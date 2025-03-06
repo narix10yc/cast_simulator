@@ -152,12 +152,18 @@ public:
     }
   }
 
+	void dumpIR(const std::string &funcName, llvm::raw_ostream &os);
+
   void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
 
   void applyCPUKernel(
       void* sv, int nQubits, CPUKernelInfo& kernelInfo);
 
   void applyCPUKernel(void* sv, int nQubits, const std::string& funcName);
+
+	void applyCPUKernel(void* sv, int nQubits, const std::string& funcName, const void* pMatArg);
+
+	void applyCPUKernel(void* sv, int nQubits, CPUKernelInfo& kernel, const void* pMatArg);
 
   void applyCPUKernelMultithread(
       void* sv, int nQubits, CPUKernelInfo& kernelInfo, int nThreads);
