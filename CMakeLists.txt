@@ -63,6 +63,7 @@ if (CAST_USE_CUDA)
   include_directories(BEFORE ${CUDAToolkit_INCLUDE_DIR})
   include_directories(BEFORE ${CUDAToolkit_INCLUDE_DIRS})
   link_directories(BEFORE ${CUDAToolkit_LIBRARY_DIR})
+  link_directories(BEFORE ${CUDAToolkit_LIBRARY_DIRS})
   message(STATUS "CUDAToolkit_rt_LIBRARY: ${CUDAToolkit_rt_LIBRARY}")
   
   get_cmake_property(_variableNames VARIABLES)

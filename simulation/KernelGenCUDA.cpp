@@ -59,7 +59,7 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(
   const double zTol = config.zeroTol / K;
   const double oTol = config.oneTol / K;
   const auto* cMat = gateMatrix.getConstantMatrix();
-  assert(cMat && "Parametrized matrices codegen not implemented yet");
+  // assert(cMat && "Parametrized matrices codegen not implemented yet");
 
   for (unsigned i = 0; i < KK; i++) {
     if (cMat == nullptr || config.forceDenseKernel) {
@@ -102,7 +102,7 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(
   }
   return data;
 }
-  
+
 Function* getFunctionDeclarationCUDA(
     IRBuilder<>& B, llvm::Module& M, const std::string& funcName,
     const CUDAKernelGenConfig& config, IRArgsCUDA& args) {
@@ -277,7 +277,7 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
   }
 
   const auto* gateCMat = gate->gateMatrix.getConstantMatrix();
-  assert(gateCMat && "Only supporting constant matrix for now");
+  // assert(gateCMat && "Only supporting constant matrix for now");
 
   // This loop updates reAmpPtrs[r] and imAmpPtrs[r].
   // Calculated by the complex inner product of the r-th row of matrix and 

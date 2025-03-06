@@ -70,10 +70,23 @@ void CUDAKernelManager::emitPTX(
     return;
   }
 
+  // Query device for compute capability
+  cuInit(0);
+  CUdevice device;
+  cuDeviceGet(&device, 0);
+
+  int major = 0, minor = 0;
+  cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
+  cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
+
+  std::ostringstream archOss;
+  archOss << "sm_" << major << minor;
+  std::string archString = archOss.str();
+
   const auto createTargetMachine = [&]() -> TargetMachine* {
     return target->createTargetMachine(
       targetTriple,   // target triple
-      "sm_70",        // cpu
+      archString,     // cpu
       "",             // features
       {},             // options
       std::nullopt    // RM

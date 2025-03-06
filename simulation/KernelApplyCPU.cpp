@@ -30,6 +30,37 @@ void CPUKernelManager::applyCPUKernel(
   kernel.executable(sv, 0ULL, idxEnd, pMat);
 }
 
+void CPUKernelManager::applyCPUKernel(
+    void* sv, 
+    int nQubits,
+    const std::string& funcName,
+    const void* pMatArg
+) {
+  assert(isJITed() && "Must initialize JIT session before calling applyCPUKernel");
+  for (auto& kernel : _kernels) {
+    if (kernel.llvmFuncName == funcName) {
+      // Found the right kernel
+      applyCPUKernel(sv, nQubits, kernel, pMatArg);
+      return;
+    }
+  }
+  llvm_unreachable("KernelManager::applyCPUKernel(pMatArg): kernel not found by name");
+}
+
+void CPUKernelManager::applyCPUKernel(
+    void* sv, 
+    int nQubits,
+    CPUKernelInfo& kernel,
+    const void* pMatArg
+) {
+  assert(isJITed() && "Must initialize JIT session before calling applyCPUKernel");
+  ensureExecutable(kernel);
+  int tmp = nQubits - kernel.gate->nQubits() - kernel.simd_s;
+  assert(tmp >= 0 && "Something’s off with qubit count");
+  uint64_t idxEnd = 1ULL << tmp;
+  kernel.executable(sv, 0ULL, idxEnd, pMatArg);
+}
+
 void CPUKernelManager::applyCPUKernelMultithread(
     void* sv, int nQubits, CPUKernelInfo& kernel, int nThreads) {
   assert(isJITed() && "Must initialize JIT session "
