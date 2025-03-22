@@ -53,12 +53,7 @@ protected:
   CPU
 */
 struct CPUKernelInfo {
-  enum KernelType {
-    CPU_Gate, CPU_Measure
-  };
   std::function<CPU_KERNEL_TYPE> executable;
-
-  KernelType type;
   int precision;
   std::string llvmFuncName;
   std::shared_ptr<QuantumGate> gate;
@@ -131,12 +126,6 @@ public:
       const CPUKernelGenConfig& config,
       std::shared_ptr<QuantumGate> gate, const std::string& funcName);
 
-  /// A function that takes in 4 arguments (void*, uint64_t, uint64_t,
-  /// void*) and returns void. Arguments are: pointer to statevector array,
-  /// taskID begin, taskID end, and pointer to measurement probability to write on
-  CPUKernelManager& genCPUMeasure(
-      const CPUKernelGenConfig& config, int q, const std::string& funcName);
-
   CPUKernelManager& genCPUGatesFromCircuitGraph(
       const CPUKernelGenConfig& config,
       const CircuitGraph& graph, const std::string& graphName);
@@ -181,18 +170,27 @@ public:
   CUDA
 */
 struct CUDAKernelInfo {
-  enum KernelType {
-    CUDA_Gate, CUDA_Measure
+  /// If CAST_USE_CUDA is not defined, \c CUDATuple is simply an empty struct.
+  /// Every CUDA module will contain exactly one CUDA function. Multiple CUDA
+  /// modules may share the same CUDA context. For multi-threading JIT session,
+  /// we create \c nThread number of CUDA contexts.
+  /// CUcontext internally is just a pointer. So multiple \c CUDATuple may have
+  /// the same \c cuContext. The collection of unique \c cuContext is stored in
+  /// \c cuContexts (only available if CAST_USE_CUDA is defined).
+  struct CUDATuple {
+    #ifdef CAST_USE_CUDA
+    CUcontext cuContext;
+    CUmodule cuModule;
+    CUfunction cuFunction;
+    #endif // #ifdef CAST_USE_CUDA
   };
   // We expect large stream writes anyway, so always trigger heap allocation.
   using PTXStringType = llvm::SmallString<0>;
   PTXStringType ptxString;
-  KernelType type;
   int precision;
   std::string llvmFuncName;
   std::shared_ptr<QuantumGate> gate;
-  // extra information
-  int opCount;
+  CUDATuple cuTuple;
 };
 
 struct CUDAKernelGenConfig {
@@ -241,17 +239,10 @@ public:
 
 #ifdef CAST_USE_CUDA
 private:
-  /// Every CUDA module will contain exactly one CUDA function. Multiple CUDA
-  /// modules may share the same CUDA context. For multi-threading JIT session,
-  /// we create \c nThread number of CUDA contexts.
-  struct CUDATuple {
-    CUcontext cuContext;
-    CUmodule cuModule;
-    CUfunction cuFunction;
-  };
-  // Every thread will manage its own CUcontext.
+  /// \c cuContexts stores a vector of unique \c CUContext. Every thread will
+  /// manage its own CUcontext. These \c CUContext 's will be destructed upon
+  /// the destruction of this class.
   std::vector<CUcontext> cuContexts;
-  std::vector<CUDATuple> cuTuples;
 public:
   CUDAKernelManager(const CUDAKernelManager&) = delete;
   CUDAKernelManager(CUDAKernelManager&&) = delete;
@@ -259,8 +250,8 @@ public:
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
   ~CUDAKernelManager() {
-    for (auto& [ctx, mod, func] : cuTuples)
-      cuModuleUnload(mod);
+    for (auto& kernel : _cudaKernels)
+      cuModuleUnload(kernel.cuTuple.cuModule);
     for (auto& ctx : cuContexts)
       cuCtxDestroy(ctx);
   }
@@ -271,7 +262,7 @@ public:
   void initCUJIT(int nThreads = 1, int verbose = 0);
 
   ///
-  void launchCUDAKernel(void* dData, int nQubits, int kernelIdx);
+  void launchCUDAKernel(void* dData, int nQubits, CUDAKernelInfo& kernelInfo);
 
 #endif // CAST_USE_CUDA
 };

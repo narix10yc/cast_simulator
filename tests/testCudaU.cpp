@@ -56,7 +56,8 @@ static void f() {
     ss << "Apply U1q at " << qubit << ": ";
     // auto immFuncName = "gateImm_" + std::to_string(i);
     // auto loadFuncName = "gateConstMemSpace_" + std::to_string(i);
-    kernelMgrCUDA.launchCUDAKernel(svCUDA0.dData(), svCUDA0.nQubits(), i);
+    kernelMgrCUDA.launchCUDAKernel(
+      svCUDA0.dData(), svCUDA0.nQubits(), kernelMgrCUDA.kernels()[i]);
     suite.assertClose(svCUDA0.norm(), 1.0,
       ss.str() + "CUDA SV norm equals to 1", GET_INFO());
 

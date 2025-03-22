@@ -334,11 +334,10 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
   // append the newly generated kernel
   this->_cudaKernels.emplace_back(
     CUDAKernelInfo::PTXStringType(), // empty ptxString
-    CUDAKernelInfo::CUDA_Gate,
     config.precision,
     func->getName().str(),
     gate,
-    gate->opCount(config.zeroTol)
+    CUDAKernelInfo::CUDATuple() // default constructor of CUDATuple
   );
   return *this;
 }

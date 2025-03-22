@@ -585,7 +585,6 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
   // append the newly generated kernel
   this->_kernels.emplace_back(
     std::function<CPU_KERNEL_TYPE>(),
-    CPUKernelInfo::CPU_Gate,
     config.precision,
     func->getName().str(),
     gate,
@@ -604,11 +603,5 @@ CPUKernelManager& CPUKernelManager::genCPUGatesFromCircuitGraph(
     genCPUGate(
       config, block->quantumGate, mangledName + std::to_string(block->id));
   }
-  return *this;
-}
-
-CPUKernelManager& CPUKernelManager::genCPUMeasure(
-    const CPUKernelGenConfig& config, int q, const std::string& funcName) {
-  assert(0 && "Not Implemented");
   return *this;
 }

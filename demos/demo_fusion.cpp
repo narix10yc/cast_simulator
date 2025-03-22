@@ -52,7 +52,6 @@ int main(int argc, const char** argv) {
   qasmRoot->toCircuitGraph(graphNaiveFuse);
   qasmRoot->toCircuitGraph(graphAdaptiveFuse);
 
-
   FusionConfig fusionConfigAggresive = FusionConfig::Aggressive;
   fusionConfigAggresive.precision = 64;
   fusionConfigAggresive.nThreads = ArgNThreads;
