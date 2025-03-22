@@ -122,6 +122,20 @@ CUDAKernelManager::collectCUDAKernelsFromCircuitGraph(
 }
 
 #ifdef CAST_USE_CUDA
+
+static int getFirstVisibleDevice() {
+  const char* castEnvVar = std::getenv("CAST_USE_CUDA_DEVICE");
+  if (castEnvVar != nullptr)
+    return std::stoi(castEnvVar);
+
+  const char* cudaEnvVar = std::getenv("CUDA_VISIBLE_DEVICES");
+  if (cudaEnvVar != nullptr)
+    return std::stoi(cudaEnvVar);
+
+  // If neither CAST_USE_CUDA_DEVICE nor CUDA_VISIBLE_DEVICES is set, return 0
+  return 0;
+}
+
 void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   assert(jitState == JIT_PTXEmitted);
   assert(nThreads > 0);
@@ -137,7 +151,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
 
   cuInit(0);
   CUdevice cuDevice;
-  cuDeviceGet(&cuDevice, 0);
+  cuDeviceGet(&cuDevice, getFirstVisibleDevice());
 
   utils::TaskDispatcher dispatcher(nThreads);
 
