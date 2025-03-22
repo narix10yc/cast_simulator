@@ -265,7 +265,8 @@ public:
   void initCUJIT(int nThreads = 1, int verbose = 0);
 
   ///
-  void launchCUDAKernel(void* dData, int nQubits, CUDAKernelInfo& kernelInfo);
+  void launchCUDAKernel(
+      void* dData, int nQubits, CUDAKernelInfo& kernelInfo, int blockSize=64);
 
 #endif // CAST_USE_CUDA
 };

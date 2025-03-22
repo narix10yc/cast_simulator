@@ -39,6 +39,11 @@ ArgNaiveMaxK("naive-max-k",
   cl::desc("The max size of gates in naive fusion"), cl::init(3));
 
 cl::opt<int>
+ArgBlockSize("blocksize",
+  cl::desc("Block size used in CUDA kernels (min 32, max 512, in powers of 2)"),
+  cl::init(64));
+
+cl::opt<int>
 ArgReplication("replication",
   cl::desc("Number of replications"), cl::init(1));
 
@@ -139,7 +144,8 @@ int main(int argc, const char** argv) {
   if (ArgRunNoFuse) {
     tr = timer.timeit([&]() {
       for (auto* kernel : kernelsNoFuse)
-        kernelMgr.launchCUDAKernel(sv.dData(), sv.nQubits(), *kernel);
+        kernelMgr.launchCUDAKernel(
+          sv.dData(), sv.nQubits(), *kernel, ArgBlockSize);
       cudaDeviceSynchronize();
     });
     tr.display(3, std::cerr << "No-fuse Circuit:\n");
@@ -148,7 +154,8 @@ int main(int argc, const char** argv) {
   if (ArgRunNaiveFuse) {
     tr = timer.timeit([&]() {
       for (auto* kernel : kernelsNaiveFuse)
-        kernelMgr.launchCUDAKernel(sv.dData(), sv.nQubits(), *kernel);
+        kernelMgr.launchCUDAKernel(
+          sv.dData(), sv.nQubits(), *kernel, ArgBlockSize);
       cudaDeviceSynchronize();
     });
     tr.display(3, std::cerr << "Naive-fused Circuit:\n");
@@ -156,7 +163,8 @@ int main(int argc, const char** argv) {
   if (ArgRunAdaptiveFuse && ArgModelPath != "") {
     tr = timer.timeit([&]() {
       for (auto* kernel : kernelAdaptiveFuse)
-        kernelMgr.launchCUDAKernel(sv.dData(), sv.nQubits(), *kernel);
+        kernelMgr.launchCUDAKernel(
+          sv.dData(), sv.nQubits(), *kernel, ArgBlockSize);
       cudaDeviceSynchronize();
     });
     tr.display(3, std::cerr << "Adaptive-fused Circuit:\n");

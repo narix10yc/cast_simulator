@@ -204,24 +204,31 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
 }
 
 void CUDAKernelManager::launchCUDAKernel(
-    void* dData, int nQubits, CUDAKernelInfo& kernelInfo) {
+    void* dData, int nQubits, CUDAKernelInfo& kernelInfo, int blockSize) {
   assert(dData != nullptr);
   assert(kernelInfo.cuTuple.cuContext != nullptr);
   assert(kernelInfo.cuTuple.cuModule != nullptr);
   assert(kernelInfo.cuTuple.cuFunction != nullptr);
+  assert(blockSize == 32 || blockSize == 64 || blockSize == 128 ||
+         blockSize == 256 || blockSize == 512);
   cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
 
-  // This corresponds to 128 threads per block
-  int blockSizeInNumBits = 5;
+  // minimum value = 5, corresponding to blockSize = 32 (warp size)
+  int blockSizeInNumBits;
+  if (blockSize >= 512) blockSizeInNumBits = 9;
+  else if (blockSize >= 256) blockSizeInNumBits = 8;
+  else if (blockSize >= 128) blockSizeInNumBits = 7;
+  else if (blockSize >= 64) blockSizeInNumBits = 6;
+  else blockSizeInNumBits = 5;
+
+  blockSize = 1 << blockSizeInNumBits;
+
   int nGateQubits = kernelInfo.gate->nQubits();
   int gridSizeInNumBits = nQubits - blockSizeInNumBits - nGateQubits;
   assert(gridSizeInNumBits >= 0 && "gridSize must be positive");
-
-  unsigned blockSize = 1 << blockSizeInNumBits;
-  unsigned gridSize = 1 << (nQubits - blockSizeInNumBits - nGateQubits);
+  int gridSize = 1 << (nQubits - blockSizeInNumBits - nGateQubits);
 
   void* cMatPtr = kernelInfo.gate->gateMatrix.getConstantMatrix()->data();
-  CUdeviceptr dArrDevicePtr = (CUdeviceptr)dData;
   void* kernelParams[] = { &dData, &cMatPtr };
 
   CU_CALL(
@@ -235,7 +242,6 @@ void CUDAKernelManager::launchCUDAKernel(
       nullptr         // extra options
     ), "cuLaunchKernel");
 }
-
 
 #endif // CAST_USE_CUDA
 
