@@ -18,6 +18,10 @@ int main() {
     test_fusionCPU();
   }, "CPU Fusion Test Finished!");
 
+  utils::timedExecute([] {
+    test_cpuRz_param();
+  }, "CPU Codegen (Runtime) Test Finished!");
+
   #ifdef CAST_USE_CUDA
 
   utils::timedExecute([] {
