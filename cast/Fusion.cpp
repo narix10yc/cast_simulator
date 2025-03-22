@@ -3,35 +3,35 @@
 
 #include "utils/iocolor.h"
 
-#define DEBUG_TYPE "fusion-cpu"
+#define DEBUG_TYPE "fusion"
 #include "llvm/Support/Debug.h"
 // #define LLVM_DEBUG(X) X
 
 using namespace IOColor;
 using namespace cast;
 
-const CPUFusionConfig CPUFusionConfig::Disable {
+const FusionConfig FusionConfig::Disable {
   .zeroTol = 0.0,
   .multiTraverse = false,
   .incrementScheme = false,
   .benefitMargin = 0.0,
 };
 
-const CPUFusionConfig CPUFusionConfig::Minor {
+const FusionConfig FusionConfig::Minor {
   .zeroTol = 1e-8,
   .multiTraverse = false,
   .incrementScheme = true,
   .benefitMargin = 0.5,
 };
 
-const CPUFusionConfig CPUFusionConfig::Default {
+const FusionConfig FusionConfig::Default {
   .zeroTol = 1e-8,
   .multiTraverse = true,
   .incrementScheme = true,
   .benefitMargin = 0.2,
 };
 
-const CPUFusionConfig CPUFusionConfig::Aggressive {
+const FusionConfig FusionConfig::Aggressive {
   .zeroTol = 1e-8,
   .multiTraverse = true,
   .incrementScheme = true,
@@ -133,7 +133,7 @@ struct TentativeFusedItem {
 
 /// @return Number of fused blocks
 int startFusion(
-    CircuitGraph& graph, const CPUFusionConfig& config,
+    CircuitGraph& graph, const FusionConfig& config,
     const CostModel* costModel,
     const int maxK, tile_iter_t curIt, const int qubit) {
   auto* fusedBlock = (*curIt)[qubit];
@@ -250,9 +250,9 @@ int startFusion(
 
 } // anonymous namespace
 
-void cast::applyCPUGateFusion(
-    const CPUFusionConfig& config, const CostModel* costModel,
-    CircuitGraph& graph, int maxK) {
+void cast::applyGateFusion(
+    const FusionConfig& config, const CostModel* costModel,
+    CircuitGraph& graph, int max_k) {
   int curMaxK = 2;
   int nFused = 0;
   do {
@@ -267,5 +267,5 @@ void cast::applyCPUGateFusion(
       ++it;
     }
     graph.squeeze();
-  } while (nFused > 0 && ++curMaxK <= maxK);
+  } while (nFused > 0 && ++curMaxK <= max_k);
 }

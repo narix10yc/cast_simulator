@@ -10,7 +10,7 @@ namespace cast {
 class CircuitGraph;
 class QuantumGate;
 
-struct CPUFusionConfig {
+struct FusionConfig {
   int precision;
   int nThreads;
 
@@ -21,7 +21,7 @@ struct CPUFusionConfig {
   /// 0.1, then we accept fusion whenever costModel predicts >10% improvement
   double benefitMargin;
 
-  static CPUFusionConfig Preset(int level) {
+  static FusionConfig Preset(int level) {
     if (level == 0)
       return Disable;
     if (level == 1)
@@ -34,16 +34,16 @@ struct CPUFusionConfig {
     return Disable;
   }
 
-  static const CPUFusionConfig Disable;
-  static const CPUFusionConfig Minor;
-  static const CPUFusionConfig Default;
-  static const CPUFusionConfig Aggressive;
+  static const FusionConfig Disable;
+  static const FusionConfig Minor;
+  static const FusionConfig Default;
+  static const FusionConfig Aggressive;
 
   std::ostream& display(std::ostream&) const;
 };
 
-void applyCPUGateFusion(
-    const CPUFusionConfig&, const CostModel*, CircuitGraph&, int maxK=7);
+void applyGateFusion(
+    const FusionConfig&, const CostModel*, CircuitGraph&, int max_k=7);
 
 void applyFPGAGateFusion(CircuitGraph&, const FPGAFusionConfig&);
 

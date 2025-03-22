@@ -53,19 +53,19 @@ int main(int argc, const char** argv) {
   qasmRoot->toCircuitGraph(graphAdaptiveFuse);
 
 
-  CPUFusionConfig fusionConfigAggresive = CPUFusionConfig::Aggressive;
+  FusionConfig fusionConfigAggresive = FusionConfig::Aggressive;
   fusionConfigAggresive.precision = 64;
   fusionConfigAggresive.nThreads = ArgNThreads;
   if (ArgRunNaiveFuse) {
     NaiveCostModel naiveCostModel(ArgNaiveMaxK, -1, 1e-8);
-    applyCPUGateFusion(fusionConfigAggresive, &naiveCostModel, graphNaiveFuse);
+    applyGateFusion(fusionConfigAggresive, &naiveCostModel, graphNaiveFuse);
   }
 
   auto cache = PerformanceCache::LoadFromCSV(ArgModelPath);
   StandardCostModel standardCostModel(&cache);
   standardCostModel.display(std::cerr);
 
-  applyCPUGateFusion(fusionConfigAggresive, &standardCostModel, graphAdaptiveFuse);
+  applyGateFusion(fusionConfigAggresive, &standardCostModel, graphAdaptiveFuse);
 
   CPUKernelManager kernelMgr;
   CPUKernelGenConfig kernelGenConfig;

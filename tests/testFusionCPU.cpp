@@ -22,7 +22,7 @@ static void f() {
   CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.simd_s = simd_s;
 
-  CPUFusionConfig fusionConfig = CPUFusionConfig::Default;
+  FusionConfig fusionConfig = FusionConfig::Default;
   NaiveCostModel costModel(4, -1, 0);
 
   std::cerr << "Test Dir: " << TEST_DIR << "\n";
@@ -46,7 +46,7 @@ static void f() {
         "beforeFusion" + std::to_string(block->id));
     }
 
-    applyCPUGateFusion(fusionConfig, &costModel, graph);
+    applyGateFusion(fusionConfig, &costModel, graph);
     allBlocks = graph.getAllBlocks();
     for (const auto& block : allBlocks) {
       kernelMgrAfterFusion.genCPUGate(

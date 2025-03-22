@@ -22,17 +22,17 @@ int main(int argc, const char** argv) {
   qasmRoot->toCircuitGraph(graphNaiveFuse);
   qasmRoot->toCircuitGraph(graphAdaptiveFuse);
 
-  CPUFusionConfig fusionConfig = CPUFusionConfig::Aggressive;
+  FusionConfig fusionConfig = FusionConfig::Aggressive;
   fusionConfig.precision = 64;
   fusionConfig.nThreads = nThreads;
   // NaiveCostModel costModel(3, 0, 1e-8);
 
   NaiveCostModel naiveCostModel(5, -1, 1e-8);
-  applyCPUGateFusion(fusionConfig, &naiveCostModel, graphNaiveFuse);
+  applyGateFusion(fusionConfig, &naiveCostModel, graphNaiveFuse);
 
   auto cache = PerformanceCache::LoadFromCSV("t382.csv") ;
   StandardCostModel standardCostModel(&cache);
-  applyCPUGateFusion(fusionConfig, &standardCostModel, graphAdaptiveFuse);
+  applyGateFusion(fusionConfig, &standardCostModel, graphAdaptiveFuse);
 
   CPUKernelManager kernelMgr;
   CPUKernelGenConfig kernelGenConfig;

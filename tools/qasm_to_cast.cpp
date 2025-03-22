@@ -180,7 +180,7 @@ RemoveFilesInsideOutputDirectory("rm-out-dir",
 
 int main(int argc, const char** argv) {
   CircuitGraph graph;
-  CPUFusionConfig fusionConfig;
+  FusionConfig fusionConfig;
   // CodeGeneratorCPU codeGenerator;
   IRGeneratorConfig irConfig;
   CodeGeneratorCPUConfig cpuConfig;
@@ -216,7 +216,7 @@ int main(int argc, const char** argv) {
     fusionConfig.maxOpCount = MaxOpCount;
     fusionConfig.zeroSkippingThreshold = ZeroSkipThreshold;
   } else
-    fusionConfig = CPUFusionConfig::Preset(FusionLevel);
+    fusionConfig = FusionConfig::Preset(FusionLevel);
   fusionConfig.allowMultipleTraverse = AllowMultipleTraverse;
   fusionConfig.incrementScheme = EnableIncrementScheme;
 
@@ -260,7 +260,7 @@ int main(int argc, const char** argv) {
 
   // gate fusion
   timedExecute([&]() {
-    cast::applyCPUGateFusion(fusionConfig, graph);
+    cast::applyGateFusion(fusionConfig, graph);
   }, "Gate Fusion Complete");
   graph.relabelBlocks();
 
