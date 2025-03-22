@@ -18,6 +18,7 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 #include "utils/Formats.h"
+#include "utils/cuda_api_call.h"
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include <llvm/Support/Debug.h>
@@ -151,41 +152,20 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
 
   cuInit(0);
   CUdevice cuDevice;
-  int deviceIdx = getFirstVisibleDevice();
-  auto cuResult = cuDeviceGet(&cuDevice, deviceIdx);
-  if (cuResult != CUDA_SUCCESS) {
-    std::cerr << RED("[CUDA Err] ") << "Failed to get CUDA device "
-              << deviceIdx << ". Error code " << cuResult << "\n";
-  }
-
-  utils::TaskDispatcher dispatcher(nThreads);
-
-  // Create CUDA contexts. Each thread creates and manages its own CUDA context.
+  // int deviceIdx = getFirstVisibleDevice();
+  int deviceIdx = 0;
+  CU_CALL(cuDeviceGet(&cuDevice, deviceIdx), "Get CUDA device");
+  
+  // Create CUDA contexts
   cuContexts.resize(nThreads);
   for (unsigned t = 0; t < nThreads; ++t) {
-    dispatcher.enqueue([&]() {
-      auto workerID = dispatcher.getWorkerID();
-      CUcontext* cuContextPtr = &cuContexts[workerID];
-      CUresult cuResult = cuCtxCreate(cuContextPtr, 0, cuDevice);
-      if (cuResult != CUDA_SUCCESS) {
-        std::cerr << RED("[CUDA Err] ") << "Worker " << workerID
-                  << " failed to create CUDA context. Error code " 
-                  << cuResult << "\n";
-        return;
-      } else {
-        LLVM_DEBUG(
-          std::cerr << GREEN("[CUDA] ") << "Worker " << workerID
-                    << " created CUcontext " << *cuContextPtr
-                    << " at " << cuContextPtr << "\n";
-        );
-      }
-    });
+    CU_CALL(cuCtxCreate(&cuContexts[t], 0, cuDevice), "Create CUDA context");
   }
-  dispatcher.sync();
-
+    
   // Load PTX codes
   assert(nKernels == llvmContextModulePairs.size());
-  
+  utils::TaskDispatcher dispatcher(nThreads);
+    
   // TODO: Currently ptxString is captured by value. This seems to be due to the
   // property of llvm::SmallVector<char, 0> -- calling str() returns an empty
   // StringRef.
@@ -200,43 +180,14 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
     const char* funcName = kernel.llvmFuncName.c_str();
     dispatcher.enqueue([=, this, &dispatcher]() {
       auto workerID = dispatcher.getWorkerID();
-      CUresult cuResult;
 
-      cuResult = cuCtxSetCurrent(cuContexts[workerID]);
+      CU_CALL(cuCtxSetCurrent(cuContexts[workerID]), "cuCtxSetCurrent");
       *cuContextPtr = cuContexts[workerID];
-      if (cuResult != CUDA_SUCCESS) {
-        std::cerr << RED("[CUDA Err] ") << "Worker " << workerID
-                  << " failed to set CUDA context. Error code " 
-                  << cuResult << "\n";
-        return;
-      }
-      cuResult = cuModuleLoadData(cuModulePtr, ptxString.c_str());
-      if (cuResult != CUDA_SUCCESS) {
-        std::cerr << RED("[CUDA Err] ") << "Worker " << workerID
-                << " failed to create CUDA module " << i << ". Error code "
-                << cuResult << "\n";
-        return;
-      } else {
-        LLVM_DEBUG(
-          std::cerr << GREEN("[CUDA] ") << "Worker " << workerID
-                    << " created CUmodule " << *cuModulePtr
-                    << " at " << cuModulePtr << "\n";
-        );
-      }
-
-      cuResult = cuModuleGetFunction(cuFunctionPtr, *cuModulePtr, funcName);
-      if (cuResult != CUDA_SUCCESS) {
-        std::cerr << RED("[CUDA Err] ") << "Worker " << workerID
-                  << " failed to load CUDA function " << i << ". Error code "
-                  << cuResult << "\n";
-        return;
-      } else {
-        LLVM_DEBUG(
-          std::cerr << GREEN("[CUDA] ") << "Worker " << workerID
-                    << " loaded CUfunction " << *cuFunctionPtr
-                    << " at " << cuFunctionPtr << "\n";
-        );
-      }
+      CU_CALL(
+        cuModuleLoadData(cuModulePtr, ptxString.c_str()), "cuModuleLoadData");
+      CU_CALL(
+        cuModuleGetFunction(cuFunctionPtr, *cuModulePtr, funcName),
+        "cuModuleGetFunction");
     });
   }
   if (verbose > 0)
@@ -267,21 +218,16 @@ void CUDAKernelManager::launchCUDAKernel(
   CUdeviceptr dArrDevicePtr = (CUdeviceptr)dData;
   void* kernelParams[] = { &dData, &cMatPtr };
 
-  auto cuResult = cuLaunchKernel(
-    kernelInfo.cuTuple.cuFunction, 
-    gridSize, 1, 1,  // grid dim
-    blockSize, 1, 1, // block dim
-    0,              // shared mem size
-    0,              // stream
-    kernelParams,  // kernel params
-    nullptr         // extra options
-  );
-
-  if (cuResult != CUDA_SUCCESS) {
-    std::cerr << RED("[CUDA Driver Error]:") << "Failed to launch kernel"
-              << "<<<" << gridSize << ", " << blockSize << ">>>. Error code: "
-              << cuResult << "\n"; 
-  }
+  CU_CALL(
+    cuLaunchKernel(
+      kernelInfo.cuTuple.cuFunction, 
+      gridSize, 1, 1,  // grid dim
+      blockSize, 1, 1, // block dim
+      0,              // shared mem size
+      0,              // stream
+      kernelParams,  // kernel params
+      nullptr         // extra options
+    ), "cuLaunchKernel");
 }
 
 

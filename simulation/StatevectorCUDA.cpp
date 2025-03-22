@@ -6,28 +6,11 @@
 #include <cassert>
 #include <iostream>
 
-#define CU_CALL(FUNC, MSG) \
-  cuResult = FUNC; \
-  if (cuResult != CUDA_SUCCESS) { \
-    std::cerr << RED("[CUDA Driver Error] ") \
-              << MSG << ". Func " << __PRETTY_FUNCTION__ \
-              << ". Error code " << cuResult << "\n"; \
-  }
-
-#define CUDA_CALL(FUNC, MSG) \
-  cudaResult = FUNC; \
-  if (cudaResult != cudaSuccess) { \
-    std::cerr << RED("[CUDA Runtime Error] ") \
-              << MSG << ". Func " << __PRETTY_FUNCTION__ \
-              << ". Error: " << cudaGetErrorString(cudaResult) << "\n"; \
-  }
-
 using namespace utils;
 
 template<typename ScalarType>
 StatevectorCUDA<ScalarType>::StatevectorCUDA(const StatevectorCUDA& other)
-: _nQubits(other._nQubits), _dData(nullptr), _hData(nullptr)
-, cuResult(CUDA_SUCCESS), cudaResult(cudaSuccess) {
+: _nQubits(other._nQubits), _dData(nullptr), _hData(nullptr) {
   // copy device data
   if (other._dData != nullptr) {
     mallocDeviceData();
@@ -44,8 +27,7 @@ StatevectorCUDA<ScalarType>::StatevectorCUDA(const StatevectorCUDA& other)
 
 template<typename ScalarType>
 StatevectorCUDA<ScalarType>::StatevectorCUDA(StatevectorCUDA&& other) 
-: _nQubits(other._nQubits), _dData(other._dData), _hData(other._hData)
-, cuResult(CUDA_SUCCESS), cudaResult(cudaSuccess) {
+: _nQubits(other._nQubits), _dData(other._dData), _hData(other._hData) {
   other._dData = nullptr;
   other._hData = nullptr;
 }

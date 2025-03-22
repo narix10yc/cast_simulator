@@ -1,6 +1,8 @@
 #ifndef UTILS_STATEVECTOR_CUDA_H
 #define UTILS_STATEVECTOR_CUDA_H
 
+#include "utils/cuda_api_call.h"
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cstring> // for std::memcpy
@@ -43,11 +45,6 @@ private:
   // host data
   ScalarType* _hData;
 
-  // cuResult is for CUDA Driver API calls
-  mutable CUresult cuResult;
-  // cudaResult is for CUDA Runtime API calls
-  mutable cudaError_t cudaResult;
-  
   // This function will call \c cudaDeviceSynchronize() after \c cudaMalloc()
   void mallocDeviceData();
 
@@ -67,8 +64,7 @@ private:
   }
 public:
   StatevectorCUDA(int nQubits)
-  : _nQubits(nQubits), _dData(nullptr), _hData(nullptr)
-  , cuResult(CUDA_SUCCESS), cudaResult(cudaSuccess) {}
+  : _nQubits(nQubits), _dData(nullptr), _hData(nullptr) {}
 
   ~StatevectorCUDA() {
     if (_dData != nullptr)
