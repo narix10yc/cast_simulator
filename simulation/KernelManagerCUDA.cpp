@@ -154,6 +154,12 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   CUdevice cuDevice;
   // int deviceIdx = getFirstVisibleDevice();
   int deviceIdx = 0;
+  /* It seems cuDeviceGet expects logical index.
+   * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
+   * physical device 2.
+   * Therefore, we always choose deviceIdx to be 0, and ask users to control
+   * via environment variable CUDA_VISIBLE_DEVICES
+   */
   CU_CALL(cuDeviceGet(&cuDevice, deviceIdx), "Get CUDA device");
   
   // Create CUDA contexts
