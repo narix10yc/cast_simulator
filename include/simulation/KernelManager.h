@@ -227,7 +227,10 @@ public:
   CUDAKernelManager& genCUDAGatesFromCircuitGraph(
       const CUDAKernelGenConfig& config,
       const CircuitGraph& graph, const std::string& graphName);
-    
+
+  std::vector<CUDAKernelInfo*>
+  collectCUDAKernelsFromCircuitGraph(const std::string& graphName);
+
   void emitPTX(
       int nThreads = 1,
       llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,

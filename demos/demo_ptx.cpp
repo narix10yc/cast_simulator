@@ -1,4 +1,4 @@
-#include "simulation/StatevectorCPU.h"
+#include "simulation/StatevectorCUDA.h"
 #include "timeit/timeit.h"
 
 #include "cast/Parser.h"
@@ -18,7 +18,7 @@ ArgInputFilename("i",
 
 cl::opt<std::string>
 ArgModelPath("model",
-  cl::desc("Path to performance model"), cl::Required);
+  cl::desc("Path to performance model"), cl::init(""));
 
 cl::opt<int>
 ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::Required);
@@ -28,7 +28,11 @@ ArgRunNoFuse("run-no-fuse", cl::desc("Run no-fuse circuit"), cl::init(false));
 
 cl::opt<bool>
 ArgRunNaiveFuse("run-naive-fuse",
-  cl::desc("Run naive-fuse circuit"), cl::init(false));
+  cl::desc("Run naive-fuse circuit"), cl::init(true));
+
+cl::opt<bool>
+ArgRunAdaptiveFuse("run-adaptive-fuse",
+  cl::desc("Run adaptive-fuse circuit"), cl::init(true));
 
 cl::opt<int>
 ArgNaiveMaxK("naive-max-k",
@@ -58,11 +62,12 @@ int main(int argc, const char** argv) {
     applyGateFusion(fusionConfigAggresive, &naiveCostModel, graphNaiveFuse);
   }
 
-  auto cache = PerformanceCache::LoadFromCSV(ArgModelPath);
-  StandardCostModel standardCostModel(&cache);
-  standardCostModel.display(std::cerr);
-
-  applyGateFusion(fusionConfigAggresive, &standardCostModel, graphAdaptiveFuse);
+  if (ArgRunAdaptiveFuse && ArgModelPath != "") {
+    auto cache = PerformanceCache::LoadFromCSV(ArgModelPath);
+    StandardCostModel standardCostModel(&cache);
+    standardCostModel.display(std::cerr);
+    applyGateFusion(fusionConfigAggresive, &standardCostModel, graphAdaptiveFuse);
+  }
 
   CUDAKernelManager kernelMgr;
   CUDAKernelGenConfig kernelGenConfig;
@@ -82,23 +87,23 @@ int main(int argc, const char** argv) {
         kernelGenConfig, graphNaiveFuse, "graphNaiveFuse");
     }, "Generate Naive-fused Kernels");
   }
-  utils::timedExecute([&]() {
-    kernelMgr.genCUDAGatesFromCircuitGraph(
-      kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
-  }, "Generate Adaptive-fused Kernels");
-
+  if (ArgRunAdaptiveFuse && ArgModelPath != "") {
+    utils::timedExecute([&]() {
+      kernelMgr.genCUDAGatesFromCircuitGraph(
+        kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
+    }, "Generate Adaptive-fused Kernels");
+  }
 
   // JIT compile kernels
-  std::vector<CPUKernelInfo*> kernelsNoFuse, kernelsNaiveFuse, kernelAdaptiveFuse;
+  std::vector<CUDAKernelInfo*> kernelsNoFuse, kernelsNaiveFuse, kernelAdaptiveFuse;
   utils::timedExecute([&]() {
-    kernelMgr.emitPTX(
-      ArgNThreads,
-      llvm::OptimizationLevel::O1,
-      /* verbose */ 1);
+    kernelMgr.emitPTX(ArgNThreads, llvm::OptimizationLevel::O1, 1);
+    kernelMgr.initCUJIT(ArgNThreads, 1);
     double opCountTotal = 0.0;
     if (ArgRunNoFuse) {
       opCountTotal = 0.0;
-      kernelsNoFuse = kernelMgr.collectCPUKernelsFromCircuitGraph("graphNoFuse");
+      kernelsNoFuse = 
+        kernelMgr.collectCUDAKernelsFromCircuitGraph("graphNoFuse");
       for (const auto* kernel : kernelsNoFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "No-fuse: nGates = " << kernelsNoFuse.size()
@@ -106,30 +111,35 @@ int main(int argc, const char** argv) {
     }
     if (ArgRunNaiveFuse) {
       opCountTotal = 0.0;
-      kernelsNaiveFuse = kernelMgr.collectCPUKernelsFromCircuitGraph("graphNaiveFuse");
+      kernelsNaiveFuse = 
+        kernelMgr.collectCUDAKernelsFromCircuitGraph("graphNaiveFuse");
       for (const auto* kernel : kernelsNaiveFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "Naive-fuse: nGates = " << kernelsNaiveFuse.size()
                 << "; opCount = " << opCountTotal << "\n";
     }
-    opCountTotal = 0.0;
-    kernelAdaptiveFuse = kernelMgr.collectCPUKernelsFromCircuitGraph("graphAdaptiveFuse");
-    for (const auto* kernel : kernelAdaptiveFuse)
-      opCountTotal += kernel->gate->opCount(1e-8);
-    std::cerr << "Adaptive-fuse: nGates = " << kernelAdaptiveFuse.size()
-              << "; opCount = " << opCountTotal << "\n";
+    if (ArgRunAdaptiveFuse && ArgModelPath != "") {
+      opCountTotal = 0.0;
+      kernelAdaptiveFuse = 
+        kernelMgr.collectCUDAKernelsFromCircuitGraph("graphAdaptiveFuse");
+      for (const auto* kernel : kernelAdaptiveFuse)
+        opCountTotal += kernel->gate->opCount(1e-8);
+      std::cerr << "Adaptive-fuse: nGates = " << kernelAdaptiveFuse.size()
+                << "; opCount = " << opCountTotal << "\n";
+    }
     }, "JIT compile kernels");
 
   // Run kernels
-  utils::StatevectorCPU<double> sv(graphNoFuse.nQubits, kernelGenConfig.simd_s);
-  // sv.randomize();
+  utils::StatevectorCUDA<double> sv(graphNoFuse.nQubits);
+  sv.randomize();
   timeit::Timer timer(ArgReplication);
   timeit::TimingResult tr;
 
   if (ArgRunNoFuse) {
     tr = timer.timeit([&]() {
       for (auto* kernel : kernelsNoFuse)
-        kernelMgr.applyCPUKernelMultithread(sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+        kernelMgr.launchCUDAKernel(sv.dData(), sv.nQubits(), *kernel);
+      cudaDeviceSynchronize();
     });
     tr.display(3, std::cerr << "No-fuse Circuit:\n");
   }
@@ -137,16 +147,19 @@ int main(int argc, const char** argv) {
   if (ArgRunNaiveFuse) {
     tr = timer.timeit([&]() {
       for (auto* kernel : kernelsNaiveFuse)
-        kernelMgr.applyCPUKernelMultithread(sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+        kernelMgr.launchCUDAKernel(sv.dData(), sv.nQubits(), *kernel);
+      cudaDeviceSynchronize();
     });
     tr.display(3, std::cerr << "Naive-fused Circuit:\n");
   }
-
-  tr = timer.timeit([&]() {
-    for (auto* kernel : kernelAdaptiveFuse)
-      kernelMgr.applyCPUKernelMultithread(sv.data(), sv.nQubits(), *kernel, ArgNThreads);
-  });
-  tr.display(3, std::cerr << "Adaptive-fused Circuit:\n");
+  if (ArgRunAdaptiveFuse && ArgModelPath != "") {
+    tr = timer.timeit([&]() {
+      for (auto* kernel : kernelAdaptiveFuse)
+        kernelMgr.launchCUDAKernel(sv.dData(), sv.nQubits(), *kernel);
+      cudaDeviceSynchronize();
+    });
+    tr.display(3, std::cerr << "Adaptive-fused Circuit:\n");
+  }
 
   return 0;
 }

@@ -354,4 +354,5 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraph(
   return *this;
 }
 
+
 #undef DEBUG_TYPE

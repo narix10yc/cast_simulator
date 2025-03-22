@@ -109,6 +109,18 @@ void CUDAKernelManager::emitPTX(
   jitState = JIT_PTXEmitted;
 }
 
+std::vector<CUDAKernelInfo*>
+CUDAKernelManager::collectCUDAKernelsFromCircuitGraph(
+    const std::string& graphName) {
+  std::vector<CUDAKernelInfo*> kernelInfos;
+  const auto mangledName = internal::mangleGraphName(graphName);
+  for (auto& kernel : _cudaKernels) {
+    if (kernel.llvmFuncName.starts_with(mangledName))
+      kernelInfos.push_back(&kernel);
+  }
+  return kernelInfos;
+}
+
 #ifdef CAST_USE_CUDA
 void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   assert(jitState == JIT_PTXEmitted);
@@ -217,6 +229,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
 
 void CUDAKernelManager::launchCUDAKernel(
     void* dData, int nQubits, CUDAKernelInfo& kernelInfo) {
+  assert(dData != nullptr);
   assert(kernelInfo.cuTuple.cuContext != nullptr);
   assert(kernelInfo.cuTuple.cuModule != nullptr);
   assert(kernelInfo.cuTuple.cuFunction != nullptr);
