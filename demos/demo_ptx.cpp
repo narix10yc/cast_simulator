@@ -131,7 +131,8 @@ int main(int argc, const char** argv) {
 
   // Run kernels
   utils::StatevectorCUDA<double> sv(graphNoFuse.nQubits);
-  sv.randomize();
+  // sv.randomize();
+  sv.initialize();
   timeit::Timer timer(ArgReplication);
   timeit::TimingResult tr;
 

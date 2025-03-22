@@ -151,7 +151,12 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
 
   cuInit(0);
   CUdevice cuDevice;
-  cuDeviceGet(&cuDevice, getFirstVisibleDevice());
+  int deviceIdx = getFirstVisibleDevice();
+  auto cuResult = cuDeviceGet(&cuDevice, deviceIdx);
+  if (cuResult != CUDA_SUCCESS) {
+    std::cerr << RED("[CUDA Err] ") << "Failed to get CUDA device "
+              << deviceIdx << ". Error code " << cuResult << "\n";
+  }
 
   utils::TaskDispatcher dispatcher(nThreads);
 
