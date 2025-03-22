@@ -1,6 +1,6 @@
 #include "simulation/KernelManager.h"
 #include "tests/TestKit.h"
-#include "utils/statevector.h"
+#include "simulation/StatevectorCPU.h"
 
 #include <cmath>
 #include <vector>
@@ -80,7 +80,7 @@ static void f() {
 
     cpuKernelMgr.initJIT();
 
-    utils::StatevectorAlt<double> sv(6, simd_s);
+    utils::StatevectorCPU<double> sv(6, simd_s);
 
     double theta = M_PI / 2.0;
     auto numericMat = buildRzNumericMatrix(theta);
@@ -91,8 +91,8 @@ static void f() {
     suite.assertClose(sv.prob(0), 0.0, "Init Prob(0)", GET_INFO());
 
     cpuKernelMgr.applyCPUKernel(
-        sv.data,
-        sv.nQubits,
+        sv.data(),
+        sv.nQubits(),
         "gate_rz_0_param",
         numericMat.data()
     );
@@ -104,8 +104,8 @@ static void f() {
     suite.assertClose(sv.prob(1), 0.0, "Init Prob(1)", GET_INFO());
 
     cpuKernelMgr.applyCPUKernel(
-        sv.data,
-        sv.nQubits,
+        sv.data(),
+        sv.nQubits(),
         "gate_rz_1_param",
         numericMat.data()
     );
@@ -116,8 +116,8 @@ static void f() {
     suite.assertClose(sv.norm(), 1.0, "Init Norm [q=2]", GET_INFO());
     suite.assertClose(sv.prob(2), 0.0, "Init Prob(2)", GET_INFO());
     cpuKernelMgr.applyCPUKernel(
-        sv.data,
-        sv.nQubits,
+        sv.data(),
+        sv.nQubits(),
         "gate_rz_2_param",
         numericMat.data()
     );
@@ -128,8 +128,8 @@ static void f() {
     suite.assertClose(sv.norm(), 1.0, "Init Norm [q=3]", GET_INFO());
     suite.assertClose(sv.prob(3), 0.0, "Init Prob(3)", GET_INFO());
     cpuKernelMgr.applyCPUKernel(
-        sv.data,
-        sv.nQubits,
+        sv.data(),
+        sv.nQubits(),
         "gate_rz_3_param",
         numericMat.data()
     );
