@@ -2,7 +2,6 @@
 .idea/*
 *.o
 *.exe
-examples/*
 *.rec
 .DS_Store
 
@@ -11,11 +10,7 @@ build*
 debug-build/*
 release-build/*
 
-tmp.txt
+# analysis files
 tmp/*
-*/gen_file*
-performance/obj
-python_perf_tests/*
 analysis/*
 *.csv
-asplos26_examples/*
