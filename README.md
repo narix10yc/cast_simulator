@@ -10,7 +10,7 @@ Go to the [LLVM release](https://releases.llvm.org/) page and find a happy versi
 After unzipping we should get a folder `llvm-project-${version}.src`. Find a happy place to store it and run our provided shell script `build_llvm.sh` with 
 
 ```
-build_llvm.sh <dir> <version>
+source build_llvm.sh <dir> <version>
 ```
 where `<dir>` is the directory in which `llvm-project-${version}.src` is put and `<version>` is the version of the LLVM version.
 
@@ -21,7 +21,7 @@ $HOME/llvm/19.1.0
 ```
 Then running
 ```
-build_llvm.sh $HOME/llvm/19.1.0 19.1.0
+source build_llvm.sh $HOME/llvm/19.1.0 19.1.0
 ```
 will use `cmake`, `ninja`, and the native compiler (in system path) to build two version of LLVM: (1) release build, with build directory `release-build` and install directory `release-install`, and (2). debug build, with build directory `debug-build` and install directory `debug-install`.
 

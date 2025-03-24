@@ -1,22 +1,26 @@
 #! /bin/shell
 
-cast_llvm_root = ($1)
-llvm_version = ($2)
+cast_llvm_root=$1
+llvm_version=$2
 
-cmake -S ${cast_llvm_root}/llvm-project-${llvm_version}.src/llvm -G Ninja \
--B release-build \
+echo "cast_llvm_root=$cast_llvm_root"
+echo "llvm_version=$llvm_version"
+
+cmake -S "${cast_llvm_root}/llvm-project-${llvm_version}.src/llvm" -G Ninja \
+-B "${cast_llvm_root}/release-build" \
 -DCMAKE_BUILD_TYPE=Release \
 -DLLVM_ENABLE_RTTI=ON \
 -DLLVM_TARGETS_TO_BUILD="Native;NVPTX" \
 -DLLVM_ENABLE_PROJECTS="clang;lld;lldb" \
 -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind;compiler-rt"
 
-cmake --build release-build
+cmake --build "${cast_llvm_root}/release-build"
 
-cmake --install release-build --prefix "${cast_llvm_root}/release-install"
+cmake --install "${cast_llvm_root}/release-build" \
+      --prefix "${cast_llvm_root}/release-install"
 
-cmake -S ${cast_llvm_root}/llvm-project-${llvm_version}.src/llvm -G Ninja \
--B debug-build \
+cmake -S "${cast_llvm_root}/llvm-project-${llvm_version}.src/llvm" -G Ninja \
+-B "${cast_llvm_root}/debug-build" \
 -DCMAKE_BUILD_TYPE=Debug \
 -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
 -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON \
@@ -26,6 +30,7 @@ cmake -S ${cast_llvm_root}/llvm-project-${llvm_version}.src/llvm -G Ninja \
 -DCMAKE_CXX_COMPILER="${cast_llvm_root}/release-install/bin/clang++" \
 -DLLVM_USE_LINKER="${cast_llvm_root}/release-install/bin/ld.lld"
 
-cmake --build debug-build
+cmake --build "${cast_llvm_root}/debug-build"
 
-cmake --install debug-build --prefix "debug-install"
+cmake --install "${cast_llvm_root}/debug-build" \
+      --prefix "${cast_llvm_root}/debug-install"
