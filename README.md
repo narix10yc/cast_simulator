@@ -46,4 +46,4 @@ CAST uses CMake to configure build. Supported commands include
 - `-DCAST_LLVM_ROOT=<path>` Specify the installation directory of the LLVM project. Alternatively you can cache it as an environment variable `cast_llvm_root` or `CAST_LLVM_ROOT`, and our top-level `CMakeLists.txt` will handle it.
 
 Some useful tips:
-- When setting `-DCAST_USE_CUDA=True`, CAST needs to find a CUDA installation for the `<cuda.h>` and `<cuda_runtime.h>` headers. You can specify where to find CUDA by `-DCUDAToolkit_ROOT=<path>`. It is often somewhere in `/usr/local/cuda-<version>`. 
+- When setting `-DCAST_USE_CUDA=True`, CAST needs to find a CUDA installation for the `<cuda.h>` and `<cuda_runtime.h>` headers. You can specify where to find CUDA by `-DCUDAToolkit_ROOT=<path>`. It is often found somewhere in `/usr/local/cuda-<version>`. 
