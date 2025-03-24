@@ -31,14 +31,19 @@ std::unique_ptr<ast::Statement> Parser::parseStmt() {
   std::unique_ptr<ast::Statement> stmt;
   skipSeparators();
 
+  // skip include stmt
+  if (curToken.type == TokenTy::Include) {
+    nextToken();
+    while (curToken.type != TokenTy::LineFeed)
+      nextToken();
+    skipSeparators();
+  }
+
   if (curToken.type == TokenTy::If) {
     stmt = parseIfThenElseStmt();
   } else if (curToken.type == TokenTy::Openqasm) {
     logDebug(1, "ready to parse openqasm");
     stmt = parseVersionStmt();
-  } else if (curToken.type == TokenTy::Include) {
-    logError("include stmt not implemented!");
-    return nullptr;
   } else if (curToken.type == TokenTy::Qreg) {
     logDebug(1, "ready to parse qreg");
     stmt = parseQRegStmt();
