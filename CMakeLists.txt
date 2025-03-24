@@ -17,10 +17,9 @@ if(NOT CAST_LLVM_ROOT)
   endif()
 endif()
 
-set(LLVM_ROOT ${CAST_LLVM_ROOT})
-message(STATUS "LLVM_ROOT: ${LLVM_ROOT}")
-set(LLVM_RELEASE_INSTALL_ROOT "${LLVM_ROOT}/release-install")
-set(LLVM_DEBUG_INSTALL_ROOT "${LLVM_ROOT}/debug-install")
+message(STATUS "CAST_LLVM_ROOT: ${CAST_LLVM_ROOT}")
+set(LLVM_RELEASE_INSTALL_ROOT "${CAST_LLVM_ROOT}/release-install")
+set(LLVM_DEBUG_INSTALL_ROOT "${CAST_LLVM_ROOT}/debug-install")
 
 set(CMAKE_C_COMPILER "${LLVM_RELEASE_INSTALL_ROOT}/bin/clang")
 set(CMAKE_CXX_COMPILER "${LLVM_RELEASE_INSTALL_ROOT}/bin/clang++")
@@ -41,7 +40,7 @@ endif()
 find_package(LLVM CONFIG)
 if(NOT LLVM_FOUND)
   message(FATAL_ERROR
-    "LLVM not found! CAST_LLVM_ROOT is currently set to '${CAST_LLVM_ROOT}'. "
+    "LLVM not found! CAST_LLVM_ROOT is currently set to '${CAST_LLVM_ROOT}'.\n"
     "We expect there are two sub-directories inside it: "
     "release-install and debug-install.")
 endif()
@@ -51,8 +50,8 @@ message(STATUS "LLVM is built for targets: ${LLVM_TARGETS_TO_BUILD}")
 
 if(CAST_USE_CUDA AND NOT "NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
   message(WARNING
-          "CUDA is enabled in the project, "
-          "but LLVM build does not support NVPTX backend.")
+    "CUDA is enabled in the project, "
+    "but LLVM build does not support NVPTX backend.")
 endif()
 
 # Find CUDAToolkit (if CAST_USE_CUDA is defined)
