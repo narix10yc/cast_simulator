@@ -18,7 +18,7 @@ ArgInputFilename("i",
 
 cl::opt<std::string>
 ArgModelPath("model",
-  cl::desc("Path to performance model"), cl::Required);
+  cl::desc("Path to performance model"), cl::init(""));
 
 cl::opt<int>
 ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::Required);
@@ -30,7 +30,12 @@ cl::opt<bool>
 ArgRunNoFuse("run-no-fuse", cl::desc("Run no-fuse circuit"), cl::init(false));
 
 cl::opt<bool>
-ArgRunNaiveFuse("run-naive-fuse", cl::desc("Run naive-fuse circuit"), cl::init(false));
+ArgRunNaiveFuse("run-naive-fuse",
+  cl::desc("Run naive-fuse circuit"), cl::init(false));
+
+cl::opt<bool>
+ArgRunAdaptiveFuse("run-adaptive-fuse",
+  cl::desc("Run adaptive-fuse circuit"), cl::init(true));
 
 cl::opt<int>
 ArgNaiveMaxK("naive-max-k",
@@ -51,28 +56,25 @@ int main(int argc, const char** argv) {
   qasmRoot->toCircuitGraph(graphNoFuse);
   qasmRoot->toCircuitGraph(graphNaiveFuse);
   qasmRoot->toCircuitGraph(graphAdaptiveFuse);
-  // CircuitGraph::QFTCircuit(30, graphNoFuse);
-  // CircuitGraph::QFTCircuit(30, graphNaiveFuse);
-  // CircuitGraph::QFTCircuit(30, graphAdaptiveFuse);
 
-  FusionConfig fusionConfigAggresive = FusionConfig::Aggressive;
-  fusionConfigAggresive.precision = 64;
-  fusionConfigAggresive.nThreads = ArgNThreads;
+  FusionConfig fusionConfig = FusionConfig::Aggressive;
+  fusionConfig.precision = 64;
+  fusionConfig.nThreads = ArgNThreads;
   if (ArgRunNaiveFuse) {
     NaiveCostModel naiveCostModel(ArgNaiveMaxK, -1, 1e-8);
-    applyGateFusion(fusionConfigAggresive, &naiveCostModel, graphNaiveFuse);
+    applyGateFusion(fusionConfig, &naiveCostModel, graphNaiveFuse);
   }
 
-  auto cache = PerformanceCache::LoadFromCSV(ArgModelPath);
-  StandardCostModel standardCostModel(&cache);
-  standardCostModel.display(std::cerr);
-
-  applyGateFusion(fusionConfigAggresive, &standardCostModel, graphAdaptiveFuse);
+  if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
+    auto cache = PerformanceCache::LoadFromCSV(ArgModelPath);
+    StandardCostModel standardCostModel(&cache);
+    standardCostModel.display(std::cerr); 
+    applyGateFusion(fusionConfig, &standardCostModel, graphAdaptiveFuse);
+  }
 
   CPUKernelManager kernelMgr;
   CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.simd_s = ArgSimd_s;
-
   kernelGenConfig.displayInfo(std::cerr) << "\n";
 
   // Generate kernels
@@ -88,14 +90,18 @@ int main(int argc, const char** argv) {
         kernelGenConfig, graphNaiveFuse, "graphNaiveFuse");
     }, "Generate Naive-fused Kernels");
   }
-  utils::timedExecute([&]() {
-    kernelMgr.genCPUGatesFromCircuitGraph(
-      kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
-  }, "Generate Adaptive-fused Kernels");
-
+  if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
+    utils::timedExecute([&]() {
+      kernelMgr.genCPUGatesFromCircuitGraph(
+        kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
+    }, "Generate Adaptive-fused Kernels");
+  }
 
   // JIT compile kernels
-  std::vector<CPUKernelInfo*> kernelsNoFuse, kernelsNaiveFuse, kernelAdaptiveFuse;
+  std::vector<CPUKernelInfo*> kernelsNoFuse;
+  std::vector<CPUKernelInfo*> kernelsNaiveFuse;
+  std::vector<CPUKernelInfo*>kernelAdaptiveFuse;
+
   utils::timedExecute([&]() {
     kernelMgr.initJIT(
       ArgNThreads,
@@ -105,7 +111,8 @@ int main(int argc, const char** argv) {
     double opCountTotal = 0.0;
     if (ArgRunNoFuse) {
       opCountTotal = 0.0;
-      kernelsNoFuse = kernelMgr.collectCPUKernelsFromCircuitGraph("graphNoFuse");
+      kernelsNoFuse = 
+        kernelMgr.collectCPUKernelsFromCircuitGraph("graphNoFuse");
       for (const auto* kernel : kernelsNoFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "No-fuse: nGates = " << kernelsNoFuse.size()
@@ -113,18 +120,22 @@ int main(int argc, const char** argv) {
     }
     if (ArgRunNaiveFuse) {
       opCountTotal = 0.0;
-      kernelsNaiveFuse = kernelMgr.collectCPUKernelsFromCircuitGraph("graphNaiveFuse");
+      kernelsNaiveFuse = 
+        kernelMgr.collectCPUKernelsFromCircuitGraph("graphNaiveFuse");
       for (const auto* kernel : kernelsNaiveFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "Naive-fuse: nGates = " << kernelsNaiveFuse.size()
                 << "; opCount = " << opCountTotal << "\n";
     }
-    opCountTotal = 0.0;
-    kernelAdaptiveFuse = kernelMgr.collectCPUKernelsFromCircuitGraph("graphAdaptiveFuse");
-    for (const auto* kernel : kernelAdaptiveFuse)
-      opCountTotal += kernel->gate->opCount(1e-8);
-    std::cerr << "Adaptive-fuse: nGates = " << kernelAdaptiveFuse.size()
-              << "; opCount = " << opCountTotal << "\n";
+    if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
+      opCountTotal = 0.0;
+      kernelAdaptiveFuse = 
+        kernelMgr.collectCPUKernelsFromCircuitGraph("graphAdaptiveFuse");
+      for (const auto* kernel : kernelAdaptiveFuse)
+        opCountTotal += kernel->gate->opCount(1e-8);
+      std::cerr << "Adaptive-fuse: nGates = " << kernelAdaptiveFuse.size()
+                << "; opCount = " << opCountTotal << "\n";
+    }
     }, "JIT compile kernels");
 
   // Run kernels
@@ -135,23 +146,29 @@ int main(int argc, const char** argv) {
 
   if (ArgRunNoFuse) {
     tr = timer.timeit([&]() {
-      for (auto* kernel : kernelsNoFuse)
-        kernelMgr.applyCPUKernelMultithread(sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+      for (auto* kernel : kernelsNoFuse) {
+        kernelMgr.applyCPUKernelMultithread(
+          sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+      }
     });
     tr.display(3, std::cerr << "No-fuse Circuit:\n");
   }
 
   if (ArgRunNaiveFuse) {
     tr = timer.timeit([&]() {
-      for (auto* kernel : kernelsNaiveFuse)
-        kernelMgr.applyCPUKernelMultithread(sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+      for (auto* kernel : kernelsNaiveFuse) {
+        kernelMgr.applyCPUKernelMultithread(
+          sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+      }
     });
     tr.display(3, std::cerr << "Naive-fused Circuit:\n");
   }
 
   tr = timer.timeit([&]() {
-    for (auto* kernel : kernelAdaptiveFuse)
-      kernelMgr.applyCPUKernelMultithread(sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+    for (auto* kernel : kernelAdaptiveFuse) {
+      kernelMgr.applyCPUKernelMultithread(
+        sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+    }
   });
   tr.display(3, std::cerr << "Adaptive-fused Circuit:\n");
 
