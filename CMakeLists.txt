@@ -2,20 +2,22 @@ cmake_minimum_required(VERSION 3.20)
 
 project(cast_simulator LANGUAGES C CXX)
 option(CAST_USE_CUDA "Use LLVM NVPTX Backend for CUDA Support" OFF)
-if (CAST_USE_CUDA)
+if(CAST_USE_CUDA)
   add_compile_definitions(CAST_USE_CUDA)
 endif()
 
 message("############ Custom Setups ############")
-# Find LLVM based on environment variable 'LLVM_ROOT' or 'llvm_root'
-if(DEFINED ENV{llvm_root})
-  set(LLVM_ROOT "$ENV{llvm_root}")
-elseif(DEFINED ENV{LLVM_ROOT})
-  set(LLVM_ROOT "$ENV{LLVM_ROOT}")
-else()
-  message(FATAL_ERROR "Missing environment variable 'LLVM_ROOT' or 'llvm_root'")
+set(CAST_LLVM_ROOT "" CACHE PATH "Path to the llvm root directory")
+
+if(NOT CAST_LLVM_ROOT)
+  if(DEFINED ENV{cast_llvm_root})
+    set(CAST_LLVM_ROOT "$ENV{cast_llvm_root}")
+  elseif(DEFINED ENV{CAST_LLVM_ROOT})
+    set(CAST_LLVM_ROOT "$ENV{CAST_LLVM_ROOT}")
+  endif()
 endif()
 
+set(LLVM_ROOT ${CAST_LLVM_ROOT})
 message(STATUS "LLVM_ROOT: ${LLVM_ROOT}")
 set(LLVM_RELEASE_INSTALL_ROOT "${LLVM_ROOT}/release-install")
 set(LLVM_DEBUG_INSTALL_ROOT "${LLVM_ROOT}/debug-install")
@@ -36,19 +38,25 @@ else()
     set(LLVM_DIR "${LLVM_RELEASE_INSTALL_ROOT}/lib/cmake/llvm")
 endif()
 
-find_package(LLVM REQUIRED CONFIG)
+find_package(LLVM CONFIG)
+if(NOT LLVM_FOUND)
+  message(FATAL_ERROR
+    "LLVM not found! CAST_LLVM_ROOT is currently set to '${CAST_LLVM_ROOT}'. "
+    "We expect there are two sub-directories inside it: "
+    "release-install and debug-install.")
+endif()
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 message(STATUS "LLVM is built for targets: ${LLVM_TARGETS_TO_BUILD}")
 
-if (CAST_USE_CUDA AND NOT "NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
+if(CAST_USE_CUDA AND NOT "NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
   message(WARNING
           "CUDA is enabled in the project, "
           "but LLVM build does not support NVPTX backend.")
 endif()
 
 # Find CUDAToolkit (if CAST_USE_CUDA is defined)
-if (CAST_USE_CUDA)
+if(CAST_USE_CUDA)
   set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
   find_package(CUDAToolkit REQUIRED)
   message(STATUS "CUDAToolkit_VERSION: ${CUDAToolkit_VERSION}")
@@ -67,7 +75,7 @@ if (CAST_USE_CUDA)
   
   get_cmake_property(_variableNames VARIABLES)
   foreach (_variableName ${_variableNames})
-    if (_variableName MATCHES "^CUDAToolkit")
+    if(_variableName MATCHES "^CUDAToolkit")
       message(STATUS "${_variableName}=${${_variableName}}")
     endif()
   endforeach()
