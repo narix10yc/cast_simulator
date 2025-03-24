@@ -1,5 +1,5 @@
-#ifndef LEXER_H_
-#define LEXER_H_
+#ifndef OPENQASM_LEXER_H
+#define OPENQASM_LEXER_H
 
 #include "token.h"
 #include <fstream>
@@ -56,4 +56,4 @@ private:
 
 } // namespace openqasm
 
-#endif // LEXER_H_
+#endif // OPENQASM_LEXER_H

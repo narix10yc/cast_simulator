@@ -1,5 +1,5 @@
-#ifndef OPENQASM_AST_H_
-#define OPENQASM_AST_H_
+#ifndef OPENQASM_AST_H
+#define OPENQASM_AST_H
 
 #include "openqasm/token.h"
 #include "utils/utils.h"
@@ -290,4 +290,4 @@ public:
 
 } // namespace openqasm::ast
 
-#endif // OPENQASM_AST_H_
+#endif // OPENQASM_AST_H

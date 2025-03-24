@@ -48,12 +48,12 @@ int main(int argc, const char** argv) {
 
   // This is temporary work-around as CircuitGraph does not allow copy yet
   CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
-  // qasmRoot->toCircuitGraph(graphNoFuse);
-  // qasmRoot->toCircuitGraph(graphNaiveFuse);
-  // qasmRoot->toCircuitGraph(graphAdaptiveFuse);
-  CircuitGraph::QFTCircuit(30, graphNoFuse);
-  CircuitGraph::QFTCircuit(30, graphNaiveFuse);
-  CircuitGraph::QFTCircuit(30, graphAdaptiveFuse);
+  qasmRoot->toCircuitGraph(graphNoFuse);
+  qasmRoot->toCircuitGraph(graphNaiveFuse);
+  qasmRoot->toCircuitGraph(graphAdaptiveFuse);
+  // CircuitGraph::QFTCircuit(30, graphNoFuse);
+  // CircuitGraph::QFTCircuit(30, graphNaiveFuse);
+  // CircuitGraph::QFTCircuit(30, graphAdaptiveFuse);
 
   FusionConfig fusionConfigAggresive = FusionConfig::Aggressive;
   fusionConfigAggresive.precision = 64;

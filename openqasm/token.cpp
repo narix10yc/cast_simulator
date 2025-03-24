@@ -25,9 +25,37 @@ std::string tokenTypetoString(TokenTy ty) {
     return "else";
   case TokenTy::Then:
     return "then";
+  case TokenTy::Semicolon:
+    return "semicolon";
+  case TokenTy::L_RoundBracket:
+    return "(";
+  case TokenTy::R_RoundBracket:
+    return ")";
+  case TokenTy::L_SquareBracket:
+    return "[";
+  case TokenTy::R_SquareBracket:
+    return "]";
+  case TokenTy::Comma:
+    return ",";
+  case TokenTy::Add:
+    return "+";
+  case TokenTy::Sub:
+    return "-";
+  case TokenTy::Mul:
+    return "*";
+  case TokenTy::Div:
+    return "/";
+  case TokenTy::Greater:  
+    return ">";
+  case TokenTy::Less: 
+    return "<";
+  case TokenTy::LineFeed:
+    return "\\n";
+  case TokenTy::CarriageReturn:
+    return "\\r";
   // TODO
   default:
-    return "<unknown>";
+    return "<unknown " + std::to_string(static_cast<int>(ty)) + ">";
   }
 }
 

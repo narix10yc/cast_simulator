@@ -1,5 +1,5 @@
-#ifndef TOKEN_H_
-#define TOKEN_H_
+#ifndef OPENQASM_TOKEN_H
+#define OPENQASM_TOKEN_H
 
 #include <string>
 
@@ -110,4 +110,4 @@ int getBinopPrecedence(BinaryOp op);
 
 } // namespace openqasm
 
-#endif // TOKEN_H_
+#endif // OPENQASM_TOKEN_H
