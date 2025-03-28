@@ -42,7 +42,7 @@ Now `CAST_LLVM_ROOT` should be set to `$HOME/llvm/19.1.0` in this example.
 
 ### CMake Commands
 CAST uses CMake to configure build. Supported commands include
-- `-DCAST_USE_CUDA=<bool>` Enable CUDA support in CAST. This commands requires LLVM to be build with NVPTX backend.
+- `-DCAST_USE_CUDA=<bool>` Enable CUDA support in CAST. This commands requires LLVM to be built with NVPTX backend.
 - `-DCAST_LLVM_ROOT=<path>` Specify the installation directory of the LLVM project. Alternatively you can cache it as an environment variable `cast_llvm_root` or `CAST_LLVM_ROOT`, and our top-level `CMakeLists.txt` will handle it.
 
 Some useful tips:
