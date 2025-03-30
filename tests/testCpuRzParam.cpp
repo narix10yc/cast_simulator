@@ -10,8 +10,8 @@
 using namespace cast;
 using namespace utils;
 
-
-GateMatrix makeRzSymbolicMatrix() {
+namespace {
+  GateMatrix makeRzSymbolicMatrix() {
     GateMatrix::p_matrix_t pMat(2);
 
     int var = 0; 
@@ -32,34 +32,35 @@ GateMatrix makeRzSymbolicMatrix() {
     // => getConstantMatrix() = null
     GateMatrix gmat(pMat);
     return gmat;
-}
+  }
 
-std::shared_ptr<QuantumGate> getRzSymbolicGate(int q) {
-    GateMatrix rzSymbolic = makeRzSymbolicMatrix();
-    QuantumGate gate(rzSymbolic, q);
-    return std::make_shared<QuantumGate>(gate);
-}
+  std::shared_ptr<QuantumGate> getRzSymbolicGate(int q) {
+      GateMatrix rzSymbolic = makeRzSymbolicMatrix();
+      QuantumGate gate(rzSymbolic, q);
+      return std::make_shared<QuantumGate>(gate);
+  }
 
-std::vector<double> buildRzNumericMatrix(double theta) {
-    double c = std::cos(theta / 2.0);
-    double s = std::sin(theta / 2.0);
+  std::vector<double> buildRzNumericMatrix(double theta) {
+      double c = std::cos(theta / 2.0);
+      double s = std::sin(theta / 2.0);
 
-    // Rz(θ) = [[ c,   -i s ],
-    //          [ -i s,   c ]]
-    // => (0,0) = c + i0
-    // => (0,1) = 0 + i(-s)
-    // => (1,0) = 0 + i(-s)
-    // => (1,1) = c + i0
-    std::vector<double> mat(8);
-    mat[0] = c;    // re(0,0)
-    mat[1] = 0.0;  // im(0,0)
-    mat[2] = 0.0;  // re(0,1)
-    mat[3] = -s;   // im(0,1)
-    mat[4] = 0.0;  // re(1,0)
-    mat[5] = -s;   // im(1,0)
-    mat[6] = c;    // re(1,1)
-    mat[7] = 0.0;  // im(1,1)
-    return mat;
+      // Rz(θ) = [[ c,   -i s ],
+      //          [ -i s,   c ]]
+      // => (0,0) = c + i0
+      // => (0,1) = 0 + i(-s)
+      // => (1,0) = 0 + i(-s)
+      // => (1,1) = c + i0
+      std::vector<double> mat(8);
+      mat[0] = c;    // re(0,0)
+      mat[1] = 0.0;  // im(0,0)
+      mat[2] = 0.0;  // re(0,1)
+      mat[3] = -s;   // im(0,1)
+      mat[4] = 0.0;  // re(1,0)
+      mat[5] = -s;   // im(1,0)
+      mat[6] = c;    // re(1,1)
+      mat[7] = 0.0;  // im(1,1)
+      return mat;
+  }
 }
 
 template<unsigned simd_s>

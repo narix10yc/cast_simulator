@@ -32,8 +32,11 @@ int main() {
     test_cudaU();
   }, "CUDA Codegen Test Finished!");
 
+  utils::timedExecute([] {
+    test_cudaRz_param();
+  }, "CUDA Codegen (Runtime) Test Finished!");
+
   #endif // CAST_USE_CUDA
 
-  
   return 0;
 }

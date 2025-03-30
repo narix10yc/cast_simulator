@@ -615,11 +615,11 @@ CPUKernelManager& CPUKernelManager::genCPUGatesFromCircuitGraph(
   return *this;
 }
 
-CPUKernelManager& CPUKernelManager::genCPUMeasure(
-    const CPUKernelGenConfig& config, int q, const std::string& funcName) {
-  assert(0 && "Not Implemented");
-  return *this;
-}
+// CPUKernelManager& CPUKernelManager::genCPUMeasure(
+//     const CPUKernelGenConfig& config, int q, const std::string& funcName) {
+//   assert(0 && "Not Implemented");
+//   return *this;
+// }
 
 void CPUKernelManager::dumpIR(const std::string &funcName, llvm::raw_ostream &os) {
   // We haven't called initJIT() yet, so the modules should still be in

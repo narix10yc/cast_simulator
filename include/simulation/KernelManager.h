@@ -245,6 +245,8 @@ public:
   std::string getPTXString(int idx) const {
     return std::string(_cudaKernels[idx].ptxString.str());
   }
+  
+  void dumpPTX(const std::string &kernelName, llvm::raw_ostream &os);
 
 #ifdef CAST_USE_CUDA
 private:
@@ -273,6 +275,14 @@ public:
   ///
   void launchCUDAKernel(
       void* dData, int nQubits, CUDAKernelInfo& kernelInfo, int blockSize=64);
+  
+  void launchCUDAKernelParam(
+      void* dData,
+      int nQubits,
+      CUDAKernelInfo& kernelInfo,
+      void* dMatPtr,
+      int blockSize=64
+  );
 
 #endif // CAST_USE_CUDA
 };

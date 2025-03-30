@@ -78,6 +78,7 @@ void test_fusionCPU();
 
 void test_statevectorCUDA();
 void test_cudaU();
+void test_cudaRz_param();
 
 } // namespace cast::test
 
