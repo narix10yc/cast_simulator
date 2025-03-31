@@ -82,7 +82,7 @@ if(CAST_USE_CUDA)
 
   message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
   set(CMAKE_CUDA_ARCHITECTURES native)
-  set(CMAKE_CUDA_COMPILER "${CUDAToolkit_ROOT}/bin/nvcc")
+  set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
   # Sometimes clang version is too high and nvcc does not support it
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --allow-unsupported-compiler")
   enable_language(CUDA)
