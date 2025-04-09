@@ -1,5 +1,4 @@
 #include "new_parser/Parser.h"
-#include "new_parser/AST.h"
 #include "utils/iocolor.h"
 
 using namespace cast::draft;
@@ -39,7 +38,8 @@ std::ostream& ast::SimpleNumericExpr::print(std::ostream& os) const {
 
 std::ostream& ast::CircuitStmt::print(std::ostream& os) const {
   os << "circuit";
-  attribute.print(os);
+  if (attribute)
+    attribute->print(os);
   os << " " << name << " {}";
   return os;
 }

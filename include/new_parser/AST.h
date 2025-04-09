@@ -156,15 +156,29 @@ public:
 
 class Stmt : public Node {
 public:
-  Attribute attribute;
+  std::unique_ptr<Attribute> attribute;
 
-  explicit Stmt(NodeKind kind) : Node(kind), attribute() {}
+  explicit Stmt(NodeKind kind) : Node(kind), attribute(nullptr) {}
 
-  void setNQubits(int nQubits) { attribute.nQubits = nQubits; }
+  void ensureHasAttribute() {
+    if (attribute == nullptr)
+      attribute = std::make_unique<Attribute>();
+  }
 
-  void setNParams(int nParams) { attribute.nParams = nParams; }
+  void setNQubits(int nQubits) {
+    ensureHasAttribute();
+    attribute->nQubits = nQubits;
+  }
 
-  void setPhase(const SimpleNumericExpr& phase) { attribute.phase = phase; }
+  void setNParams(int nParams) { 
+    ensureHasAttribute();
+    attribute->nParams = nParams;
+  }
+
+  void setPhase(const SimpleNumericExpr& phase) { 
+    ensureHasAttribute();
+    attribute->phase = phase;
+  }
 
   static bool classof(const Node* node) {
     return node->getKind() >= NK_Stmt && node->getKind() <= NK_Stmt_GateApply;
@@ -175,8 +189,10 @@ class CircuitStmt : public Stmt {
 public:
   std::string name;
 
-  CircuitStmt() : Stmt(NK_Stmt_Circuit), name() {}
-  CircuitStmt(const std::string& name) : Stmt(NK_Stmt_Circuit), name(name) {}
+  CircuitStmt() : Stmt(NK_Stmt_Circuit), name() { ensureHasAttribute(); }
+  CircuitStmt(const std::string& name) : Stmt(NK_Stmt_Circuit), name(name) {
+    ensureHasAttribute();
+  }
 
   std::ostream& print(std::ostream& os) const override;
 

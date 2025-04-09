@@ -447,9 +447,11 @@ convertExprToSimpleNumeric(const ast::Expr* expr) {
 
 }
 
-void Parser::parseAttribute(ast::Attribute& attr) {
+std::unique_ptr<ast::Attribute> Parser::parseAttribute() {
   if (curToken.isNot(tk_L_SquareBracket))
-    return;
+    return nullptr;
+  
+  auto attr = std::make_unique<ast::Attribute>();
 
   advance(tk_L_SquareBracket);
   while (curToken.isNot(tk_R_SquareBracket)) {
@@ -462,12 +464,12 @@ void Parser::parseAttribute(ast::Attribute& attr) {
     // 'nqubits', 'nparams', and 'phase' are reserved attributes
     if (name == "nqubits") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nqubits' must be a number");
-      attr.nQubits = curToken.toInt();
+      attr->nQubits = curToken.toInt();
       advance(tk_Numeric);
     }
     else if (name == "nparams") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nparams' must be a number");
-      attr.nQubits = curToken.toInt();
+      attr->nParams = curToken.toInt();
       advance(tk_Numeric);
     }
     else if (name == "phase") {
@@ -485,7 +487,7 @@ void Parser::parseAttribute(ast::Attribute& attr) {
         printLocation();
         failAndExit();
       }
-      attr.phase = *simpleNumeric;
+      attr->phase = *simpleNumeric;
     }
     else {
       // other attributes
@@ -494,14 +496,14 @@ void Parser::parseAttribute(ast::Attribute& attr) {
     optionalAdvance(tk_Comma);
   }
   advance(tk_R_SquareBracket);
-  return;
+  return attr;
 }
 
 std::unique_ptr<ast::CircuitStmt> Parser::parseCircuitStmt() {
   advance(tk_Circuit);
 
   auto stmt = std::make_unique<ast::CircuitStmt>();
-  parseAttribute(stmt->attribute);
+  stmt->attribute = std::move(parseAttribute());
   requireCurTokenIs(tk_Identifier);
   stmt->name = curToken.toString();
   advance(tk_Identifier);
