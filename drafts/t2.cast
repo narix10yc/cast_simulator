@@ -1,0 +1,6 @@
+// Depolarizing Channel
+channel depo {
+  0.1 X,
+  0.1 Y,
+  0.1 Z
+}

@@ -1,0 +1,8 @@
+// an empty circuit
+circuit my_circuit_0 {
+
+}
+
+// 1-qubit circuit with 1 gate
+circuit[nqubits=2, phase=2 / 3 * pi] my_circuit_1 {
+}
