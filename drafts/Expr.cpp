@@ -19,6 +19,12 @@ std::ostream& ast::BinaryOpExpr::print(std::ostream& os) const {
   return os << ")";
 }
 
+std::ostream& ast::MinusOpExpr::print(std::ostream& os) const {
+  os << "-";
+  operand->print(os);
+  return os;
+}
+
 double ast::SimpleNumericExpr::getValue() const {
   if (_value.is<int>())
     return static_cast<double>(_value.get<int>());
@@ -30,6 +36,17 @@ double ast::SimpleNumericExpr::getValue() const {
 }
 
 /* Arithmatic of SimpleNumericExpr */
+ast::SimpleNumericExpr
+ast::SimpleNumericExpr::operator-() const {
+  if (_value.is<double>())
+    return SimpleNumericExpr(-_value.get<double>());
+  if (_value.is<int>())
+    return SimpleNumericExpr(-_value.get<int>());
+  assert(_value.is<FractionPi>() && "Invalid state");
+  const auto& fraction = _value.get<FractionPi>();
+  return SimpleNumericExpr(-fraction.numerator, fraction.denominator);
+}
+
 ast::SimpleNumericExpr
 ast::SimpleNumericExpr::operator+(const SimpleNumericExpr& other) const {
   if (_value.is<double>() || other._value.is<double>())
@@ -122,7 +139,6 @@ ast::SimpleNumericExpr::operator*(const SimpleNumericExpr& other) const {
     reduced.print(std::cerr) << "\n";
   #endif
   return reduced;
-
 }
 
 ast::SimpleNumericExpr
@@ -160,7 +176,7 @@ ast::SimpleNumericExpr::operator/(const SimpleNumericExpr& other) const {
   return reduced;
 }
 
-static int getPrecedence(ast::BinaryOpExpr::BinaryOpKind binOp) {
+static int getBinaryOpPrecedence(ast::BinaryOpExpr::BinaryOpKind binOp) {
   switch (binOp) {
   case ast::BinaryOpExpr::Invalid:
     return -1;
@@ -171,12 +187,14 @@ static int getPrecedence(ast::BinaryOpExpr::BinaryOpKind binOp) {
   case ast::BinaryOpExpr::Div:
     return 20;
   case ast::BinaryOpExpr::Pow:
-    return 30;
+    return 50;
   default:
     assert(false && "Invalid binary operator");
     return -1;
   }
 }
+
+static constexpr int minusOpPrecedence = 30;
 
 static ast::BinaryOpExpr::BinaryOpKind toBinaryOp(TokenKind tokenKind) {
   switch (tokenKind) {
@@ -196,6 +214,14 @@ static ast::BinaryOpExpr::BinaryOpKind toBinaryOp(TokenKind tokenKind) {
 }
 
 std::unique_ptr<ast::Expr> Parser::parsePrimaryExpr() {
+  if (curToken.is(tk_Add)) {
+    advance(tk_Add);
+    return parsePrimaryExpr();
+  }
+  if (curToken.is(tk_Sub)) {
+    advance(tk_Sub);
+    return std::make_unique<ast::MinusOpExpr>(parseExpr(minusOpPrecedence));
+  }
   if (curToken.is(tk_Numeric)) {
     if (curToken.convertibleToInt()) {
       auto value = curToken.toInt();
@@ -234,7 +260,7 @@ std::unique_ptr<ast::Expr> Parser::parseExpr(int precedence) {
   auto lhs = parsePrimaryExpr();
   while (true) {
     auto binOp = toBinaryOp(curToken.kind);
-    int prec = getPrecedence(binOp);
+    int prec = getBinaryOpPrecedence(binOp);
     if (prec < precedence)
       break;
     advance();

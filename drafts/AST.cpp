@@ -26,9 +26,12 @@ std::ostream& ast::SimpleNumericExpr::print(std::ostream& os) const {
   assert(fraction.numerator != 0 && "Numerator is zero?");
   assert(fraction.denominator != 0 && "Invalid state");
 
-  if (fraction.numerator != 1)
-    os << fraction.numerator << "*";
-  os << "pi";
+  if (fraction.numerator == 1)
+    os << "pi";
+  else if (fraction.numerator == -1)
+    os << "-pi";
+  else
+    os << fraction.numerator << "*pi";
   if (fraction.denominator != 1)
     os << '/' << fraction.denominator;
   return os;

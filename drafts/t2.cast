@@ -1,6 +1,6 @@
-// Depolarizing Channel
-channel depo {
-  0.1 X,
-  0.1 Y,
-  0.1 Z
+// A non-parametrized circuit
+circuit my_circuit {
+  X 0;
+  Y 0;
+  H 3;
 }

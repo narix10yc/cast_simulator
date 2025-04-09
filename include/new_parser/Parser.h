@@ -30,20 +30,31 @@ enum TokenKind : int {
   tk_EqualEqual = -40,   // ==
 
   // symbols
-  tk_Comma = -104,          // ,
-  tk_Semicolon = -105,      // ;
-  tk_L_RoundBracket = -106,  // (
-  tk_R_RoundBracket = -107,  // )
-  tk_L_SquareBracket = -108, // [
-  tk_R_SquareBracket = -109, // ]
-  tk_L_CurlyBracket = -112,  // {
-  tk_R_CurlyBracket = -113,  // }
-  tk_SingleQuote = -114,    // '
-  tk_DoubleQuote = -115,    // "
-  tk_AtSymbol = -116,       // @
-  tk_Percent = -117,        // %
-  tk_Hash = -118,           // #
-  tk_Backslash = -119,      // '\'
+  tk_Comma              = -104,  // ,
+  tk_Semicolon          = -105,  // ;
+  tk_L_RoundBracket     = -106,  // (
+  tk_R_RoundBracket     = -107,  // )
+  tk_L_SquareBracket    = -108,  // [
+  tk_R_SquareBracket    = -109,  // ]
+  tk_Colon              = -110,  // :
+  tk_L_CurlyBracket     = -112,  // {
+  tk_R_CurlyBracket     = -113,  // }
+  tk_SingleQuote        = -114,  // '
+  tk_DoubleQuote        = -115,  // "
+  tk_AtSymbol           = -116,  // @
+  tk_Percent            = -117,  // %
+  tk_Hash               = -118,  // #
+  tk_Backslash          = -119,  // '\'
+  tk_Slash              = -120,  // /
+  tk_Tilde              = -121,  // ~
+  tk_Exclamation        = -122,  // !
+  tk_Question           = -123,  // ?
+  tk_Ampersand          = -124,  // &
+  tk_Pipe               = -125,  // |
+  tk_Caret              = -126,  // ^
+  tk_Dot                = -133,  // .
+  tk_Dollar             = -134,  // $
+  tk_Backtick           = -135,  // `
 
   tk_Unknown = -1000,
   tk_Any = -1001,
@@ -175,7 +186,7 @@ class Parser {
   // curToken is '[', and if so, parse attribute list (ended with ']').
   // Otherwise it will do nothing.
   void parseAttribute(ast::Attribute& attr);
-  
+
   std::unique_ptr<ast::CircuitStmt> parseCircuitStmt();
   
   // Expression-related

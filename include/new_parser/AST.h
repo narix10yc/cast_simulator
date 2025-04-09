@@ -21,7 +21,7 @@ public:
       NK_Expr_SimpleNumeric,
       NK_Expr_Parameter,
       NK_Expr_BinaryOp,
-      NK_Expr_UnaryOp,
+      NK_Expr_MinusOp,
     NK_Root
   };
 private:
@@ -41,7 +41,7 @@ public:
   explicit Expr(NodeKind kind) : Node(kind) {}
 
   static bool classof(const Node* node) {
-    return node->getKind() >= NK_Expr && node->getKind() <= NK_Expr_UnaryOp;
+    return node->getKind() >= NK_Expr && node->getKind() <= NK_Expr_MinusOp;
   }
 }; // class Expr
 
@@ -73,6 +73,8 @@ public:
   std::ostream& print(std::ostream& os) const override;
 
   double getValue() const;
+
+  SimpleNumericExpr operator-() const;
 
   SimpleNumericExpr operator+(const SimpleNumericExpr& other) const;
   SimpleNumericExpr operator-(const SimpleNumericExpr& other) const;
@@ -128,6 +130,20 @@ public:
   }
 
 }; // class BinaryOpExpr
+
+class MinusOpExpr : public Expr {
+public:
+  std::unique_ptr<Expr> operand;
+
+  MinusOpExpr(std::unique_ptr<Expr> operand)
+    : Expr(NK_Expr_MinusOp), operand(std::move(operand)) {}
+
+  std::ostream& print(std::ostream& os) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_MinusOp;
+  }
+}; // class UnaryOpExpr
 
 class Attribute {
 public:

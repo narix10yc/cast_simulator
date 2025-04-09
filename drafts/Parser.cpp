@@ -201,6 +201,48 @@ void Lexer::lex(Token& tok) {
   case '%':
     lexOneChar(tok, tk_Percent);
     return;
+  case '#':
+    lexOneChar(tok, tk_Hash);
+    return;
+  case '$':
+    lexOneChar(tok, tk_Dollar);
+    return;
+  case '&':
+    lexOneChar(tok, tk_Ampersand);
+    return;
+  case '|':
+    lexOneChar(tok, tk_Pipe);
+    return;
+  case '^':
+    lexOneChar(tok, tk_Caret);
+    return;
+  case '\'':
+    lexOneChar(tok, tk_SingleQuote);
+    return;
+  case '"':
+    lexOneChar(tok, tk_DoubleQuote);
+    return;
+  case '\\':
+    lexOneChar(tok, tk_Backslash);
+    return;
+  case '`':
+    lexOneChar(tok, tk_Backtick);
+    return;
+  case '!':
+    lexOneChar(tok, tk_Exclamation);
+    return;
+  case '~':
+    lexOneChar(tok, tk_Tilde);
+    return;
+  case ':':
+    lexOneChar(tok, tk_Colon);
+    return;
+  case '?':
+    lexOneChar(tok, tk_Question);
+    return;
+  case '.':
+    lexOneChar(tok, tk_Dot);
+    return;
   case '@':
     lexOneChar(tok, tk_AtSymbol);
     return;
@@ -243,7 +285,7 @@ void Lexer::lex(Token& tok) {
 
   default:
     auto* memRefBegin = curPtr;
-    if (c == '-' || ('0' <= c && c <= '9')) {
+    if ('0' <= c && c <= '9') {
       c = *(++curPtr);
       while (c == 'e' || c == '+' || c == '-' || c == '.' ||
              ('0' <= c && c <= '9'))
@@ -372,6 +414,13 @@ convertExprToSimpleNumeric(const ast::Expr* expr) {
 
   if (auto* e = llvm::dyn_cast<ast::SimpleNumericExpr>(expr))
     return std::make_unique<ast::SimpleNumericExpr>(*e);
+
+  if (auto* e = llvm::dyn_cast<ast::MinusOpExpr>(expr)) {
+    auto operand = convertExprToSimpleNumeric(e->operand.get());
+    if (!operand)
+      return nullptr;
+    return std::make_unique<ast::SimpleNumericExpr>(-(*operand));
+  }
 
   if (auto* e = llvm::dyn_cast<ast::BinaryOpExpr>(expr)) {
     auto lhs = convertExprToSimpleNumeric(e->lhs.get());
