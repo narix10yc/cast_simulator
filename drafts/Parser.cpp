@@ -75,7 +75,7 @@ std::complex<double> Parser::parseComplexNumber() {
 }
 
 // Try to convert a general expression to a simple numeric expression.
-// This function is mainly used in parsing the 'phase' attribute of statements.
+// Return nullptr if the conversion is not possible.
 static std::unique_ptr<ast::SimpleNumericExpr>
 convertExprToSimpleNumeric(const ast::Expr* expr) {
   if (expr == nullptr)
@@ -218,6 +218,29 @@ std::unique_ptr<ast::GateChainStmt> Parser::parseGateChainStmt() {
     auto attr = parseAttribute();
     if (attr)
       gate.attribute = std::move(attr);
+
+    // gate parameters
+    if (curToken.is(tk_L_RoundBracket)) {
+      advance(tk_L_RoundBracket);
+      while (curToken.isNot(tk_R_RoundBracket)) {
+        auto expr = parseExpr();
+        if (expr == nullptr) {
+          logErrHere("Expect a parameter expression");
+          failAndExit();
+        }
+        // Transform to SimpleNumericExpr if possible
+        if (auto simpleNumeric = convertExprToSimpleNumeric(expr.get()))
+          gate.params.emplace_back(std::move(simpleNumeric));
+        else
+          gate.params.emplace_back(std::move(expr));
+        if (curToken.is(tk_R_RoundBracket))
+          break;
+        requireCurTokenIs(tk_Comma, "Expect ',' to separate parameters");
+        advance(tk_Comma);
+        continue;
+      }
+      advance(tk_R_RoundBracket);
+    }
     
     // target qubits
     while (curToken.is(tk_Numeric) || curToken.is(tk_All)) {

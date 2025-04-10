@@ -43,11 +43,11 @@ std::ostream& ast::SimpleNumericExpr::print(std::ostream& os) const {
   assert(fraction.denominator != 0 && "Invalid state");
 
   if (fraction.numerator == 1)
-    os << "pi";
+    os << "Pi";
   else if (fraction.numerator == -1)
-    os << "-pi";
+    os << "-Pi";
   else
-    os << fraction.numerator << "*pi";
+    os << fraction.numerator << "*Pi";
   if (fraction.denominator != 1)
     os << '/' << fraction.denominator;
   return os;
@@ -57,6 +57,16 @@ std::ostream& ast::GateApplyStmt::print(std::ostream& os) const {
   os << name;
   if (attribute)
     attribute->print(os);
+  auto pSize = params.size();
+  if (pSize > 0) {
+    os << "(";
+    for (size_t i = 0; i < pSize; ++i) {
+      params[i]->print(os);
+      if (i != pSize - 1)
+        os << ", ";
+    }
+    os << ")";
+  }
   for (const auto& qubit : qubits)
     qubit->print(os << " ");
   return os;
@@ -72,7 +82,7 @@ std::ostream& ast::GateChainStmt::print(std::ostream& os) const {
 }
 
 std::ostream& ast::CircuitStmt::print(std::ostream& os) const {
-  os << "circuit";
+  os << "Circuit";
   if (attribute)
     attribute->print(os);
   os << " " << name << " {\n";

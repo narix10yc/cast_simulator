@@ -107,3 +107,20 @@ Circuit[nqubits=4, nparams=20] block_circuit {
   H All;
 }
 ```
+
+### TODO: Error Correction Code
+```
+// Auto-deduce this is a [[5,1,3]] code.
+ECC five_qubit_code {
+  XZZXI;
+  IXZZX;
+  XIXZZ;
+  ZXIXZ;
+}
+
+// Auto-deduce this circuit has 5 physical qubits
+Circuit[ecc=five_qubit_code] ecc_circuit {
+  H 0;
+  Measure 0;
+}
+```

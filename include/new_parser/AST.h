@@ -233,14 +233,17 @@ public:
 }; // class Stmt
 
 class GateApplyStmt : public Stmt {
+  // TODO: change it to be compatible with gate parameter type
+  using ParamVectorType = llvm::SmallVector<std::unique_ptr<ast::Expr>, 3>;
   // TODO: change it to ast::IntegerLiteral
   using QubitVectorType = llvm::SmallVector<std::unique_ptr<ast::Expr>, 2>;
 public:
   std::string name;
+  ParamVectorType params;
   QubitVectorType qubits;
 
   GateApplyStmt(const std::string& name)
-    : Stmt(NK_Stmt_GateApply), name(name), qubits() {}
+    : Stmt(NK_Stmt_GateApply), name(name), params(), qubits() {}
 
   // Because we expect \c GateApplyStmt will not appear in the top-level, 
   // \c print does not print indentation and the final semicolon.
