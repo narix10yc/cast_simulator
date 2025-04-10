@@ -2,6 +2,7 @@
 #define CAST_DRAFT_AST_H
 
 #include "llvm/Support/Casting.h"
+#include "llvm/ADT/SmallVector.h"
 #include "utils/PODVariant.h"
 #include <iostream>
 #include <string>
@@ -15,10 +16,22 @@ public:
   /// The LLVM-style RTTI. Indentation corresponds to class hirearchy.
   enum NodeKind {
     NK_Stmt,
-      NK_Stmt_Circuit,
       NK_Stmt_GateApply,
+      NK_Stmt_GateChain,
+      NK_Stmt_GateBlock,
+      NK_Stmt_Measure,
+      NK_Stmt_If,
+      NK_Stmt_Repeat,
+      NK_Stmt_Circuit,
+      NK_Stmt_Channel,
     NK_Expr,
       NK_Expr_SimpleNumeric,
+        NK_Expr_IntegerLiteral,
+        NK_Expr_FloatingLiteral,
+        NK_Expr_FractionLiteral,
+        NK_Expr_FractionPiLiteral,
+      NK_Expr_Measure,
+      NK_Expr_All,
       NK_Expr_Parameter,
       NK_Expr_BinaryOp,
       NK_Expr_MinusOp,
@@ -45,9 +58,10 @@ public:
   }
 }; // class Expr
 
-/// @brief SimpleNumericExpr represents a constant numeric expression that can
-/// be either a double or a fraction of pi. This design allows storing exact
-/// value such as pi/2 and 2*pi/3 that are useful in printing the AST.
+/// @brief SimpleNumericExpr represents a constant numeric expression. This
+/// design allows storing exact values of fraction-multiple of pi, such as pi/2
+/// and 2*pi/3. We also support basic arithmatics. They are useful in printing
+/// the AST.
 class SimpleNumericExpr : public Expr {
 private:
   struct FractionPi {
@@ -84,9 +98,42 @@ public:
   SimpleNumericExpr operator/(const SimpleNumericExpr& other) const;
 
   static bool classof(const Node* node) {
-    return node->getKind() == NK_Expr_SimpleNumeric;
+    return node->getKind() >= NK_Expr_SimpleNumeric &&
+           node->getKind() <= NK_Expr_FractionPiLiteral;
   }
 }; // class SimpleNumericExpr
+
+class MeasureExpr : public Expr {
+public:
+  int qubit;
+
+  MeasureExpr(int qubit)
+    : Expr(NK_Expr_Measure), qubit(qubit) {}
+
+  std::ostream& print(std::ostream& os) const override {
+    return os << "Measure " << qubit;
+  }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_Measure;
+  }
+}; // class MeasureExpr
+
+// \c AllExpr corresponds to the 'All' keyword that is used as an convenient way
+// of applying a gate to all wires.
+class AllExpr : public Expr {
+public:
+  AllExpr() : Expr(NK_Expr_All) {}
+
+  std::ostream& print(std::ostream& os) const override {
+    return os << "All";
+  }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_All;
+  }
+
+}; // class AllExpr
 
 // #index 
 class ParameterExpr : public Expr {
@@ -181,16 +228,69 @@ public:
   }
 
   static bool classof(const Node* node) {
-    return node->getKind() >= NK_Stmt && node->getKind() <= NK_Stmt_GateApply;
+    return node->getKind() >= NK_Stmt && node->getKind() <= NK_Stmt_Channel;
   }
 }; // class Stmt
+
+class GateApplyStmt : public Stmt {
+  // TODO: change it to ast::IntegerLiteral
+  using QubitVectorType = llvm::SmallVector<std::unique_ptr<ast::Expr>, 2>;
+public:
+  std::string name;
+  QubitVectorType qubits;
+
+  GateApplyStmt(const std::string& name)
+    : Stmt(NK_Stmt_GateApply), name(name), qubits() {}
+
+  // Because we expect \c GateApplyStmt will not appear in the top-level, 
+  // \c print does not print indentation and the final semicolon.
+  std::ostream& print(std::ostream& os) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Stmt_GateApply;
+  }
+}; // class GateApplyStmt
+
+class GateChainStmt : public Stmt {
+public:
+  std::vector<GateApplyStmt> gates;
+
+  GateChainStmt() : Stmt(NK_Stmt_GateChain), gates() {}
+
+  std::ostream& print(std::ostream& os) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Stmt_GateChain;
+  }
+}; // class GateChainStmt
+
+class MeasureStmt : public Stmt {
+public:
+  int qubit;
+
+  MeasureStmt(int qubit)
+    : Stmt(NK_Stmt_Measure), qubit(qubit) {}
+
+  std::ostream& print(std::ostream& os) const override {
+    return os << "Measure " << qubit << ";";
+  }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Stmt_Measure;
+  }
+}; // class MeasureStmt
 
 class CircuitStmt : public Stmt {
 public:
   std::string name;
+  std::vector<std::unique_ptr<Stmt>> body;
 
-  CircuitStmt() : Stmt(NK_Stmt_Circuit), name() { ensureHasAttribute(); }
-  CircuitStmt(const std::string& name) : Stmt(NK_Stmt_Circuit), name(name) {
+  CircuitStmt() : Stmt(NK_Stmt_Circuit), name(), body() {
+    ensureHasAttribute();
+  }
+
+  CircuitStmt(const std::string& name)
+    : Stmt(NK_Stmt_Circuit), name(name), body() {
     ensureHasAttribute();
   }
 

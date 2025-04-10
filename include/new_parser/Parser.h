@@ -20,7 +20,11 @@ class Parser {
   // Otherwise it returns nullptr.
   std::unique_ptr<ast::Attribute> parseAttribute();
 
+  // CircuitStmt is a top-level statement.
   std::unique_ptr<ast::CircuitStmt> parseCircuitStmt();
+
+  std::unique_ptr<ast::Stmt> parseCircuitLevelStmt();
+  std::unique_ptr<ast::GateChainStmt> parseGateChainStmt();
   
   // Expression-related
   std::unique_ptr<ast::Expr> parseExpr(int precedence = 0);
@@ -28,8 +32,9 @@ class Parser {
 
   void printLocation(std::ostream& os = std::cerr) const;
 
-  std::ostream& logErr() const {
-    return std::cerr << BOLDRED("Parser Error: ");
+  void logErrHere(const char* msg) const {
+    std::cerr << BOLDRED("Parser Error: ") << msg << "\n";
+    printLocation();
   }
 
   void failAndExit() const {

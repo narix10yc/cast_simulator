@@ -1,8 +1,9 @@
 // an empty circuit
-circuit my_circuit_0 {
+Circuit my_circuit_0 {
 
 }
 
-circuit[nqubits=2, phase=-pi/2] my_circuit_1 {
-
+Circuit[nqubits=2, phase=-Pi/2] my_circuit_1 {
+  H 0
+  @ Z[phase=-Pi] 1;
 }

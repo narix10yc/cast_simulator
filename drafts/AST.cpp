@@ -1,14 +1,31 @@
 #include "new_parser/Parser.h"
 #include "utils/iocolor.h"
+#include "utils/utils.h"
 
 using namespace cast::draft;
 
 std::ostream& ast::Attribute::print(std::ostream& os) const {
-  os << "[nqubits=" << nQubits
-    << ", nparams=" << nParams
-    << ", phase=";
-  phase.print(os) << "]";
-  return os;
+  if (nQubits == 0 && nParams == 0 && phase.getValue() == 0.0)
+    return os;
+  os << "[";
+  bool needComma = false;
+  if (nQubits != 0) {
+    os << "nqubits=" << nQubits;
+    needComma = true;
+  }
+  if (nParams != 0) {
+    if (needComma)
+      os << ", ";
+    os << "nparams=" << nParams;
+    needComma = true;
+  }
+  if (phase.getValue() != 0.0) {
+    if (needComma)
+      os << ", ";
+    os << "phase=";
+    phase.print(os);
+  }
+  return os << "]";
 }
 
 std::ostream& ast::SimpleNumericExpr::print(std::ostream& os) const {
@@ -36,11 +53,32 @@ std::ostream& ast::SimpleNumericExpr::print(std::ostream& os) const {
   return os;
 }
 
+std::ostream& ast::GateApplyStmt::print(std::ostream& os) const {
+  os << name;
+  if (attribute)
+    attribute->print(os);
+  for (const auto& qubit : qubits)
+    qubit->print(os << " ");
+  return os;
+}
+
+std::ostream& ast::GateChainStmt::print(std::ostream& os) const {
+  assert(attribute == nullptr && "GateChainStmt should not have attribute");
+  for (size_t i = 0, size = gates.size(); i < size; ++i) {
+    gates[i].print(os);
+    os << ((i == size - 1) ? ";" : "\n@ ");
+  }
+  return os;
+}
+
 std::ostream& ast::CircuitStmt::print(std::ostream& os) const {
   os << "circuit";
   if (attribute)
     attribute->print(os);
-  os << " " << name << " {}";
+  os << " " << name << " {\n";
+  for (const auto& stmt : body)
+    stmt->print(os << "  ") << "\n";
+  os << "}\n";
   return os;
 }
 

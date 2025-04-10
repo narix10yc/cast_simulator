@@ -15,6 +15,11 @@ enum TokenKind : int {
   // keywords
   tk_Pi = -10,
   tk_Circuit = -11,
+  tk_Channel = -12,
+  tk_Measure = -13,
+  tk_If = -14,
+  tk_All = -15,
+  tk_Repeat = -16,
 
   // operators
   tk_Add = -30,          // +

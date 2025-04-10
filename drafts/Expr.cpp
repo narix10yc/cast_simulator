@@ -214,6 +214,7 @@ static ast::BinaryOpExpr::BinaryOpKind toBinaryOp(TokenKind tokenKind) {
 }
 
 std::unique_ptr<ast::Expr> Parser::parsePrimaryExpr() {
+  // handle unary operators (+ and -)
   if (curToken.is(tk_Add)) {
     advance(tk_Add);
     return parsePrimaryExpr();
@@ -222,6 +223,7 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpr() {
     advance(tk_Sub);
     return std::make_unique<ast::MinusOpExpr>(parseExpr(minusOpPrecedence));
   }
+  // Numerics
   if (curToken.is(tk_Numeric)) {
     if (curToken.convertibleToInt()) {
       auto value = curToken.toInt();
@@ -232,10 +234,28 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpr() {
     advance(tk_Numeric);
     return std::make_unique<ast::SimpleNumericExpr>(value);
   }
+  // Pi
   if (curToken.is(tk_Pi)) {
     advance(tk_Pi);
     return std::make_unique<ast::SimpleNumericExpr>(1, 1);
   }
+  // Measure
+  if (curToken.is(tk_Measure)) {
+    advance(tk_Measure);
+    if (curToken.isNot(tk_Numeric) || !curToken.convertibleToInt()) {
+      logErrHere("Expect a target qubit after 'Measure'");
+      failAndExit();
+    }
+    auto qubit = curToken.toInt();
+    advance(tk_Numeric);
+    return std::make_unique<ast::MeasureExpr>(qubit);
+  }
+  // All
+  if (curToken.is(tk_All)) {
+    advance(tk_All);
+    return std::make_unique<ast::AllExpr>();
+  }
+  // Parameter (#number)
   if (curToken.is(tk_Hash)) {
     advance(tk_Hash);
     requireCurTokenIs(tk_Numeric, "Expect a number after #");
@@ -243,6 +263,7 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpr() {
     advance(tk_Numeric);
     return std::make_unique<ast::ParameterExpr>(index);
   }
+  // Paranthesis 
   if (curToken.is(tk_L_RoundBracket)) {
     advance(tk_L_RoundBracket);
     auto expr = parseExpr();
@@ -250,8 +271,7 @@ std::unique_ptr<ast::Expr> Parser::parsePrimaryExpr() {
     advance(tk_R_RoundBracket);
     return expr;
   }
-  logErr() << "Unknown expression. CurToken is ";
-  curToken.print(std::cerr) << "\n";
+  logErrHere("Unknown primary expression");
   failAndExit();
   return nullptr;
 }
