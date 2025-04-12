@@ -127,7 +127,11 @@ int main(int argc, const char** argv) {
       std::cerr << "Naive-fuse: nGates = " << kernelsNaiveFuse.size()
                 << "; opCount = " << opCountTotal << "\n";
     }
-    if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
+    if (ArgRunAdaptiveFuse) {
+      if (ArgModelPath == "") {
+        std::cerr << RED("ERROR: Adaptive fusion requires -model <file>. Skipping.\n");
+        return;
+      }
       opCountTotal = 0.0;
       kernelAdaptiveFuse = 
         kernelMgr.collectCPUKernelsFromCircuitGraph("graphAdaptiveFuse");
@@ -163,14 +167,15 @@ int main(int argc, const char** argv) {
     });
     tr.display(3, std::cerr << "Naive-fused Circuit:\n");
   }
-
-  tr = timer.timeit([&]() {
-    for (auto* kernel : kernelAdaptiveFuse) {
-      kernelMgr.applyCPUKernelMultithread(
-        sv.data(), sv.nQubits(), *kernel, ArgNThreads);
-    }
-  });
-  tr.display(3, std::cerr << "Adaptive-fused Circuit:\n");
-
+  
+  if (!kernelAdaptiveFuse.empty()) {
+    tr = timer.timeit([&]() {
+      for (auto* kernel : kernelAdaptiveFuse) {
+        kernelMgr.applyCPUKernelMultithread(
+          sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+      }
+    });
+    tr.display(3, std::cerr << "Adaptive-fused Circuit:\n");
+  }
   return 0;
 }
