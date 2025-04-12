@@ -130,6 +130,14 @@ public:
       llvm::SmallVector<int>(qubits.begin(), qubits.end()));
   }
 
+  static QuantumGate RandomUnitary(const std::vector<int>& qubits) {
+    llvm::SmallVector<int> sortedQubits(qubits.begin(), qubits.end());
+    std::ranges::sort(sortedQubits);
+    return QuantumGate(
+        GateMatrix(utils::randomUnitaryMatrix(1U << qubits.size())),
+        sortedQubits);
+  }
+
 };
 
 } // namespace cast

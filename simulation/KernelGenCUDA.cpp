@@ -682,14 +682,48 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
   B.CreateRetVoid();
   LLVM_DEBUG(func->dump());
 
-  // append the newly generated kernel
+  // auto estimateSharedMem = [](const QuantumGate* gate, int precision) {
+  //   size_t matrixElems = (1 << gate->nQubits()) * (1 << gate->nQubits());
+  //   size_t elemSize = (precision == 32) ? 8 : 16;
+  //   size_t base = matrixElems * elemSize;
+
+  //   // Add temp buffer for parameterized gates
+  //   // if (gate->isParameterized()) {
+  //   //     base += (1 << gate->nQubits()) * elemSize;
+  //   // }
+
+  //   // Architecture-aware safety margin
+  //   size_t safety = (gate->nQubits() >= 4) ? 1.2 : 1;
+    
+  //   return ((base * safety) + 15) & ~15; // Aligned
+  // };
+
+  CUDAKernelInfo::CUDATuple cudaTuple;
+  // cudaTuple.cuContext = nullptr;
+  // cudaTuple.cuModule = nullptr;
+  // cudaTuple.cuFunction = nullptr;
+  // cudaTuple.sharedMemBytes = estimateSharedMem(gate.get(), config.precision);
+
+  // #ifdef CAST_USE_CUDA
+  // cudaDeviceProp props;
+  // cudaGetDeviceProperties(&props, 0);
+  // if (cudaTuple.sharedMemBytes > props.sharedMemPerBlock) {
+  //     throw std::runtime_error(
+  //         "Kernel '" + func->getName().str() + "' requires " +
+  //         std::to_string(cudaTuple.sharedMemBytes) + " bytes shared memory, " +
+  //         "but device only has " + std::to_string(props.sharedMemPerBlock) +
+  //         " bytes per block (for " + std::to_string(gate->nQubits()) + "-qubit gate)"
+  //     );
+  // }
+  // #endif
+
   this->_cudaKernels.emplace_back(
     CUDAKernelInfo::PTXStringType(), // empty ptxString
     config.precision,
     func->getName().str(),
     gate,
-    CUDAKernelInfo::CUDATuple() // default constructor of CUDATuple
-  );
+    cudaTuple,
+    gate->opCount(config.zeroTol));
   return *this;
 }
 

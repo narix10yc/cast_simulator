@@ -111,6 +111,69 @@ public:
   CSV_Title = "nQubits,opCount,precision,irregularity,nThreads,memSpd\n";
 };
 
+#ifdef CAST_USE_CUDA
+
+class CUDAPerformanceCache {
+public:
+  struct Item {
+    int nQubits;
+    int opCount;
+    int precision;
+    int blockSize;
+    double occupancy;
+    double coalescingScore;
+    double memUpdateSpeed;
+    int nData = 1;
+    
+    double getAvgGibTimePerOpCount() const {
+        return (1.0 / memUpdateSpeed) / opCount;
+    }
+  };
+
+  std::vector<Item> items;
+  int defaultBlockSize = 256;
+
+  void runExperiments(
+    const CUDAKernelGenConfig& gpuConfig,
+    int nQubits, int blockSize, int nRuns, int nWorkerThreads);
+  void writeResults(std::ostream& os) const;
+  void writeResults(const std::string& filename) const;
+  static CUDAPerformanceCache LoadFromCSV(const std::string& filename);
+  const Item* findClosestMatch(
+      const QuantumGate& gate, int precision, int blockSize) const;
+  
+  constexpr static const char* CSV_HEADER = 
+      "nQubits,opCount,precision,blockSize,occupancy,coalescing,memSpd";
+};
+
+class CUDACostModel : public CostModel {
+    const CUDAPerformanceCache* cache;
+    double zeroTol;
+    int currentBlockSize;
+    double minGibTimeCap;
+    
+public:
+    explicit CUDACostModel(const CUDAPerformanceCache* c, double zt = 1e-8)
+      : cache(c), zeroTol(zt), currentBlockSize(256), minGibTimeCap(1e-9) {}
+    
+    double computeGiBTime(const QuantumGate& gate, int precision, int) const override;
+
+    void setBlockSize(int blockSize) { 
+      if (blockSize < 32 || blockSize > 1024 || 
+          (blockSize & (blockSize-1)) != 0) {
+          throw std::invalid_argument(
+              "Block size must be power of 2 between 32-1024");
+      }
+      currentBlockSize = blockSize;
+    }
+    
+private:
+    double calculateOccupancyPenalty(const CUDAPerformanceCache::Item& item) const;
+    double calculateCoalescingPenalty(const CUDAPerformanceCache::Item& item) const;
+};
+
+#endif // CAST_USE_CUDA
+
 
 } // namespace cast
 

@@ -190,6 +190,8 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   // StringRef.
   // One fix is to replace PTXStringType from SmallVector<char, 0> to 
   // std::string. Then we need to adjust emitPTX accordingly.
+  std::vector<size_t> sharedMemValues(nKernels);
+
   for (unsigned i = 0; i < nKernels; ++i) {
     auto& kernel = _cudaKernels[i];
     std::string ptxString(kernel.ptxString.str());
@@ -197,7 +199,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
     CUmodule* cuModulePtr = &(kernel.cuTuple.cuModule);
     CUfunction* cuFunctionPtr = &(kernel.cuTuple.cuFunction);
     const char* funcName = kernel.llvmFuncName.c_str();
-    dispatcher.enqueue([=, this, &dispatcher]() {
+    dispatcher.enqueue([=, &sharedMemValues, this, &dispatcher]() {
       auto workerID = dispatcher.getWorkerID();
 
       CU_CALL(cuCtxSetCurrent(cuContexts[workerID]), "cuCtxSetCurrent");
@@ -207,11 +209,21 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
       CU_CALL(
         cuModuleGetFunction(cuFunctionPtr, *cuModulePtr, funcName),
         "cuModuleGetFunction");
+      int staticShared = 0;
+      CU_CALL(cuFuncGetAttribute(
+          &staticShared, 
+          CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
+          *cuFunctionPtr // kernel.cuTuple.cuFunction
+      ), "cuFuncGetAttribute(SHARED_SIZE_BYTES)");
+      sharedMemValues[i] = static_cast<size_t>(staticShared);
     });
   }
   if (verbose > 0)
     std::cerr << "Loading PTX codes and getting CUDA functions...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
+  for (unsigned i = 0; i < nKernels; ++i) {
+    _cudaKernels[i].cuTuple.sharedMemBytes = sharedMemValues[i];
+  }
 
   jitState = JIT_CUFunctionLoaded;
 }
@@ -249,7 +261,7 @@ void CUDAKernelManager::launchCUDAKernel(
       kernelInfo.cuTuple.cuFunction, 
       gridSize, 1, 1,  // grid dim
       blockSize, 1, 1, // block dim
-      0,              // shared mem size
+      kernelInfo.cuTuple.sharedMemBytes,  // shared mem size
       0,              // stream
       kernelParams,  // kernel params
       nullptr         // extra options
@@ -288,12 +300,14 @@ void CUDAKernelManager::launchCUDAKernelParam(
 
   void* kernelParams[] = { &dData, &dMatPtr };
 
+  size_t matrixSize = (1 << (2*kernelInfo.gate->nQubits())) * 
+                       (kernelInfo.precision == 32 ? 8 : 16);
   CU_CALL(
     cuLaunchKernel(
       kernelInfo.cuTuple.cuFunction,
       gridSize, 1, 1,    // grid dims
       blockSize, 1, 1,   // block dims
-      0,                 // sharedMem
+      kernelInfo.cuTuple.sharedMemBytes + matrixSize,  // sharedMem
       0,                 // stream
       kernelParams,      // kernel args
       nullptr            // extra
