@@ -130,7 +130,7 @@ public:
 /// TODO: Refactor to use std::list
 class CircuitGraph {
 private:
-  std::shared_ptr<CircuitGraphContext> _context;
+  std::unique_ptr<CircuitGraphContext> _context;
 public:
   using row_t = std::array<GateBlock*, 42>;
   using tile_t = utils::List<row_t>;
@@ -148,7 +148,7 @@ public:
   int nQubits;
 
   CircuitGraph()
-  : _context(std::make_shared<CircuitGraphContext>()), _tile(), nQubits(0) {
+  : _context(std::make_unique<CircuitGraphContext>()), _tile(), nQubits(0) {
     _tile.emplace_back();
   }
 
@@ -196,14 +196,6 @@ public:
   void releaseGateBlock(GateBlock* gateBlock) const {
     assert(gateBlock != nullptr && "Releasing null gateBlock");
     _context->gateBlockPool.release(gateBlock);
-  }
-
-  bool isManaging(const GateNode* gateNode) const {
-    return _context->gateNodePool.isInPool(gateNode);
-  }
-
-  bool isManaging(const GateBlock* gateBlock) const {
-    return _context->gateBlockPool.isInPool(gateBlock);
   }
 
   /// Append a quantum gate to the tile. Quantum gate must be managed by
