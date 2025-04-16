@@ -76,53 +76,53 @@ std::complex<double> Parser::parseComplexNumber() {
 
 // Try to convert a general expression to a simple numeric expression.
 // Return nullptr if the conversion is not possible.
-static std::unique_ptr<ast::SimpleNumericExpr>
-convertExprToSimpleNumeric(const ast::Expr* expr) {
-  if (expr == nullptr)
+// static std::unique_ptr<ast::SimpleNumericExpr>
+// convertExprToSimpleNumeric(const ast::Expr* expr) {
+//   if (expr == nullptr)
+//     return nullptr;
+//   if (auto* e = llvm::dyn_cast<ast::ParameterExpr>(expr))
+//     return nullptr;
+
+//   if (auto* e = llvm::dyn_cast<ast::SimpleNumericExpr>(expr))
+//     return std::make_unique<ast::SimpleNumericExpr>(*e);
+
+//   if (auto* e = llvm::dyn_cast<ast::MinusOpExpr>(expr)) {
+//     auto operand = convertExprToSimpleNumeric(e->operand.get());
+//     if (!operand)
+//       return nullptr;
+//     return std::make_unique<ast::SimpleNumericExpr>(-(*operand));
+//   }
+
+//   if (auto* e = llvm::dyn_cast<ast::BinaryOpExpr>(expr)) {
+//     auto lhs = convertExprToSimpleNumeric(e->lhs.get());
+//     auto rhs = convertExprToSimpleNumeric(e->rhs.get());
+//     if (!lhs || !rhs)
+//       return nullptr;
+//     switch (e->op) {
+//       case ast::BinaryOpExpr::Add:
+//         return std::make_unique<ast::SimpleNumericExpr>(*lhs + *rhs);
+//       case ast::BinaryOpExpr::Sub:
+//         return std::make_unique<ast::SimpleNumericExpr>(*lhs - *rhs);
+//       case ast::BinaryOpExpr::Mul:
+//         return std::make_unique<ast::SimpleNumericExpr>(*lhs * *rhs);
+//       case ast::BinaryOpExpr::Div:
+//         return std::make_unique<ast::SimpleNumericExpr>(*lhs / *rhs);
+//       default:
+//         assert(false && "Illegal binary operator");
+//         return nullptr;
+//     }
+//   }
+
+//   // otherwise, not convertible to simple numeric
+//   return nullptr;
+// }
+
+ast::Attribute* Parser::parseAttribute() {
+  if (curToken.isNot(tk_Less))
     return nullptr;
-  if (auto* e = llvm::dyn_cast<ast::ParameterExpr>(expr))
-    return nullptr;
 
-  if (auto* e = llvm::dyn_cast<ast::SimpleNumericExpr>(expr))
-    return std::make_unique<ast::SimpleNumericExpr>(*e);
-
-  if (auto* e = llvm::dyn_cast<ast::MinusOpExpr>(expr)) {
-    auto operand = convertExprToSimpleNumeric(e->operand.get());
-    if (!operand)
-      return nullptr;
-    return std::make_unique<ast::SimpleNumericExpr>(-(*operand));
-  }
-
-  if (auto* e = llvm::dyn_cast<ast::BinaryOpExpr>(expr)) {
-    auto lhs = convertExprToSimpleNumeric(e->lhs.get());
-    auto rhs = convertExprToSimpleNumeric(e->rhs.get());
-    if (!lhs || !rhs)
-      return nullptr;
-    switch (e->op) {
-      case ast::BinaryOpExpr::Add:
-        return std::make_unique<ast::SimpleNumericExpr>(*lhs + *rhs);
-      case ast::BinaryOpExpr::Sub:
-        return std::make_unique<ast::SimpleNumericExpr>(*lhs - *rhs);
-      case ast::BinaryOpExpr::Mul:
-        return std::make_unique<ast::SimpleNumericExpr>(*lhs * *rhs);
-      case ast::BinaryOpExpr::Div:
-        return std::make_unique<ast::SimpleNumericExpr>(*lhs / *rhs);
-      default:
-        assert(false && "Illegal binary operator");
-        return nullptr;
-    }
-  }
-
-  // otherwise, not convertible to simple numeric
-  return nullptr;
-}
-
-std::unique_ptr<ast::Attribute> Parser::parseAttribute() {
-  if (curToken.isNot(tk_L_SquareBracket))
-    return nullptr;
+  auto* attr = new (ctx) ast::Attribute();
   
-  auto attr = std::make_unique<ast::Attribute>();
-
   advance(tk_L_SquareBracket);
   while (curToken.isNot(tk_R_SquareBracket)) {
     requireCurTokenIs(tk_Identifier, "Attribute name expected");
@@ -134,29 +134,16 @@ std::unique_ptr<ast::Attribute> Parser::parseAttribute() {
     // 'nqubits', 'nparams', and 'phase' are reserved attributes
     if (name == "nqubits") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nqubits' must be a number");
-      attr->nQubits = curToken.toInt();
+      attr->nQubits = new (ctx) ast::IntegerLiteral(curToken.toInt());
       advance(tk_Numeric);
     }
     else if (name == "nparams") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nparams' must be a number");
-      attr->nParams = curToken.toInt();
+      attr->nParams = new (ctx) ast::IntegerLiteral(curToken.toInt());
       advance(tk_Numeric);
     }
     else if (name == "phase") {
-      auto expr = parseExpr();
-      if (expr == nullptr) {
-        logErrHere("Failed to parse expression for attribute 'phase'");
-        failAndExit();
-      }
-      auto simpleNumeric = convertExprToSimpleNumeric(expr.get());
-      if (simpleNumeric == nullptr) {
-        std::stringstream ss;
-        expr->print(ss << "Expression ")
-          << " cannot be used in attribute 'phase'";
-        logErrHere(ss.str().c_str());
-        failAndExit();
-      }
-      attr->phase = *simpleNumeric;
+      attr->phase = parseExpr();
     }
     else {
       // other attributes
@@ -164,129 +151,132 @@ std::unique_ptr<ast::Attribute> Parser::parseAttribute() {
     }
     optionalAdvance(tk_Comma);
   }
-  advance(tk_R_SquareBracket);
+  advance(tk_Greater);
   return attr;
 }
 
-std::unique_ptr<ast::CircuitStmt> Parser::parseCircuitStmt() {
+ast::CircuitStmt* Parser::parseCircuitStmt() {
+  assert(curToken.is(tk_Circuit) &&
+         "parseCircuitStmt expects to be called with a 'Circuit' token");
   advance(tk_Circuit);
 
-  auto circuitStmt = std::make_unique<ast::CircuitStmt>();
-  circuitStmt->attribute = std::move(parseAttribute());
-  requireCurTokenIs(tk_Identifier);
-  circuitStmt->name = curToken.toString();
+  auto* attr = parseAttribute();
+  requireCurTokenIs(tk_Identifier, "Expect a circuit name");
+  auto name = ctx.createIdentifier(curToken.toStringView());
   advance(tk_Identifier);
 
+  requireCurTokenIs(tk_L_CurlyBracket, "Expect '{' to start circuit body");
   advance(tk_L_CurlyBracket);
   // circuit body
-  while (auto s = parseCircuitLevelStmt())
-    circuitStmt->body.emplace_back(std::move(s));
+  llvm::SmallVector<ast::Stmt*> body;
+  while (true) {
+    auto* stmt = parseCircuitLevelStmt();
+    if (stmt == nullptr)
+      break;
+    body.push_back(stmt);
+  }
 
+  requireCurTokenIs(tk_R_CurlyBracket, "Expect '}' to end circuit body");
   advance(tk_R_CurlyBracket);
 
-  return circuitStmt;
+  return new (ctx) ast::CircuitStmt(
+    name, 
+    attr,
+    ctx.createSpan(body.data(), body.size())
+  );
 }
 
-std::unique_ptr<ast::Stmt> Parser::parseCircuitLevelStmt() {
-  if (curToken.is(tk_Measure)) {
-    advance(tk_Measure);
-    if (curToken.isNot(tk_Numeric) || !curToken.convertibleToInt()) {
-      logErrHere("Expect a target qubit after 'Measure'");
-      failAndExit();
+ast::Stmt* Parser::parseCircuitLevelStmt() {
+  switch (curToken.kind) {
+    case tk_Measure: {
+      advance(tk_Measure);
+      auto* target = parseExpr();
+      assert(target != nullptr);
+      return new (ctx) ast::MeasureStmt(target);
     }
-    auto qubit = curToken.toInt();
-    advance(tk_Numeric);
-    requireCurTokenIs(tk_Semicolon);
-    advance(tk_Semicolon);
-    return std::make_unique<ast::MeasureStmt>(qubit);
+    case tk_Identifier:
+      return parseGateChainStmt();
+    default:
+      return nullptr;
   }
-  if (curToken.is(tk_Identifier))
-    return parseGateChainStmt();
-  return nullptr;
 }
 
-std::unique_ptr<ast::GateChainStmt> Parser::parseGateChainStmt() {
-  auto chain = std::make_unique<ast::GateChainStmt>();
-  const auto appendGateApplyStmt = [&]() {
-    // name
-    assert(curToken.is(tk_Identifier));
-    chain->gates.emplace_back(curToken.toString());
-    auto& gate = chain->gates.back();
-    advance(tk_Identifier);
-    
-    // attribute
-    auto attr = parseAttribute();
-    if (attr)
-      gate.attribute = std::move(attr);
-
-    // gate parameters
-    if (curToken.is(tk_L_RoundBracket)) {
-      advance(tk_L_RoundBracket);
-      while (curToken.isNot(tk_R_RoundBracket)) {
-        auto expr = parseExpr();
-        if (expr == nullptr) {
-          logErrHere("Expect a parameter expression");
-          failAndExit();
-        }
-        // Transform to SimpleNumericExpr if possible
-        if (auto simpleNumeric = convertExprToSimpleNumeric(expr.get()))
-          gate.params.emplace_back(std::move(simpleNumeric));
-        else
-          gate.params.emplace_back(std::move(expr));
-        if (curToken.is(tk_R_RoundBracket))
-          break;
-        requireCurTokenIs(tk_Comma, "Expect ',' to separate parameters");
-        advance(tk_Comma);
-        continue;
-      }
-      advance(tk_R_RoundBracket);
-    }
-    
-    // target qubits
-    while (curToken.is(tk_Numeric) || curToken.is(tk_All)) {
-      if (curToken.is(tk_Numeric)) {
-        if (!curToken.convertibleToInt()) {
-          logErrHere("Expect a number for target qubit");
-          failAndExit();
-        }
-        gate.qubits.emplace_back(
-          std::make_unique<ast::SimpleNumericExpr>(curToken.toInt()));
-        advance(tk_Numeric);
-      }
-      else {
-        assert(curToken.is(tk_All));
-        advance(tk_All);
-        gate.qubits.emplace_back(std::make_unique<ast::AllExpr>());
-      }
-      if (curToken.is(tk_Comma))
-        advance(tk_Comma);
-    }
-    if (gate.qubits.empty()) {
-      logErrHere("Expect at least one target qubit");
-      failAndExit();
-    }
-  };
-
+ast::GateChainStmt* Parser::parseGateChainStmt() {
+  llvm::SmallVector<ast::GateApplyStmt*> gates;
   while (true) {
-    requireCurTokenIs(tk_Identifier, "Expect a gate name");
-    appendGateApplyStmt();
+    if (curToken.is(tk_Semicolon))
+      break;
+    auto* gate = parseGateApplyStmt();
+    assert(gate != nullptr);
+    gates.push_back(gate);
     if (curToken.is(tk_AtSymbol)) {
       advance(tk_AtSymbol);
       continue;
     }
-    break;
+    requireCurTokenIs(tk_Semicolon, "Expect ';' to finish a GateChain");
   }
-  requireCurTokenIs(tk_Semicolon, "Expect ';' to finish a GateChain");
   advance(tk_Semicolon);
-  return chain;
+
+  return new (ctx) ast::GateChainStmt(
+    ctx.createSpan(gates.data(), gates.size())
+  );
 }
 
-ast::RootNode Parser::parse() {
-  ast::RootNode root;
+ast::GateApplyStmt* Parser::parseGateApplyStmt() {
+  // name
+  assert(curToken.is(tk_Identifier) &&
+         "parseGateApplyStmt expects to be called with an identifier");
+  auto name = ctx.createIdentifier(curToken.toStringView());
+  advance(tk_Identifier);
+  
+  llvm::SmallVector<ast::Expr*> params;
+  llvm::SmallVector<ast::Expr*> qubits;
+  // gate parameters
+  if (curToken.is(tk_L_RoundBracket)) {
+    advance(tk_L_RoundBracket);
+    while (true) {
+      auto* expr = parseExpr();
+      if (expr == nullptr)
+        break;
+      params.push_back(expr);
+      if (curToken.is(tk_R_RoundBracket))
+        break;
+      requireCurTokenIs(tk_Comma, "Expect ',' to separate parameters");
+      advance(tk_Comma);
+      continue;
+    }
+    advance(tk_R_RoundBracket);
+  }
+  
+  // target qubits
+  while (true) {
+    auto* expr = parseExpr();
+    if (expr == nullptr)
+      break;
+    qubits.push_back(expr);
+    // skip optional comma
+    if (curToken.is(tk_Comma)) {
+      advance(tk_Comma);
+      continue;
+    }
+  }
+
+  return new (ctx) ast::GateApplyStmt(
+    name, 
+    ctx.createSpan(params.data(), params.size()),
+    ctx.createSpan(qubits.data(), qubits.size())
+  );
+}
+
+ast::RootNode* Parser::parse() {
+  llvm::SmallVector<ast::Stmt*> stmts;
+
   while (curToken.isNot(tk_Eof)) {
     switch (curToken.kind) {
       case tk_Circuit: {
-        root.stmts.emplace_back(std::move(parseCircuitStmt()));
+        auto* stmt = parseCircuitStmt();
+        assert(stmt != nullptr);
+        stmts.push_back(stmt);
         break;
       }
       default: {
@@ -296,5 +286,7 @@ ast::RootNode Parser::parse() {
       }
     }
   }
-  return root;
+  return new (ctx) ast::RootNode(
+    ctx.createSpan(stmts.data(), stmts.size())
+  );
 }

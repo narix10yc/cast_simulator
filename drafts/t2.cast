@@ -1,6 +1,8 @@
 // A non-parametrized circuit
-circuit my_circuit {
-  X 0;
-  Y 0;
+Circuit my_circuit {
+  X 0 + 1
+@ Y 0;
   H 3;
+  RX(Pi/2) 0;
+  RXX(2*Pi/2, -Pi/3) 2 1;
 }

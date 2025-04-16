@@ -1,6 +1,7 @@
 #ifndef CAST_DRAFT_PARSER_H
 #define CAST_DRAFT_PARSER_H
 
+#include "new_parser/ASTContext.h"
 #include "new_parser/AST.h"
 #include "new_parser/Lexer.h"
 #include "utils/iocolor.h"
@@ -9,6 +10,7 @@
 namespace cast::draft {
 class Parser {
   Lexer lexer;
+  ASTContext& ctx;
 
   Token curToken;
   Token nextToken;
@@ -16,25 +18,31 @@ class Parser {
   std::complex<double> parseComplexNumber();
 
   // Parse attributes assocated with a statement. When invoked, it checks if 
-  // curToken is '[', and if so, parse attribute list (ended with ']').
+  // curToken is '<', and if so, parse attribute list (ended with '>').
   // Otherwise it returns nullptr.
-  std::unique_ptr<ast::Attribute> parseAttribute();
+  ast::Attribute* parseAttribute();
 
-  // CircuitStmt is a top-level statement.
-  std::unique_ptr<ast::CircuitStmt> parseCircuitStmt();
+  // CircuitStmt is a top-level statement. Should only be called when curToken
+  // is 'Circuit'. This function never returns nullptr.
+  ast::CircuitStmt* parseCircuitStmt();
 
-  std::unique_ptr<ast::Stmt> parseCircuitLevelStmt();
-  std::unique_ptr<ast::GateChainStmt> parseGateChainStmt();
+  // Circuit-level statements include GateChainStmt, MeasureStmt
+  // Possibly returns nullptr
+  ast::Stmt* parseCircuitLevelStmt();
+
+  ast::GateChainStmt* parseGateChainStmt();
+  // Never returns nullptr
+  ast::GateApplyStmt* parseGateApplyStmt();
   
-  // Expression-related
-  std::unique_ptr<ast::Expr> parseExpr(int precedence = 0);
-  std::unique_ptr<ast::Expr> parsePrimaryExpr();
+  // Possibly returns nullptr
+  ast::Expr* parseExpr(int precedence = 0);
 
-  void printLocation(std::ostream& os = std::cerr) const;
+  // Possibly returns nullptr
+  ast::Expr* parsePrimaryExpr();
 
   void logErrHere(const char* msg) const {
     std::cerr << BOLDRED("Parser Error: ") << msg << "\n";
-    printLocation();
+    lexer.sm.printLineInfo(std::cerr, curToken.memRefBegin, curToken.memRefEnd);
   }
 
   void failAndExit() const {
@@ -66,12 +74,13 @@ class Parser {
   /// program with error messages
   void requireCurTokenIs(TokenKind kind, const char* msg = nullptr) const;
 public:
-  Parser(const char* fileName) : lexer(fileName) {
+  Parser(ASTContext& ctx, const char* fileName)
+    : lexer(fileName), ctx(ctx) {
     lexer.lex(curToken);
     lexer.lex(nextToken);
   }
 
-  ast::RootNode parse();
+  ast::RootNode* parse();
 };
 
 

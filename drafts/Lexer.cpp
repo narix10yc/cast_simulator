@@ -1,6 +1,7 @@
-#include "new_parser/Parser.h"
+#include "new_parser/Lexer.h"
 #include <fstream>
 #include <cassert>
+#include "utils/iocolor.h"
 
 using namespace cast::draft;
 
@@ -45,34 +46,6 @@ std::string cast::draft::internal::getNameOfTokenKind(TokenKind kind) {
     return "Unimplemented Name of TokenKind " +
            std::to_string(static_cast<int>(kind));
   }
-}
-
-Lexer::Lexer(const char* fileName) {
-  std::ifstream file(fileName, std::ifstream::binary);
-  assert(file);
-  assert(file.is_open());
-
-  file.seekg(0, file.end);
-  bufferLength = file.tellg();
-  file.seekg(0, file.beg);
-
-  bufferBegin = new char[bufferLength];
-  bufferEnd = bufferBegin + bufferLength;
-  file.read(const_cast<char*>(bufferBegin), bufferLength);
-  file.close();
-
-  curPtr = bufferBegin;
-  lineNumber = 1;
-  lineBegin = bufferBegin;
-}
-
-void Parser::printLocation(std::ostream& os) const {
-  auto lineInfo = lexer.getCurLineInfo();
-  os << std::setw(5) << std::setfill(' ') << lineInfo.line << " | ";
-  os.write(lineInfo.memRefBegin, lineInfo.memRefEnd - lineInfo.memRefBegin);
-  os << "      | "
-     << std::string(curToken.memRefBegin - lexer.lineBegin,' ')
-     << BOLDGREEN(std::string(curToken.length(), '^') << "\n");
 }
 
 std::ostream& Token::print(std::ostream& os) const {
@@ -155,7 +128,7 @@ void Lexer::lexTwoChar(Token& tok, char snd, TokenKind tk1, TokenKind tk2) {
 }
 
 void Lexer::lex(Token& tok) {
-  if (curPtr >= bufferEnd) {
+  if (curPtr >= sm.bufferEnd) {
     lexOneChar(tok, tk_Eof);
     --curPtr; // keep curPtr to its current position
     return;
@@ -163,10 +136,6 @@ void Lexer::lex(Token& tok) {
 
   char c = *curPtr;
   while (c == ' ' || c == '\n' || c == '\r' || c == '\t') {
-    if (c == '\n') {
-      ++lineNumber;
-      lineBegin = curPtr + 1;
-    }
     c = *(++curPtr);
   }
 
@@ -295,10 +264,10 @@ void Lexer::lex(Token& tok) {
     }
 
     if (!std::isalpha(c)) {
-      auto lineInfo = getCurLineInfo();
       std::cerr << RED("[Lexer Error]: ") << "Unknown char "
-                << static_cast<int>(c) << " at line " << lineInfo.line
+                << static_cast<int>(c)
                 << ". This is likely not implemented yet.\n";
+      sm.printLineInfo(std::cerr, curPtr, curPtr + 1);
       assert(false);
     }
     c = *(++curPtr);
@@ -328,20 +297,8 @@ void Lexer::lex(Token& tok) {
 }
 
 void Lexer::skipLine() {
-  while (curPtr < bufferEnd) {
-    if (*curPtr++ == '\n') {
-      ++lineNumber;
-      lineBegin = curPtr;
-      break;
-    }
-  }
-}
-
-Lexer::LineInfo Lexer::getCurLineInfo() const {
-  auto* lineEnd = curPtr;
-  while (lineEnd < bufferEnd) {
-    if (*lineEnd++ == '\n')
+  while (curPtr < sm.bufferEnd) {
+    if (*curPtr++ == '\n')
       break;
   }
-  return { .line = lineNumber, .memRefBegin = lineBegin, .memRefEnd = lineEnd };
 }

@@ -2,8 +2,7 @@
 #define NEW_PARSER_LEXER_H
 
 #include <string>
-#include <cassert>
-#include <iostream>
+#include "new_parser/SourceManager.h"
 
 namespace cast::draft {
 
@@ -142,26 +141,13 @@ private:
   /// After this function returns, curPtr always points to the next char after 
   /// \c tok
   void lexTwoChar(Token& tok, char snd, TokenKind tk1, TokenKind tk2);
-public:
-  const char* bufferBegin;
-  const char* bufferEnd;
-  size_t bufferLength;
 
+public:
+  SourceManager sm;
   const char* curPtr;
 
-  int lineNumber;
-  const char* lineBegin;
-
-  explicit Lexer(const char* fileName);
-
-  Lexer(const Lexer&) = delete;
-  Lexer(Lexer&&) = delete;
-
-  Lexer& operator=(const Lexer&) = delete;
-  Lexer& operator=(Lexer&&) = delete;
-  
-  ~Lexer() {
-    delete[] bufferBegin;
+  explicit Lexer(const char* fileName) : sm(fileName) {
+    curPtr = sm.bufferBegin;
   }
 
   /// After this function returns, curPtr always points to the next char after 
@@ -169,14 +155,6 @@ public:
   void lex(Token& tok);
 
   void skipLine();
-
-  struct LineInfo {
-    int line;
-    const char* memRefBegin;
-    const char* memRefEnd;
-  };
-
-  LineInfo getCurLineInfo() const;
 };
 
 } // namespace cast::draft

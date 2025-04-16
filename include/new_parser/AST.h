@@ -6,6 +6,11 @@
 #include "utils/PODVariant.h"
 #include <iostream>
 #include <string>
+#include <span>
+
+namespace cast {
+  class CircuitGraph;
+} // namespace cast
 
 namespace cast::draft {
 
@@ -58,44 +63,16 @@ public:
   }
 }; // class Expr
 
-/// @brief SimpleNumericExpr represents a constant numeric expression. This
+/// @brief SimpleNumericExpr is a purely abstract class that represents a
+/// constant numeric expression. This
 /// design allows storing exact values of fraction-multiple of pi, such as pi/2
 /// and 2*pi/3. We also support basic arithmatics. They are useful in printing
 /// the AST.
 class SimpleNumericExpr : public Expr {
-private:
-  struct FractionPi {
-    int numerator;
-    int denominator;
-  };
-  utils::PODVariant<int, double, FractionPi> _value;
 public:
-  SimpleNumericExpr() : Expr(NK_Expr_SimpleNumeric), _value() {}
-
-  explicit SimpleNumericExpr(int value)
-    : Expr(NK_Expr_SimpleNumeric)
-    , _value(value) {}
-
-  explicit SimpleNumericExpr(double value)
-    : Expr(NK_Expr_SimpleNumeric)
-    , _value(value) {}
-  
-  explicit SimpleNumericExpr(int numerator, int denominator)
-    : Expr(NK_Expr_SimpleNumeric)
-    , _value(FractionPi{numerator, denominator}) {}
-
-  std::ostream& print(std::ostream& os) const override;
-
-  double getValue() const;
-
-  SimpleNumericExpr operator-() const;
-
-  SimpleNumericExpr operator+(const SimpleNumericExpr& other) const;
-  SimpleNumericExpr operator-(const SimpleNumericExpr& other) const;
-  SimpleNumericExpr operator*(const SimpleNumericExpr& other) const;
-  // TODO: Known issue: fraction information in non-multiple-of-pi will be lost
-  // For example, 2*pi/3 is correctly handled, but 2/3*pi is not.
-  SimpleNumericExpr operator/(const SimpleNumericExpr& other) const;
+  SimpleNumericExpr() : Expr(NK_Expr_SimpleNumeric) {}
+ 
+  virtual double getValue() const = 0;
 
   static bool classof(const Node* node) {
     return node->getKind() >= NK_Expr_SimpleNumeric &&
@@ -103,15 +80,89 @@ public:
   }
 }; // class SimpleNumericExpr
 
-class MeasureExpr : public Expr {
+class IntegerLiteral : public SimpleNumericExpr {
 public:
-  int qubit;
+  int value;
 
-  MeasureExpr(int qubit)
-    : Expr(NK_Expr_Measure), qubit(qubit) {}
+  IntegerLiteral(int value)
+    : SimpleNumericExpr(), value(value) {}
+
+  double getValue() const override { return value; }
 
   std::ostream& print(std::ostream& os) const override {
-    return os << "Measure " << qubit;
+    return os << value;
+  }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_IntegerLiteral;
+  }
+}; // class IntegerLiteral
+
+class FloatingLiteral : public SimpleNumericExpr {
+public:
+  double value;
+
+  FloatingLiteral(double value)
+    : SimpleNumericExpr(), value(value) {}
+
+  double getValue() const override { return value; }
+
+  std::ostream& print(std::ostream& os) const override {
+    return os << value;
+  }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_FloatingLiteral;
+  }
+}; // class FloatingLiteral
+
+class FractionLiteral : public SimpleNumericExpr {
+public:
+  int numerator;
+  int denominator;
+
+  FractionLiteral(int numerator, int denominator)
+    : SimpleNumericExpr(), numerator(numerator), denominator(denominator) {}
+
+  double getValue() const override { return double(numerator) / denominator; }
+
+  std::ostream& print(std::ostream& os) const override {
+    return os << numerator << "/" << denominator;
+  }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_FractionLiteral;
+  }
+}; // class FractionLiteral
+
+class FractionPiLiteral : public SimpleNumericExpr {
+public:
+  int numerator;
+  int denominator;
+
+  FractionPiLiteral(int numerator, int denominator)
+    : SimpleNumericExpr(), numerator(numerator), denominator(denominator) {}
+
+  double getValue() const override { 
+    return M_PI * numerator / denominator;
+  }
+
+  std::ostream& print(std::ostream& os) const override;
+  
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_FractionPiLiteral;
+  }
+}; // class FractionPiLiteral
+
+class MeasureExpr : public Expr {
+public:
+  Expr* target;
+
+  MeasureExpr(Expr* target)
+    : Expr(NK_Expr_Measure), target(target) {}
+
+  std::ostream& print(std::ostream& os) const override {
+    return target->print(os << "Measure ");
   }
 
   static bool classof(const Node* node) {
@@ -135,7 +186,7 @@ public:
 
 }; // class AllExpr
 
-// #index 
+// "#" <uint>
 class ParameterExpr : public Expr {
 public:
   int index;
@@ -163,12 +214,11 @@ public:
   };
 
   BinaryOpKind op;
-  std::unique_ptr<Expr> lhs;
-  std::unique_ptr<Expr> rhs;
+  Expr* lhs;
+  Expr* rhs;
 
-  BinaryOpExpr(
-    BinaryOpKind op, std::unique_ptr<Expr> lhs, std::unique_ptr<Expr> rhs)
-  : Expr(NK_Expr_BinaryOp), op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  BinaryOpExpr(BinaryOpKind op, Expr* lhs, Expr* rhs)
+    : Expr(NK_Expr_BinaryOp), op(op), lhs(lhs), rhs(rhs) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -178,12 +228,13 @@ public:
 
 }; // class BinaryOpExpr
 
+// "-" <expr>
 class MinusOpExpr : public Expr {
 public:
-  std::unique_ptr<Expr> operand;
+  Expr* operand;
 
-  MinusOpExpr(std::unique_ptr<Expr> operand)
-    : Expr(NK_Expr_MinusOp), operand(std::move(operand)) {}
+  MinusOpExpr(Expr* operand)
+    : Expr(NK_Expr_MinusOp), operand(operand) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -194,38 +245,24 @@ public:
 
 class Attribute {
 public:
-  int nQubits;
-  int nParams;
-  SimpleNumericExpr phase;
+  // we use pointer here to allow null
+  IntegerLiteral* nQubits;
+  IntegerLiteral* nParams;
+  Expr* phase;
+
+  Attribute() : nQubits(nullptr), nParams(nullptr), phase(nullptr) {}
+  
+  Attribute(IntegerLiteral* nQubits,
+            IntegerLiteral* nParams,
+            Expr* phase)
+    : nQubits(nQubits), nParams(nParams), phase(phase) {}
 
   std::ostream& print(std::ostream& os) const;
 };
 
 class Stmt : public Node {
 public:
-  std::unique_ptr<Attribute> attribute;
-
-  explicit Stmt(NodeKind kind) : Node(kind), attribute(nullptr) {}
-
-  void ensureHasAttribute() {
-    if (attribute == nullptr)
-      attribute = std::make_unique<Attribute>();
-  }
-
-  void setNQubits(int nQubits) {
-    ensureHasAttribute();
-    attribute->nQubits = nQubits;
-  }
-
-  void setNParams(int nParams) { 
-    ensureHasAttribute();
-    attribute->nParams = nParams;
-  }
-
-  void setPhase(const SimpleNumericExpr& phase) { 
-    ensureHasAttribute();
-    attribute->phase = phase;
-  }
+  explicit Stmt(NodeKind kind) : Node(kind) {}
 
   static bool classof(const Node* node) {
     return node->getKind() >= NK_Stmt && node->getKind() <= NK_Stmt_Channel;
@@ -233,20 +270,18 @@ public:
 }; // class Stmt
 
 class GateApplyStmt : public Stmt {
-  // TODO: change it to be compatible with gate parameter type
-  using ParamVectorType = llvm::SmallVector<std::unique_ptr<ast::Expr>, 3>;
-  // TODO: change it to ast::IntegerLiteral
-  using QubitVectorType = llvm::SmallVector<std::unique_ptr<ast::Expr>, 2>;
 public:
-  std::string name;
-  ParamVectorType params;
-  QubitVectorType qubits;
+  std::string_view name;
+  std::span<Expr*> params;
+  std::span<Expr*> qubits;
 
-  GateApplyStmt(const std::string& name)
-    : Stmt(NK_Stmt_GateApply), name(name), params(), qubits() {}
+  GateApplyStmt(std::string_view name,
+                std::span<Expr*> params,
+                std::span<Expr*> qubits)
+    : Stmt(NK_Stmt_GateApply), name(name), params(params), qubits(qubits) {}
 
   // Because we expect \c GateApplyStmt will not appear in the top-level, 
-  // \c print does not print indentation and the final semicolon.
+  // \c print does not print indentation or the final semicolon.
   std::ostream& print(std::ostream& os) const override;
 
   static bool classof(const Node* node) {
@@ -256,9 +291,10 @@ public:
 
 class GateChainStmt : public Stmt {
 public:
-  std::vector<GateApplyStmt> gates;
+  std::span<GateApplyStmt*> gates;
 
-  GateChainStmt() : Stmt(NK_Stmt_GateChain), gates() {}
+  GateChainStmt(std::span<GateApplyStmt*> gates)
+    : Stmt(NK_Stmt_GateChain), gates(gates) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -269,13 +305,13 @@ public:
 
 class MeasureStmt : public Stmt {
 public:
-  int qubit;
+  Expr* target;
 
-  MeasureStmt(int qubit)
-    : Stmt(NK_Stmt_Measure), qubit(qubit) {}
+  MeasureStmt(Expr* target)
+    : Stmt(NK_Stmt_Measure), target(target) {}
 
   std::ostream& print(std::ostream& os) const override {
-    return os << "Measure " << qubit << ";";
+    return target->print(os << "Measure ");
   }
 
   static bool classof(const Node* node) {
@@ -283,21 +319,22 @@ public:
   }
 }; // class MeasureStmt
 
+// "Circuit" ["<" <attribute> ">"] <name> "{" {<stmt>} "}"
 class CircuitStmt : public Stmt {
 public:
-  std::string name;
-  std::vector<std::unique_ptr<Stmt>> body;
+  std::string_view name;
+  Attribute* attr;
+  std::span<Stmt*> body;
 
-  CircuitStmt() : Stmt(NK_Stmt_Circuit), name(), body() {
-    ensureHasAttribute();
-  }
+  CircuitStmt(std::string_view name)
+    : Stmt(NK_Stmt_Circuit), name(name), attr(nullptr), body() {}
 
-  CircuitStmt(const std::string& name)
-    : Stmt(NK_Stmt_Circuit), name(name), body() {
-    ensureHasAttribute();
-  }
+  CircuitStmt(std::string_view name, Attribute* attr, std::span<Stmt*> body)
+    : Stmt(NK_Stmt_Circuit), name(name), attr(attr), body(body) {}
 
   std::ostream& print(std::ostream& os) const override;
+
+  void toCircuitGraph(cast::CircuitGraph& graph) const;
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Stmt_Circuit;
@@ -306,11 +343,15 @@ public:
 
 class RootNode : public Node {
 public:
-  RootNode() : Node(NK_Root), stmts() {}
-  
-  std::vector<std::unique_ptr<Stmt>> stmts;
+  std::span<Stmt*> stmts;
+
+  RootNode(std::span<Stmt*> stmts) : Node(NK_Root), stmts(stmts) {}
 
   std::ostream& print(std::ostream& os) const override;
+
+  /// Lookup a circuit by name. If not found, return nullptr.
+  /// If name is empty, return the first circuit found.
+  CircuitStmt* lookupCircuit(const std::string& name = "");
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Root;

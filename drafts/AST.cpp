@@ -2,61 +2,51 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
+#include "cast/CircuitGraph.h"
+
 using namespace cast::draft;
 
-std::ostream& ast::Attribute::print(std::ostream& os) const {
-  if (nQubits == 0 && nParams == 0 && phase.getValue() == 0.0)
-    return os;
-  os << "[";
-  bool needComma = false;
-  if (nQubits != 0) {
-    os << "nqubits=" << nQubits;
-    needComma = true;
-  }
-  if (nParams != 0) {
-    if (needComma)
-      os << ", ";
-    os << "nparams=" << nParams;
-    needComma = true;
-  }
-  if (phase.getValue() != 0.0) {
-    if (needComma)
-      os << ", ";
-    os << "phase=";
-    phase.print(os);
-  }
-  return os << "]";
+void ast::CircuitStmt::toCircuitGraph(cast::CircuitGraph& graph) const {
+  assert(false && "Not implemented yet");
 }
 
-std::ostream& ast::SimpleNumericExpr::print(std::ostream& os) const {
-  if (!_value.holdingValue())
-    return os << "0";
-  if (_value.is<int>())
-    return os << _value.get<int>();
-  if (_value.is<double>())
-    return os << _value.get<double>();
-    
-  assert(_value.is<FractionPi>() && "Invalid state");
-  const auto& fraction = _value.get<FractionPi>();
+std::ostream& ast::Attribute::print(std::ostream& os) const {
+  os << "<";
+  bool needComma = false;
+  if (nQubits != nullptr) {
+    nQubits->print(os << "nqubits=");
+    needComma = true;
+  }
+  if (nParams != nullptr) {
+    if (needComma)
+      os << ", ";
+    nParams->print(os << "nparams=");
+    needComma = true;
+  }
+  if (phase != nullptr) {
+    if (needComma)
+      os << ", ";
+    phase->print(os << "phase=");
+  }
+  return os << ">";
+}
 
-  assert(fraction.numerator != 0 && "Numerator is zero?");
-  assert(fraction.denominator != 0 && "Invalid state");
+std::ostream& ast::FractionPiLiteral::print(std::ostream& os) const {
+  assert(denominator > 0 && "Denominator must be positive");
+  if (numerator == 1) {}
+  else if (numerator == -1) { os << "-"; }
+  else { os << numerator << "*"; }
+  
+  os << "Pi";
 
-  if (fraction.numerator == 1)
-    os << "Pi";
-  else if (fraction.numerator == -1)
-    os << "-Pi";
-  else
-    os << fraction.numerator << "*Pi";
-  if (fraction.denominator != 1)
-    os << '/' << fraction.denominator;
+  if (denominator != 1)
+    os << "/" << denominator;
+
   return os;
 }
 
 std::ostream& ast::GateApplyStmt::print(std::ostream& os) const {
   os << name;
-  if (attribute)
-    attribute->print(os);
   auto pSize = params.size();
   if (pSize > 0) {
     os << "(";
@@ -73,9 +63,8 @@ std::ostream& ast::GateApplyStmt::print(std::ostream& os) const {
 }
 
 std::ostream& ast::GateChainStmt::print(std::ostream& os) const {
-  assert(attribute == nullptr && "GateChainStmt should not have attribute");
   for (size_t i = 0, size = gates.size(); i < size; ++i) {
-    gates[i].print(os);
+    gates[i]->print(os);
     os << ((i == size - 1) ? ";" : "\n@ ");
   }
   return os;
@@ -83,8 +72,8 @@ std::ostream& ast::GateChainStmt::print(std::ostream& os) const {
 
 std::ostream& ast::CircuitStmt::print(std::ostream& os) const {
   os << "Circuit";
-  if (attribute)
-    attribute->print(os);
+  if (attr != nullptr)
+    attr->print(os);
   os << " " << name << " {\n";
   for (const auto& stmt : body)
     stmt->print(os << "  ") << "\n";
@@ -93,9 +82,19 @@ std::ostream& ast::CircuitStmt::print(std::ostream& os) const {
 }
 
 std::ostream& ast::RootNode::print(std::ostream& os) const {
-  for (const auto& stmt : stmts) {
+  for (const auto* stmt : stmts) {
     stmt->print(os);
     os << '\n';
   }
   return os;
+}
+
+ast::CircuitStmt* ast::RootNode::lookupCircuit(const std::string& name) {
+  for (auto& stmt : stmts) {
+    if (auto* circuit = llvm::dyn_cast<CircuitStmt>(stmt)) {
+      if (name.empty() || circuit->name == name)
+        return circuit;
+    }
+  }
+  return nullptr;
 }

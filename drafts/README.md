@@ -1,4 +1,9 @@
 ## CAST Quantum Circuit Description Language
+### Grammer
+```
+
+```
+
 ### Keywords
 All keywords start in captial letter. Keywords include `Circuit`, `Channel`, `All`, `If`, `Repeat`, and standard gates.
 
@@ -7,11 +12,21 @@ All keywords start in captial letter. Keywords include `Circuit`, `Channel`, `Al
 - Builtin support includes `X`, `Y`, `Z`, `H`, `CX`, `CY`, `CZ`, `RX`, `RY`, `RZ`.
 - Optionally be followed by square brakets `[]` for attributes. For example, `X[phase=pi]` means the $-X$ gate.
 
+### Top-level Statements
+```
+top_level_stmt ::= circuit_stmt | channel_stmt | gate_stmt ;
+```
+
 ### Circuit
+Grammer:
+```
+`Circuit`
+```
+
 Example:
 ```
 Circuit my_circuit {
-  X[phase=pi] 0;
+  X<phase=pi> 0;
   H 1;
   RZ(pi) 2;
 }
@@ -86,6 +101,17 @@ my_noisy_circuit {
 }
 ```
 
+```
+Gate reset(q) {
+  If (Measure q)
+    X q;
+}
+
+Circuit qc {
+  Call reset(0);
+}
+```
+
 ### TODO: Convenient Grammer
 ```
 Gate[nqubits=2, nparams=4] block_gate(a, b) {
@@ -105,6 +131,16 @@ Circuit[nqubits=4, nparams=20] block_circuit {
     block_gate(3, 0);
   }
   H All;
+}
+```
+
+- Range operator `...` and `..<`
+- List operator `[]`
+```
+Circuit qc {
+  H 0...9;
+  CX 0 1..<10;
+  Measure [1, 2, 3];
 }
 ```
 

@@ -1,4 +1,5 @@
-add_library(new_parser STATIC AST.cpp Lexer.cpp Parser.cpp Expr.cpp)
+file(GLOB SRCS "ast/*.cpp")
+add_library(new_parser STATIC AST.cpp Lexer.cpp Parser.cpp Expr.cpp ${SRCS})
 llvm_map_components_to_libnames(LLVM_LIBS support)
 add_executable(draft_parser draft_parser.cpp)
 target_link_libraries(draft_parser PRIVATE new_parser utils ${LLVM_LIBS})
