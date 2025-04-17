@@ -1,5 +1,7 @@
-add_executable(demo_ptx "demo_ptx.cpp")
-target_link_libraries(demo_ptx utils qasm cast simulation timeit)
+if (CAST_USE_CUDA)
+  add_executable(demo_ptx "demo_ptx.cpp")
+  target_link_libraries(demo_ptx utils qasm cast simulation timeit)
+endif()
 
 add_executable(demo_fusion "demo_fusion.cpp")
 target_link_libraries(demo_fusion utils qasm cast simulation timeit)

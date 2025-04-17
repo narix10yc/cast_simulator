@@ -47,6 +47,14 @@ cl::opt<int>
 ArgReplication("replication",
   cl::desc("Number of replications"), cl::init(1));
 
+cl::opt<std::string>
+ArgCUDAModelPath("cuda-model",
+  cl::desc("Path to CUDA performance model"), cl::init(""));
+
+cl::opt<bool>
+ArgRunCudaFuse("run-cuda-fuse",
+  cl::desc("Run CUDA-optimized fusion"), cl::init(false));
+
 int main(int argc, const char** argv) {
   cl::ParseCommandLineOptions(argc, argv);
 
@@ -54,10 +62,11 @@ int main(int argc, const char** argv) {
   auto qasmRoot = qasmParser.parse();
 
   // This is temporary work-around as CircuitGraph does not allow copy yet
-  CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
+  CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse, graphCudaFuse;
   qasmRoot->toCircuitGraph(graphNoFuse);
   qasmRoot->toCircuitGraph(graphNaiveFuse);
   qasmRoot->toCircuitGraph(graphAdaptiveFuse);
+  qasmRoot->toCircuitGraph(graphCudaFuse);
 
   FusionConfig fusionConfigAggresive = FusionConfig::Aggressive;
   fusionConfigAggresive.precision = 64;
@@ -74,8 +83,16 @@ int main(int argc, const char** argv) {
     applyGateFusion(fusionConfigAggresive, &standardCostModel, graphAdaptiveFuse);
   }
 
+  if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
+    auto cudaCache = CUDAPerformanceCache::LoadFromCSV(ArgCUDAModelPath);
+    CUDACostModel cudaCostModel(&cudaCache);
+    // standardCostModel.display(std::cerr);
+    applyGateFusion(fusionConfigAggresive, &cudaCostModel, graphCudaFuse);
+  }
+
   CUDAKernelManager kernelMgr;
   CUDAKernelGenConfig kernelGenConfig;
+  kernelGenConfig.blockSize = ArgBlockSize;
 
   kernelGenConfig.displayInfo(std::cerr) << "\n";
 
@@ -98,12 +115,26 @@ int main(int argc, const char** argv) {
         kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
     }, "Generate Adaptive-fused Kernels");
   }
+  if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
+    utils::timedExecute([&]() {
+      kernelMgr.genCUDAGatesFromCircuitGraph(
+        kernelGenConfig, graphCudaFuse, "graphCudaFuse");
+    }, "Generate CUDA-optimized Kernels");
+  }
 
   // JIT compile kernels
-  std::vector<CUDAKernelInfo*> kernelsNoFuse, kernelsNaiveFuse, kernelAdaptiveFuse;
+  std::vector<CUDAKernelInfo*> kernelsNoFuse, kernelsNaiveFuse, kernelAdaptiveFuse, kernelCudaFuse;
   utils::timedExecute([&]() {
     kernelMgr.emitPTX(ArgNThreads, llvm::OptimizationLevel::O1, 1);
     kernelMgr.initCUJIT(ArgNThreads, 1);
+    auto printStats = [&](const std::string& name, 
+                         const std::vector<CUDAKernelInfo*>& kernels) {
+      double opCountTotal = 0.0;
+      for (const auto* kernel : kernels)
+        opCountTotal += kernel->gate->opCount(1e-8);
+      std::cerr << name << ": nGates = " << kernels.size()
+                << "; opCount = " << opCountTotal << "\n";
+    };
     double opCountTotal = 0.0;
     if (ArgRunNoFuse) {
       opCountTotal = 0.0;
@@ -130,6 +161,15 @@ int main(int argc, const char** argv) {
       for (const auto* kernel : kernelAdaptiveFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "Adaptive-fuse: nGates = " << kernelAdaptiveFuse.size()
+                << "; opCount = " << opCountTotal << "\n";
+    }
+    if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
+      opCountTotal = 0.0;
+      kernelCudaFuse = 
+        kernelMgr.collectCUDAKernelsFromCircuitGraph("graphCudaFuse");
+      for (const auto* kernel : kernelCudaFuse)
+        opCountTotal += kernel->gate->opCount(1e-8);
+      std::cerr << "Cuda-fuse: nGates = " << kernelAdaptiveFuse.size()
                 << "; opCount = " << opCountTotal << "\n";
     }
     }, "JIT compile kernels");
@@ -168,6 +208,15 @@ int main(int argc, const char** argv) {
       cudaDeviceSynchronize();
     });
     tr.display(3, std::cerr << "Adaptive-fused Circuit:\n");
+  }
+  if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
+    tr = timer.timeit([&]() {
+      for (auto* kernel : kernelCudaFuse)
+        kernelMgr.launchCUDAKernel(
+          sv.dData(), sv.nQubits(), *kernel, ArgBlockSize);
+      cudaDeviceSynchronize();
+    });
+    tr.display(3, std::cerr << "Cuda-fused Circuit:\n");
   }
 
   return 0;

@@ -188,6 +188,7 @@ struct CUDAKernelInfo {
     CUcontext cuContext;
     CUmodule cuModule;
     CUfunction cuFunction;
+    size_t sharedMemBytes;
     #endif // #ifdef CAST_USE_CUDA
   };
   // We expect large stream writes anyway, so always trigger heap allocation.
@@ -197,6 +198,19 @@ struct CUDAKernelInfo {
   std::string llvmFuncName;
   std::shared_ptr<QuantumGate> gate;
   CUDATuple cuTuple;
+  int opCount;
+  // int blockSize = 256;
+  #ifdef CAST_USE_CUDA
+  CUfunction kernelFunction() const { 
+    return cuTuple.cuFunction; 
+  }
+  size_t sharedMemUsage() const { 
+    return cuTuple.sharedMemBytes; 
+  }
+  #else
+  CUfunction kernelFunction() const { return nullptr; }
+  size_t sharedMemUsage() const { return 0; }
+  #endif
 };
 
 struct CUDAKernelGenConfig {
@@ -207,6 +221,7 @@ struct CUDAKernelGenConfig {
   double zeroTol = 1e-8;
   double oneTol = 1e-8;
   bool forceDenseKernel = false;
+  int blockSize = 64; // for now have constant blocksize across kernels
   MatrixLoadMode matrixLoadMode = UseMatImmValues;
 
   std::ostream& displayInfo(std::ostream& os) const;

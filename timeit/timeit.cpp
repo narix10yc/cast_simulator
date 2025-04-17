@@ -67,7 +67,7 @@ std::string TimingResult::timeToString(double t, int n_sig_dig) {
 }
 
 std::ostream& TimingResult::display(int n_sig_dig, std::ostream& os) const {
-  os << replication << " replications (" << repeat << " repeats each): "
+  os << replication << " replications (" << repeat << (repeat == 1 ? " repeat each): " : " repeats each): ")
      << "min " << timeToString(min, n_sig_dig) << "; median "
      << timeToString(med, n_sig_dig) << "\n";
   return os;

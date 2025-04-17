@@ -67,3 +67,27 @@ cmake -GNinja \
 ```
 
 Then run `ninja unit_test && ./unit_test` to run some unit tests, and confirm it compiles and runs correctly.
+
+## Running Experiments
+To use our provided CostModel class to conduct benchmarks for a cost model specialized to your hardware platform follow the steps below:
+
+### CPU
+To perform benchmarks on your CPU, run a command such as the following from inside the build-debug folder:
+```
+ninja cost_model && ./cost_model -o cost_model.csv -T 4 -N 10
+```
+Note: you can substitute the arguments provided, or include additional flags. Run `ninja cost_model && ./cost_model --help` to see the manual.
+
+### GPU:
+To run benchmarks on your Nvidia GPU, run the following command from inside the build-debug folder:
+```
+ninja cost_model_cuda && ./cost_model_cuda -o cost_model_cuda.csv --blockSize 128 -N 10 -nqubits 16 -workerThreads 8
+```
+Note: you can customise the flags above, or include additional ones. Run `ninja cost_model_cuda && ./cost_model_cuda --help` to see the manual.
+
+### Apply Cost Model
+*Check: have access to qasm files?
+
+```
+ninja demo_ptx && ./demo_ptx ../examples/qft/qft-28-cp.qasm -T4 --run-no-fuse --run-naive-fuse --run-adaptive-fuse --run-cuda-fuse --model cost_model.csv --cuda-model cost_model_cuda.csv --blocksize 128
+```

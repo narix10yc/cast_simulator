@@ -38,4 +38,9 @@ target_link_libraries(fpga_vary_buffer qasm cast simulation)
 add_executable(cost_model "cost_model.cpp")
 target_link_libraries(cost_model qasm cast simulation timeit utils)
 
+if (CAST_USE_CUDA)
+  add_executable(cost_model_cuda "cost_model_cuda.cpp")
+  target_link_libraries(cost_model_cuda qasm cast simulation timeit utils)
+endif()
+
 add_executable(blank "blank.cpp")
