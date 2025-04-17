@@ -70,6 +70,7 @@ if(CAST_USE_CUDA)
   include_directories(BEFORE ${CUDAToolkit_INCLUDE_DIR})
   include_directories(BEFORE ${CUDAToolkit_INCLUDE_DIRS})
   link_directories(BEFORE ${CUDAToolkit_LIBRARY_DIR})
+  link_directories(BEFORE ${CUDAToolkit_LIBRARY_DIRS})
   message(STATUS "CUDAToolkit_rt_LIBRARY: ${CUDAToolkit_rt_LIBRARY}")
   
   get_cmake_property(_variableNames VARIABLES)
@@ -81,7 +82,7 @@ if(CAST_USE_CUDA)
 
   message(STATUS "CMAKE_CUDA_ARCHITECTURES: ${CMAKE_CUDA_ARCHITECTURES}")
   set(CMAKE_CUDA_ARCHITECTURES native)
-  set(CMAKE_CUDA_COMPILER "${CUDAToolkit_ROOT}/bin/nvcc")
+  set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
   # Sometimes clang version is too high and nvcc does not support it
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --allow-unsupported-compiler")
   enable_language(CUDA)

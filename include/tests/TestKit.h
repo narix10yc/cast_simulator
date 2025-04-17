@@ -72,10 +72,13 @@ void test_gateMatMul();
 void test_cpuH();
 void test_cpuU();
 
+void test_cpuRz_param();
+
 void test_fusionCPU();
 
 void test_statevectorCUDA();
 void test_cudaU();
+void test_cudaRz_param();
 
 } // namespace cast::test
 

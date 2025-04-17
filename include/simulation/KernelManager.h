@@ -152,12 +152,18 @@ public:
     }
   }
 
+	void dumpIR(const std::string &funcName, llvm::raw_ostream &os);
+
   void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
 
   void applyCPUKernel(
       void* sv, int nQubits, CPUKernelInfo& kernelInfo);
 
   void applyCPUKernel(void* sv, int nQubits, const std::string& funcName);
+
+	void applyCPUKernel(void* sv, int nQubits, const std::string& funcName, const void* pMatArg);
+
+	void applyCPUKernel(void* sv, int nQubits, CPUKernelInfo& kernel, const void* pMatArg);
 
   void applyCPUKernelMultithread(
       void* sv, int nQubits, CPUKernelInfo& kernelInfo, int nThreads);
@@ -239,6 +245,8 @@ public:
   std::string getPTXString(int idx) const {
     return std::string(_cudaKernels[idx].ptxString.str());
   }
+  
+  void dumpPTX(const std::string &kernelName, llvm::raw_ostream &os);
 
 #ifdef CAST_USE_CUDA
 private:
@@ -267,6 +275,14 @@ public:
   ///
   void launchCUDAKernel(
       void* dData, int nQubits, CUDAKernelInfo& kernelInfo, int blockSize=64);
+  
+  void launchCUDAKernelParam(
+      void* dData,
+      int nQubits,
+      CUDAKernelInfo& kernelInfo,
+      void* dMatPtr,
+      int blockSize=64
+  );
 
 #endif // CAST_USE_CUDA
 };

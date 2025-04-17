@@ -13,6 +13,10 @@ cmake -S "${cast_llvm_root}/llvm-project-${llvm_version}.src/llvm" -G Ninja \
 -DLLVM_TARGETS_TO_BUILD="Native;NVPTX" \
 -DLLVM_ENABLE_PROJECTS="clang;lld;lldb" \
 -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind;compiler-rt"
+ # -DLLDB_ENABLE_PYTHON=ON \
+  # -DPython3_EXECUTABLE="$CONDA_PREFIX/bin/python" \
+  # -DPython3_INCLUDE_DIR="$CONDA_PREFIX/include/python3.12" \
+  # -DPython3_LIBRARY="$CONDA_PREFIX/lib/libpython3.12.so"
 
 cmake --build "${cast_llvm_root}/release-build"
 

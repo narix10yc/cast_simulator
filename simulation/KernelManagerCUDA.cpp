@@ -70,10 +70,23 @@ void CUDAKernelManager::emitPTX(
     return;
   }
 
+  // Query device for compute capability
+  cuInit(0);
+  CUdevice device;
+  cuDeviceGet(&device, 0);
+
+  int major = 0, minor = 0;
+  cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
+  cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
+
+  std::ostringstream archOss;
+  archOss << "sm_" << major << minor;
+  std::string archString = archOss.str();
+
   const auto createTargetMachine = [&]() -> TargetMachine* {
     return target->createTargetMachine(
       targetTriple,   // target triple
-      "sm_70",        // cpu
+      archString,     // cpu
       "",             // features
       {},             // options
       std::nullopt    // RM
@@ -241,6 +254,52 @@ void CUDAKernelManager::launchCUDAKernel(
       kernelParams,  // kernel params
       nullptr         // extra options
     ), "cuLaunchKernel");
+}
+
+void CUDAKernelManager::launchCUDAKernelParam(
+    void* dData,    // pointer to device statevector
+    int nQubits,
+    CUDAKernelInfo& kernelInfo,
+    void* dMatPtr,  // pointer to device matrix
+    int blockSize
+)
+{
+  assert(dData != nullptr);
+  assert(dMatPtr != nullptr);
+  assert(kernelInfo.cuTuple.cuContext != nullptr);
+  assert(kernelInfo.cuTuple.cuModule != nullptr);
+  assert(kernelInfo.cuTuple.cuFunction != nullptr);
+  assert(blockSize == 32 || blockSize == 64 || blockSize == 128 ||
+         blockSize == 256 || blockSize == 512);
+  cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
+
+  // minimum value = 5, corresponding to blockSize = 32 (warp size)
+  int blockSizeInNumBits;
+  if (blockSize >= 512) blockSizeInNumBits = 9;
+  else if (blockSize >= 256) blockSizeInNumBits = 8;
+  else if (blockSize >= 128) blockSizeInNumBits = 7;
+  else if (blockSize >= 64)  blockSizeInNumBits = 6;
+  else blockSizeInNumBits = 5;
+
+  int nGateQubits = kernelInfo.gate->nQubits();
+  int gridSizeInNumBits = nQubits - blockSizeInNumBits - nGateQubits;
+  assert(gridSizeInNumBits >= 0 && "gridSize must be positive");
+  int gridSize = 1 << gridSizeInNumBits;
+
+  void* kernelParams[] = { &dData, &dMatPtr };
+
+  CU_CALL(
+    cuLaunchKernel(
+      kernelInfo.cuTuple.cuFunction,
+      gridSize, 1, 1,    // grid dims
+      blockSize, 1, 1,   // block dims
+      0,                 // sharedMem
+      0,                 // stream
+      kernelParams,      // kernel args
+      nullptr            // extra
+    ),
+    "launchCUDAKernelParam"
+  );
 }
 
 #endif // CAST_USE_CUDA

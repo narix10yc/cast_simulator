@@ -67,46 +67,50 @@ inline std::vector<IRMatDataCUDA> getMatrixData(
 
   std::vector<IRMatDataCUDA> data(KK);
 
-  const double zTol = config.zeroTol / K;
-  const double oTol = config.oneTol / K;
   const auto* cMat = gateMatrix.getConstantMatrix();
-  assert(cMat && "Parametrized matrices codegen not implemented yet");
+  // assert(cMat && "Parametrized matrices codegen not implemented yet");
 
-  for (unsigned i = 0; i < KK; i++) {
-    if (cMat == nullptr || config.forceDenseKernel) {
-      data[i].reKind = SK_General;
-      data[i].imKind = SK_General;
-      continue;
-    }
-    auto real = cMat->data()[i].real();
-    auto imag = cMat->data()[i].imag();
+  // Have compile-time known matrix
+  if (cMat != nullptr && !config.forceDenseKernel) {
+    const double zTol = config.zeroTol / K;
+    const double oTol = config.oneTol / K;
 
-    if (std::abs(real) < zTol)
-      data[i].reKind = SK_Zero;
-    else if (std::abs(real - 1.0) < oTol)
-      data[i].reKind = SK_One;
-    else if (std::abs(real + 1.0) < oTol)
-      data[i].reKind = SK_MinusOne;
-    else if (config.matrixLoadMode == CPUKernelGenConfig::UseMatImmValues) {
-      data[i].reKind = SK_ImmValue;
-      data[i].reElemVal = ConstantFP::get(B.getContext(), APFloat(real));
-    }
-    else
-      data[i].reKind = SK_General;
+    for (unsigned i = 0; i < KK; i++) {
+			auto real = cMat->data()[i].real();
+			auto imag = cMat->data()[i].imag();
 
-    if (std::abs(imag) < zTol)
-      data[i].imKind = SK_Zero;
-    else if (std::abs(imag - 1.0) < oTol)
-      data[i].imKind = SK_One;
-    else if (std::abs(imag + 1.0) < oTol)
-      data[i].imKind = SK_MinusOne;
-    else if (config.matrixLoadMode == CPUKernelGenConfig::UseMatImmValues) {
-      data[i].imKind = SK_ImmValue;
-      data[i].imElemVal = ConstantFP::get(B.getContext(), APFloat(imag));
+			if (std::abs(real) < zTol)
+				data[i].reKind = SK_Zero;
+			else if (std::abs(real - 1.0) < oTol)
+				data[i].reKind = SK_One;
+			else if (std::abs(real + 1.0) < oTol)
+				data[i].reKind = SK_MinusOne;
+			else if (config.matrixLoadMode == CPUKernelGenConfig::UseMatImmValues) {
+				data[i].reKind = SK_ImmValue;
+				data[i].reElemVal = ConstantFP::get(B.getContext(), APFloat(real));
+			}
+			else
+				data[i].reKind = SK_General;
+
+			if (std::abs(imag) < zTol)
+				data[i].imKind = SK_Zero;
+			else if (std::abs(imag - 1.0) < oTol)
+				data[i].imKind = SK_One;
+			else if (std::abs(imag + 1.0) < oTol)
+				data[i].imKind = SK_MinusOne;
+			else if (config.matrixLoadMode == CPUKernelGenConfig::UseMatImmValues) {
+				data[i].imKind = SK_ImmValue;
+				data[i].imElemVal = ConstantFP::get(B.getContext(), APFloat(imag));
+			}
+			else
+				data[i].imKind = SK_General;
+		}
+  } else { // runtime / param matrix - no compile-time numeric classification possible
+			for (unsigned i = 0; i < KK; i++) {
+				data[i].reKind = SK_General;
+				data[i].imKind = SK_General;
     }
-    else
-      data[i].imKind = SK_General;
-  }
+	}
   return data;
 }
 
@@ -140,6 +144,8 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
 
   // init matrix
   auto matrixData = getMatrixData(B, gate->gateMatrix, config);
+
+	bool haveConstantMatrix = (gate->gateMatrix.getConstantMatrix() != nullptr); // TODO: change this to be less redundant
 
   // init basic blocks
   BasicBlock* entryBB = BasicBlock::Create(B.getContext(), "entry", func);
@@ -211,6 +217,9 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
   case CPUKernelGenConfig::UseMatImmValues: {
     // Imm values are LLVM Constant. They will not appear as instructions in 
     // the entry block.
+		if (!haveConstantMatrix) {
+      llvm_unreachable("Asked to use immediate values but we have no cMat");
+    }
     for (unsigned i = 0, n = matrixData.size(); i < n; i++) {
       if (matrixData[i].reElemVal) {
         matrixData[i].reVecVal = B.CreateVectorSplat(
@@ -246,7 +255,7 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
   }
   default: {
     llvm_unreachable(
-      "Only supporting UseMatImmValues and StackLoadMatElems modes");
+      "Unrecognized matrixLoadMode - Only supporting UseMatImmValues and StackLoadMatElems modes");
     break;
   }
   }
@@ -604,4 +613,24 @@ CPUKernelManager& CPUKernelManager::genCPUGatesFromCircuitGraph(
       config, block->quantumGate, mangledName + std::to_string(block->id));
   }
   return *this;
+}
+
+// CPUKernelManager& CPUKernelManager::genCPUMeasure(
+//     const CPUKernelGenConfig& config, int q, const std::string& funcName) {
+//   assert(0 && "Not Implemented");
+//   return *this;
+// }
+
+void CPUKernelManager::dumpIR(const std::string &funcName, llvm::raw_ostream &os) {
+  // We haven't called initJIT() yet, so the modules should still be in
+  // llvmContextModulePairs.
+  for (auto &cmp : llvmContextModulePairs) {
+    auto &M = *cmp.llvmModule;
+    if (auto *F = M.getFunction(funcName)) {
+      os << "=== Dumping IR for function '" << funcName << "' ===\n";
+      M.print(os, nullptr);
+      return;
+    }
+  }
+  os << "No module found containing function '" << funcName << "'\n";
 }
