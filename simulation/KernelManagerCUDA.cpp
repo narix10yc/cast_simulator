@@ -18,7 +18,6 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 #include "utils/Formats.h"
-#include "utils/cuda_api_call.h"
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include <llvm/Support/Debug.h>
@@ -143,6 +142,8 @@ CUDAKernelManager::collectCUDAKernelsFromCircuitGraph(
 }
 
 #ifdef CAST_USE_CUDA
+
+#include "utils/cuda_api_call.h"
 
 static int getFirstVisibleDevice() {
   const char* castEnvVar = std::getenv("CAST_USE_CUDA_DEVICE");

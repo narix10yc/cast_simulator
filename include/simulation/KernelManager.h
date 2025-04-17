@@ -208,8 +208,8 @@ struct CUDAKernelInfo {
     return cuTuple.sharedMemBytes; 
   }
   #else
-  CUfunction kernelFunction() const { return nullptr; }
-  size_t sharedMemUsage() const { return 0; }
+  // CUfunction kernelFunction() const { return nullptr; }
+  // size_t sharedMemUsage() const { return 0; }
   #endif
 };
 

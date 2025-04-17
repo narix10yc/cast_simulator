@@ -1,10 +1,8 @@
 #include "cast/CostModel.h"
 #include "cast/QuantumGate.h"
 #include "simulation/StatevectorCPU.h"
-#include "simulation/StatevectorCUDA.h"
 #include "utils/Formats.h"
 #include "timeit/timeit.h"
-#include "utils/cuda_api_call.h"
 
 #include <fstream>
 #include <iomanip>
@@ -475,6 +473,9 @@ void PerformanceCache::runExperiments(
 }
 
 #ifdef CAST_USE_CUDA
+
+#include "simulation/StatevectorCUDA.h"
+#include "utils/cuda_api_call.h"
 
 namespace {
 
