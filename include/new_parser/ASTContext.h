@@ -4,9 +4,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cassert>
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
 #include <new>
 #include <vector>
 #include <span>
+#include <string_view>
 
 namespace cast::draft {
 
