@@ -3,6 +3,6 @@ Circuit my_circuit {
   X 0 + 1
 @ Y 0;
   H 3;
-  RX(Pi/2) 0;
-  RXX(2*Pi/2, -Pi/3) 2 1;
+  RX(-2/3 * Pi) 0;
+  RXX(2*Pi/3, -Pi/3) 2 1;
 }

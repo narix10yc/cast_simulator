@@ -31,20 +31,6 @@ std::ostream& ast::Attribute::print(std::ostream& os) const {
   return os << ">";
 }
 
-std::ostream& ast::FractionPiLiteral::print(std::ostream& os) const {
-  assert(denominator > 0 && "Denominator must be positive");
-  if (numerator == 1) {}
-  else if (numerator == -1) { os << "-"; }
-  else { os << numerator << "*"; }
-  
-  os << "Pi";
-
-  if (denominator != 1)
-    os << "/" << denominator;
-
-  return os;
-}
-
 std::ostream& ast::GateApplyStmt::print(std::ostream& os) const {
   os << name;
   auto pSize = params.size();

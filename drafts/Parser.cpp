@@ -76,52 +76,53 @@ std::complex<double> Parser::parseComplexNumber() {
 
 // Try to convert a general expression to a simple numeric expression.
 // Return nullptr if the conversion is not possible.
-// static std::unique_ptr<ast::SimpleNumericExpr>
-// convertExprToSimpleNumeric(const ast::Expr* expr) {
-//   if (expr == nullptr)
-//     return nullptr;
-//   if (auto* e = llvm::dyn_cast<ast::ParameterExpr>(expr))
-//     return nullptr;
+static ast::SimpleNumericExpr*
+convertExprToSimpleNumeric(ASTContext& ctx, ast::Expr* expr) {
+  if (expr == nullptr)
+    return nullptr;
+  // okay: SimpleNumericExpr
+  if (auto* e = llvm::dyn_cast<ast::SimpleNumericExpr>(expr))
+    return e;
 
-//   if (auto* e = llvm::dyn_cast<ast::SimpleNumericExpr>(expr))
-//     return std::make_unique<ast::SimpleNumericExpr>(*e);
+  // possibly okay: MinusOpExpr
+  if (auto* e = llvm::dyn_cast<ast::MinusOpExpr>(expr)) {
+    auto* operand = convertExprToSimpleNumeric(ctx, e->operand);
+    if (operand == nullptr)
+      return nullptr;
+    return ast::SimpleNumericExpr::neg(ctx, operand);
+  }
 
-//   if (auto* e = llvm::dyn_cast<ast::MinusOpExpr>(expr)) {
-//     auto operand = convertExprToSimpleNumeric(e->operand.get());
-//     if (!operand)
-//       return nullptr;
-//     return std::make_unique<ast::SimpleNumericExpr>(-(*operand));
-//   }
+  // possibly okay: BinaryOpExpr
+  if (auto* e = llvm::dyn_cast<ast::BinaryOpExpr>(expr)) {
+    auto* lhs = convertExprToSimpleNumeric(ctx, e->lhs);
+    auto* rhs = convertExprToSimpleNumeric(ctx, e->rhs);
+    if (!lhs || !rhs)
+      return nullptr;
+    switch (e->op) {
+      case ast::BinaryOpExpr::Add:
+        return ast::SimpleNumericExpr::add(ctx, lhs, rhs);
+      case ast::BinaryOpExpr::Sub:
+        return ast::SimpleNumericExpr::sub(ctx, lhs, rhs);
+      case ast::BinaryOpExpr::Mul:
+        return ast::SimpleNumericExpr::mul(ctx, lhs, rhs);
+      case ast::BinaryOpExpr::Div:
+        return ast::SimpleNumericExpr::div(ctx, lhs, rhs);
+      default:
+        assert(false && "Illegal binary operator");
+        return nullptr;
+    }
+  }
 
-//   if (auto* e = llvm::dyn_cast<ast::BinaryOpExpr>(expr)) {
-//     auto lhs = convertExprToSimpleNumeric(e->lhs.get());
-//     auto rhs = convertExprToSimpleNumeric(e->rhs.get());
-//     if (!lhs || !rhs)
-//       return nullptr;
-//     switch (e->op) {
-//       case ast::BinaryOpExpr::Add:
-//         return std::make_unique<ast::SimpleNumericExpr>(*lhs + *rhs);
-//       case ast::BinaryOpExpr::Sub:
-//         return std::make_unique<ast::SimpleNumericExpr>(*lhs - *rhs);
-//       case ast::BinaryOpExpr::Mul:
-//         return std::make_unique<ast::SimpleNumericExpr>(*lhs * *rhs);
-//       case ast::BinaryOpExpr::Div:
-//         return std::make_unique<ast::SimpleNumericExpr>(*lhs / *rhs);
-//       default:
-//         assert(false && "Illegal binary operator");
-//         return nullptr;
-//     }
-//   }
-
-//   // otherwise, not convertible to simple numeric
-//   return nullptr;
-// }
+  // otherwise, not convertible to simple numeric
+  return nullptr;
+}
 
 ast::Attribute* Parser::parseAttribute() {
   if (curToken.isNot(tk_Less))
     return nullptr;
-
-  auto* attr = new (ctx) ast::Attribute();
+  ast::IntegerLiteral* nQubits = nullptr;
+  ast::IntegerLiteral* nParams = nullptr;
+  ast::SimpleNumericExpr* phase = nullptr;
   
   advance(tk_L_SquareBracket);
   while (curToken.isNot(tk_R_SquareBracket)) {
@@ -134,16 +135,23 @@ ast::Attribute* Parser::parseAttribute() {
     // 'nqubits', 'nparams', and 'phase' are reserved attributes
     if (name == "nqubits") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nqubits' must be a number");
-      attr->nQubits = new (ctx) ast::IntegerLiteral(curToken.toInt());
+      nQubits = new (ctx) ast::IntegerLiteral(curToken.toInt());
       advance(tk_Numeric);
     }
     else if (name == "nparams") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nparams' must be a number");
-      attr->nParams = new (ctx) ast::IntegerLiteral(curToken.toInt());
+      nParams = new (ctx) ast::IntegerLiteral(curToken.toInt());
       advance(tk_Numeric);
     }
     else if (name == "phase") {
-      attr->phase = parseExpr();
+      auto* expr = parseExpr();
+      phase = convertExprToSimpleNumeric(ctx, expr);
+      std::cerr << "Successful: ";
+      phase->print(std::cerr) << "\n";
+      if (phase == nullptr) {
+        logErrHere("Attribute 'phase' must be a simple numeric expression");
+        failAndExit();
+      }
     }
     else {
       // other attributes
@@ -152,7 +160,7 @@ ast::Attribute* Parser::parseAttribute() {
     optionalAdvance(tk_Comma);
   }
   advance(tk_Greater);
-  return attr;
+  return new (ctx) ast::Attribute(nQubits, nParams, phase);
 }
 
 ast::CircuitStmt* Parser::parseCircuitStmt() {
@@ -238,6 +246,9 @@ ast::GateApplyStmt* Parser::parseGateApplyStmt() {
       auto* expr = parseExpr();
       if (expr == nullptr)
         break;
+      // try to simplify the gate parameter to simple numerics
+      if (auto* e = convertExprToSimpleNumeric(ctx, expr))
+        expr = e;
       params.push_back(expr);
       if (curToken.is(tk_R_RoundBracket))
         break;

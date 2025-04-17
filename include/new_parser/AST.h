@@ -13,6 +13,7 @@ namespace cast {
 } // namespace cast
 
 namespace cast::draft {
+  class ASTContext;
 
 namespace ast {
 
@@ -70,9 +71,30 @@ public:
 /// the AST.
 class SimpleNumericExpr : public Expr {
 public:
-  SimpleNumericExpr() : Expr(NK_Expr_SimpleNumeric) {}
+  explicit SimpleNumericExpr(NodeKind kind) : Expr(kind) {
+    assert(llvm::dyn_cast<SimpleNumericExpr>(this) != nullptr);
+  }
  
   virtual double getValue() const = 0;
+
+  // "-" <SimpleNumericExpr>
+  static SimpleNumericExpr* neg(ASTContext& ctx, SimpleNumericExpr* operand);
+
+  // <SimpleNumericExpr> "+" <SimpleNumericExpr>
+  static SimpleNumericExpr*
+  add(ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs);
+
+  // <SimpleNumericExpr> "-" <SimpleNumericExpr>
+  static SimpleNumericExpr*
+  sub(ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs);
+  
+  // <SimpleNumericExpr> "*" <SimpleNumericExpr>
+  static SimpleNumericExpr*
+  mul(ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs);
+
+  // <SimpleNumericExpr> "/" <SimpleNumericExpr>
+  static SimpleNumericExpr*
+  div(ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs);
 
   static bool classof(const Node* node) {
     return node->getKind() >= NK_Expr_SimpleNumeric &&
@@ -85,7 +107,7 @@ public:
   int value;
 
   IntegerLiteral(int value)
-    : SimpleNumericExpr(), value(value) {}
+    : SimpleNumericExpr(NK_Expr_IntegerLiteral), value(value) {}
 
   double getValue() const override { return value; }
 
@@ -103,7 +125,7 @@ public:
   double value;
 
   FloatingLiteral(double value)
-    : SimpleNumericExpr(), value(value) {}
+    : SimpleNumericExpr(NK_Expr_FloatingLiteral), value(value) {}
 
   double getValue() const override { return value; }
 
@@ -118,17 +140,17 @@ public:
 
 class FractionLiteral : public SimpleNumericExpr {
 public:
-  int numerator;
-  int denominator;
+  // numerator
+  int n;
+  // denominator (always positive)
+  int d;
 
-  FractionLiteral(int numerator, int denominator)
-    : SimpleNumericExpr(), numerator(numerator), denominator(denominator) {}
+  // Handle fraction simplification
+  FractionLiteral(int numerator, int denominator);
 
-  double getValue() const override { return double(numerator) / denominator; }
+  double getValue() const override { return double(n) / d; }
 
-  std::ostream& print(std::ostream& os) const override {
-    return os << numerator << "/" << denominator;
-  }
+  std::ostream& print(std::ostream& os) const override;
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_FractionLiteral;
@@ -137,14 +159,15 @@ public:
 
 class FractionPiLiteral : public SimpleNumericExpr {
 public:
-  int numerator;
-  int denominator;
+  // numerator
+  int n;
+  // denominator (always positive)
+  int d;
 
-  FractionPiLiteral(int numerator, int denominator)
-    : SimpleNumericExpr(), numerator(numerator), denominator(denominator) {}
+  FractionPiLiteral(int numerator, int denominator);
 
   double getValue() const override { 
-    return M_PI * numerator / denominator;
+    return M_PI * n / d;
   }
 
   std::ostream& print(std::ostream& os) const override;
@@ -248,13 +271,11 @@ public:
   // we use pointer here to allow null
   IntegerLiteral* nQubits;
   IntegerLiteral* nParams;
-  Expr* phase;
-
-  Attribute() : nQubits(nullptr), nParams(nullptr), phase(nullptr) {}
+  SimpleNumericExpr* phase;
   
   Attribute(IntegerLiteral* nQubits,
             IntegerLiteral* nParams,
-            Expr* phase)
+            SimpleNumericExpr* phase)
     : nQubits(nQubits), nParams(nParams), phase(phase) {}
 
   std::ostream& print(std::ostream& os) const;
