@@ -70,18 +70,25 @@ void CUDAKernelManager::emitPTX(
     return;
   }
 
+  #ifdef CAST_USE_CUDA
   // Query device for compute capability
   cuInit(0);
   CUdevice device;
   cuDeviceGet(&device, 0);
 
   int major = 0, minor = 0;
-  cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
-  cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
+  cuDeviceGetAttribute(
+    &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
+  cuDeviceGetAttribute(
+    &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
 
   std::ostringstream archOss;
   archOss << "sm_" << major << minor;
   std::string archString = archOss.str();
+  #else
+  // Fallback to default compute capability
+  std::string archString = "sm_76";
+  #endif // #ifdef CAST_USE_CUDA
 
   const auto createTargetMachine = [&]() -> TargetMachine* {
     return target->createTargetMachine(
