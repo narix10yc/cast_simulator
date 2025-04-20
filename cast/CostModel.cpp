@@ -504,70 +504,69 @@ double calculateMemUpdateSpeedCuda(int nQubits, int precision, double t,
   assert(coalescingScore > 0.0 && coalescingScore <= 1.0);
   assert(occupancy > 0.0 && occupancy <= 1.0);
 
-  if (nQubits > 6) return 1e9;
+  const double bytesTouched =
+       (precision == 32 ? 8.0 : 16.0) // 8 or 16 bytes per amplitude
+       * std::pow(2.0, nQubits);
 
-  // Theoretical memory accessed (bytes)
-  const size_t theoreticalBytes = (precision == 32 ? 8ULL : 16ULL) << nQubits;
-  
-  // Apply penalties for imperfect access patterns
-  const double effectiveBytes = theoreticalBytes / 
-                              (coalescingScore * sqrt(occupancy));
-  return effectiveBytes * 1e-9 / t;
+  return bytesTouched /
+      (static_cast<double>(1u << 30) // bytes GiB
+      * t                            // divide by time
+      * coalescingScore              // coalescing penalty
+      * std::sqrt(occupancy));       // occupancy penalty
 }
 
-double estimateOccupancy(const CUDAKernelInfo& kernel, int blockSize) {
-  CUcontext ctx;
-  CUresult res = cuCtxGetCurrent(&ctx);
-  if (res != CUDA_SUCCESS || !ctx) {
-    std::cerr << "ERROR: No active CUDA context!\n";
-    return 1.0;
-  }
-  if (!kernel.kernelFunction()) {
-    std::cerr << "ERROR: Kernel function is NULL!\n";
-    return 1.0;
+
+double estimateOccupancy(const CUDAKernelInfo& k, int blockSize) {
+  // Device properties (unchanged for the whole run, so probably should cache)
+  static cudaDeviceProp props;
+  static bool propsInit = false;
+  if (!propsInit) {
+      CUDA_CHECK(cudaGetDeviceProperties(&props, 0));
+      propsInit = true;
   }
 
-  int numRegs = 0, staticShmem = 0;
-  driverGetFuncAttributes(kernel.kernelFunction(), numRegs, staticShmem);
+  // Fast path: kernel has been JITed -> ask the driver
+  if (k.kernelFunction()) {
+      int maxBlocksPerSM = 0;
+      CUresult res = cuOccupancyMaxActiveBlocksPerMultiprocessor(
+                          &maxBlocksPerSM,
+                          k.kernelFunction(),
+                          blockSize,
+                          k.sharedMemUsage());          // dynamic SMEM
+      if (res != CUDA_SUCCESS) {
+          std::cerr << "cuOccupancyMaxActiveBlocksPerMultiprocessor failed\n";
+          return 1.0;
+      }
 
-  // query the maximum blocks-per-SM from the driver API
-  int maxBlocksPerSM = 0;
-  res = cuOccupancyMaxActiveBlocksPerMultiprocessor(
-        &maxBlocksPerSM,
-        kernel.kernelFunction(),
-        blockSize,
-        kernel.sharedMemUsage() // dynamic shared mem usage
-      );
-
-  if (res != CUDA_SUCCESS) {
-    std::cerr << "cuOccupancyMaxActiveBlocksPerMultiprocessor failed\n";
-    return 1.0;
+      double occ = double(maxBlocksPerSM * blockSize) /
+                    double(props.maxThreadsPerMultiProcessor);
+      return std::clamp(occ, 0.05, 1.0);
   }
 
-  cudaDeviceProp props;
-  CUDA_CHECK(cudaGetDeviceProperties(&props, 0));
+  // Metadata‑only path : have an estimate of regs & SMEM
+  unsigned regsPerThr = k.registerUsage();
+  size_t dynSmem = k.sharedMemUsage();
 
-  double activeThreads = double(maxBlocksPerSM * blockSize);
-  double theoreticalOcc = activeThreads / double(props.maxThreadsPerMultiProcessor);
-  if (theoreticalOcc > 1.0) theoreticalOcc = 1.0;
+  unsigned maxBlocksThreads =
+      props.maxThreadsPerMultiProcessor / blockSize;
 
-  double registerLimit = 1.0;
-  {
-    if (numRegs > 0) {
-      registerLimit = double(props.regsPerBlock) / double(blockSize * numRegs);
-      if (registerLimit > 1.0) registerLimit = 1.0;
-    }
-  }
-  double smemLimit = 1.0;
-  {
-    double needed = double(staticShmem + kernel.sharedMemUsage());
-    if (needed > 0) {
-      smemLimit = double(props.sharedMemPerBlock) / needed;
-      if (smemLimit > 1.0) smemLimit = 1.0;
-    }
-  }
-  double finalOcc = std::min({theoreticalOcc, registerLimit, smemLimit});
-  return (finalOcc < 0.05) ? 0.05 : finalOcc;
+  unsigned maxBlocksRegs =
+      (regsPerThr == 0)
+          ? maxBlocksThreads
+          : props.regsPerBlock / (regsPerThr * blockSize);
+
+  unsigned maxBlocksSmem =
+      (dynSmem == 0)
+          ? maxBlocksThreads
+          : props.sharedMemPerBlock / dynSmem;
+
+  unsigned activeBlocks = std::max(1u,
+      std::min({maxBlocksThreads, maxBlocksRegs, maxBlocksSmem}));
+
+  double occ = double(activeBlocks * blockSize) /
+                double(props.maxThreadsPerMultiProcessor);
+
+  return std::clamp(occ, 0.05, 1.0);
 }
 
 double estimateCoalescingScore(const QuantumGate& gate, int nQubits) {
@@ -690,84 +689,75 @@ const CUDAPerformanceCache::Item* CUDAPerformanceCache::findClosestMatch(
     return bestMatch;
 }
 
-double CUDACostModel::computeGiBTime(const QuantumGate& gate, int precision, int) const {
-  const int gateNQubits = gate.nQubits();
-  const double gateOpCount = gate.opCount(zeroTol);
-  // We'll hold a pointer to an exactMatch if we find one
-  const CUDAPerformanceCache::Item* exactItem = nullptr;
-  for (auto &item : cache->items) {
-      if (item.nQubits   == gateNQubits &&
-          item.precision == precision   &&
-          item.blockSize == currentBlockSize)
-      {
-          exactItem = &item;
-          break;
-      }
-  }
+inline double regPenalty(int regsPerThr, int blk, int regsPerSM = 65536)
+{
+  if (regsPerThr == 0) return 1.0; // unknown -> no penalty
+  double maxWarps = double(regsPerSM) /
+                    (regsPerThr * (blk / 32.0));
+  double occLimit = std::min(1.0, maxWarps / 64.0); // 64 warps = 100 %
+  return 1.0 / std::max(0.05, occLimit);
+}
 
-  if (exactItem) {
-      double speed = exactItem->memUpdateSpeed; // GiB/s
-      double baseTimePerGiB = 1.0 / std::max(speed, minGibTimeCap);
-      
-      // TODO: use calculation functions!
-      double occupancyPenalty  = 1.0 / (exactItem->occupancy * exactItem->occupancy);
-      double coalescingPenalty = std::pow(1.0 / exactItem->coalescingScore, 1.5);
+double CUDACostModel::computeGiBTime(const QuantumGate& gate,
+                                     int precision, int) const
+{
+  const double gpuPeakTFLOPs = (precision == 32 ? 35.6 : 0.556); // RTX‑3090
+  const double launchOverhead = 3.0e-6;
+  const double opCnt = gate.opCount(zeroTol);
+  const int nQ = gate.nQubits();
 
-      constexpr double kernelLaunchOverheadSec = 3.0e-6;
-
-      double totalTime = baseTimePerGiB * gateOpCount * occupancyPenalty * coalescingPenalty
-                        + kernelLaunchOverheadSec;
-      return totalTime;
-  }
-
-  // No exact match: find the "closest" item
-  const CUDAPerformanceCache::Item* bestItem = nullptr;
+  // pick the best anchor (same precision, closest nQ & blockSize)
+  const CUDAPerformanceCache::Item* anchor = nullptr;
   double bestScore = -1.0;
-  for (auto &item : cache->items) {
-      if (item.precision != precision) {
-          continue;
-      }
-      double score = (item.blockSize == currentBlockSize) ? 1.0 : 0.25;
-      int dq = std::abs(item.nQubits - gateNQubits);
-      score += 1.0 / double(1 + dq);
-
-      if (score > bestScore) {
-          bestScore = score;
-          bestItem  = &item;
-      }
+  for (const auto& it : cache->items) {
+      if (it.precision != precision) continue;
+      double s  = (it.blockSize == currentBlockSize ? 1.0 : 0.25);
+      s        += 1.0 / (1.0 + std::abs(it.nQubits - nQ));
+      if (s > bestScore) { bestScore = s; anchor = &it; }
   }
-  // fallback
-  if (!bestItem) {
-      return 1e8;
-  }
+  if (!anchor) return 1e8; // no data → discourage fuse
 
-  // sublinear scaling to adapt from bestItem to gateNQubits
-  // and from bestItem->blockSize to currentBlockSize, 
-  // plus occupancy & coalescing penalty
-  double blockSizeRatio = double(bestItem->blockSize) / double(currentBlockSize);
-  double blockSizeScale = std::pow(blockSizeRatio, 0.85); // pow(std::min(blockSizeRatio, 4.0), 0.5);
+  // live resource estimates for the fused candidate gate
+  CUDAKernelInfo tmp;
+  tmp.setGate(&gate);
+  tmp.setKernelFunction(nullptr);   // metadata only
 
-  double occupancyPenalty  = 1.0 / (bestItem->occupancy * bestItem->occupancy);
-  double coalescingPenalty = std::pow(1.0 / bestItem->coalescingScore, 1.5);
+  auto estSmemBytes = [&](const QuantumGate& g) {
+      int localQ = g.nQubits();
+      const int bytesPerAmp = (precision == 32 ? 8 : 16);
+      return (localQ <= 5 ? 0
+                          : (std::size_t{1} << localQ) * bytesPerAmp);
+  };
+  auto estRegisters = [&](const QuantumGate& g) {
+      return 32 + 4 * g.nQubits();
+  };
 
-  // mild exponential penalty if gateNQubits differs 
-  // from bestItem->nQubits
-  int diffQ = gateNQubits - bestItem->nQubits;
-  // if diffQ=2 => sizePenalty = 2^|2|=4 - can improve on this
-  double sizePenalty = (diffQ == 0) ? 1.0 : std::pow(2.0, std::abs(diffQ));
+  tmp.setSharedMemUsage(estSmemBytes(gate));
+  tmp.setRegisterUsage(estRegisters(gate));
 
-  double speed = bestItem->memUpdateSpeed * blockSizeScale;
-  speed = std::max(speed, 1e-6);
+  double occLive  = std::clamp(estimateOccupancy(tmp, currentBlockSize), 0.05, 1.0);
+  double coalLive = std::clamp(estimateCoalescingScore(gate, nQ), 0.05, 1.0);
 
-  double baseTimePerGiB = 1.0 / std::max(speed, minGibTimeCap);
-  double totalComputeTime = baseTimePerGiB * gateOpCount
-                          * occupancyPenalty * coalescingPenalty
-                          * sizePenalty;
+  // scale the anchor bandwidth by live penalties
+  double blkScale = std::pow(double(anchor->blockSize) / currentBlockSize, 0.5);
+  double occScale = occLive/std::max(0.05, anchor->occupancy);
+  double coalScale = std::pow(coalLive/std::max(0.05, anchor->coalescingScore), 1.5);
 
-  // Add constant kernel overhead
-  totalComputeTime += 3.0e-6;
+  double effGiBps = anchor->memUpdateSpeed * occScale * blkScale * coalScale;
+  effGiBps = std::max(effGiBps, 1.0 / minGibTimeCap); // clamp
 
-  return totalComputeTime;
+  // turn bandwidth into time (memory + FLOP + launch const)
+  const double bytesPerAmp = (precision == 32 ? 8.0 : 16.0);
+  double memGiB = bytesPerAmp * opCnt / (1ULL << 30);
+  double memTime = memGiB / effGiBps;
+  double flopTime = opCnt * 2.0 / (gpuPeakTFLOPs * 1e12);
+
+  constexpr double gpuBW_Bytes = 840.0 * (1ULL << 30);
+  double ridgeAI = (gpuPeakTFLOPs * 1e12) / gpuBW_Bytes;
+  double ai = 2.0 / bytesPerAmp;
+  double execCore = (ai < ridgeAI) ? memTime : flopTime;
+
+  return execCore + launchOverhead;
 }
 
 
@@ -990,8 +980,8 @@ void CUDAPerformanceCache::runExperiments(
       nQubits, 
       kernel.precision, 
       avgTimeSec,
-      occupancy,
-      coalescing
+      coalescing,
+      occupancy
     );
 
     items.emplace_back(Item{

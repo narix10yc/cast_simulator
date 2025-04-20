@@ -169,7 +169,7 @@ int main(int argc, const char** argv) {
         kernelMgr.collectCUDAKernelsFromCircuitGraph("graphCudaFuse");
       for (const auto* kernel : kernelCudaFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
-      std::cerr << "Cuda-fuse: nGates = " << kernelAdaptiveFuse.size()
+      std::cerr << "Cuda-fuse: nGates = " << kernelCudaFuse.size()
                 << "; opCount = " << opCountTotal << "\n";
     }
     }, "JIT compile kernels");

@@ -74,14 +74,14 @@ To use our provided CostModel class to conduct benchmarks for a cost model speci
 ### CPU
 To perform benchmarks on your CPU, run a command such as the following from inside the build-debug folder:
 ```
-ninja cost_model && ./cost_model -o cost_model.csv -T 4 -N 10
+ninja cost_model && ./cost_model -o cost_model.csv -T4 -N 10 -simd-s 2
 ```
 Note: you can substitute the arguments provided, or include additional flags. Run `ninja cost_model && ./cost_model --help` to see the manual.
 
 ### GPU:
 To run benchmarks on your Nvidia GPU, run the following command from inside the build-debug folder:
 ```
-ninja cost_model_cuda && ./cost_model_cuda -o cost_model_cuda.csv --blockSize 128 -N 10 -nqubits 16 -workerThreads 8
+ninja cost_model_cuda && ./cost_model_cuda -o cost_model_cuda.csv --blockSize 128 -N 10 -workerThreads 8
 ```
 Note: you can customise the flags above, or include additional ones. Run `ninja cost_model_cuda && ./cost_model_cuda --help` to see the manual.
 

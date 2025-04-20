@@ -199,17 +199,32 @@ struct CUDAKernelInfo {
   std::shared_ptr<QuantumGate> gate;
   CUDATuple cuTuple;
   int opCount;
+  unsigned regsPerThread = 32;
   // int blockSize = 256;
   #ifdef CAST_USE_CUDA
+  void setGate(const QuantumGate* g) {
+      gate = std::shared_ptr<QuantumGate>(
+                 const_cast<QuantumGate*>(g),
+                 [](QuantumGate*){});            // empty deleter
+  }
+  void setSharedMemUsage(size_t bytes) {
+      cuTuple.sharedMemBytes = bytes;
+  }
+  void setKernelFunction(CUfunction fn) {
+      cuTuple.cuFunction = fn;
+  }
   CUfunction kernelFunction() const { 
     return cuTuple.cuFunction; 
   }
   size_t sharedMemUsage() const { 
     return cuTuple.sharedMemBytes; 
   }
-  #else
-  // CUfunction kernelFunction() const { return nullptr; }
-  // size_t sharedMemUsage() const { return 0; }
+  void setRegisterUsage(unsigned r) {
+    regsPerThread = r; 
+  }
+  unsigned registerUsage() const { 
+    return regsPerThread; 
+  }
   #endif
 };
 
