@@ -23,11 +23,6 @@ enum class FusionStrategy {
   Cuda
 };
 
-enum class PrecisionMode {
-  Float32,
-  Float64
-};
-
 static const char* toString(FusionStrategy fs) {
   switch (fs) {
     case FusionStrategy::NoFuse:   return "NoFuse";
@@ -35,14 +30,6 @@ static const char* toString(FusionStrategy fs) {
     case FusionStrategy::Adaptive: return "Adaptive";
     case FusionStrategy::Cuda:     return "Cuda";
     default:                       return "Unknown";
-  }
-}
-
-static const char* toString(PrecisionMode pm) {
-  switch (pm) {
-    case PrecisionMode::Float32: return "Float32";
-    case PrecisionMode::Float64: return "Float64";
-    default:                     return "Unknown";
   }
 }
 
@@ -171,19 +158,34 @@ int main() {
   genConfig.precision      = 64;
   genConfig.matrixLoadMode = CUDAKernelGenConfig::UseMatImmValues;
 
-  Timer genTimer(nReps);
-  TimingResult genTR = genTimer.timeit([&]() {
-    CUDAKernelManager localKernelMgr;
-    localKernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
-    localKernelMgr.emitPTX(nThreads, optLevel, 0);
-    localKernelMgr.initCUJIT(nThreads, 0);
+  Timer kernelGenTimer(nReps);
+  TimingResult kernelGenTR = kernelGenTimer.timeit([&]() {
+    CUDAKernelManager localKM;
+    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
   });
+
+  Timer ptxTimer(nReps);
+  TimingResult ptxTR = ptxTimer.timeit([&]() {
+    CUDAKernelManager localKM;
+    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+    localKM.emitPTX(nThreads, optLevel, 0);
+  });
+
+  Timer jitTimer(nReps);
+  TimingResult jitTR = jitTimer.timeit([&]() {
+    CUDAKernelManager localKM;
+    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+    localKM.emitPTX(nThreads, optLevel, 0);
+    localKM.initCUJIT(nThreads, 0);
+  });
+
   CUDAKernelManager kernelMgr;
   kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
   kernelMgr.emitPTX(nThreads, optLevel, 0);
   kernelMgr.initCUJIT(nThreads, 0);
 
   auto kernels = kernelMgr.collectCUDAKernelsFromCircuitGraph("testCircuit");
+
   Timer execTimer(nReps);
   TimingResult execTR = execTimer.timeit([&]() {
     utils::StatevectorCUDA<double> sv(graphPtr->nQubits);
@@ -198,9 +200,10 @@ int main() {
   printTimingStats("1) Parse Time", parseTR);
   printTimingStats("2) Build Time", buildTR);
   printTimingStats("3) Fusion Time", fusionTR);
-  printTimingStats("4) Gen/Compile Time", genTR);
-  printTimingStats("5) Execution Time", execTR);
+  printTimingStats("4) Kernel Gen Time", kernelGenTR);
+  printTimingStats("5) PTX Time", ptxTR);
+  printTimingStats("6) JIT Time", jitTR);
+  printTimingStats("7) Execution Time", execTR);
   std::cout << "================================\n";
   return 0;
 }
-
