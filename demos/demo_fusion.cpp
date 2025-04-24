@@ -41,28 +41,88 @@ cl::opt<int>
 ArgNaiveMaxK("naive-max-k",
   cl::desc("The max size of gates in naive fusion"), cl::init(3));
 
+cl::opt<bool>
+ArgRunDenseKernel("run-dense-kernel",
+  cl::desc("Run dense kernel"), cl::init(false));
+
 cl::opt<int>
 ArgReplication("replication",
   cl::desc("Number of replications"), cl::init(1));
 
+static double collectKernelsAndGetTotalOpCount(
+    CPUKernelManager& kernelMgr,
+    const std::string& graphName,
+    std::vector<CPUKernelInfo*>& kernels) {
+  double opCountTotal = 0.0;
+  kernels = kernelMgr.collectCPUKernelsFromCircuitGraph(graphName);
+  for (const auto* kernel : kernels)
+    opCountTotal += kernel->gate->opCount(1e-8);
+  return opCountTotal;
+}
+
+static double collectDenseKernelsAndGetTotalOpCount(
+    CPUKernelManager& kernelMgr,
+    const std::string& graphName,
+    std::vector<CPUKernelInfo*>& kernels) {
+  double opCountTotal = 0.0;
+  kernels = kernelMgr.collectCPUKernelsFromCircuitGraph(graphName);
+  for (const auto* kernel : kernels)
+    opCountTotal += std::pow(2.0, kernel->gate->nQubits() + 2);
+  return opCountTotal;
+}
+
 int main(int argc, const char** argv) {
   cl::ParseCommandLineOptions(argc, argv);
+
+  if (ArgRunAdaptiveFuse && ArgModelPath == "") {
+    std::cerr << BOLDRED("[Err] ") 
+              << "--model=<path> must be specified when using adaptive fusion.\n";
+    return 1;
+  }
+
+  if (!(ArgRunNoFuse || ArgRunNaiveFuse || ArgRunAdaptiveFuse)) {
+    std::cerr << BOLDRED("[Err] ") 
+              << "At least one of --run-no-fuse, --run-naive-fuse, "
+              << "--run-adaptive-fuse must be specified.\n";
+    return 1;
+  }
 
   openqasm::Parser qasmParser(ArgInputFilename, 0);
   auto qasmRoot = qasmParser.parse();
 
   // This is temporary work-around as CircuitGraph does not allow copy yet
   CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
-  qasmRoot->toCircuitGraph(graphNoFuse);
-  qasmRoot->toCircuitGraph(graphNaiveFuse);
-  qasmRoot->toCircuitGraph(graphAdaptiveFuse);
+  CircuitGraph graphNoFuseDense, graphNaiveFuseDense, graphAdaptiveFuseDense;
 
+  // we always generate the no-fuse graph to get the number of qubits
+  qasmRoot->toCircuitGraph(graphNoFuse);
+  if (ArgRunNoFuse) {
+    if (ArgRunDenseKernel) {
+      qasmRoot->toCircuitGraph(graphNoFuseDense);
+    }
+  }
+  if (ArgRunNaiveFuse) {
+    qasmRoot->toCircuitGraph(graphNaiveFuse);
+    if (ArgRunDenseKernel) {
+      qasmRoot->toCircuitGraph(graphNaiveFuseDense);
+    }
+  }
+  if (ArgRunAdaptiveFuse) {
+    qasmRoot->toCircuitGraph(graphAdaptiveFuse);
+    if (ArgRunDenseKernel) {
+      qasmRoot->toCircuitGraph(graphAdaptiveFuseDense);
+    }
+  }
+
+  // Fusion
   FusionConfig fusionConfig = FusionConfig::Aggressive;
   fusionConfig.precision = 64;
   fusionConfig.nThreads = ArgNThreads;
   if (ArgRunNaiveFuse) {
     NaiveCostModel naiveCostModel(ArgNaiveMaxK, -1, 1e-8);
     applyGateFusion(fusionConfig, &naiveCostModel, graphNaiveFuse);
+    if (ArgRunDenseKernel)
+      applyGateFusion(fusionConfig, &naiveCostModel, graphNaiveFuseDense);
   }
 
   if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
@@ -70,12 +130,17 @@ int main(int argc, const char** argv) {
     StandardCostModel standardCostModel(&cache);
     standardCostModel.display(std::cerr); 
     applyGateFusion(fusionConfig, &standardCostModel, graphAdaptiveFuse);
+    if (ArgRunDenseKernel)
+      applyGateFusion(fusionConfig, &standardCostModel, graphAdaptiveFuseDense);
   }
 
   CPUKernelManager kernelMgr;
   CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.simd_s = ArgSimd_s;
   kernelGenConfig.displayInfo(std::cerr) << "\n";
+  auto denseKernelGenConfig = kernelGenConfig;
+  denseKernelGenConfig.forceDenseKernel = true;
+  denseKernelGenConfig.matrixLoadMode = CPUKernelGenConfig::StackLoadMatElems;
 
   // Generate kernels
   if (ArgRunNoFuse) {
@@ -96,51 +161,83 @@ int main(int argc, const char** argv) {
         kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
     }, "Generate Adaptive-fused Kernels");
   }
+  if (ArgRunNoFuse && ArgRunDenseKernel) {
+    utils::timedExecute([&]() {
+      kernelMgr.genCPUGatesFromCircuitGraph(
+        denseKernelGenConfig, graphNoFuseDense, "graphNoFuseDense");
+    }, "Generate No-fuse Dense Kernels");
+  }
+  if (ArgRunNaiveFuse && ArgRunDenseKernel) {
+    utils::timedExecute([&]() {
+      kernelMgr.genCPUGatesFromCircuitGraph(
+        denseKernelGenConfig, graphNaiveFuseDense, "graphNaiveFuseDense");
+    }, "Generate Naive-fused Dense Kernels");
+  }
+  if (ArgModelPath != "" && ArgRunAdaptiveFuse && ArgRunDenseKernel) {
+    utils::timedExecute([&]() {
+      kernelMgr.genCPUGatesFromCircuitGraph(
+        denseKernelGenConfig, graphAdaptiveFuseDense, "graphAdaptiveFuseDense");
+    }, "Generate Adaptive-fused Dense Kernels");
+  }
 
   // JIT compile kernels
   std::vector<CPUKernelInfo*> kernelsNoFuse;
   std::vector<CPUKernelInfo*> kernelsNaiveFuse;
-  std::vector<CPUKernelInfo*>kernelAdaptiveFuse;
+  std::vector<CPUKernelInfo*> kernelAdaptiveFuse;
+  std::vector<CPUKernelInfo*> denseKernelsNoFuse;
+  std::vector<CPUKernelInfo*> denseKernelsNaiveFuse;
+  std::vector<CPUKernelInfo*> denseKernelAdaptiveFuse;
 
   utils::timedExecute([&]() {
     kernelMgr.initJIT(
       ArgNThreads,
       llvm::OptimizationLevel::O1,
       /* useLazyJIT */ false,
-      /* verbose */ 1);
-    double opCountTotal = 0.0;
-    if (ArgRunNoFuse) {
-      opCountTotal = 0.0;
-      kernelsNoFuse = 
-        kernelMgr.collectCPUKernelsFromCircuitGraph("graphNoFuse");
-      for (const auto* kernel : kernelsNoFuse)
-        opCountTotal += kernel->gate->opCount(1e-8);
-      std::cerr << "No-fuse: nGates = " << kernelsNoFuse.size()
+      /* verbose */ 1
+    );
+  }, "JIT compile kernels");
+
+  // Display summaries of kernels under different configurations
+  std::cerr << BOLDCYAN("Kernel Summary:\n");
+  if (ArgRunNoFuse) {
+    std::cerr << "- No-fuse kernels:\n";
+    double opCountTotal = collectKernelsAndGetTotalOpCount(
+      kernelMgr, "graphNoFuse", kernelsNoFuse);
+    std::cerr << "  nGates = " << kernelsNoFuse.size()
+              << "; opCount = " << opCountTotal << "\n";
+    if (ArgRunDenseKernel) {
+      opCountTotal = collectDenseKernelsAndGetTotalOpCount(
+        kernelMgr, "graphNoFuseDense", denseKernelsNoFuse);
+      std::cerr << "  Dense nGates = " << denseKernelsNoFuse.size()
                 << "; opCount = " << opCountTotal << "\n";
     }
-    if (ArgRunNaiveFuse) {
-      opCountTotal = 0.0;
-      kernelsNaiveFuse = 
-        kernelMgr.collectCPUKernelsFromCircuitGraph("graphNaiveFuse");
-      for (const auto* kernel : kernelsNaiveFuse)
-        opCountTotal += kernel->gate->opCount(1e-8);
-      std::cerr << "Naive-fuse: nGates = " << kernelsNaiveFuse.size()
+  }
+  if (ArgRunNaiveFuse) {
+    std::cerr << "- Naive-fused kernels:\n";
+    double opCountTotal = collectKernelsAndGetTotalOpCount(
+      kernelMgr, "graphNaiveFuse", kernelsNaiveFuse);
+    std::cerr << "  nGates = " << kernelsNaiveFuse.size()
+              << "; opCount = " << opCountTotal << "\n";
+    if (ArgRunDenseKernel) {
+      opCountTotal = collectDenseKernelsAndGetTotalOpCount(
+        kernelMgr, "graphNaiveFuseDense", denseKernelsNaiveFuse);
+      std::cerr << "  Dense nGates = " << denseKernelsNaiveFuse.size()
                 << "; opCount = " << opCountTotal << "\n";
     }
-    if (ArgRunAdaptiveFuse) {
-      if (ArgModelPath == "") {
-        std::cerr << RED("ERROR: Adaptive fusion requires -model <file>. Skipping.\n");
-        return;
-      }
-      opCountTotal = 0.0;
-      kernelAdaptiveFuse = 
-        kernelMgr.collectCPUKernelsFromCircuitGraph("graphAdaptiveFuse");
-      for (const auto* kernel : kernelAdaptiveFuse)
-        opCountTotal += kernel->gate->opCount(1e-8);
-      std::cerr << "Adaptive-fuse: nGates = " << kernelAdaptiveFuse.size()
+  }
+  if (ArgRunAdaptiveFuse) {
+    std::cerr << "- Adaptive-fused kernels:\n";
+    double opCountTotal = collectKernelsAndGetTotalOpCount(
+      kernelMgr, "graphAdaptiveFuse", kernelAdaptiveFuse);
+    std::cerr << "  nGates = " << kernelAdaptiveFuse.size()
+              << "; opCount = " << opCountTotal << "\n";
+    if (ArgRunDenseKernel) {
+      opCountTotal = collectDenseKernelsAndGetTotalOpCount(
+        kernelMgr, "graphAdaptiveFuseDense", denseKernelAdaptiveFuse);
+      std::cerr << "  Dense nGates = " << denseKernelAdaptiveFuse.size()
                 << "; opCount = " << opCountTotal << "\n";
     }
-    }, "JIT compile kernels");
+  }
 
   // Run kernels
   utils::StatevectorCPU<double> sv(graphNoFuse.nQubits, kernelGenConfig.simd_s);
@@ -148,6 +245,7 @@ int main(int argc, const char** argv) {
   timeit::Timer timer(ArgReplication);
   timeit::TimingResult tr;
 
+  std::cerr << BOLDCYAN("Running kernels:\n");
   if (ArgRunNoFuse) {
     tr = timer.timeit([&]() {
       for (auto* kernel : kernelsNoFuse) {
@@ -156,6 +254,15 @@ int main(int argc, const char** argv) {
       }
     });
     tr.display(3, std::cerr << "No-fuse Circuit:\n");
+    if (ArgRunDenseKernel) {
+      tr = timer.timeit([&]() {
+        for (auto* kernel : denseKernelsNoFuse) {
+          kernelMgr.applyCPUKernelMultithread(
+            sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+        }
+      });
+      tr.display(3, std::cerr << "No-fuse Dense Circuit:\n");
+    }
   }
 
   if (ArgRunNaiveFuse) {
@@ -166,6 +273,15 @@ int main(int argc, const char** argv) {
       }
     });
     tr.display(3, std::cerr << "Naive-fused Circuit:\n");
+    if (ArgRunDenseKernel) {
+      tr = timer.timeit([&]() {
+        for (auto* kernel : denseKernelsNaiveFuse) {
+          kernelMgr.applyCPUKernelMultithread(
+            sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+        }
+      });
+      tr.display(3, std::cerr << "Naive-fused Dense Circuit:\n");
+    }
   }
   
   if (!kernelAdaptiveFuse.empty()) {
@@ -176,6 +292,15 @@ int main(int argc, const char** argv) {
       }
     });
     tr.display(3, std::cerr << "Adaptive-fused Circuit:\n");
+    if (ArgRunDenseKernel) {
+      tr = timer.timeit([&]() {
+        for (auto* kernel : denseKernelAdaptiveFuse) {
+          kernelMgr.applyCPUKernelMultithread(
+            sv.data(), sv.nQubits(), *kernel, ArgNThreads);
+        }
+      });
+      tr.display(3, std::cerr << "Adaptive-fused Dense Circuit:\n");
+    }
   }
   return 0;
 }
