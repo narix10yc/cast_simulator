@@ -26,19 +26,12 @@ Grammer:
 Example:
 ```
 Circuit my_circuit {
-  X<phase=pi> 0;
-  H 1;
-  RZ(pi) 2;
-}
-```
-This circuit will be compiled to
-```
-Circuit[nqubits=3, nparams=0, phase=pi] my_circuit {
   X 0;
   H 1;
-  RZ(pi) 2;
+  RZ(Pi) 2;
 }
 ```
+defines a circuit with 3 gates.
 
 Gate fusion is denoted by `@`. For example,
 ```
@@ -48,14 +41,15 @@ Circuit my_circuit2 {
   RZ(pi) 2;
 }
 ```
-This circuit is likely compiled to
+Because $YX=-iZ$, this circuit is equivalent to
 ```
-Circuit[nqubits=3, nparams=0, phase=pi/4] {
+Circuit<phase=-Pi/4> {
   Z 0;
   RZ(pi) 2;
 }
 ```
 
+### Parameter
 We support parameter by `#n`
 ```
 Circuit my_circuit3 {
@@ -69,26 +63,32 @@ Circuit[nqubits=1, nparams=1] {
 }
 ```
 
-### Noise Model
-We define noise model by the `Channel` keyword. For example, to define a symmetric depolarizing channel with strength `p`, we write
+## Gate
+
+## Channel
+We define quantum channels by the `Channel` keyword. For example, to define a symmetric depolarizing channel with strength `p`, we write
 ```
-Channel symmetric_depolarizing {
-  #0/3 X;
-  #0/3 Y;
-  #0/3 Z;
+Channel symmetric_depolarizing(p) {
+  X p/3;
+  Y p/3;
+  Z p/3;
 }
 ```
-Attributes are also supported (auto-deduced in the above example):
+Similarly, we can define a general single-qubit channel
 ```
-Channel[nqubits=1, nparams=1]
-symmetric_depolarizing {
-  #0/3 X;
-  #0/3 Y;
-  #0/3 Z;
+Channel single_qubit_noise(px, py, pz) {
+  X px;
+  Y py;
+  Z pz;
 }
 ```
 
-### Measurements and conditionals
+The channel body must be a list of `pauli_component_stmt`.
+```
+pauli_component_stmt ::= pauli_string expr ";" ;
+```
+
+## Measurements and conditionals
 ```
 Circuit[noise=symmetric_depolarizing(0.1)]
 my_noisy_circuit {

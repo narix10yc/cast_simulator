@@ -10,7 +10,8 @@
 #include <new>
 #include <vector>
 #include <span>
-#include <string_view>
+
+#include "new_parser/AST.h"
 
 namespace cast::draft {
 
@@ -171,10 +172,22 @@ public:
     return memoryManager.allocate(size, align);
   }
 
-  std::string_view createIdentifier(std::string_view name) {
-    auto* ptr = memoryManager.allocate(name.size());
-    std::memcpy(ptr, name.data(), name.size());
-    return std::string_view(static_cast<char*>(ptr), name.size());
+  ast::Identifier createIdentifier(const std::string& name) {
+    return createIdentifier(std::string_view(name));
+  }
+  
+  ast::Identifier createIdentifier(std::string_view name) {
+    auto size = name.size();
+    auto* ptr = memoryManager.allocate(size);
+    std::memcpy(ptr, name.data(), size);
+    return { std::string_view(static_cast<char*>(ptr), size) };
+  }
+
+  std::span<std::string_view> createSpan(
+      std::string_view* begin, size_t size) {
+    auto* ptr = memoryManager.allocate(size * sizeof(std::string_view));
+    std::memcpy(ptr, begin, size * sizeof(std::string_view));
+    return std::span<std::string_view>(static_cast<std::string_view*>(ptr), size);
   }
 
   template<typename T>

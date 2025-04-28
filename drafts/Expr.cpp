@@ -64,16 +64,23 @@ static ast::BinaryOpExpr::BinaryOpKind toBinaryOp(TokenKind tokenKind) {
 
 ast::Expr* Parser::parsePrimaryExpr() {
   // handle unary operators (+ and -)
-  if (curToken.is(tk_Add)) {
+  switch (curToken.kind) {
+  case tk_Add: {
     advance(tk_Add);
     return parsePrimaryExpr();
   }
-  if (curToken.is(tk_Sub)) {
+  case tk_Sub: {
     advance(tk_Sub);
     return new (ctx) ast::MinusOpExpr(parseExpr(minusOpPrecedence));
   }
+  // Identifier
+  case tk_Identifier: {
+    auto name = ctx.createIdentifier(curToken.toStringView());
+    advance(tk_Identifier);
+    return new (ctx) ast::IdentifierExpr(name);
+  }
   // Numerics
-  if (curToken.is(tk_Numeric)) {
+  case tk_Numeric: {
     if (curToken.convertibleToInt()) {
       auto iValue = curToken.toInt();
       advance(tk_Numeric);
@@ -84,22 +91,22 @@ ast::Expr* Parser::parsePrimaryExpr() {
     return new (ctx) ast::FloatingLiteral(fValue);
   }
   // Pi
-  if (curToken.is(tk_Pi)) {
+  case tk_Pi: {
     advance(tk_Pi);
     return new (ctx) ast::FractionPiLiteral(1, 1);
   }
   // Measure
-  if (curToken.is(tk_Measure)) {
+  case tk_Measure: {
     advance(tk_Measure);
     return new (ctx) ast::MeasureExpr(parseExpr());
   }
   // All
-  if (curToken.is(tk_All)) {
+  case tk_All: {
     advance(tk_All);
     return new (ctx) ast::AllExpr();
   }
   // Parameter (#number)
-  if (curToken.is(tk_Hash)) {
+  case tk_Hash: {
     advance(tk_Hash);
     requireCurTokenIs(tk_Numeric, "Expect a number after #");
     auto index = curToken.toInt();
@@ -107,14 +114,16 @@ ast::Expr* Parser::parsePrimaryExpr() {
     return new (ctx) ast::ParameterExpr(index);
   }
   // Paranthesis 
-  if (curToken.is(tk_L_RoundBracket)) {
+  case tk_L_RoundBracket: {
     advance(tk_L_RoundBracket);
     auto* expr = parseExpr();
     requireCurTokenIs(tk_R_RoundBracket, "Expect ')' to close the expression");
     advance(tk_R_RoundBracket);
     return expr;
   }
-  return nullptr;
+  default:
+    return nullptr;
+  }
 }
 
 ast::Expr* Parser::parseExpr(int precedence) {

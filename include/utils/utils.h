@@ -107,9 +107,9 @@ std::ostream& printArray(
 }
 
 // @param f: The printer is expected to take inputs (const T&, std::ostream&)
-template<typename T, typename Printer_T>
+template<typename T, typename Printer>
 std::ostream& printVectorWithPrinter(
-    const std::vector<T>& v, Printer_T f, std::ostream& os = std::cerr) {
+    const std::vector<T>& v, Printer f, std::ostream& os = std::cerr) {
   if (v.empty())
     return os << "[]";
   auto it = v.cbegin();
@@ -117,6 +117,28 @@ std::ostream& printVectorWithPrinter(
   while (++it != v.cend())
     f(*it, os << ",");
   return os << "]";
+}
+
+template <typename Printer_T, typename T>
+concept Printer_C = requires(
+    Printer_T printer, std::ostream& os, const T& value) {
+  { printer(os, value) } -> std::same_as<void>;
+};
+
+template <typename T, typename Printer_T>
+requires Printer_C<Printer_T, T>
+std::ostream& printSpanWithPrinterNoBracket(
+    std::ostream& os, std::span<T> v, Printer_T f) {
+  auto it = v.begin();
+  auto e = v.end();
+  if (it == e)
+    return os;
+  std::invoke(f, os, *it);
+  while (++it != e) {
+    os << ",";
+    std::invoke(f, os, *it);
+  }
+  return os;
 }
 
 template<typename T>

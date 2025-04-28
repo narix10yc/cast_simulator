@@ -33,18 +33,24 @@ public:
       NK_Stmt_If,
       NK_Stmt_Repeat,
       NK_Stmt_Circuit,
+      NK_Stmt_PauliComponent,
       NK_Stmt_Channel,
+      _NK_Stmt_End,
     NK_Expr,
+      NK_Expr_Identifier,
+      NK_Expr_ParameterDecl,
       NK_Expr_SimpleNumeric,
         NK_Expr_IntegerLiteral,
         NK_Expr_FloatingLiteral,
         NK_Expr_FractionLiteral,
         NK_Expr_FractionPiLiteral,
+        _NK_Expr_SimpleNumeric_End,
       NK_Expr_Measure,
       NK_Expr_All,
       NK_Expr_Parameter,
       NK_Expr_BinaryOp,
       NK_Expr_MinusOp,
+      _NK_Expr_End,
     NK_Root
   };
 private:
@@ -56,17 +62,59 @@ public:
 
   virtual ~Node() = default;
 
-  virtual std::ostream& print(std::ostream& os) const = 0;
+  virtual std::ostream& print(std::ostream& os) const {
+    return os << "[Node @ " << this << "]";
+  }
 }; // class Node
+
+/// @brief ContextManagedStringView is a simple wrapper around std::string_view.
+/// Should be created by ASTContext::createIdentifier()
+struct Identifier {
+  std::string_view str;
+
+  friend std::ostream& operator<<(std::ostream& os, const Identifier& id) {
+    return os << id.str;
+  }
+};
 
 class Expr : public Node {
 public:
   explicit Expr(NodeKind kind) : Node(kind) {}
 
   static bool classof(const Node* node) {
-    return node->getKind() >= NK_Expr && node->getKind() <= NK_Expr_MinusOp;
+    return node->getKind() >= NK_Expr && 
+           node->getKind() <= _NK_Expr_End;
   }
 }; // class Expr
+
+class IdentifierExpr : public Expr {
+public:
+  Identifier name;
+
+  IdentifierExpr(Identifier name)
+    : Expr(NK_Expr_Identifier), name(name) {}
+
+  std::ostream& print(std::ostream& os) const override {
+    return os << name;
+  }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_Identifier;
+  }
+}; // class IdentifierExpr
+
+class ParameterDeclExpr : public Expr {
+public:
+  std::span<ast::IdentifierExpr*> parameters;
+  ParameterDeclExpr(std::span<ast::IdentifierExpr*> parameters)
+    : Expr(NK_Expr_ParameterDecl), parameters(parameters) {}
+
+  std::ostream& print(std::ostream& os) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_ParameterDecl;
+  }
+}; // class ParameterDeclExpr
 
 /// @brief SimpleNumericExpr is a purely abstract class that represents a
 /// constant numeric expression. This
@@ -102,7 +150,7 @@ public:
 
   static bool classof(const Node* node) {
     return node->getKind() >= NK_Expr_SimpleNumeric &&
-           node->getKind() <= NK_Expr_FractionPiLiteral;
+           node->getKind() <= _NK_Expr_SimpleNumeric_End;
   }
 }; // class SimpleNumericExpr
 
@@ -290,17 +338,18 @@ public:
   explicit Stmt(NodeKind kind) : Node(kind) {}
 
   static bool classof(const Node* node) {
-    return node->getKind() >= NK_Stmt && node->getKind() <= NK_Stmt_Channel;
+    return node->getKind() >= NK_Stmt &&
+           node->getKind() <= _NK_Stmt_End;
   }
 }; // class Stmt
 
 class GateApplyStmt : public Stmt {
 public:
-  std::string_view name;
+  Identifier name;
   std::span<Expr*> params;
   std::span<Expr*> qubits;
 
-  GateApplyStmt(std::string_view name,
+  GateApplyStmt(Identifier name,
                 std::span<Expr*> params,
                 std::span<Expr*> qubits)
     : Stmt(NK_Stmt_GateApply), name(name), params(params), qubits(qubits) {}
@@ -344,17 +393,17 @@ public:
   }
 }; // class MeasureStmt
 
-// "Circuit" ["<" <attribute> ">"] <name> "{" {<stmt>} "}"
+// "Circuit" ["<" <attribute> ">"] <name> "{" {<stmt>} "}" ;
 class CircuitStmt : public Stmt {
 public:
-  std::string_view name;
+  Identifier name;
   Attribute* attr;
   std::span<Stmt*> body;
 
-  CircuitStmt(std::string_view name)
+  CircuitStmt(Identifier name)
     : Stmt(NK_Stmt_Circuit), name(name), attr(nullptr), body() {}
 
-  CircuitStmt(std::string_view name, Attribute* attr, std::span<Stmt*> body)
+  CircuitStmt(Identifier name, Attribute* attr, std::span<Stmt*> body)
     : Stmt(NK_Stmt_Circuit), name(name), attr(attr), body(body) {}
 
   std::ostream& print(std::ostream& os) const override;
@@ -365,6 +414,48 @@ public:
     return node->getKind() == NK_Stmt_Circuit;
   }
 }; // class CircuitStmt
+
+class PauliComponentStmt : public Stmt {
+public:
+  Identifier str;
+  Expr* weight;
+
+  PauliComponentStmt(Identifier str, Expr* weight)
+    : Stmt(NK_Stmt_PauliComponent), str(str), weight(weight) {}
+
+  std::ostream& print(std::ostream& os) const override {
+    os << str << " ";
+    weight->print(os) << ";";
+    return os;
+  }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Stmt_PauliComponent;
+  }
+}; // class PauliComponentStmt
+
+// "Channel" ["<" [<attribute>] ">"] <name> ["(" [<parameter_decl>] ")"]
+//  "{" {<pauli_component_stmt>} "}" ;
+class ChannelStmt : public Stmt {
+public:
+  Attribute* attr;
+  Identifier name;
+  ParameterDeclExpr* paramDecl;
+  std::span<PauliComponentStmt*> body;
+
+  ChannelStmt(Attribute* attr, 
+              Identifier name,
+              ParameterDeclExpr* paramDecl,
+              std::span<PauliComponentStmt*> body)
+    : Stmt(NK_Stmt_Channel)
+    , attr(attr), name(name), paramDecl(paramDecl), body(body) {}
+
+  std::ostream& print(std::ostream& os) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Stmt_Channel;
+  }
+}; // class ChannelStmt
 
 class RootNode : public Node {
 public:

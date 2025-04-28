@@ -22,6 +22,11 @@ class Parser {
   // Otherwise it returns nullptr.
   ast::Attribute* parseAttribute();
 
+  // Parse a parameter declaration. When invoked, it checks if curToken is '(',
+  // and if so, parse parameter list (ended with ')').
+  // Otherwise it returns nullptr.
+  ast::ParameterDeclExpr* parseParameterDecl();
+  
   // CircuitStmt is a top-level statement. Should only be called when curToken
   // is 'Circuit'. This function never returns nullptr.
   ast::CircuitStmt* parseCircuitStmt();
@@ -33,6 +38,14 @@ class Parser {
   ast::GateChainStmt* parseGateChainStmt();
   // Never returns nullptr
   ast::GateApplyStmt* parseGateApplyStmt();
+
+  // ChannelStmt is a top-level statement. Should only be called when curToken
+  // is 'Channel'. Never returns nullptr.
+  ast::ChannelStmt* parseChannelStmt();
+
+  // Parse a PauliComponentStmt. Should not be called when curToken is an
+  // identifier. Never returns nullptr.
+  ast::PauliComponentStmt* parsePauliComponentStmt();
   
   // Possibly returns nullptr
   ast::Expr* parseExpr(int precedence = 0);

@@ -31,6 +31,17 @@ std::ostream& ast::Attribute::print(std::ostream& os) const {
   return os << ">";
 }
 
+std::ostream& ast::ParameterDeclExpr::print(std::ostream& os) const {
+  os << "(";
+  utils::printSpanWithPrinterNoBracket(
+    os, parameters, 
+    [](std::ostream& os, ast::IdentifierExpr* param) {
+      param->print(os);
+    }
+  );
+  return os << ") ";
+}
+
 std::ostream& ast::GateApplyStmt::print(std::ostream& os) const {
   os << name;
   auto pSize = params.size();
@@ -78,7 +89,7 @@ std::ostream& ast::RootNode::print(std::ostream& os) const {
 ast::CircuitStmt* ast::RootNode::lookupCircuit(const std::string& name) {
   for (auto& stmt : stmts) {
     if (auto* circuit = llvm::dyn_cast<CircuitStmt>(stmt)) {
-      if (name.empty() || circuit->name == name)
+      if (name.empty() || circuit->name.str == name)
         return circuit;
     }
   }

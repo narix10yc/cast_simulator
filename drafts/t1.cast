@@ -1,3 +1,9 @@
 Circuit my_circuit_1 {
-  RX 0;
+  RX(0.3 * Pi) 0;
+}
+
+Channel symmetric_depolarizing(p) {
+  X p/3;
+  Y p/3;
+  Z p/3;
 }

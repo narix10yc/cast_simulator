@@ -163,6 +163,42 @@ ast::Attribute* Parser::parseAttribute() {
   return new (ctx) ast::Attribute(nQubits, nParams, phase);
 }
 
+ast::ParameterDeclExpr* Parser::parseParameterDecl() {
+  if (curToken.isNot(tk_L_RoundBracket))
+    return nullptr;
+  advance(tk_L_RoundBracket);
+  std::vector<ast::IdentifierExpr*> params;
+  while (true) {
+    switch (curToken.kind) {
+      case tk_R_RoundBracket: {
+        break;
+      }
+      case tk_Identifier: {
+        auto name = ctx.createIdentifier(curToken.toStringView());
+        params.push_back(new (ctx) ast::IdentifierExpr(name));
+        advance(tk_Identifier);
+        if (curToken.is(tk_Comma))
+          advance(tk_Comma);
+        break;
+      }
+      case tk_Comma: {
+        logErrHere("Extra comma in parameter list");
+        failAndExit();
+        return nullptr;
+      }
+      default:
+        logErrHere("Expect a parameter name or ')' to end parameter list");
+        failAndExit();
+    }
+    if (curToken.is(tk_R_RoundBracket))
+      break;
+  }
+  advance(tk_R_RoundBracket);
+  return new (ctx) ast::ParameterDeclExpr(
+    ctx.createSpan(params.data(), params.size())
+  );
+}
+
 ast::CircuitStmt* Parser::parseCircuitStmt() {
   assert(curToken.is(tk_Circuit) &&
          "parseCircuitStmt expects to be called with a 'Circuit' token");
@@ -286,6 +322,12 @@ ast::RootNode* Parser::parse() {
     switch (curToken.kind) {
       case tk_Circuit: {
         auto* stmt = parseCircuitStmt();
+        assert(stmt != nullptr);
+        stmts.push_back(stmt);
+        break;
+      }
+      case tk_Channel: {
+        auto* stmt = parseChannelStmt();
         assert(stmt != nullptr);
         stmts.push_back(stmt);
         break;
