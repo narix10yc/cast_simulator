@@ -10,7 +10,7 @@ All keywords start in captial letter. Keywords include `Circuit`, `Channel`, `Al
 ### Standard Gates
 - All captical letters.
 - Builtin support includes `X`, `Y`, `Z`, `H`, `CX`, `CY`, `CZ`, `RX`, `RY`, `RZ`.
-- Optionally be followed by square brakets `[]` for attributes. For example, `X[phase=pi]` means the $-X$ gate.
+- Parameters should follow round brackets. For example, `RX(-Pi) 0` means applying a RX gate with angle $-\pi$ to qubit 0.
 
 ### Top-level Statements
 ```
