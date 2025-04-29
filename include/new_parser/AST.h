@@ -39,6 +39,7 @@ public:
     NK_Expr,
       NK_Expr_Identifier,
       NK_Expr_ParameterDecl,
+      NK_Expr_Call,
       NK_Expr_SimpleNumeric,
         NK_Expr_IntegerLiteral,
         NK_Expr_FloatingLiteral,
@@ -68,7 +69,8 @@ public:
 }; // class Node
 
 /// @brief ContextManagedStringView is a simple wrapper around std::string_view.
-/// Should be created by ASTContext::createIdentifier()
+/// Should be created by ASTContext::createIdentifier() for correct memory
+/// management.
 struct Identifier {
   std::string_view str;
 
@@ -87,6 +89,7 @@ public:
   }
 }; // class Expr
 
+/// @brief IdentifierExpr internally is a string_view.
 class IdentifierExpr : public Expr {
 public:
   Identifier name;
@@ -115,6 +118,21 @@ public:
     return node->getKind() == NK_Expr_ParameterDecl;
   }
 }; // class ParameterDeclExpr
+
+class CallExpr : public Expr {
+public:
+  Identifier name;
+  std::span<Expr*> args;
+
+  CallExpr(Identifier name, std::span<Expr*> args)
+    : Expr(NK_Expr_Call), name(name), args(args) {}
+
+  std::ostream& print(std::ostream& os) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Expr_Call;
+  }
+}; // class CallExpr
 
 /// @brief SimpleNumericExpr is a purely abstract class that represents a
 /// constant numeric expression. This
@@ -297,6 +315,8 @@ public:
 
   std::ostream& print(std::ostream& os) const override;
 
+  static int getPrecedence(BinaryOpKind binOp);
+
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_BinaryOp;
   }
@@ -313,10 +333,12 @@ public:
 
   std::ostream& print(std::ostream& os) const override;
 
+  static int getPrecedence();
+
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_MinusOp;
   }
-}; // class UnaryOpExpr
+}; // class MinusOpExpr
 
 class Attribute {
 public:
@@ -333,6 +355,7 @@ public:
   std::ostream& print(std::ostream& os) const;
 };
 
+// The base class for all statements. 
 class Stmt : public Node {
 public:
   explicit Stmt(NodeKind kind) : Node(kind) {}
@@ -355,7 +378,7 @@ public:
     : Stmt(NK_Stmt_GateApply), name(name), params(params), qubits(qubits) {}
 
   // Because we expect \c GateApplyStmt will not appear in the top-level, 
-  // \c print does not print indentation or the final semicolon.
+  // \c print does not print indentation nor the final semicolon.
   std::ostream& print(std::ostream& os) const override;
 
   static bool classof(const Node* node) {
