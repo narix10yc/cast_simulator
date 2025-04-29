@@ -175,7 +175,7 @@ public:
   ast::Identifier createIdentifier(const std::string& name) {
     return createIdentifier(std::string_view(name));
   }
-  
+
   ast::Identifier createIdentifier(std::string_view name) {
     auto size = name.size();
     auto* ptr = memoryManager.allocate(size);
@@ -191,10 +191,15 @@ public:
   }
 
   template<typename T>
-  std::span<T*> createSpan(T** begin, size_t size) {
+  std::span<T*> createSpan(T *const * begin, size_t size) {
     auto* ptr = memoryManager.allocate(size * sizeof(T*));
     std::memcpy(ptr, begin, size * sizeof(T*));
     return std::span<T*>(static_cast<T**>(ptr), size);
+  }
+
+  template<typename T>
+  std::span<T*> createSpan(const std::vector<T*>& vec) {
+    return createSpan(vec.data(), vec.size());
   }
 
   template<typename T, typename... Args>

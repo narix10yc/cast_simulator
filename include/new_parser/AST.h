@@ -66,6 +66,10 @@ public:
   virtual std::ostream& print(std::ostream& os) const {
     return os << "[Node @ " << this << "]";
   }
+
+  virtual std::ostream& prettyPrint(std::ostream& os, int indent=0) const {
+    return os << std::string(indent, ' ') << "[Node @ " << this << "]\n";
+  }
 }; // class Node
 
 /// @brief ContextManagedStringView is a simple wrapper around std::string_view.

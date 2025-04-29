@@ -26,6 +26,9 @@ class Parser {
   // and if so, parse parameter list (ended with ')').
   // Otherwise it returns nullptr.
   ast::ParameterDeclExpr* parseParameterDecl();
+
+  // Used in \c parsePrimaryStmt, triggered by when \c curToken is an identfier
+  ast::Expr* parseIdentifierOrCallExpr();
   
   // CircuitStmt is a top-level statement. Should only be called when curToken
   // is 'Circuit'. This function never returns nullptr.

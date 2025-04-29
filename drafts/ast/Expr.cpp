@@ -2,6 +2,35 @@
 
 using namespace cast::draft;
 
+ast::Expr* Parser::parseIdentifierOrCallExpr() {
+  assert(curToken.is(tk_Identifier));
+  auto name = ctx.createIdentifier(curToken.toStringView());
+  advance(tk_Identifier);
+  if (curToken.isNot(tk_L_RoundBracket))
+    return new (ctx) ast::IdentifierExpr(name);
+
+  // A call expr
+  advance(tk_L_RoundBracket);
+  std::vector<ast::Expr*> args;
+  while (true) {
+    auto* arg = parseExpr();
+    if (arg == nullptr)
+      break;
+    args.push_back(arg);
+    if (curToken.is(tk_Comma)) {
+      advance(tk_Comma);
+      continue;
+    }
+    if (curToken.is(tk_R_RoundBracket))
+      break;
+    logErrHere("Invalid token inside function call arguments");
+    failAndExit();
+  }
+
+  advance(tk_R_RoundBracket);
+  return new (ctx) ast::CallExpr(name, ctx.createSpan(args));
+}
+
 ast::Expr* Parser::parsePrimaryExpr() {
   // handle unary operators (+ and -)
   switch (curToken.kind) {
@@ -16,9 +45,7 @@ ast::Expr* Parser::parsePrimaryExpr() {
   }
   // Identifier
   case tk_Identifier: {
-    auto name = ctx.createIdentifier(curToken.toStringView());
-    advance(tk_Identifier);
-    return new (ctx) ast::IdentifierExpr(name);
+    return parseIdentifierOrCallExpr();
   }
   // Numerics
   case tk_Numeric: {
