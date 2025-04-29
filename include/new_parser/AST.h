@@ -20,7 +20,6 @@ namespace cast::draft {
   class ASTContext;
 
 namespace ast {
-
 class Node {
 public:
   /// The LLVM-style RTTI. Indentation corresponds to class hirearchy.
@@ -61,14 +60,19 @@ public:
 
   NodeKind getKind() const { return _kind; }
 
+  static std::string getKindName(NodeKind k);
+
   virtual ~Node() = default;
 
   virtual std::ostream& print(std::ostream& os) const {
-    return os << "[Node @ " << this << "]";
+    return os << "[Node " << Node::getKindName(getKind())
+              << " @ " << this << "]";
   }
 
   virtual std::ostream& prettyPrint(std::ostream& os, int indent=0) const {
-    return os << std::string(indent, ' ') << "[Node @ " << this << "]\n";
+    return os << std::string(indent, ' ') 
+              << "[Node " << Node::getKindName(getKind())
+              << " @ " << this << "]\n";
   }
 }; // class Node
 

@@ -6,6 +6,13 @@
 
 using namespace cast::draft;
 
+std::string ast::Node::getKindName(ast::Node::NodeKind k) {
+  switch (k) {
+    default:
+      return "Unmplemented NodeKindName";
+  }
+}
+
 void ast::CircuitStmt::toCircuitGraph(cast::CircuitGraph& graph) const {
   assert(false && "Not implemented yet");
 }
