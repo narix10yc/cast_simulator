@@ -179,7 +179,9 @@ public:
   // @brief Get number of qubits
   int nQubits() const;
 
-  // int opCount() const;
+  /// @brief Return other * this. That is, A.lmatmul(B) will return BA.
+  /// Currently only support cMat
+  GateMatrix lmatmul(const GateMatrix& other) const;
 
   std::ostream& printCMat(std::ostream& os) const;
 
@@ -219,6 +221,16 @@ public:
 
   static const p_matrix_t MatrixCX_p;
   static const p_matrix_t MatrixCZ_p;
+
+  // preset gate matrices
+  static GateMatrix H() { return GateMatrix(MatrixH_c); }
+  static GateMatrix X() { return GateMatrix(MatrixX_c); }
+  static GateMatrix Y() { return GateMatrix(MatrixY_c); }
+  static GateMatrix Z() { return GateMatrix(MatrixZ_c); }
+  static GateMatrix I1() { return GateMatrix(MatrixI1_c); }
+  static GateMatrix I2() { return GateMatrix(MatrixI2_c); }
+  static GateMatrix CX() { return GateMatrix(MatrixCX_c); }
+  static GateMatrix CZ() { return GateMatrix(MatrixCZ_c); }
 };
 
 

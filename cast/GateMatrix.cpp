@@ -660,3 +660,22 @@ void GateMatrix::computeAndCacheSigMat(double zeroTol, double oneTol) const {
   cache.sigZeroTol = zeroTol;
   cache.sigOneTol = oneTol;
 }
+
+GateMatrix GateMatrix::lmatmul(const GateMatrix& other) const {
+  auto* cMatA = getConstantMatrix();
+  auto* cMatB = other.getConstantMatrix();
+  assert(cMatA != nullptr && cMatB != nullptr);
+  assert(cMatA->edgeSize() == cMatB->edgeSize());
+  const auto edgeSize = cMatA->edgeSize();
+  c_matrix_t cMat(edgeSize);
+
+  // (BA)_ij = B_ik * A_kj
+  for (size_t i = 0; i < edgeSize; ++i) {
+    for (size_t j = 0; j < edgeSize; ++j) {
+      cMat.rc(i, j) = {0.0, 0.0};
+      for (size_t k = 0; k < edgeSize; ++k)
+        cMat.rc(i, j) += cMatB->rc(i, k) * cMatA->rc(k, j);
+    }
+  }
+  return GateMatrix(cMat);
+}
