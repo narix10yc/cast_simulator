@@ -233,7 +233,8 @@ public:
   static GateMatrix CZ() { return GateMatrix(MatrixCZ_c); }
 };
 
-
+// An easy name for gate matrix pointer type
+using gmp_t = std::shared_ptr<GateMatrix>;
 
 } // namespace cast
 
