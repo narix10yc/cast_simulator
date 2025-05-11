@@ -7,7 +7,8 @@ int main(int argc, char** argv) {
   ASTContext context;
   Parser parser(context, argv[1]);
   auto* root = parser.parse();
-  root->prettyPrint(std::cerr);
+  ast::PrettyPrinter p(std::cerr);
+  root->prettyPrint(p, 0);
   root->print(std::cerr);
 
   return 0;

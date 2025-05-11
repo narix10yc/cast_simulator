@@ -1,6 +1,7 @@
 #ifndef CAST_DRAFT_AST_H
 #define CAST_DRAFT_AST_H
 
+#include "new_parser/PrettyPrinter.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/ADT/SmallVector.h"
 #include "utils/PODVariant.h"
@@ -18,8 +19,9 @@ namespace cast {
 
 namespace cast::draft {
   class ASTContext;
-
+  
 namespace ast {
+  
 class Node {
 public:
   /// The LLVM-style RTTI. Indentation corresponds to class hirearchy.
@@ -55,24 +57,24 @@ public:
   };
 private:
   NodeKind _kind;
+  static std::string _getKindName(NodeKind k);
 public:
   explicit Node(NodeKind kind) : _kind(kind) {}
 
   NodeKind getKind() const { return _kind; }
 
-  static std::string getKindName(NodeKind k);
+  virtual std::string getKindName() const { return _getKindName(_kind); }
 
   virtual ~Node() = default;
 
   virtual std::ostream& print(std::ostream& os) const {
-    return os << "[Node " << Node::getKindName(getKind())
+    return os << "[Node " << getKindName()
               << " @ " << this << "]";
   }
 
-  virtual std::ostream& prettyPrint(std::ostream& os, int indent=0) const {
-    return os << std::string(indent, ' ') 
-              << "[Node " << Node::getKindName(getKind())
-              << " @ " << this << "]\n";
+  virtual void prettyPrint(PrettyPrinter& p, int indent) const {
+    p.write(indent) << "[Node " << getKindName()
+                    << " @ " << this << "]\n";
   }
 }; // class Node
 
@@ -108,6 +110,9 @@ public:
   std::ostream& print(std::ostream& os) const override {
     return os << name;
   }
+  void prettyPrint(PrettyPrinter& p, int indent) const override {
+    p.write(indent) << getKindName() << "(" << name << ")\n";
+  }
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_Identifier;
@@ -136,6 +141,8 @@ public:
     : Expr(NK_Expr_Call), name(name), args(args) {}
 
   std::ostream& print(std::ostream& os) const override;
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_Call;
@@ -193,6 +200,10 @@ public:
     return os << value;
   }
 
+  void prettyPrint(PrettyPrinter& p, int indent) const override {
+    p.write(indent) << getKindName() << "(" << value << ")\n";
+  }
+
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_IntegerLiteral;
   }
@@ -209,6 +220,10 @@ public:
 
   std::ostream& print(std::ostream& os) const override {
     return os << value;
+  }
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override {
+    p.write(indent) << getKindName() << "(" << value << ")\n";
   }
 
   static bool classof(const Node* node) {
@@ -229,6 +244,8 @@ public:
   double getValue() const override { return double(n) / d; }
 
   std::ostream& print(std::ostream& os) const override;
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_FractionLiteral;
@@ -389,6 +406,8 @@ public:
   // \c print does not print indentation nor the final semicolon.
   std::ostream& print(std::ostream& os) const override;
 
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
+
   static bool classof(const Node* node) {
     return node->getKind() == NK_Stmt_GateApply;
   }
@@ -402,6 +421,8 @@ public:
     : Stmt(NK_Stmt_GateChain), gates(gates) {}
 
   std::ostream& print(std::ostream& os) const override;
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Stmt_GateChain;
@@ -438,6 +459,8 @@ public:
     : Stmt(NK_Stmt_Circuit), name(name), attr(attr), body(body) {}
 
   std::ostream& print(std::ostream& os) const override;
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
 
   void toCircuitGraph(cast::CircuitGraph& graph) const;
 
@@ -495,6 +518,7 @@ public:
   RootNode(std::span<Stmt*> stmts) : Node(NK_Root), stmts(stmts) {}
 
   std::ostream& print(std::ostream& os) const override;
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
 
   /// Lookup a circuit by name. If not found, return nullptr.
   /// If name is empty, return the first circuit found.
