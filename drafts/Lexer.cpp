@@ -52,15 +52,13 @@ std::ostream& Token::print(std::ostream& os) const {
   os << "tok(";
 
   if (kind == tk_Numeric) {
-    assert(memRefBegin != memRefEnd);
     os << "Num,";
-    return os.write(memRefBegin, memRefEnd - memRefBegin) << ")";
+    return os.write(loc.begin, length()) << ")";
   }
 
   if (kind == tk_Identifier) {
-    assert(memRefBegin != memRefEnd);
     os << "Identifier,";
-    return os.write(memRefBegin, memRefEnd - memRefBegin) << ")";
+    return os.write(loc.begin, length()) << ")";
   }
 
   os << IOColor::CYAN_FG;
@@ -267,7 +265,7 @@ void Lexer::lex(Token& tok) {
       std::cerr << RED("[Lexer Error]: ") << "Unknown char "
                 << static_cast<int>(c)
                 << ". This is likely not implemented yet.\n";
-      sm.printLineInfo(std::cerr, curPtr, curPtr + 1);
+      sm.printLineInfo(std::cerr, {curPtr, curPtr + 1});
       assert(false);
     }
     c = *(++curPtr);

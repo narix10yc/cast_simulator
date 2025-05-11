@@ -6,6 +6,7 @@ int main(int argc, char** argv) {
   assert(argc > 1);
   ASTContext context;
   Parser parser(context, argv[1]);
+  parser.displayLineTable();
   auto* root = parser.parse();
   ast::PrettyPrinter p(std::cerr);
   root->prettyPrint(p, 0);

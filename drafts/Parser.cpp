@@ -1,8 +1,64 @@
 #include "new_parser/Parser.h"
+#include <llvm/Support/Casting.h>
 #include <fstream>
 #include <cassert>
 
 using namespace cast::draft;
+
+void Parser::displayLineTable() const {
+  std::cerr << "Line table:\n";
+  if (lexer.sm.lineTable.empty()) {
+    std::cerr << "  Line table is empty.\n";
+    return;
+  }
+  auto nLines = lexer.sm.lineTable.size() - 1;
+  for (size_t i = 0; i < nLines; ++i) {
+    std::cerr << "Line " << i + 1 << " @ "
+              << static_cast<const void*>(lexer.sm.lineTable[i]) << " | "
+              << IOColor::CYAN_FG;
+
+    std::cerr.write(
+      lexer.sm.lineTable[i], 
+      lexer.sm.lineTable[i + 1] - lexer.sm.lineTable[i]
+    );
+    std::cerr << IOColor::RESET;
+  }
+  std::cerr << "\nEoF @ "
+            << static_cast<const void*>(lexer.sm.lineTable[nLines]) << "\n";
+}
+
+void Parser::addSymbol(ast::Identifier name, ast::Node* node) {
+  const auto locPrint = [this](ast::Node* node) {
+    if (auto* circuit = llvm::dyn_cast<ast::CircuitStmt>(node)) {
+      printLineInfo(circuit->nameLoc);
+    } else if (auto* channel = llvm::dyn_cast<ast::ChannelStmt>(node)) {
+      printLineInfo(channel->nameLoc);
+    } else {
+      assert(false && "Unknown node type");
+    }
+  };
+  assert(currentScope && "Trying to add symbol to a null scope");
+  auto it = currentScope->symbols.find(name);
+  if (it != currentScope->symbols.end()) {
+    err() << "Duplicate symbol: " << name << "\n";
+    locPrint(node);
+    std::cerr << "Previous definition:\n";
+    locPrint(it->second);
+    failAndExit();
+  }
+  currentScope->symbols[name] = node;
+}
+
+ast::Node* Parser::lookup(ast::Identifier name) {
+  Scope* scope = currentScope;
+  while (scope) {
+    auto it = scope->symbols.find(name);
+    if (it != scope->symbols.end())
+      return it->second;
+    scope = scope->parent;
+  }
+  return nullptr;
+}
 
 void Parser::requireCurTokenIs(TokenKind kind, const char* msg) const {
   if (curToken.is(kind))
@@ -76,8 +132,8 @@ std::complex<double> Parser::parseComplexNumber() {
 
 // Try to convert a general expression to a simple numeric expression.
 // Return nullptr if the conversion is not possible.
-static ast::SimpleNumericExpr*
-convertExprToSimpleNumeric(ASTContext& ctx, ast::Expr* expr) {
+ast::SimpleNumericExpr*
+Parser::convertExprToSimpleNumeric(ast::Expr* expr) {
   if (expr == nullptr)
     return nullptr;
   // okay: SimpleNumericExpr
@@ -86,7 +142,7 @@ convertExprToSimpleNumeric(ASTContext& ctx, ast::Expr* expr) {
 
   // possibly okay: MinusOpExpr
   if (auto* e = llvm::dyn_cast<ast::MinusOpExpr>(expr)) {
-    auto* operand = convertExprToSimpleNumeric(ctx, e->operand);
+    auto* operand = convertExprToSimpleNumeric(e->operand);
     if (operand == nullptr)
       return nullptr;
     return ast::SimpleNumericExpr::neg(ctx, operand);
@@ -94,8 +150,8 @@ convertExprToSimpleNumeric(ASTContext& ctx, ast::Expr* expr) {
 
   // possibly okay: BinaryOpExpr
   if (auto* e = llvm::dyn_cast<ast::BinaryOpExpr>(expr)) {
-    auto* lhs = convertExprToSimpleNumeric(ctx, e->lhs);
-    auto* rhs = convertExprToSimpleNumeric(ctx, e->rhs);
+    auto* lhs = convertExprToSimpleNumeric(e->lhs);
+    auto* rhs = convertExprToSimpleNumeric(e->rhs);
     if (!lhs || !rhs)
       return nullptr;
     switch (e->op) {
@@ -145,7 +201,7 @@ ast::Attribute* Parser::parseAttribute() {
     }
     else if (name == "phase") {
       auto* expr = parseExpr();
-      phase = convertExprToSimpleNumeric(ctx, expr);
+      phase = convertExprToSimpleNumeric(expr);
       std::cerr << "Successful: ";
       phase->print(std::cerr) << "\n";
       if (phase == nullptr) {
@@ -199,37 +255,6 @@ ast::ParameterDeclExpr* Parser::parseParameterDecl() {
   );
 }
 
-ast::CircuitStmt* Parser::parseCircuitStmt() {
-  assert(curToken.is(tk_Circuit) &&
-         "parseCircuitStmt expects to be called with a 'Circuit' token");
-  advance(tk_Circuit);
-
-  auto* attr = parseAttribute();
-  requireCurTokenIs(tk_Identifier, "Expect a circuit name");
-  auto name = ctx.createIdentifier(curToken.toStringView());
-  advance(tk_Identifier);
-
-  requireCurTokenIs(tk_L_CurlyBracket, "Expect '{' to start circuit body");
-  advance(tk_L_CurlyBracket);
-  // circuit body
-  llvm::SmallVector<ast::Stmt*> body;
-  while (true) {
-    auto* stmt = parseCircuitLevelStmt();
-    if (stmt == nullptr)
-      break;
-    body.push_back(stmt);
-  }
-
-  requireCurTokenIs(tk_R_CurlyBracket, "Expect '}' to end circuit body");
-  advance(tk_R_CurlyBracket);
-
-  return new (ctx) ast::CircuitStmt(
-    name, 
-    attr,
-    ctx.createSpan(body.data(), body.size())
-  );
-}
-
 ast::Stmt* Parser::parseCircuitLevelStmt() {
   switch (curToken.kind) {
     case tk_Measure: {
@@ -243,103 +268,4 @@ ast::Stmt* Parser::parseCircuitLevelStmt() {
     default:
       return nullptr;
   }
-}
-
-ast::GateChainStmt* Parser::parseGateChainStmt() {
-  llvm::SmallVector<ast::GateApplyStmt*> gates;
-  while (true) {
-    if (curToken.is(tk_Semicolon))
-      break;
-    auto* gate = parseGateApplyStmt();
-    assert(gate != nullptr);
-    gates.push_back(gate);
-    if (curToken.is(tk_AtSymbol)) {
-      advance(tk_AtSymbol);
-      continue;
-    }
-    requireCurTokenIs(tk_Semicolon, "Expect ';' to finish a GateChain");
-  }
-  advance(tk_Semicolon);
-
-  return new (ctx) ast::GateChainStmt(
-    ctx.createSpan(gates.data(), gates.size())
-  );
-}
-
-ast::GateApplyStmt* Parser::parseGateApplyStmt() {
-  // name
-  assert(curToken.is(tk_Identifier) &&
-         "parseGateApplyStmt expects to be called with an identifier");
-  auto name = ctx.createIdentifier(curToken.toStringView());
-  advance(tk_Identifier);
-  
-  llvm::SmallVector<ast::Expr*> params;
-  llvm::SmallVector<ast::Expr*> qubits;
-  // gate parameters
-  if (curToken.is(tk_L_RoundBracket)) {
-    advance(tk_L_RoundBracket);
-    while (true) {
-      auto* expr = parseExpr();
-      if (expr == nullptr)
-        break;
-      // try to simplify the gate parameter to simple numerics
-      if (auto* e = convertExprToSimpleNumeric(ctx, expr))
-        expr = e;
-      params.push_back(expr);
-      if (curToken.is(tk_R_RoundBracket))
-        break;
-      requireCurTokenIs(tk_Comma, "Expect ',' to separate parameters");
-      advance(tk_Comma);
-      continue;
-    }
-    advance(tk_R_RoundBracket);
-  }
-  
-  // target qubits
-  while (true) {
-    auto* expr = parseExpr();
-    if (expr == nullptr)
-      break;
-    qubits.push_back(expr);
-    // skip optional comma
-    if (curToken.is(tk_Comma)) {
-      advance(tk_Comma);
-      continue;
-    }
-  }
-
-  return new (ctx) ast::GateApplyStmt(
-    name, 
-    ctx.createSpan(params.data(), params.size()),
-    ctx.createSpan(qubits.data(), qubits.size())
-  );
-}
-
-ast::RootNode* Parser::parse() {
-  llvm::SmallVector<ast::Stmt*> stmts;
-
-  while (curToken.isNot(tk_Eof)) {
-    switch (curToken.kind) {
-      case tk_Circuit: {
-        auto* stmt = parseCircuitStmt();
-        assert(stmt != nullptr);
-        stmts.push_back(stmt);
-        break;
-      }
-      case tk_Channel: {
-        auto* stmt = parseChannelStmt();
-        assert(stmt != nullptr);
-        stmts.push_back(stmt);
-        break;
-      }
-      default: {
-        logErrHere("Expecting a top-level expression, which could be a "
-                   "Circuit or Channel.");
-        failAndExit();
-      }
-    }
-  }
-  return new (ctx) ast::RootNode(
-    ctx.createSpan(stmts.data(), stmts.size())
-  );
 }

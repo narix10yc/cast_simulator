@@ -1,6 +1,7 @@
 #ifndef CAST_DRAFT_AST_H
 #define CAST_DRAFT_AST_H
 
+#include "new_parser/LocationSpan.h"
 #include "new_parser/PrettyPrinter.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/ADT/SmallVector.h"
@@ -78,11 +79,17 @@ public:
   }
 }; // class Node
 
-/// @brief ContextManagedStringView is a simple wrapper around std::string_view.
+/// @brief Identifier is a simple wrapper around std::string_view.
 /// Should be created by ASTContext::createIdentifier() for correct memory
 /// management.
 struct Identifier {
   std::string_view str;
+
+  explicit Identifier(std::string_view str) : str(str) {}
+
+  bool operator==(const Identifier& other) const {
+    return str == other.str;
+  }
 
   friend std::ostream& operator<<(std::ostream& os, const Identifier& id) {
     return os << id.str;
@@ -404,7 +411,8 @@ public:
   GateApplyStmt(Identifier name,
                 std::span<Expr*> params,
                 std::span<Expr*> qubits)
-    : Stmt(NK_Stmt_GateApply), name(name), params(params), qubits(qubits) {}
+    : Stmt(NK_Stmt_GateApply)
+    , name(name), params(params), qubits(qubits) {}
 
   // Because we expect \c GateApplyStmt will not appear in the top-level, 
   // \c print does not print indentation nor the final semicolon.
@@ -453,14 +461,16 @@ public:
 class CircuitStmt : public Stmt {
 public:
   Identifier name;
+  LocationSpan nameLoc;
   Attribute* attr;
   std::span<Stmt*> body;
 
-  CircuitStmt(Identifier name)
-    : Stmt(NK_Stmt_Circuit), name(name), attr(nullptr), body() {}
-
-  CircuitStmt(Identifier name, Attribute* attr, std::span<Stmt*> body)
-    : Stmt(NK_Stmt_Circuit), name(name), attr(attr), body(body) {}
+  CircuitStmt(Identifier name,
+              LocationSpan nameLoc,
+              Attribute* attr,
+              std::span<Stmt*> body)
+    : Stmt(NK_Stmt_Circuit)
+    , name(name), nameLoc(nameLoc), attr(attr), body(body) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -495,14 +505,17 @@ public:
 class ChannelStmt : public Stmt {
 public:
   Identifier name;
+  LocationSpan nameLoc;
   ParameterDeclExpr* paramDecl;
   std::span<PauliComponentStmt*> components;
 
   ChannelStmt(Identifier name,
+              LocationSpan nameLoc,
               ParameterDeclExpr* paramDecl,
               std::span<PauliComponentStmt*> components)
     : Stmt(NK_Stmt_Channel)
-    , name(name), paramDecl(paramDecl), components(components) {}
+    , name(name), nameLoc(nameLoc)
+    , paramDecl(paramDecl), components(components) {}
 
   std::ostream& print(std::ostream& os) const override;
 

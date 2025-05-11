@@ -30,6 +30,14 @@ public:
 
 }; // class QuantumChannel
 
+namespace draft::ast {
+  class ChannelStmt;
+}
+using ChannelStmt = draft::ast::ChannelStmt;
+
+std::shared_ptr<QuantumChannel> getQuantumChannelFromAST(
+    const ChannelStmt& channelStmt, const llvm::SmallVector<int>& qubits);
+
 } // namespace cast
 
 #endif // CAST_QUANTUM_CHANNEL_H

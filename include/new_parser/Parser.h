@@ -6,11 +6,27 @@
 #include "new_parser/Lexer.h"
 #include "utils/iocolor.h"
 #include <complex>
+#include <unordered_map>
 
 namespace cast::draft {
+
+class Scope {
+private:
+  struct IdentifierHash {
+    std::size_t operator()(const ast::Identifier& id) const {
+      return std::hash<std::string_view>()(id.str);
+    }
+  }; // struct IdentifierHash
+public:
+  std::unordered_map<ast::Identifier, ast::Node*, IdentifierHash> symbols;
+  Scope* parent;
+  explicit Scope(Scope* parent) : symbols(), parent(parent) {}
+}; // class Scope
+
 class Parser {
-  Lexer lexer;
   ASTContext& ctx;
+  Lexer lexer;
+  Scope* currentScope;
 
   Token curToken;
   Token nextToken;
@@ -56,9 +72,37 @@ class Parser {
   // Possibly returns nullptr
   ast::Expr* parsePrimaryExpr();
 
+  // Try to convert a general expression to a simple numeric expression.
+  // Return nullptr if the conversion is not possible.
+  ast::SimpleNumericExpr* convertExprToSimpleNumeric(ast::Expr* expr);
+
+  void pushScope() {
+    currentScope = new Scope(currentScope);
+  }
+
+  void popScope() {
+    assert(currentScope && "Trying to pop a null scope");
+    Scope* parent = currentScope->parent;
+    delete currentScope;
+    currentScope = parent;
+  }
+
+  void addSymbol(ast::Identifier name, ast::Node* node);
+
+  ast::Node* lookup(ast::Identifier name);
+
+  std::ostream& err() const {
+    return std::cerr << BOLDRED("Parser Error: ");
+  }
+
+  std::ostream& printLineInfo(LocationSpan loc) const {
+    return lexer.sm.printLineInfo(std::cerr, loc);
+  }
+  
+  // A convenience function to print error message followed by line info.
   void logErrHere(const char* msg) const {
-    std::cerr << BOLDRED("Parser Error: ") << msg << "\n";
-    lexer.sm.printLineInfo(std::cerr, curToken.memRefBegin, curToken.memRefEnd);
+    err() << msg << "\n";
+    lexer.sm.printLineInfo(std::cerr, curToken.loc);
   }
 
   void failAndExit() const {
@@ -91,12 +135,23 @@ class Parser {
   void requireCurTokenIs(TokenKind kind, const char* msg = nullptr) const;
 public:
   Parser(ASTContext& ctx, const char* fileName)
-    : lexer(fileName), ctx(ctx) {
+    : ctx(ctx), lexer(fileName), currentScope(nullptr) {
     lexer.lex(curToken);
     lexer.lex(nextToken);
   }
 
+  Parser(const Parser&) = delete;
+  Parser& operator=(const Parser&) = delete;
+  Parser(Parser&&) = delete;
+  Parser& operator=(Parser&&) = delete;
+
+  ~Parser() {
+    assert(currentScope == nullptr && "Parser exits with a non-empty scope");
+  }
+
   ast::RootNode* parse();
+
+  void displayLineTable() const;
 };
 
 

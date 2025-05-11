@@ -1,6 +1,8 @@
+#include "cast/QuantumChannel.h"
 #include "cast/internal/KrausRep.h"
 #include "cast/internal/ChoiRep.h"
 
+#include "new_parser/AST.h"
 using namespace cast;
 
 std::ostream& KrausRep::display(std::ostream& os) const {
@@ -52,6 +54,21 @@ ChoiRep ChoiRep::FromKrausRep(const KrausRep& krausRep) {
       }
     }
   }
-
   return choiRep;
+}
+
+int QuantumChannel::getRank() const {
+  if (reps.choiRep) {
+    return reps.choiRep->rank();
+  }
+  return -1;
+}
+
+std::shared_ptr<QuantumChannel> getQuantumChannelFromAST(
+    const ChannelStmt& channelStmt, const llvm::SmallVector<int>& qubits) {
+  auto quantumChannel = std::make_shared<QuantumChannel>(qubits);
+  auto& reps = quantumChannel->reps;
+  reps.krausRep = std::make_shared<KrausRep>(qubits.size());
+  reps.choiRep = std::make_shared<ChoiRep>(qubits.size());
+  return quantumChannel;
 }

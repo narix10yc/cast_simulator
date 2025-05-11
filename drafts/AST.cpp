@@ -99,7 +99,7 @@ std::ostream& ast::ParameterDeclExpr::print(std::ostream& os) const {
       param->print(os);
     }
   );
-  return os << ") ";
+  return os << ")";
 }
 
 ast::CircuitStmt* ast::RootNode::lookupCircuit(const std::string& name) {

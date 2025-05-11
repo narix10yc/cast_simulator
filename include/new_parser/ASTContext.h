@@ -180,14 +180,15 @@ public:
     auto size = name.size();
     auto* ptr = memoryManager.allocate(size);
     std::memcpy(ptr, name.data(), size);
-    return { std::string_view(static_cast<char*>(ptr), size) };
+    return ast::Identifier(std::string_view(static_cast<char*>(ptr), size));
   }
 
   std::span<std::string_view> createSpan(
       std::string_view* begin, size_t size) {
     auto* ptr = memoryManager.allocate(size * sizeof(std::string_view));
     std::memcpy(ptr, begin, size * sizeof(std::string_view));
-    return std::span<std::string_view>(static_cast<std::string_view*>(ptr), size);
+    return std::span<std::string_view>(static_cast<std::string_view*>(ptr),
+                                       size);
   }
 
   template<typename T>
@@ -210,8 +211,6 @@ public:
 };
 
 } // namespace cast::draft
-
-#include <iostream>
 
 inline void* operator new(size_t size, cast::draft::ASTContext& ctx) {
   return ctx.allocate(size);

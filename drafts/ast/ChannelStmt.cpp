@@ -7,6 +7,7 @@ ast::ChannelStmt* Parser::parseChannelStmt() {
   advance(tk_Channel);
   requireCurTokenIs(tk_Identifier, "Expect a channel name");
   auto name = ctx.createIdentifier(curToken.toStringView());
+  auto nameLoc = curToken.loc;
   advance(tk_Identifier);
   auto* paramDecl = parseParameterDecl();
   std::vector<ast::PauliComponentStmt*> body;
@@ -27,14 +28,14 @@ ast::ChannelStmt* Parser::parseChannelStmt() {
   requireCurTokenIs(tk_R_CurlyBracket, "Expect '}' to end channel body");
   advance(tk_R_CurlyBracket);
   return new (ctx) ast::ChannelStmt(
-    name, paramDecl, ctx.createSpan(body.data(), body.size()));
+    name, nameLoc, paramDecl, ctx.createSpan(body.data(), body.size()));
 }
 
 std::ostream& ast::ChannelStmt::print(std::ostream& os) const {
   os << "Channel " << name;
   if (paramDecl != nullptr)
     paramDecl->print(os);
-  os << "{\n";
+  os << " {\n";
   for (const auto* stmt : components) {
     stmt->print(os << "  ");
     os << "\n";

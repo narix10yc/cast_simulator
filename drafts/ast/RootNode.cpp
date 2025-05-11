@@ -2,6 +2,39 @@
 
 using namespace cast::draft;
 
+ast::RootNode* Parser::parse() {
+  llvm::SmallVector<ast::Stmt*> stmts;
+  pushScope();
+
+  while (curToken.isNot(tk_Eof)) {
+    switch (curToken.kind) {
+      case tk_Circuit: {
+        auto* stmt = parseCircuitStmt();
+        assert(stmt != nullptr);
+        stmts.push_back(stmt);
+        addSymbol(stmt->name, stmt);
+        break;
+      }
+      case tk_Channel: {
+        auto* stmt = parseChannelStmt();
+        assert(stmt != nullptr);
+        stmts.push_back(stmt);
+        addSymbol(stmt->name, stmt);
+        break;
+      }
+      default: {
+        logErrHere("Expecting a top-level expression, which could be a "
+                   "Circuit or Channel.");
+        failAndExit();
+      }
+    }
+  }
+  popScope();
+  return new (ctx) ast::RootNode(
+    ctx.createSpan(stmts.data(), stmts.size())
+  );
+}
+
 std::ostream& ast::RootNode::print(std::ostream& os) const {
   for (const auto* stmt : stmts) {
     stmt->print(os);
