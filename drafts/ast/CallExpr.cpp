@@ -11,10 +11,8 @@ std::ostream& ast::CallExpr::print(std::ostream& os) const {
 }
 
 void ast::CallExpr::prettyPrint(PrettyPrinter& p, int indent) const {
-  p.write(indent)
-    << "CallExpr{name=" << this->name
-    << ", " << args.size() << " args}\n";
-              
+  p.write(indent) << getKindName() << ": " << name << ", "
+                  << args.size() << " args\n";
   p.setState(indent, args.size());
   for (const auto* arg : args)
     arg->prettyPrint(p, indent + 1);

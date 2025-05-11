@@ -2,28 +2,9 @@
 
 using namespace cast::draft;
 
-ast::PauliComponentStmt* Parser::parsePauliComponentStmt() {
-  assert(curToken.is(tk_Identifier) && 
-    "parsePauliComponentStmt expects to be called with an identifier");
-  auto str = ctx.createIdentifier(curToken.toStringView());
-  advance(tk_Identifier);
-  auto* weight = parseExpr();
-  if (weight == nullptr) {
-    logErrHere("Expect a weight after the Pauli component");
-    failAndExit();
-  }
-  if (curToken.isNot(tk_Semicolon)) {
-    logErrHere("Expect ';' to end a Pauli component");
-    failAndExit();
-  }
-  advance(tk_Semicolon);
-  return new (ctx) ast::PauliComponentStmt(str, weight);
-}
-
 ast::ChannelStmt* Parser::parseChannelStmt() {
   assert(curToken.is(tk_Channel) && "Expect 'Channel' to start a channel");
   advance(tk_Channel);
-  auto* attr = parseAttribute();
   requireCurTokenIs(tk_Identifier, "Expect a channel name");
   auto name = ctx.createIdentifier(curToken.toStringView());
   advance(tk_Identifier);
@@ -46,20 +27,28 @@ ast::ChannelStmt* Parser::parseChannelStmt() {
   requireCurTokenIs(tk_R_CurlyBracket, "Expect '}' to end channel body");
   advance(tk_R_CurlyBracket);
   return new (ctx) ast::ChannelStmt(
-    attr, name, paramDecl, ctx.createSpan(body.data(), body.size()));
+    name, paramDecl, ctx.createSpan(body.data(), body.size()));
 }
 
 std::ostream& ast::ChannelStmt::print(std::ostream& os) const {
-  os << "Channel ";
-  if (attr != nullptr)
-    attr->print(os);
-  os << name;
+  os << "Channel " << name;
   if (paramDecl != nullptr)
     paramDecl->print(os);
   os << "{\n";
-  for (const auto* stmt : body) {
+  for (const auto* stmt : components) {
     stmt->print(os << "  ");
     os << "\n";
   }
   return os << "}";
-} // ChannelStmt::print
+}
+
+void ast::ChannelStmt::prettyPrint(PrettyPrinter& p, int indent) const {
+  unsigned size = components.size();
+  p.write(indent) << getKindName() << ": " << name;
+  if (paramDecl != nullptr)
+    paramDecl->print(p.os);
+  p.os << "\n";
+  p.setState(indent, size);
+  for (unsigned i = 0; i < size; ++i)
+    components[i]->prettyPrint(p, indent + 1);
+}

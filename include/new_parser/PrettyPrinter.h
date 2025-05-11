@@ -13,8 +13,9 @@ class PrettyPrinter {
 public:
   std::ostream& os;
   std::vector<int> states;
+  std::string prefix;
 
-  PrettyPrinter(std::ostream& os) : os(os) {
+  PrettyPrinter(std::ostream& os) : os(os), prefix() {
     states.reserve(8);
   }
 
@@ -26,6 +27,11 @@ public:
     states[idx] = value;
   }
 
+  void setPrefix(const std::string& prefix) {
+    this->prefix = prefix;
+  }
+
+  // prefix will be cleared after write. 
   std::ostream& write(int indent) {
     assert(indent <= states.size());
     assert(indent >= 0);
@@ -47,6 +53,8 @@ public:
       --states[indent - 1];
       os << "|-";
     }
+    os << prefix;
+    prefix.clear();
     return os;
   }
   

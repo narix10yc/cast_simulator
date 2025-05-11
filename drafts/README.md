@@ -66,6 +66,15 @@ Circuit[nqubits=1, nparams=1] {
 ## Gate
 
 ## Channel
+Grammer
+```
+channel_stmt ::= "Channel" identifier 
+[ parameter_decl_expr ] 
+"{" 
+{ pauli_component_stmt }
+"}"
+```
+
 We define quantum channels by the `Channel` keyword. For example, to define a symmetric depolarizing channel with strength `p`, we write
 ```
 Channel symmetric_depolarizing(p) {
@@ -74,12 +83,12 @@ Channel symmetric_depolarizing(p) {
   Z p/3;
 }
 ```
-Similarly, we can define a general single-qubit channel
+Similarly, we can define a two-qubit channel
 ```
-Channel single_qubit_noise(px, py, pz) {
-  X px;
-  Y py;
-  Z pz;
+Channel two_qubit_noise(pxx, pyy, pzz) {
+  XX pxx;
+  YY pyy;
+  ZZ pzz;
 }
 ```
 
@@ -87,6 +96,8 @@ The channel body must be a list of `pauli_component_stmt`.
 ```
 pauli_component_stmt ::= pauli_string expr ";" ;
 ```
+
+`pauli_string` is a string of `X` `Y` `Z` optionally followed by numbers that specify which qubit to act on. For example, `XIIYI` is equivalent to `X4Y1`. To adjust the size of the Pauli string, we could add a dummy `I<n>` term. For example, the 4-qubit `IIXI` could be written as `I3X1`.
 
 ## Measurements and conditionals
 ```

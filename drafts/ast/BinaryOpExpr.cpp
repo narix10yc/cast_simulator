@@ -1,5 +1,4 @@
 #include "new_parser/Parser.h"
-#include "new_parser/Lexer.h"
 
 using namespace cast::draft;
 
@@ -21,10 +20,6 @@ int ast::BinaryOpExpr::getPrecedence(ast::BinaryOpExpr::BinaryOpKind binOp) {
   }
 }
 
-int ast::MinusOpExpr::getPrecedence() {
-  return 30;
-}
-
 std::ostream& ast::BinaryOpExpr::print(std::ostream& os) const {
   os << "(";
   lhs->print(os);
@@ -42,8 +37,21 @@ std::ostream& ast::BinaryOpExpr::print(std::ostream& os) const {
   return os << ")";
 }
 
-std::ostream& ast::MinusOpExpr::print(std::ostream& os) const {
-  os << "-";
-  operand->print(os);
-  return os;
+void ast::BinaryOpExpr::prettyPrint(PrettyPrinter& p, int indent) const {
+  p.write(indent) << getKindName() << ": ";
+  switch (op) {
+    case Add: p.os << "+"; break;
+    case Sub: p.os << "-"; break;
+    case Mul: p.os << "*"; break;
+    case Div: p.os << "/"; break;
+    case Pow: p.os << "**"; break;
+    default:
+      assert(false && "Invalid operator");
+  }
+  p.setState(indent, 2);
+  p.os << "\n";
+  p.setPrefix("lhs: ");
+  lhs->prettyPrint(p, indent + 1);
+  p.setPrefix("rhs: ");
+  rhs->prettyPrint(p, indent + 1);
 }

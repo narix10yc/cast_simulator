@@ -340,6 +340,8 @@ public:
 
   std::ostream& print(std::ostream& os) const override;
 
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
+
   static int getPrecedence(BinaryOpKind binOp);
 
   static bool classof(const Node* node) {
@@ -357,6 +359,8 @@ public:
     : Expr(NK_Expr_MinusOp), operand(operand) {}
 
   std::ostream& print(std::ostream& os) const override;
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
 
   static int getPrecedence();
 
@@ -477,34 +481,32 @@ public:
   PauliComponentStmt(Identifier str, Expr* weight)
     : Stmt(NK_Stmt_PauliComponent), str(str), weight(weight) {}
 
-  std::ostream& print(std::ostream& os) const override {
-    os << str << " ";
-    weight->print(os) << ";";
-    return os;
-  }
+  std::ostream& print(std::ostream& os) const override;
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Stmt_PauliComponent;
   }
 }; // class PauliComponentStmt
 
-// "Channel" ["<" [<attribute>] ">"] <name> ["(" [<parameter_decl>] ")"]
+// "Channel" <name> ["(" [<parameter_decl>] ")"]
 //  "{" {<pauli_component_stmt>} "}" ;
 class ChannelStmt : public Stmt {
 public:
-  Attribute* attr;
   Identifier name;
   ParameterDeclExpr* paramDecl;
-  std::span<PauliComponentStmt*> body;
+  std::span<PauliComponentStmt*> components;
 
-  ChannelStmt(Attribute* attr, 
-              Identifier name,
+  ChannelStmt(Identifier name,
               ParameterDeclExpr* paramDecl,
-              std::span<PauliComponentStmt*> body)
+              std::span<PauliComponentStmt*> components)
     : Stmt(NK_Stmt_Channel)
-    , attr(attr), name(name), paramDecl(paramDecl), body(body) {}
+    , name(name), paramDecl(paramDecl), components(components) {}
 
   std::ostream& print(std::ostream& os) const override;
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Stmt_Channel;
