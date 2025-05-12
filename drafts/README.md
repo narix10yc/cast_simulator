@@ -49,21 +49,12 @@ Circuit<phase=-Pi/4> {
 }
 ```
 
-### Parameter
-We support parameter by `#n`
-```
-Circuit my_circuit3 {
-  RX(#0) 0;
-}
-```
-This circuit is likely compiled to
-```
-Circuit[nqubits=1, nparams=1] {
-  RX(#0) 0;
-}
-```
+### Attributes
+Attributes are key-value pairs surrounded by angle brackets `<>`. Circuits and gates can have attributes. For example, `Circuit<phase=Pi>` defines a circuit with global phase $e^{i\pi}$.
 
-## Gate
+Here is a list of supported attributes:
+- Circuit supports `nqubits`, `nparams`, `phase`, `noise` attributes.
+- Gate supports `noise` attribute.
 
 ## Channel
 Grammer
@@ -77,7 +68,7 @@ channel_stmt ::= "Channel" identifier
 
 We define quantum channels by the `Channel` keyword. For example, to define a symmetric depolarizing channel with strength `p`, we write
 ```
-Channel symmetric_depolarizing(p) {
+Channel sdc(p) {
   X p/3;
   Y p/3;
   Z p/3;
@@ -99,18 +90,33 @@ pauli_component_stmt ::= pauli_string expr ";" ;
 
 `pauli_string` is a string of `X` `Y` `Z` optionally followed by numbers that specify which qubit to act on. For example, `XIIYI` is equivalent to `X4Y1`. To adjust the size of the Pauli string, we could add a dummy `I<n>` term. For example, the 4-qubit `IIXI` could be written as `I3X1`.
 
-## Measurements and conditionals
+To use channels in circuit definition, use `<noise=...>` as an attribute to the gates. For example,
 ```
-Circuit[noise=symmetric_depolarizing(0.1)]
-my_noisy_circuit {
-  H 0;
-  // Reset qubit 0 to 0
-  If (Measure 0)
-    X 0;
-  H 1;
-  Measure 1;
+Circuit qc {
+  H<noise=sdc(0.01)> 0;
 }
 ```
+
+We can also impose a global error model by using the `noise=...` attribute after the `Circuit` keyword.
+```
+Circuit<noise=sdc(0.01)>
+my_noisy_circuit {
+  H 0;
+  CX 0 1;
+}
+```
+Notice that for multi-qubit gates, `Circuit<noise=...>` will add indepedent noise to every target qubit. For example, the above circuit is equivalent to
+```
+Circuit my_noisy_circuit {
+  H 0;
+  I<noise=sdc(0.01)> 0;
+  CX 0 1;
+  I<noise=sdc(0.01)> 0;
+  I<noise=sdc(0.01)> 1;
+}
+```
+
+### TODO: Measurements and Conditionals
 
 ```
 Gate reset(q) {

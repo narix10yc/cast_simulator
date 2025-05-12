@@ -457,24 +457,47 @@ public:
   }
 }; // class MeasureStmt
 
+struct CircuitAttribute {
+  int nQubits;
+  int nParams;
+  Expr* phase;
+  Expr* noise;
+
+  CircuitAttribute()
+    : nQubits(-1), nParams(-1), phase(nullptr), noise(nullptr) {}
+
+  CircuitAttribute(int nQubits, int nParams, Expr* phase, Expr* noise)
+    : nQubits(nQubits), nParams(nParams), phase(phase), noise(noise) {}
+
+  bool isInited() const {
+    return nQubits != -1 || nParams != -1 ||
+           phase != nullptr || noise != nullptr;
+  }
+}; // struct CircuitAttribute
+
 // "Circuit" ["<" <attribute> ">"] <name> "{" {<stmt>} "}" ;
 class CircuitStmt : public Stmt {
 public:
   Identifier name;
   LocationSpan nameLoc;
-  Attribute* attr;
+  CircuitAttribute attr;
+  ParameterDeclExpr* paramDecl;
   std::span<Stmt*> body;
 
   CircuitStmt(Identifier name,
               LocationSpan nameLoc,
-              Attribute* attr,
+              ParameterDeclExpr* paramDecl,
+              CircuitAttribute attr,
               std::span<Stmt*> body)
     : Stmt(NK_Stmt_Circuit)
-    , name(name), nameLoc(nameLoc), attr(attr), body(body) {}
+    , name(name), nameLoc(nameLoc)
+    , paramDecl(paramDecl), attr(attr), body(body) {}
 
   std::ostream& print(std::ostream& os) const override;
 
   void prettyPrint(PrettyPrinter& p, int indent) const override;
+
+  void updateAttribute();
 
   void toCircuitGraph(cast::CircuitGraph& graph) const;
 

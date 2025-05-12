@@ -7,11 +7,65 @@ ast::CircuitStmt* Parser::parseCircuitStmt() {
          "parseCircuitStmt expects to be called with a 'Circuit' token");
   advance(tk_Circuit);
 
-  auto* attr = parseAttribute();
+  ast::CircuitAttribute attr;
+  if (optionalAdvance(tk_Less)) {
+    // parse circuit attributes
+    std::string key;
+    while (true) {
+      if (curToken.is(tk_Greater)) {
+        break;
+      }
+      requireCurTokenIs(tk_Identifier, "Expect a key");
+      key = curToken.toString();
+      advance(tk_Identifier);
+      requireCurTokenIs(tk_Equal, "Expect '=' after key");
+      advance(tk_Equal);
+      if (key == "nqubits") {
+        if (!curToken.convertibleToInt()) {
+          logErrHere("'nqubits' must be an integer");
+          failAndExit();
+        }
+        attr.nQubits = curToken.toInt();
+        advance(tk_Numeric);
+      }
+      else if (key == "nparams") {
+        if (!curToken.convertibleToInt()) {
+          logErrHere("'nparams' must be an integer");
+          failAndExit();
+        }
+        attr.nParams = curToken.toInt();
+        advance(tk_Numeric);
+      }
+      else if (key == "phase") {
+        attr.phase = parseExpr();
+        if (attr.phase == nullptr) {
+          logErrHere("Expect a phase expression");
+          failAndExit();
+        }
+      }
+      else if (key == "noise") {
+        attr.noise = parseExpr();
+        if (attr.noise == nullptr) {
+          logErrHere("Expect a noise expression");
+          failAndExit();
+        }
+      }
+      else {
+        logErrHere("Unknown attribute key");
+        failAndExit();
+      }
+      key.clear();
+      if (curToken.is(tk_Comma))
+        advance(tk_Comma);
+    } // end of while loop
+    advance(tk_Greater);
+  }
+
   requireCurTokenIs(tk_Identifier, "Expect a circuit name");
   auto name = ctx.createIdentifier(curToken.toStringView());
   auto nameLoc = curToken.loc;
   advance(tk_Identifier);
+  auto* paramDecl = parseParameterDecl();
 
   // circuit body
   requireCurTokenIs(tk_L_CurlyBracket, "Expect '{' to start circuit body");
@@ -30,18 +84,52 @@ ast::CircuitStmt* Parser::parseCircuitStmt() {
   popScope();
   // end of circuit body
 
-  return new (ctx) ast::CircuitStmt(
+  auto* circuit = new (ctx) ast::CircuitStmt(
     name,
     nameLoc,
+    paramDecl,
     attr,
     ctx.createSpan(body.data(), body.size())
   );
+
+  circuit->updateAttribute();
+  return circuit;
+}
+
+void ast::CircuitStmt::updateAttribute() {
+  // Not implemented yet
 }
 
 std::ostream& ast::CircuitStmt::print(std::ostream& os) const {
   os << "Circuit";
-  if (attr != nullptr)
-    attr->print(os);
+  bool hasAttr = attr.isInited();
+  if (hasAttr) {
+    os << "<";
+    bool needComma = false;
+    if (attr.nQubits != -1) {
+      os << "nqubits=" << attr.nQubits;
+      needComma = true;
+    }
+    if (attr.nParams != -1) {
+      if (needComma)
+        os << ",";
+      os << "nparams=" << attr.nParams;
+      needComma = true;
+    }
+    if (attr.phase != nullptr) {
+      if (needComma)
+        os << ",";
+      attr.phase->print(os << "phase=");
+      needComma = true;
+    }
+    if (attr.noise != nullptr) {
+      if (needComma)
+        os << ",";
+      attr.noise->print(os << "noise=");
+      needComma = true;
+    }
+    os << ">";
+  }
   os << " " << name << " {\n";
   for (const auto& stmt : body)
     stmt->print(os << "  ") << "\n";
@@ -53,9 +141,20 @@ void ast::CircuitStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   unsigned size = body.size();
   p.write(indent) << getKindName() << "(" << name << "): "
                   << size << " stmts\n";
-  if (attr != nullptr)
-    p.os << "Attr\n";
-  p.setState(indent, size);
+  int val = size;
+  if (attr.phase != nullptr)
+    val++;
+  if (attr.noise != nullptr)
+    val++;
+  p.setState(indent, val);
+  if (attr.phase != nullptr) {
+    p.setPrefix("phase: ");
+    attr.phase->prettyPrint(p, indent + 1);
+  }
+  if (attr.noise != nullptr) {
+    p.setPrefix("noise: ");
+    attr.noise->prettyPrint(p, indent + 1);
+  }
   for (unsigned i = 0; i < size; ++i)
     body[i]->prettyPrint(p, indent + 1);
 }

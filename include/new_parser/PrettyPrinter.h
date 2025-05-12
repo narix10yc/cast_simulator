@@ -53,8 +53,11 @@ public:
       --states[indent - 1];
       os << "|-";
     }
-    os << prefix;
-    prefix.clear();
+    if (!prefix.empty()) {
+      // Print the prefix in purple
+      os << "\033[35m" << prefix << "\033[0m";
+      prefix.clear();
+    }
     return os;
   }
   
