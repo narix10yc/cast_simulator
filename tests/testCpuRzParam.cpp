@@ -34,10 +34,10 @@ namespace {
     return gmat;
   }
 
-  std::shared_ptr<QuantumGate> getRzSymbolicGate(int q) {
+  std::shared_ptr<LegacyQuantumGate> getRzSymbolicGate(int q) {
       LegacyGateMatrix rzSymbolic = makeRzSymbolicMatrix();
-      QuantumGate gate(rzSymbolic, q);
-      return std::make_shared<QuantumGate>(gate);
+      LegacyQuantumGate gate(rzSymbolic, q);
+      return std::make_shared<LegacyQuantumGate>(gate);
   }
 
   std::vector<double> buildRzNumericMatrix(double theta) {

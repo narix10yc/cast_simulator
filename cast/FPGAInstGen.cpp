@@ -376,7 +376,7 @@ public:
 
           auto gate = b->quantumGate->lmatmul(*lastUpBlock->quantumGate);
           auto* node = new GateNode(
-            std::make_shared<QuantumGate>(gate.gateMatrix, gate.qubits), graph);
+            std::make_shared<LegacyQuantumGate>(gate.gateMatrix, gate.qubits), graph);
           auto* block = new GateBlock(node);
           instructions[vacantGateIdx - 1].setGInst(
               std::make_unique<GInstUP>(block, FPGAGateCategory::NonComp));

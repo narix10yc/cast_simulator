@@ -1,7 +1,7 @@
 #include "cast/CircuitGraph.h"
 #include "cast/FPGAInst.h"
 #include "cast/Fusion.h"
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "utils/iocolor.h"
 
 using namespace cast;
@@ -106,7 +106,7 @@ GateBlock* computeCandidate(
   // accept candidate
   // std::cerr << GREEN_FG << "Fusion accepted! " << "\n" << RESET;
 
-  block->quantumGate = std::make_unique<QuantumGate>(
+  block->quantumGate = std::make_unique<LegacyQuantumGate>(
       rhs->quantumGate->lmatmul(*lhs->quantumGate));
 
   return block;

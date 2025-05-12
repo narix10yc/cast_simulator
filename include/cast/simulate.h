@@ -2,7 +2,7 @@
 #define CAST_SIMULATE_H
 
 #include "cast/CircuitGraph.h"
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include <iomanip>
 
 namespace cast::simulate {

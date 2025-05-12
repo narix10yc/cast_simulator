@@ -3,7 +3,7 @@
 // #define LLVM_DEBUG(X) X
 #include <llvm/IR/IntrinsicsX86.h>
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "cast/CircuitGraph.h"
 #include "simulation/KernelManager.h"
 #include "simulation/KernelGenInternal.h"
@@ -118,7 +118,7 @@ inline std::vector<IRMatDataCUDA> getMatrixData(
 
 CPUKernelManager& CPUKernelManager::genCPUGate(
     const CPUKernelGenConfig& config,
-    std::shared_ptr<QuantumGate> gate, const std::string& funcName) {
+    std::shared_ptr<LegacyQuantumGate> gate, const std::string& funcName) {
   const unsigned s = config.simd_s;
   const unsigned S = 1ULL << s;
   const unsigned k = gate->qubits.size();

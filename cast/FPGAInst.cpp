@@ -1,12 +1,12 @@
 #include "cast/FPGAInst.h"
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 
 using namespace cast;
 using namespace cast::impl;
 using namespace cast::fpga;
 
 namespace {
-inline bool isRealOnlyGate(const QuantumGate& gate, double reTol) {
+inline bool isRealOnlyGate(const LegacyQuantumGate& gate, double reTol) {
   const auto* cMat = gate.gateMatrix.getConstantMatrix();
   assert(cMat);
   for (const auto& cplx : *cMat) {
@@ -19,7 +19,7 @@ inline bool isRealOnlyGate(const QuantumGate& gate, double reTol) {
 
 FPGAGateCategory
 cast::fpga::getFPGAGateCategory(
-    const QuantumGate& gate, const FPGAGateCategoryTolerance &tolerances) {
+    const LegacyQuantumGate& gate, const FPGAGateCategoryTolerance &tolerances) {
   switch (gate.gateMatrix.gateKind) {
   case gX:
     return FPGAGateCategory::SingleQubit | FPGAGateCategory::NonComp |

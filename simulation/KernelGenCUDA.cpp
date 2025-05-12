@@ -1,6 +1,6 @@
 #include <llvm/IR/IntrinsicsNVPTX.h>
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "cast/CircuitGraph.h"
 
 #include "simulation/KernelManager.h"
@@ -468,7 +468,7 @@ static GlobalVariable* getOrCreateConstMatGlobal(
 
 CUDAKernelManager& CUDAKernelManager::genCUDAGate(
     const CUDAKernelGenConfig& config,
-    std::shared_ptr<QuantumGate> gate, const std::string& funcName) {
+    std::shared_ptr<LegacyQuantumGate> gate, const std::string& funcName) {
   const unsigned k = gate->qubits.size();
   const unsigned K = 1ULL << k;
   const unsigned KK = K * K;

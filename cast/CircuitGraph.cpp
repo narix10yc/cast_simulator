@@ -17,7 +17,7 @@ int CircuitGraphContext::GateNodeCount = 0;
 int CircuitGraphContext::GateBlockCount = 0;
 
 GateNode::GateNode(
-    std::shared_ptr<QuantumGate> gate, const CircuitGraph& graph)
+    std::shared_ptr<LegacyQuantumGate> gate, const CircuitGraph& graph)
   : id(CircuitGraphContext::GateNodeCount++), quantumGate(gate) {
   connections.reserve(quantumGate->nQubits());
   for (const auto q : quantumGate->qubits) {
@@ -64,10 +64,10 @@ void CircuitGraph::clear() {
 
 void CircuitGraph::QFTCircuit(int nQubits, CircuitGraph& graph) {
   for (int q = 0; q < nQubits; ++q) {
-    graph.appendGate(std::make_shared<QuantumGate>(QuantumGate::H(q)));
+    graph.appendGate(std::make_shared<LegacyQuantumGate>(LegacyQuantumGate::H(q)));
     for (int l = q + 1; l < nQubits; ++l) {
       double angle = M_PI_2 * std::pow(2.0, q - l);
-      graph.appendGate(std::make_shared<QuantumGate>(QuantumGate(
+      graph.appendGate(std::make_shared<LegacyQuantumGate>(LegacyQuantumGate(
         LegacyGateMatrix::FromName("cp", {angle}), {q, l})));
     }
   }
@@ -96,7 +96,7 @@ void CircuitGraph::QFTCircuit(int nQubits, CircuitGraph& graph) {
 
 GateBlock* CircuitGraph::acquireGateBlock(
     GateBlock* lhsBlock, GateBlock* rhsBlock) {
-  auto quantumGate = std::make_shared<QuantumGate>(
+  auto quantumGate = std::make_shared<LegacyQuantumGate>(
     lhsBlock->quantumGate->lmatmul(*rhsBlock->quantumGate));
 
   auto* gateBlock = _context->gateBlockPool.acquire();
@@ -159,7 +159,7 @@ CircuitGraph::tile_iter_t CircuitGraph::insertBlock(
   return it;
 }
 
-void CircuitGraph::appendGate(std::shared_ptr<QuantumGate> quantumGate) {
+void CircuitGraph::appendGate(std::shared_ptr<LegacyQuantumGate> quantumGate) {
   assert(quantumGate != nullptr);
   // update nQubits
   for (const auto& q : quantumGate->qubits) {

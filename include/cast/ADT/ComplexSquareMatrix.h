@@ -21,7 +21,7 @@ public:
   }
 
   ComplexSquareMatrix(std::initializer_list<double> re,
-                                std::initializer_list<double> im) {
+                      std::initializer_list<double> im) {
     assert(re.size() == im.size());
     size_t s = std::sqrt<size_t>(re.size());
     assert(s * s == re.size() && "Size is not a perfect square");

@@ -7,7 +7,7 @@
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/Passes/OptimizationLevel.h>
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include <memory>
 
 #ifdef CAST_USE_CUDA
@@ -56,7 +56,7 @@ struct CPUKernelInfo {
   std::function<CPU_KERNEL_TYPE> executable;
   int precision;
   std::string llvmFuncName;
-  std::shared_ptr<QuantumGate> gate;
+  std::shared_ptr<LegacyQuantumGate> gate;
   // extra information
   int simd_s;
   int opCount;
@@ -124,7 +124,7 @@ public:
   /// taskID begin, taskID end, and pointer to matrix array (could be null).
   CPUKernelManager& genCPUGate(
       const CPUKernelGenConfig& config,
-      std::shared_ptr<QuantumGate> gate, const std::string& funcName);
+      std::shared_ptr<LegacyQuantumGate> gate, const std::string& funcName);
 
   CPUKernelManager& genCPUGatesFromCircuitGraph(
       const CPUKernelGenConfig& config,
@@ -196,7 +196,7 @@ struct CUDAKernelInfo {
   PTXStringType ptxString;
   int precision;
   std::string llvmFuncName;
-  std::shared_ptr<QuantumGate> gate;
+  std::shared_ptr<LegacyQuantumGate> gate;
   CUDATuple cuTuple;
   int opCount;
   // int blockSize = 256;
@@ -243,7 +243,7 @@ public:
 
   CUDAKernelManager& genCUDAGate(
       const CUDAKernelGenConfig& config,
-      std::shared_ptr<QuantumGate> gate, const std::string& funcName);
+      std::shared_ptr<LegacyQuantumGate> gate, const std::string& funcName);
 
   CUDAKernelManager& genCUDAGatesFromCircuitGraph(
       const CUDAKernelGenConfig& config,

@@ -8,7 +8,7 @@
 namespace cast {
 
 class CircuitGraph;
-class QuantumGate;
+class LegacyQuantumGate;
 
 struct FusionConfig {
   int precision;

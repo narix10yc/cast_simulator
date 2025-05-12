@@ -1,5 +1,5 @@
 #include "cast/CostModel.h"
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "simulation/StatevectorCPU.h"
 #include "utils/Formats.h"
 #include "timeit/timeit.h"
@@ -12,7 +12,7 @@ using namespace cast;
 using namespace llvm;
 
 double NaiveCostModel::computeGiBTime(
-    const QuantumGate& gate, int precision, int nThreads) const {
+    const LegacyQuantumGate& gate, int precision, int nThreads) const {
   if (gate.nQubits() > maxNQubits)
     return 1.0;
   if (maxOp > 0 && gate.opCount(zeroTol) > maxOp)
@@ -57,7 +57,7 @@ StandardCostModel::StandardCostModel(PerformanceCache* cache, double zeroTol)
 }
 
 double StandardCostModel::computeGiBTime(
-    const QuantumGate& gate, int precision, int nThreads) const {
+    const LegacyQuantumGate& gate, int precision, int nThreads) const {
   assert(!items.empty());
   const auto gateNQubits = gate.nQubits();
   auto gateOpCount = gate.opCount(zeroTol);
@@ -249,7 +249,7 @@ PerformanceCache PerformanceCache::LoadFromCSV(const std::string& fileName) {
   return cache;
 }
 
-static inline void randomRemove(QuantumGate& gate, float p) {
+static inline void randomRemove(LegacyQuantumGate& gate, float p) {
   auto* cMat = gate.gateMatrix.getConstantMatrix();
   assert(cMat != nullptr);
 }
@@ -277,7 +277,7 @@ static inline void sampleNoReplacement(int n, std::vector<int>& holder) {
 void PerformanceCache::runExperiments(
     const CPUKernelGenConfig& cpuConfig,
     int nQubits, int nThreads, int nRuns) {
-  std::vector<std::shared_ptr<QuantumGate>> gates;
+  std::vector<std::shared_ptr<LegacyQuantumGate>> gates;
   gates.reserve(nRuns);
 //  constexpr int maxAllowedK = 7;
 //  std::vector<int> holder(maxAllowedK);
@@ -289,7 +289,7 @@ void PerformanceCache::runExperiments(
   float prob = 1.0f;
 
   const auto randFloat = [&]() { return disFloat(gen); };
-  const auto randRemove = [&](QuantumGate& gate) {
+  const auto randRemove = [&](LegacyQuantumGate& gate) {
     if (prob >= 1.0)
       return;
     auto* cMat = gate.gateMatrix.getConstantMatrix();
@@ -308,8 +308,8 @@ void PerformanceCache::runExperiments(
 
   const auto addRandU1q = [&]() {
     auto a = disInt(gen);
-    gates.emplace_back(std::make_shared<QuantumGate>(
-      QuantumGate::RandomUnitary(a)));
+    gates.emplace_back(std::make_shared<LegacyQuantumGate>(
+      LegacyQuantumGate::RandomUnitary(a)));
     randRemove(*gates.back());
   };
 
@@ -317,8 +317,8 @@ void PerformanceCache::runExperiments(
     int a,b;
     a = disInt(gen);
     do { b = disInt(gen); } while (b == a);
-    gates.emplace_back(std::make_shared<QuantumGate>(
-      QuantumGate::RandomUnitary(a, b)));
+    gates.emplace_back(std::make_shared<LegacyQuantumGate>(
+      LegacyQuantumGate::RandomUnitary(a, b)));
     randRemove(*gates.back());
   };
 
@@ -327,8 +327,8 @@ void PerformanceCache::runExperiments(
     a = disInt(gen);
     do { b = disInt(gen); } while (b == a);
     do { c = disInt(gen); } while (c == a || c == b);
-    gates.emplace_back(std::make_shared<QuantumGate>(
-      QuantumGate::RandomUnitary(a, b, c)));
+    gates.emplace_back(std::make_shared<LegacyQuantumGate>(
+      LegacyQuantumGate::RandomUnitary(a, b, c)));
     randRemove(*gates.back());
   };
 
@@ -339,8 +339,8 @@ void PerformanceCache::runExperiments(
     do { b = disInt(gen); } while (b == a);
     do { c = disInt(gen); } while (c == a || c == b);
     do { d = disInt(gen); } while (d == a || d == b || d == c);
-    gates.emplace_back(std::make_shared<QuantumGate>(
-      QuantumGate::RandomUnitary(a, b, c, d)));
+    gates.emplace_back(std::make_shared<LegacyQuantumGate>(
+      LegacyQuantumGate::RandomUnitary(a, b, c, d)));
     randRemove(*gates.back());
   };
 
@@ -351,8 +351,8 @@ void PerformanceCache::runExperiments(
     do { c = disInt(gen); } while (c == a || c == b);
     do { d = disInt(gen); } while (d == a || d == b || d == c);
     do { e = disInt(gen); } while (e == a || e == b || e == c || e == d);
-    gates.emplace_back(std::make_shared<QuantumGate>(
-      QuantumGate::RandomUnitary(a, b, c, d, e)));
+    gates.emplace_back(std::make_shared<LegacyQuantumGate>(
+      LegacyQuantumGate::RandomUnitary(a, b, c, d, e)));
     randRemove(*gates.back());
   };
 
@@ -366,8 +366,8 @@ void PerformanceCache::runExperiments(
     do { f = disInt(gen); }
     while (f == a || f == b || f == c || f == d || f == e);
 
-    gates.emplace_back(std::make_shared<QuantumGate>(
-      QuantumGate::RandomUnitary(a, b, c, d, e, f)));
+    gates.emplace_back(std::make_shared<LegacyQuantumGate>(
+      LegacyQuantumGate::RandomUnitary(a, b, c, d, e, f)));
     randRemove(*gates.back());
   };
 
@@ -383,8 +383,8 @@ void PerformanceCache::runExperiments(
     do { g = disInt(gen); }
     while (g == a || g == b || g == c || g == d || g == e || g == f);
 
-    gates.emplace_back(std::make_shared<QuantumGate>(
-      QuantumGate::RandomUnitary(a, b, c, d, e, f, g)));
+    gates.emplace_back(std::make_shared<LegacyQuantumGate>(
+      LegacyQuantumGate::RandomUnitary(a, b, c, d, e, f, g)));
     randRemove(*gates.back());
   };
 

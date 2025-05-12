@@ -22,11 +22,11 @@ static void internal_U1q() {
   CPUKernelManager kernelMgr;
 
   // generate random unitary gates
-  std::vector<std::shared_ptr<QuantumGate>> gates;
+  std::vector<std::shared_ptr<LegacyQuantumGate>> gates;
   gates.reserve(nQubits);
   for (int q = 0; q < nQubits; q++) {
     gates.emplace_back(
-      std::make_shared<QuantumGate>(QuantumGate::RandomUnitary(q)));
+      std::make_shared<LegacyQuantumGate>(LegacyQuantumGate::RandomUnitary(q)));
   }
 
   CPUKernelGenConfig cpuConfig;
@@ -77,7 +77,7 @@ static void internal_U2q() {
   CPUKernelManager kernelMgr;
 
   // generate random gates, set up kernel names
-  std::vector<std::shared_ptr<QuantumGate>> gates;
+  std::vector<std::shared_ptr<LegacyQuantumGate>> gates;
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<> d(0, nQubits - 1);
@@ -86,7 +86,7 @@ static void internal_U2q() {
     a = d(gen);
     do { b = d(gen); } while (b == a);
     gates.emplace_back(
-      std::make_shared<QuantumGate>(QuantumGate::RandomUnitary(a, b)));
+      std::make_shared<LegacyQuantumGate>(LegacyQuantumGate::RandomUnitary(a, b)));
   }
 
   CPUKernelGenConfig cpuConfig;

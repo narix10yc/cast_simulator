@@ -29,6 +29,6 @@ void RootNode::toCircuitGraph(cast::CircuitGraph& graph) const {
       params[0].get<double>() *= 0.5;
     }
     auto matrix = cast::LegacyGateMatrix::FromName(gateApply->name, params);
-    graph.appendGate(std::make_shared<cast::QuantumGate>(matrix, qubits));
+    graph.appendGate(std::make_shared<cast::LegacyQuantumGate>(matrix, qubits));
   }
 }

@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "cast/CircuitGraph.h"
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 
 namespace simulation {
 
@@ -165,16 +165,16 @@ public:
                        const std::vector<llvm::Value*>& bRe,
                        const std::vector<llvm::Value*>& bIm);
 
-  llvm::Function* generateKernel(const cast::QuantumGate& gate,
+  llvm::Function* generateKernel(const cast::LegacyQuantumGate& gate,
                                  const std::string& funcName = "") {
     return generateKernelDebug(gate, 0, funcName);
   }
 
-  llvm::Function* generateKernelDebug(const cast::QuantumGate& gate,
+  llvm::Function* generateKernelDebug(const cast::LegacyQuantumGate& gate,
                                       int debugLevel,
                                       const std::string& funcName = "");
 
-  llvm::Function* generateCUDAKernel(const cast::QuantumGate& gate,
+  llvm::Function* generateCUDAKernel(const cast::LegacyQuantumGate& gate,
                                      const CUDAGenerationConfig& config,
                                      const std::string& funcName = "");
 

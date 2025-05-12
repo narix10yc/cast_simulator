@@ -31,10 +31,10 @@ namespace {
     return gmat;
   }
 
-  std::shared_ptr<QuantumGate> getRzSymbolicGate(int q) {
+  std::shared_ptr<LegacyQuantumGate> getRzSymbolicGate(int q) {
     LegacyGateMatrix rzSymbolic = makeRzSymbolicMatrix();
-    QuantumGate gate(rzSymbolic, q);
-    return std::make_shared<QuantumGate>(gate);
+    LegacyQuantumGate gate(rzSymbolic, q);
+    return std::make_shared<LegacyQuantumGate>(gate);
   }
 
   std::vector<double> buildRzNumericMatrix(double theta) {
@@ -62,7 +62,7 @@ static void f() {
   CUDAKernelManager kernelMgrCUDA;
 
   const int nGates = 3;
-  std::vector<std::shared_ptr<QuantumGate>> gates(nGates);
+  std::vector<std::shared_ptr<LegacyQuantumGate>> gates(nGates);
   for (int i = 0; i < nGates; ++i) {
     gates[i] = getRzSymbolicGate(i);  // Rz on qubit i
   }

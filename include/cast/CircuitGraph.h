@@ -1,7 +1,7 @@
 #ifndef CAST_CIRCUITGRAPH_H
 #define CAST_CIRCUITGRAPH_H
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "cast/CircuitGraphContext.h"
 #include "utils/List.h"
 
@@ -25,10 +25,10 @@ public:
   };
 
   int id;
-  std::shared_ptr<QuantumGate> quantumGate;
+  std::shared_ptr<LegacyQuantumGate> quantumGate;
   std::vector<ConnectionInfo> connections;
 
-  GateNode(std::shared_ptr<QuantumGate> quantumGate, const CircuitGraph& graph);
+  GateNode(std::shared_ptr<LegacyQuantumGate> quantumGate, const CircuitGraph& graph);
 
   GateNode(const GateNode&) = delete;
   GateNode(GateNode&&) = delete;
@@ -76,7 +76,7 @@ public:
 
   int id;
   std::vector<WireInfo> wires;
-  std::shared_ptr<QuantumGate> quantumGate;
+  std::shared_ptr<LegacyQuantumGate> quantumGate;
 
   GateBlock();
   explicit GateBlock(GateNode* gateNode);
@@ -200,7 +200,7 @@ public:
 
   /// Append a quantum gate to the tile. Quantum gate must be managed by
   /// \c *this
-  void appendGate(std::shared_ptr<QuantumGate> quantumGate);
+  void appendGate(std::shared_ptr<LegacyQuantumGate> quantumGate);
 
   /// @brief Erase empty rows in the tile
   void eraseEmptyRows();

@@ -1,7 +1,7 @@
 #ifndef CAST_AST_H
 #define CAST_AST_H
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 
 namespace cast {
 class CircuitGraph;
@@ -108,7 +108,7 @@ public:
 
   void addChainStmt(std::unique_ptr<GateChainStmt> chain);
 
-  std::shared_ptr<QuantumGate>
+  std::shared_ptr<LegacyQuantumGate>
   gateApplyToQuantumGate(const GateApplyStmt&) const;
 
   // CircuitGraph forbids copy and moves.

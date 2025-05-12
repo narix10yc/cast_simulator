@@ -11,7 +11,7 @@
 #include "llvm/TargetParser/Host.h"
 #include "llvm/IR/Verifier.h"
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "cast/CircuitGraph.h"
 
 #include "utils/TaskDispatcher.h"

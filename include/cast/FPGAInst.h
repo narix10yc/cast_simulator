@@ -10,7 +10,7 @@
 
 namespace cast {
 class CircuitGraph;
-class QuantumGate;
+class LegacyQuantumGate;
 class GateBlock;
 } // namespace cast
 
@@ -21,7 +21,7 @@ namespace cast::fpga {
 // @param reOnlyTol: tolerance of the absolute value of imaginary value of
 // each entry smaller than (or equal to) which can be considered zero;
 FPGAGateCategory
-getFPGAGateCategory(const QuantumGate& gate,
+getFPGAGateCategory(const LegacyQuantumGate& gate,
                     const FPGAGateCategoryTolerance &tolerances);
 
 enum GInstKind : int {

@@ -1,4 +1,4 @@
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 #include <cmath>
@@ -7,14 +7,14 @@
 using namespace cast;
 using namespace IOColor;
 
-std::ostream& QuantumGate::displayInfo(std::ostream& os) const {
+std::ostream& LegacyQuantumGate::displayInfo(std::ostream& os) const {
   os << CYAN("QuantumGate Info\n") << "- Target Qubits ";
   utils::printArray(os, llvm::ArrayRef(qubits.begin(), qubits.size())) << "\n";
   os << "- Matrix:\n";
   return gateMatrix.printCMat(os);
 }
 
-void QuantumGate::sortQubits() {
+void LegacyQuantumGate::sortQubits() {
   const auto nQubits = qubits.size();
   llvm::SmallVector<int> indices(nQubits);
   for (unsigned i = 0; i < nQubits; i++)
@@ -74,7 +74,7 @@ namespace {
 // }
 } // anonymous namespace
 
-QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
+LegacyQuantumGate LegacyQuantumGate::lmatmul(const LegacyQuantumGate& other) const {
   // C = B.lmatmul(A) returns matrix multiplication C = AB
   // A is other, B is this
   const auto& aQubits = other.qubits;
@@ -210,7 +210,7 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
         cCMat[i] += aCMat->data()[aIdx] * bCMat->data()[bIdx];
       }
     }
-    return QuantumGate(LegacyGateMatrix(cCMat), cQubits);
+    return LegacyQuantumGate(LegacyGateMatrix(cCMat), cQubits);
   }
 
   // otherwise, parametrised matrix
@@ -235,7 +235,7 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
     }
   }
 
-  return QuantumGate(LegacyGateMatrix(cPMat), cQubits);
+  return LegacyQuantumGate(LegacyGateMatrix(cPMat), cQubits);
 }
 
 namespace { // QuantumGate::opCount helper functions
@@ -267,7 +267,7 @@ inline int opCount_p(const LegacyGateMatrix::p_matrix_t& mat, double zeroTol) {
 
 } // anonymous namespace
 
-double QuantumGate::opCount(double zeroTol) const {
+double LegacyQuantumGate::opCount(double zeroTol) const {
   if (opCountCache >= 0)
     return opCountCache;
 
