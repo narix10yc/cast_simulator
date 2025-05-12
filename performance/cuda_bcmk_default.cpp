@@ -263,11 +263,13 @@ int main() {
   CUDAKernelManager kernelMgr;
   kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
   kernelMgr.emitPTX(nThreads, optLevel, 0);
-  // llvm::outs() << "\n=== DUMPING PTX FOR INSPECTION ===\n";
-  // kernelMgr.dumpPTX("bcmk_param_gate_test", llvm::outs());
-  // llvm::outs() << "=== END PTX DUMP ===\n\n";
   
   kernelMgr.initCUJIT(nThreads, 0);
+  // for (auto &kInfo : kernelMgr.kernels()) {
+  //   std::string fnName = kInfo.llvmFuncName;
+  //   llvm::outs() << "\n=== PTX for " << fnName << " ===\n";
+  //   kernelMgr.dumpPTX(fnName, llvm::outs());
+  // }
 
   auto kernels = kernelMgr.collectCUDAKernelsFromCircuitGraph("testCircuit");
 

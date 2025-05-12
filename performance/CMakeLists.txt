@@ -8,6 +8,9 @@ if (CAST_USE_CUDA)
   add_executable(bcmk_CudaJit "bcmk_CudaJit.cpp")
   target_link_libraries(bcmk_CudaJit utils qasm cast simulation timeit)
 
-  add_executable(simple_bcmk "simple_bcmk.cpp")
-  target_link_libraries(simple_bcmk utils qasm cast simulation timeit)
+  add_executable(cuda_bcmk_default "cuda_bcmk_default.cpp")
+  target_link_libraries(cuda_bcmk_default utils qasm cast simulation timeit)
+
+  add_executable(cuda_bcmk_imm "cuda_bcmk_imm.cpp")
+  target_link_libraries(cuda_bcmk_imm utils qasm cast simulation timeit)
 endif()
