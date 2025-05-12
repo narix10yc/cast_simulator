@@ -184,7 +184,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   CU_CALL(cuDeviceGet(&cuDevice, deviceIdx), "Get CUDA device");
   
   // Create CUDA contexts
-  cuContexts.resize(nThreads);
+  cuContexts.resize(nThreads, nullptr);
   for (unsigned t = 0; t < nThreads; ++t) {
     CU_CALL(cuCtxCreate(&cuContexts[t], 0, cuDevice), "Create CUDA context");
   }

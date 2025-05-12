@@ -189,6 +189,12 @@ struct CUDAKernelInfo {
     CUmodule cuModule;
     CUfunction cuFunction;
     size_t sharedMemBytes;
+    CUDATuple()
+      : cuContext(nullptr)
+      , cuModule(nullptr)
+      , cuFunction(nullptr)
+      , sharedMemBytes(0)
+    {}
     #endif // #ifdef CAST_USE_CUDA
   };
   // We expect large stream writes anyway, so always trigger heap allocation.
@@ -291,10 +297,16 @@ public:
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
   ~CUDAKernelManager() {
-    for (auto& kernel : _cudaKernels)
-      cuModuleUnload(kernel.cuTuple.cuModule);
-    for (auto& ctx : cuContexts)
-      cuCtxDestroy(ctx);
+    for (auto& kernel : _cudaKernels) {
+      if (kernel.cuTuple.cuModule) {
+        cuModuleUnload(kernel.cuTuple.cuModule);
+      }
+    }
+    for (auto& ctx : cuContexts) {
+      if (ctx) {
+        cuCtxDestroy(ctx);
+      }
+    }
   }
 
   /// @brief Initialize CUDA JIT session by loading PTX strings into CUDA
