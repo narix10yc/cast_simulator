@@ -7,9 +7,9 @@ ast::CircuitStmt* Parser::parseCircuitStmt() {
          "parseCircuitStmt expects to be called with a 'Circuit' token");
   advance(tk_Circuit);
 
+  // circuit attributes
   ast::CircuitAttribute attr;
   if (optionalAdvance(tk_Less)) {
-    // parse circuit attributes
     std::string key;
     while (true) {
       if (curToken.is(tk_Greater)) {
@@ -61,6 +61,7 @@ ast::CircuitStmt* Parser::parseCircuitStmt() {
     advance(tk_Greater);
   }
 
+  // name and parameter declaration
   requireCurTokenIs(tk_Identifier, "Expect a circuit name");
   auto name = ctx.createIdentifier(curToken.toStringView());
   auto nameLoc = curToken.loc;
