@@ -1,5 +1,5 @@
-#ifndef CAST_GATEMATRIX_H
-#define CAST_GATEMATRIX_H
+#ifndef CAST_LEGACY_GATE_MATRIX_H
+#define CAST_LEGACY_GATE_MATRIX_H
 
 #include "cast/UnitaryPermMatrix.h"
 #include "cast/ScalarKind.h"
@@ -238,4 +238,4 @@ using gmp_t = std::shared_ptr<LegacyGateMatrix>;
 
 } // namespace cast
 
-#endif // CAST_GATEMATRIX_H
+#endif // CAST_LEGACY_GATE_MATRIX_H
