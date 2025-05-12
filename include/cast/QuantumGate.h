@@ -1,7 +1,7 @@
 #ifndef CAST_QUANTUM_GATE_H
 #define CAST_QUANTUM_GATE_H
 
-#include "cast/GateMatrix.h"
+#include "cast/LegacyGateMatrix.h"
 #include <array>
 
 namespace cast {

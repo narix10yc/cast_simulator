@@ -1,4 +1,4 @@
-#include "cast/GateMatrix.h"
+#include "cast/LegacyGateMatrix.h"
 #include "utils/iocolor.h"
 #include <cmath>
 #include <iomanip>
