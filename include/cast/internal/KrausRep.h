@@ -3,7 +3,7 @@
 
 /* === KrausRep.h - Kraus representation of quantum channels === */
 
-#include "cast/ADT/ScalarGateMatrix.h"
+#include "cast/ADT/GateMatrix.h"
 
 #include <memory>
 #include <vector>

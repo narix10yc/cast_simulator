@@ -10,7 +10,7 @@ if (CAST_USE_CUDA)
 endif()
 
 add_executable(unit_test "test_main.cpp")
-target_link_libraries(unit_test cast simulation TestKit)
+target_link_libraries(unit_test cast simulation TestKit adt timeit)
 
 add_executable(qasm_to_cast "qasm_to_cast.cpp")
 target_link_libraries(qasm_to_cast cast qasm simulation)

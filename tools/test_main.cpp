@@ -5,6 +5,10 @@ using namespace cast::test;
 
 int main() {
   utils::timedExecute([] {
+    test_complexSquareMatrix();
+  }, "Complex Square Matrix Test Finished!");
+
+  utils::timedExecute([] {
     test_applyGate();
     test_gateMatMul();
   }, "Gate Multiplication Test Finished!");

@@ -81,6 +81,9 @@ public:
     return sizeof(double) * 2 * _edgeSize * _edgeSize;
   }
 
+  double* data() { return _data; }
+  const double* data() const { return _data; }
+
   double* reData() { return _data; }
   double* reBegin() { return _data; }
   double* reEnd() { return _data + _edgeSize * _edgeSize; }
@@ -152,6 +155,9 @@ public:
   static ComplexSquareMatrix I2() { return eye(4); }
 
 }; // class ComplexSquareMatrix
+
+double maximum_norm(const ComplexSquareMatrix& A,
+                    const ComplexSquareMatrix& B);
 
 }; // namespace cast
 

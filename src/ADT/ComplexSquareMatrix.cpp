@@ -47,6 +47,14 @@ ComplexSquareMatrix ComplexSquareMatrix::H() {
   return matH;
 }
 
+ComplexSquareMatrix ComplexSquareMatrix::eye(size_t edgeSize) {
+  ComplexSquareMatrix m(edgeSize);
+  std::memset(m.imData(), 0, m.halfSize() * sizeof(double));
+  for (size_t i = 0; i < edgeSize; ++i)
+    m.reBegin()[i * edgeSize + i] = 1.0;
+  return m;
+}
+
 /* Implementation of Arithmatics of ComplexSquareMatrix */
 
 ComplexSquareMatrix
@@ -172,4 +180,17 @@ std::ostream& ComplexSquareMatrix::print(std::ostream& os) const {
     utils::print_complex(os, rc(_edgeSize - 1, c)) << ", ";
   utils::print_complex(os, rc(_edgeSize - 1, _edgeSize - 1));
   return os << " ]\n";
+}
+
+double cast::maximum_norm(const ComplexSquareMatrix& A,
+                          const ComplexSquareMatrix& B) {
+  assert(A.edgeSize() == B.edgeSize());
+  assert(A.size() == B.size());
+  double maxNorm = 0.0;
+  for (size_t i = 0; i < A.size(); ++i) {
+    double diff = std::abs(A.data()[i] - B.data()[i]);
+    if (diff > maxNorm)
+      maxNorm = diff;
+  }
+  return maxNorm;
 }
