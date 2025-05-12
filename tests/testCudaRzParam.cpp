@@ -8,8 +8,8 @@ using namespace cast;
 using namespace cast::test;
 
 namespace {
-  GateMatrix makeRzSymbolicMatrix() {
-    GateMatrix::p_matrix_t pMat(2);
+  LegacyGateMatrix makeRzSymbolicMatrix() {
+    LegacyGateMatrix::p_matrix_t pMat(2);
 
     int var = 0; 
     Polynomial c( Monomial::Cosine(var) );
@@ -27,12 +27,12 @@ namespace {
 
     // Wrapping in a GateMatrix => isConvertibleToCMat = UnConvertible
     // => getConstantMatrix() = null
-    GateMatrix gmat(pMat);
+    LegacyGateMatrix gmat(pMat);
     return gmat;
   }
 
   std::shared_ptr<QuantumGate> getRzSymbolicGate(int q) {
-    GateMatrix rzSymbolic = makeRzSymbolicMatrix();
+    LegacyGateMatrix rzSymbolic = makeRzSymbolicMatrix();
     QuantumGate gate(rzSymbolic, q);
     return std::make_shared<QuantumGate>(gate);
   }

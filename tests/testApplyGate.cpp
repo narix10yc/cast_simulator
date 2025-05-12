@@ -26,8 +26,8 @@ static void internal_U1q() {
   // phase gates do not change probabilities
   for (int q = 0; q < nQubits; q++) {
     double pBefore = sv.prob(q);
-    auto gate0 = QuantumGate(GateMatrix::FromName("p", {0.14}), q);
-    auto gate1 = QuantumGate(GateMatrix::FromName("p", {0.41}), (q+1) % nQubits);
+    auto gate0 = QuantumGate(LegacyGateMatrix::FromName("p", {0.14}), q);
+    auto gate1 = QuantumGate(LegacyGateMatrix::FromName("p", {0.41}), (q+1) % nQubits);
     auto gate = gate0.lmatmul(gate1);
 
     sv.applyGate(gate);

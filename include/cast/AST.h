@@ -49,9 +49,9 @@ public:
 class ParameterDefStmt : public Statement {
 public:
   int refNumber;
-  std::unique_ptr<GateMatrix> gateMatrix;
+  std::unique_ptr<LegacyGateMatrix> gateMatrix;
 
-  ParameterDefStmt(int refNumber, std::unique_ptr<GateMatrix> gateMatrix)
+  ParameterDefStmt(int refNumber, std::unique_ptr<LegacyGateMatrix> gateMatrix)
     : Statement(SK_ParamDef)
     , refNumber(refNumber)
     , gateMatrix(std::move(gateMatrix)) {}
@@ -61,7 +61,7 @@ public:
 
 class GateApplyStmt : public Statement {
 public:
-  using arg_t = utils::PODVariant<int, GateMatrix::gate_params_t>;
+  using arg_t = utils::PODVariant<int, LegacyGateMatrix::gate_params_t>;
   std::string name;
   arg_t argument;
   llvm::SmallVector<int> qubits;

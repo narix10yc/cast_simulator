@@ -47,7 +47,7 @@ namespace cast {
   } // namespace impl
 
 
-class GateMatrix {
+class LegacyGateMatrix {
 public:
   // specify gate matrix with (up to three) parameters
   using gate_params_t = std::array<utils::PODVariant<int, double>, 3>;
@@ -96,16 +96,16 @@ public:
   impl::GateKind gateKind;
   gate_params_t gateParams;
 
-  GateMatrix() : cache(), gateKind(impl::gUndef), gateParams() {}
+  LegacyGateMatrix() : cache(), gateKind(impl::gUndef), gateParams() {}
 
-  GateMatrix(impl::GateKind gateKind, const gate_params_t& params = {})
+  LegacyGateMatrix(impl::GateKind gateKind, const gate_params_t& params = {})
       : cache(), gateKind(gateKind), gateParams(params) {}
 
-  explicit GateMatrix(const up_matrix_t& upMat);
-  explicit GateMatrix(const c_matrix_t& upMat);
-  explicit GateMatrix(const p_matrix_t& upMat);
+  explicit LegacyGateMatrix(const up_matrix_t& upMat);
+  explicit LegacyGateMatrix(const c_matrix_t& upMat);
+  explicit LegacyGateMatrix(const p_matrix_t& upMat);
 
-  static GateMatrix FromName(
+  static LegacyGateMatrix FromName(
       const std::string& name, const gate_params_t& params = {});
 
   void permuteSelf(const llvm::SmallVector<int>& flags);
@@ -181,7 +181,7 @@ public:
 
   /// @brief Return other * this. That is, A.lmatmul(B) will return BA.
   /// Currently only support cMat
-  GateMatrix lmatmul(const GateMatrix& other) const;
+  LegacyGateMatrix lmatmul(const LegacyGateMatrix& other) const;
 
   std::ostream& printCMat(std::ostream& os) const;
 
@@ -223,18 +223,18 @@ public:
   static const p_matrix_t MatrixCZ_p;
 
   // preset gate matrices
-  static GateMatrix H() { return GateMatrix(MatrixH_c); }
-  static GateMatrix X() { return GateMatrix(MatrixX_c); }
-  static GateMatrix Y() { return GateMatrix(MatrixY_c); }
-  static GateMatrix Z() { return GateMatrix(MatrixZ_c); }
-  static GateMatrix I1() { return GateMatrix(MatrixI1_c); }
-  static GateMatrix I2() { return GateMatrix(MatrixI2_c); }
-  static GateMatrix CX() { return GateMatrix(MatrixCX_c); }
-  static GateMatrix CZ() { return GateMatrix(MatrixCZ_c); }
+  static LegacyGateMatrix H() { return LegacyGateMatrix(MatrixH_c); }
+  static LegacyGateMatrix X() { return LegacyGateMatrix(MatrixX_c); }
+  static LegacyGateMatrix Y() { return LegacyGateMatrix(MatrixY_c); }
+  static LegacyGateMatrix Z() { return LegacyGateMatrix(MatrixZ_c); }
+  static LegacyGateMatrix I1() { return LegacyGateMatrix(MatrixI1_c); }
+  static LegacyGateMatrix I2() { return LegacyGateMatrix(MatrixI2_c); }
+  static LegacyGateMatrix CX() { return LegacyGateMatrix(MatrixCX_c); }
+  static LegacyGateMatrix CZ() { return LegacyGateMatrix(MatrixCZ_c); }
 };
 
 // An easy name for gate matrix pointer type
-using gmp_t = std::shared_ptr<GateMatrix>;
+using gmp_t = std::shared_ptr<LegacyGateMatrix>;
 
 } // namespace cast
 

@@ -15,7 +15,7 @@ inline size_t insertZeroBit(size_t number, int index) {
 }
 
 template<typename real_t = double>
-static void applyGeneral(std::complex<real_t>* sv, const cast::GateMatrix& gate,
+static void applyGeneral(std::complex<real_t>* sv, const cast::LegacyGateMatrix& gate,
                          const std::vector<int>& qubits, unsigned nQubits) {
   assert(gate.nQubits == qubits.size());
   assert(gate.isConstantMatrix());

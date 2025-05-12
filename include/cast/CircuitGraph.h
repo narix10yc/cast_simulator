@@ -161,7 +161,7 @@ public:
   static CircuitGraph ALACircuit(int nQubits, int nrounds);
 
   static CircuitGraph GetTestCircuit(
-    const GateMatrix& gateMatrix, int nQubits, int nrounds);
+    const LegacyGateMatrix& gateMatrix, int nQubits, int nrounds);
 
   tile_t& tile() { return _tile; }
   const tile_t& tile() const { return _tile; }

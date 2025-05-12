@@ -173,11 +173,11 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
   // }
 
   // const matrix
-  const GateMatrix::c_matrix_t* aCMat;
-  const GateMatrix::c_matrix_t* bCMat;
+  const LegacyGateMatrix::c_matrix_t* aCMat;
+  const LegacyGateMatrix::c_matrix_t* bCMat;
   if ((aCMat = other.gateMatrix.getConstantMatrix())
       && (bCMat = gateMatrix.getConstantMatrix())) {
-    GateMatrix::c_matrix_t cCMat(1 << cnQubits);
+    LegacyGateMatrix::c_matrix_t cCMat(1 << cnQubits);
     // main loop
     for (uint64_t i = 0ULL; i < (1ULL << (2 * cnQubits)); i++) {
       uint64_t aIdxBegin = utils::pext64(i, aPextMask) & aZeroingMask;
@@ -210,13 +210,13 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
         cCMat[i] += aCMat->data()[aIdx] * bCMat->data()[bIdx];
       }
     }
-    return QuantumGate(GateMatrix(cCMat), cQubits);
+    return QuantumGate(LegacyGateMatrix(cCMat), cQubits);
   }
 
   // otherwise, parametrised matrix
   auto aPMat = other.gateMatrix.getParametrizedMatrix();
   auto bPMat = gateMatrix.getParametrizedMatrix();
-  GateMatrix::p_matrix_t cPMat(1 << cnQubits);
+  LegacyGateMatrix::p_matrix_t cPMat(1 << cnQubits);
   // main loop
   for (uint64_t i = 0ULL; i < (1ULL << (2 * cnQubits)); i++) {
     uint64_t aIdxBegin = utils::pdep64(i, aPextMask) & aZeroingMask;
@@ -235,11 +235,11 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
     }
   }
 
-  return QuantumGate(GateMatrix(cPMat), cQubits);
+  return QuantumGate(LegacyGateMatrix(cPMat), cQubits);
 }
 
 namespace { // QuantumGate::opCount helper functions
-inline int opCount_c(const GateMatrix::c_matrix_t& mat, double zeroTol) {
+inline int opCount_c(const LegacyGateMatrix::c_matrix_t& mat, double zeroTol) {
   int count = 0;
   for (const auto& data : mat) {
     if (std::abs(data.real()) >= zeroTol)
@@ -250,7 +250,7 @@ inline int opCount_c(const GateMatrix::c_matrix_t& mat, double zeroTol) {
   return 2 * count;
 }
 
-inline int opCount_p(const GateMatrix::p_matrix_t& mat, double zeroTol) {
+inline int opCount_p(const LegacyGateMatrix::p_matrix_t& mat, double zeroTol) {
   int count = 0;
   for (const auto& data : mat) {
     auto ev = data.getValue();

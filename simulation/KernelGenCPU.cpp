@@ -59,7 +59,7 @@ struct IRMatDataCUDA {
 };
 
 inline std::vector<IRMatDataCUDA> getMatrixData(
-    IRBuilder<>& B, const GateMatrix& gateMatrix,
+    IRBuilder<>& B, const LegacyGateMatrix& gateMatrix,
     const CPUKernelGenConfig& config) {
   const int k = gateMatrix.nQubits();
   const unsigned K = 1 << k;

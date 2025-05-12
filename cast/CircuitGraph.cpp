@@ -68,7 +68,7 @@ void CircuitGraph::QFTCircuit(int nQubits, CircuitGraph& graph) {
     for (int l = q + 1; l < nQubits; ++l) {
       double angle = M_PI_2 * std::pow(2.0, q - l);
       graph.appendGate(std::make_shared<QuantumGate>(QuantumGate(
-        GateMatrix::FromName("cp", {angle}), {q, l})));
+        LegacyGateMatrix::FromName("cp", {angle}), {q, l})));
     }
   }
 }

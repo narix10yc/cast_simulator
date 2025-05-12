@@ -56,7 +56,7 @@ struct IRMatDataCUDA {
 };
 
 std::vector<IRMatDataCUDA> getMatDataCUDA(
-    IRBuilder<>& B, const GateMatrix& gateMatrix,
+    IRBuilder<>& B, const LegacyGateMatrix& gateMatrix,
     const CUDAKernelGenConfig& config) {
   const int k = gateMatrix.nQubits();
   const unsigned K = 1 << k;
@@ -190,7 +190,7 @@ Value* getGlobalTidCUDA(IRBuilder<>& B) {
 void genMatrixVectorMultiply(
     llvm::IRBuilder<>& B,
     const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
+    const LegacyGateMatrix& gateMat,
     const llvm::ArrayRef<int> qubits,
     const std::vector<IRMatDataCUDA>& matData,
     llvm::Value* svPtrV,
@@ -273,7 +273,7 @@ void genMatrixVectorMultiply(
 void genMatrixVectorMultiplyFromPointer(
     llvm::IRBuilder<>& B,
     const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
+    const LegacyGateMatrix& gateMat,
     const llvm::ArrayRef<int> qubits,
     llvm::Value* matBasePtr,
     llvm::Value* svPtrV,
@@ -355,7 +355,7 @@ void genMatrixVectorMultiplyFromPointer(
 void genMatrixVectorMultiplyFromConst(
     llvm::IRBuilder<>& B,
     const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
+    const LegacyGateMatrix& gateMat,
     const llvm::ArrayRef<int> qubits,
     llvm::GlobalVariable* gConstMat,
     llvm::Value* svPtrV,

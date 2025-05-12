@@ -352,8 +352,8 @@ GateApplyStmt Parser::parseGateApply() {
       advance(tk_Numeric);
     } else {
       // up to 3 parameters
-      stmt.argument.set<GateMatrix::gate_params_t>();
-      auto& parameters = stmt.argument.get<GateMatrix::gate_params_t>();
+      stmt.argument.set<LegacyGateMatrix::gate_params_t>();
+      auto& parameters = stmt.argument.get<LegacyGateMatrix::gate_params_t>();
       for (int i = 0; i < 3; ++i) {
         if (curToken.is(tk_Numeric)) {
           parameters[i] = curToken.toDouble();

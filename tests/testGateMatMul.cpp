@@ -14,16 +14,16 @@ static void basics() {
   gate1 = QuantumGate::I1(1);
   norm = utils::maximum_norm(
     *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
-    GateMatrix::MatrixI1_c);
+    LegacyGateMatrix::MatrixI1_c);
   suite.assertClose(norm, 0.0, "I multiply by I Same Qubit", GET_INFO());
 
   gate0 = QuantumGate::I1(2);
   norm = utils::maximum_norm(
     *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
-    GateMatrix::MatrixI2_c);
+    LegacyGateMatrix::MatrixI2_c);
   suite.assertClose(norm, 0.0, "I multiply by I Different Qubit", GET_INFO());
 
-  gate1 = QuantumGate(GateMatrix(utils::randomUnitaryMatrix(2)), 2);
+  gate1 = QuantumGate(LegacyGateMatrix(utils::randomUnitaryMatrix(2)), 2);
   norm = utils::maximum_norm(
     *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
     *gate1.gateMatrix.getConstantMatrix());

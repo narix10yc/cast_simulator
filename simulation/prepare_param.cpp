@@ -95,7 +95,7 @@ Function* IRGenerator::generatePrepareParameter(const CircuitGraph& graph) {
     GateBlock* gateBlock = allBlocks[i];
     uint64_t numCompMatrixEntries = (1ULL << (2 * gateBlock->nQubits()));
 
-    const GateMatrix& gateMatrix = gateBlock->quantumGate->gateMatrix;
+    const LegacyGateMatrix& gateMatrix = gateBlock->quantumGate->gateMatrix;
     if (const auto* cMat = gateMatrix.getConstantMatrix()) {
       const auto& cData = cMat->data();
       for (uint64_t d = 0; d < numCompMatrixEntries; d++) {

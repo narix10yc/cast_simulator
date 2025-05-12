@@ -11,7 +11,7 @@ using namespace cast::ast;
 namespace {
 
 std::ostream& printGateParameters(
-    std::ostream& os, const GateMatrix::gate_params_t &params) {
+    std::ostream& os, const LegacyGateMatrix::gate_params_t &params) {
   const auto visitor = [&os](const utils::PODVariant<int, double>& arg) {
     if (arg.is<int>())
       os << arg.get<int>();
@@ -66,8 +66,8 @@ std::ostream& GateApplyStmt::print(std::ostream& os) const {
   // parameter
   if (argument.is<int>())
     os << "(#" << argument.get<int>() << ")";
-  else if (argument.is<GateMatrix::gate_params_t>()) {
-    auto& gateParams = argument.get<GateMatrix::gate_params_t>();
+  else if (argument.is<LegacyGateMatrix::gate_params_t>()) {
+    auto& gateParams = argument.get<LegacyGateMatrix::gate_params_t>();
     printGateParameters(os, gateParams);
   }
 
@@ -131,14 +131,14 @@ std::shared_ptr<QuantumGate> QuantumCircuit::gateApplyToQuantumGate(
     return nullptr;
   }
 
-  if (gaStmt.argument.is<GateMatrix::gate_params_t>())
+  if (gaStmt.argument.is<LegacyGateMatrix::gate_params_t>())
     return std::make_shared<QuantumGate>(
-      GateMatrix::FromName(
+      LegacyGateMatrix::FromName(
         gaStmt.name,
-        gaStmt.argument.get<GateMatrix::gate_params_t>()),
+        gaStmt.argument.get<LegacyGateMatrix::gate_params_t>()),
       gaStmt.qubits);
   return std::make_shared<QuantumGate>(
-    GateMatrix::FromName(gaStmt.name), gaStmt.qubits);
+    LegacyGateMatrix::FromName(gaStmt.name), gaStmt.qubits);
 }
 
 void QuantumCircuit::toCircuitGraph(CircuitGraph& graph) const {
