@@ -1,8 +1,6 @@
-#include "cast/QuantumChannel.h"
-#include "cast/internal/KrausRep.h"
-#include "cast/internal/ChoiRep.h"
+#include "cast/ADT/NoiseChannel.h"
+#include "utils/iocolor.h"
 
-#include "new_parser/AST.h"
 using namespace cast;
 
 std::ostream& KrausRep::display(std::ostream& os) const {
@@ -57,18 +55,49 @@ ChoiRep ChoiRep::FromKrausRep(const KrausRep& krausRep) {
   return choiRep;
 }
 
-int QuantumChannel::getRank() const {
+int NoiseChannel::getRank() const {
   if (reps.choiRep) {
     return reps.choiRep->rank();
   }
   return -1;
 }
 
-std::shared_ptr<QuantumChannel> getQuantumChannelFromAST(
-    const ChannelStmt& channelStmt, const llvm::SmallVector<int>& qubits) {
-  auto quantumChannel = std::make_shared<QuantumChannel>(qubits);
-  auto& reps = quantumChannel->reps;
-  reps.krausRep = std::make_shared<KrausRep>(qubits.size());
-  reps.choiRep = std::make_shared<ChoiRep>(qubits.size());
-  return quantumChannel;
+std::ostream& NoiseChannel::displayInfo(std::ostream& os, int verbose) const {
+  os << CYAN("Info of NoiseChannel @ " << this << "\n");
+  os << "- Kraus Rep: " << (reps.krausRep ? "Available" : "No") << "\n";
+  os << "- Choi Rep:  " << (reps.choiRep ? "Available" : "No") << "\n";
+  if (verbose > 1) {
+    if (reps.krausRep)
+      reps.krausRep->display(os);
+    if (reps.choiRep)
+      reps.choiRep->display(os);
+  }
+
+  return os;
+}
+
+int NoiseChannel::nQubits() const {
+  if (reps.krausRep) {
+    return reps.krausRep->nQubits();
+  } else if (reps.choiRep) {
+    return reps.choiRep->nQubits();
+  }
+  assert(false && "No representation available");
+  return -1;
+}
+
+NoiseChannelPtr NoiseChannel::SymmetricPauliChannel(double p) {
+  assert(p >= 0 && p <= 1);
+  int nQubits = 1;
+  auto krausRep = std::make_shared<KrausRep>(nQubits);
+  auto xMatrix = ScalarGateMatrix::X();
+  auto yMatrix = ScalarGateMatrix::Y();
+  auto zMatrix = ScalarGateMatrix::Z();
+  
+  // Kraus operators for the symmetric Pauli channel
+  krausRep->addMatrix(*xMatrix * std::sqrt(p));
+  krausRep->addMatrix(*yMatrix * std::sqrt(p));
+  krausRep->addMatrix(*zMatrix * std::sqrt(p));
+  
+  return std::make_shared<NoiseChannel>(krausRep);
 }
