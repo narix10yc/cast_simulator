@@ -8,7 +8,7 @@
 #include <memory>
 
 namespace cast {
-class CircuitGraph;
+class LegacyCircuitGraph;
 }
 namespace openqasm::ast {
 
@@ -285,7 +285,7 @@ public:
   size_t countStmts() { return stmts.size(); }
   Statement getStmt(size_t index) { return *(stmts[index]); }
 
-  void toCircuitGraph(cast::CircuitGraph&) const;
+  void toCircuitGraph(cast::LegacyCircuitGraph&) const;
 };
 
 } // namespace openqasm::ast

@@ -72,7 +72,7 @@ IRGenerator::generatePolynomial(const Polynomial& P, ParamValueFeeder& feeder) {
   return polyV;
 }
 
-Function* IRGenerator::generatePrepareParameter(const CircuitGraph& graph) {
+Function* IRGenerator::generatePrepareParameter(const LegacyCircuitGraph& graph) {
   Type* scalarTy = getScalarTy();
 
   auto* funcTy = FunctionType::get(

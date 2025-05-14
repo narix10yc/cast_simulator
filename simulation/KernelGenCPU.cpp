@@ -4,7 +4,7 @@
 #include <llvm/IR/IntrinsicsX86.h>
 
 #include "cast/LegacyQuantumGate.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "simulation/KernelManager.h"
 #include "simulation/KernelGenInternal.h"
 
@@ -604,7 +604,7 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
 }
 
 CPUKernelManager& CPUKernelManager::genCPUGatesFromCircuitGraph(
-    const CPUKernelGenConfig& config, const CircuitGraph& graph,
+    const CPUKernelGenConfig& config, const LegacyCircuitGraph& graph,
     const std::string& graphName) {
   const auto allBlocks = graph.getAllBlocks();
   const auto mangledName = internal::mangleGraphName(graphName);

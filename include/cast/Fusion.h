@@ -7,7 +7,7 @@
 
 namespace cast {
 
-class CircuitGraph;
+class LegacyCircuitGraph;
 class LegacyQuantumGate;
 
 struct FusionConfig {
@@ -43,9 +43,9 @@ struct FusionConfig {
 };
 
 void applyGateFusion(
-    const FusionConfig&, const CostModel*, CircuitGraph&, int max_k=7);
+    const FusionConfig&, const CostModel*, LegacyCircuitGraph&, int max_k=7);
 
-void applyFPGAGateFusion(CircuitGraph&, const FPGAFusionConfig&);
+void applyFPGAGateFusion(LegacyCircuitGraph&, const FPGAFusionConfig&);
 
 } // namespace cast
 

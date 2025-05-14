@@ -1,11 +1,11 @@
 #include "openqasm/ast.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 #include "llvm/ADT/SmallVector.h"
 
 using namespace openqasm::ast;
 
-void RootNode::toCircuitGraph(cast::CircuitGraph& graph) const {
+void RootNode::toCircuitGraph(cast::LegacyCircuitGraph& graph) const {
   llvm::SmallVector<int> qubits;
   for (const auto& s : stmts) {
     cast::LegacyGateMatrix::gate_params_t params;

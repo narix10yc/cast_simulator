@@ -4,7 +4,7 @@
 #include "cast/LegacyQuantumGate.h"
 
 namespace cast {
-class CircuitGraph;
+class LegacyCircuitGraph;
 }
 
 namespace cast::ast {
@@ -112,8 +112,8 @@ public:
   gateApplyToQuantumGate(const GateApplyStmt&) const;
 
   // CircuitGraph forbids copy and moves.
-  void toCircuitGraph(CircuitGraph&) const;
-  static QuantumCircuit FromCircuitGraph(const CircuitGraph&);
+  void toCircuitGraph(LegacyCircuitGraph&) const;
+  static QuantumCircuit FromCircuitGraph(const LegacyCircuitGraph&);
 };
 
 } // namespace cast::ast

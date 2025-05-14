@@ -2,7 +2,7 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 using namespace cast::draft;
 
@@ -66,7 +66,7 @@ std::string ast::Node::_getKindName(ast::Node::NodeKind k) {
   }
 }
 
-void ast::CircuitStmt::toCircuitGraph(cast::CircuitGraph& graph) const {
+void ast::CircuitStmt::toCircuitGraph(cast::LegacyCircuitGraph& graph) const {
   assert(false && "Not implemented yet");
 }
 

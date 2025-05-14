@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATE_H
 #define CAST_SIMULATE_H
 
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/LegacyQuantumGate.h"
 #include <iomanip>
 

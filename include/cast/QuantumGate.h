@@ -11,9 +11,8 @@ using QuantumGatePtr = std::shared_ptr<QuantumGate>;
 
 /// @brief \c QuantumGate is a wrapper around \c GateMatrix and \c NoiseChannel.
 /// Each of them can be nullptr.
-/// Recommended to use \c QuantumGatePtr (which is a shared pointer to 
-/// \c QuantumGate ). Use factory constructor \c QuantumGate::Create() to return
-/// a \c QuantumGatePtr.
+/// Recommend to use \c QuantumGatePtr=std::shared_ptr<QuantumGate>.
+/// Recommand to use factory constructors \c QuantumGate::Create() 
 class QuantumGate {
   GateMatrixPtr gateMatrix;
   NoiseChannelPtr noiseChannel;
@@ -55,10 +54,15 @@ public:
     return gateMatrix->nQubits();
   }
 
+  // Get the gate matrix. Gate matrix can be nullptr, in which case it means the
+  // identity matrix.
+  // The gate matrix is not always unitary.
   GateMatrixPtr getGateMatrix() const {
     return gateMatrix;
   }
-  
+
+  // Get the noise channel. Noise channel can be nullptr, in which case it means
+  // no noise.
   NoiseChannelPtr getNoise() const {
     return noiseChannel;
   }

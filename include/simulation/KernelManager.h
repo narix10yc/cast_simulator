@@ -26,7 +26,7 @@ namespace cast {
     std::string demangleGraphName(const std::string& mangledName);
   } // namespace internal
 
-class CircuitGraph;
+class LegacyCircuitGraph;
 
 class KernelManagerBase {
 protected:
@@ -128,7 +128,7 @@ public:
 
   CPUKernelManager& genCPUGatesFromCircuitGraph(
       const CPUKernelGenConfig& config,
-      const CircuitGraph& graph, const std::string& graphName);
+      const LegacyCircuitGraph& graph, const std::string& graphName);
 
   std::vector<CPUKernelInfo*>
   collectCPUKernelsFromCircuitGraph(const std::string& graphName);
@@ -247,7 +247,7 @@ public:
 
   CUDAKernelManager& genCUDAGatesFromCircuitGraph(
       const CUDAKernelGenConfig& config,
-      const CircuitGraph& graph, const std::string& graphName);
+      const LegacyCircuitGraph& graph, const std::string& graphName);
 
   std::vector<CUDAKernelInfo*>
   collectCUDAKernelsFromCircuitGraph(const std::string& graphName);

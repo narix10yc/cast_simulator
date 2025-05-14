@@ -2,7 +2,7 @@
 #include "timeit/timeit.h"
 
 #include "cast/Parser.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "openqasm/parser.h"
 
@@ -91,8 +91,8 @@ int main(int argc, const char** argv) {
   auto qasmRoot = qasmParser.parse();
 
   // This is temporary work-around as CircuitGraph does not allow copy yet
-  CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
-  CircuitGraph graphNoFuseDense, graphNaiveFuseDense, graphAdaptiveFuseDense;
+  LegacyCircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
+  LegacyCircuitGraph graphNoFuseDense, graphNaiveFuseDense, graphAdaptiveFuseDense;
 
   // we always generate the no-fuse graph to get the number of qubits
   qasmRoot->toCircuitGraph(graphNoFuse);

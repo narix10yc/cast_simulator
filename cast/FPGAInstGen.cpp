@@ -1,4 +1,4 @@
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/FPGAInst.h"
 
 using namespace cast;
@@ -132,7 +132,7 @@ private:
     }
   };
 
-  void init(const CircuitGraph& graph) {
+  void init(const LegacyCircuitGraph& graph) {
     // initialize qubit statuses
     std::vector<int> priorities(nQubits);
     for (int i = 0; i < nQubits; ++i)
@@ -181,7 +181,7 @@ private:
   }
 
 public:
-  const CircuitGraph& graph;
+  const LegacyCircuitGraph& graph;
   const FPGAInstGenConfig& config;
   int nRows;
   int nQubits;
@@ -191,7 +191,7 @@ public:
   std::vector<int> unlockedRowIndices;
   std::vector<available_blocks_t> availables;
 
-  InstGenState(const CircuitGraph& graph, const FPGAInstGenConfig& config)
+  InstGenState(const LegacyCircuitGraph& graph, const FPGAInstGenConfig& config)
       : graph(graph), config(config),
         nRows(graph.tile().size()), nQubits(graph.nQubits),
         qubitStatuses(graph.nQubits), tileBlocks(graph.tile().size() * nQubits),
@@ -568,7 +568,7 @@ public:
 } // anonymous namespace
 
 std::vector<Instruction> cast::fpga::genInstruction(
-    const CircuitGraph& graph, const FPGAInstGenConfig& config) {
+    const LegacyCircuitGraph& graph, const FPGAInstGenConfig& config) {
   InstGenState state(graph, config);
 
   return state.generate();

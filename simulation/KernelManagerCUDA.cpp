@@ -12,7 +12,7 @@
 #include "llvm/IR/Verifier.h"
 
 #include "cast/LegacyQuantumGate.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"

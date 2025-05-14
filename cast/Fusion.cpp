@@ -1,4 +1,4 @@
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 
 #include "utils/iocolor.h"
@@ -41,7 +41,7 @@ const FusionConfig FusionConfig::Aggressive {
 
 namespace {
 
-using tile_iter_t = CircuitGraph::tile_iter_t;
+using tile_iter_t = LegacyCircuitGraph::tile_iter_t;
 
 int getKAfterFusion(const GateBlock* blockA, const GateBlock* blockB) {
   int count = 0;
@@ -80,7 +80,7 @@ int getKAfterFusion(const GateBlock* blockA, const GateBlock* blockB) {
 /// Notice this function will NOT delete old blocks.
 /// @return fused block
 GateBlock* fuseAndInsertSameRow(
-    CircuitGraph& graph, tile_iter_t iter,
+    LegacyCircuitGraph& graph, tile_iter_t iter,
     GateBlock* blockA, GateBlock* blockB) {
   auto* blockFused = graph.acquireGateBlock(blockA, blockB);
   for (const auto& wireA : blockA->wires)
@@ -94,7 +94,7 @@ GateBlock* fuseAndInsertSameRow(
 /// Notice this function will NOT delete old blocks.
 /// @return the tile iterator of the fused block
 tile_iter_t fuseAndInsertDiffRow(
-    CircuitGraph& graph, tile_iter_t iterL, int qubit) {
+    LegacyCircuitGraph& graph, tile_iter_t iterL, int qubit) {
   assert(iterL != nullptr);
   auto* blockL = (*iterL)[qubit];
   assert(blockL != nullptr);
@@ -133,7 +133,7 @@ struct TentativeFusedItem {
 
 /// @return Number of fused blocks
 int startFusion(
-    CircuitGraph& graph, const FusionConfig& config,
+    LegacyCircuitGraph& graph, const FusionConfig& config,
     const CostModel* costModel,
     const int maxK, tile_iter_t curIt, const int qubit) {
   auto* fusedBlock = (*curIt)[qubit];
@@ -252,7 +252,7 @@ int startFusion(
 
 void cast::applyGateFusion(
     const FusionConfig& config, const CostModel* costModel,
-    CircuitGraph& graph, int max_k) {
+    LegacyCircuitGraph& graph, int max_k) {
   int curMaxK = 2;
   int nFused = 0;
   do {

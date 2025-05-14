@@ -2,7 +2,7 @@
 #include "timeit/timeit.h"
 
 #include "cast/Parser.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "openqasm/parser.h"
 
@@ -17,7 +17,7 @@ int main(int argc, const char** argv) {
   int nThreads = std::stoi(argv[2]);
 
   // This is temporary work-around as CircuitGraph does not allow copy yet
-  CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
+  LegacyCircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
   qasmRoot->toCircuitGraph(graphNoFuse);
   qasmRoot->toCircuitGraph(graphNaiveFuse);
   qasmRoot->toCircuitGraph(graphAdaptiveFuse);

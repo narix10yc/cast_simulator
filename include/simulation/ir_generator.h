@@ -11,7 +11,7 @@
 #include <array>
 #include <vector>
 
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/LegacyQuantumGate.h"
 
 namespace simulation {
@@ -184,7 +184,7 @@ public:
 
   // Generate a function that prepares matrices in simulation.
   // @return A function void(void* param, void* matrix).
-  llvm::Function* generatePrepareParameter(const cast::CircuitGraph& graph);
+  llvm::Function* generatePrepareParameter(const cast::LegacyCircuitGraph& graph);
 };
 
 } // namespace simulation

@@ -9,7 +9,7 @@
 #include "cast/FPGAConfig.h"
 
 namespace cast {
-class CircuitGraph;
+class LegacyCircuitGraph;
 class LegacyQuantumGate;
 class GateBlock;
 } // namespace cast
@@ -235,7 +235,7 @@ public:
 
 // top-level function to generate FPGA instructions from a CircuitGraph
 std::vector<Instruction> genInstruction(
-    const CircuitGraph&, const FPGAInstGenConfig&);
+    const LegacyCircuitGraph&, const FPGAInstGenConfig&);
 
 }; // namespace cast::fpga
 

@@ -1,7 +1,7 @@
 #include <llvm/IR/IntrinsicsNVPTX.h>
 
 #include "cast/LegacyQuantumGate.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 #include "simulation/KernelManager.h"
 #include "simulation/KernelGenInternal.h"
@@ -729,7 +729,7 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
 
 CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraph(
     const CUDAKernelGenConfig& config,
-    const CircuitGraph& graph, const std::string& graphName) {
+    const LegacyCircuitGraph& graph, const std::string& graphName) {
   const auto allBlocks = graph.getAllBlocks();
   const auto mangledName = internal::mangleGraphName(graphName);
   for (const auto& block : allBlocks) {

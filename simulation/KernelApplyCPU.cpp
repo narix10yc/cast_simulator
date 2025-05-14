@@ -1,5 +1,5 @@
 #include "simulation/KernelManager.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 using namespace cast;
 

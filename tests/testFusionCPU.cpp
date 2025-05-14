@@ -1,4 +1,4 @@
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Parser.h"
 #include "cast/Fusion.h"
 #include "simulation/KernelManager.h"
@@ -37,7 +37,7 @@ static void f() {
 
     Parser parser(p.path().c_str());
     auto qc = parser.parseQuantumCircuit();
-    CircuitGraph graph;
+    LegacyCircuitGraph graph;
     qc.toCircuitGraph(graph);
     auto allBlocks = graph.getAllBlocks();
     for (const auto& block : allBlocks) {

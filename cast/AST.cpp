@@ -1,5 +1,5 @@
 #include "cast/AST.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 #include "utils/iocolor.h"
 #include "utils/utils.h"
@@ -141,7 +141,7 @@ std::shared_ptr<LegacyQuantumGate> QuantumCircuit::gateApplyToQuantumGate(
     LegacyGateMatrix::FromName(gaStmt.name), gaStmt.qubits);
 }
 
-void QuantumCircuit::toCircuitGraph(CircuitGraph& graph) const {
+void QuantumCircuit::toCircuitGraph(LegacyCircuitGraph& graph) const {
   for (const auto& s : chains) {
     if (s->isNot(Statement::SK_GateChain)) {
       std::cerr << BOLDYELLOW("Warning: ")
@@ -162,7 +162,7 @@ void QuantumCircuit::toCircuitGraph(CircuitGraph& graph) const {
   }
 }
 
-QuantumCircuit QuantumCircuit::FromCircuitGraph(const CircuitGraph& graph) {
+QuantumCircuit QuantumCircuit::FromCircuitGraph(const LegacyCircuitGraph& graph) {
   const auto allBlocks = graph.getAllBlocks();
 
   QuantumCircuit qc;

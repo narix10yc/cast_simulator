@@ -1,5 +1,5 @@
 #include "cast/Parser.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/AST.h"
 
 #include "utils/iocolor.h"
