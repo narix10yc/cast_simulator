@@ -86,6 +86,11 @@ int NoiseChannel::nQubits() const {
   return -1;
 }
 
+NoiseChannelPtr cast::permute(NoiseChannelPtr nc, const std::vector<int>& flags) {
+  // TODO: Not Implemented
+  return nullptr;
+}
+
 NoiseChannelPtr NoiseChannel::SymmetricPauliChannel(double p) {
   assert(p >= 0 && p <= 1);
   int nQubits = 1;

@@ -52,7 +52,6 @@ public:
   }
 }; // class GateMatrix
 
-
 /// @brief \c ScalarGateMatrix is a wrapper around \c ComplexSquareMatrix whose
 /// edgeSize is always a power-of-2. 
 class ScalarGateMatrix : public GateMatrix {
@@ -121,6 +120,10 @@ public:
     return gm->kind() == GM_Parametrized;
   }
 }; // class ParametrizedGateMatrix
+
+/* Permute */
+
+GateMatrixPtr permute(GateMatrixPtr gm, const std::vector<int>& flags);
 
 /* Arithmatic Operator Overloading */
 

@@ -38,6 +38,10 @@ public:
 
 }; // class NoiseChannel
 
+/* Permute target qubits */
+
+NoiseChannelPtr permute(NoiseChannelPtr nc, const std::vector<int>& flags);
+
 } // namespace cast
  
 #endif // CAST_QUANTUM_CHANNEL_H

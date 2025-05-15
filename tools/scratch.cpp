@@ -3,16 +3,16 @@
 using namespace cast;
 
 int main(int argc, char** argv) {
-
   std::cerr << "sizeof(ScalarGateMatrix) = " << sizeof(ScalarGateMatrix) << "\n";
   std::cerr << "sizeof(ComplexSquareMatrix) = " << sizeof(ComplexSquareMatrix) << "\n";
   std::cerr << "sizeof(KrausRep) = " << sizeof(KrausRep) << "\n";
   std::cerr << "sizeof(ChoiRep) = " << sizeof(ChoiRep) << "\n";
   
-  auto gate = QuantumGate::Create(ScalarGateMatrix::X());
-  gate->setNoiseSymmetricPauliChannel(0.1);
+  auto xGate = ScalarGateMatrix::X();
 
-  gate->displayInfo(std::cerr, 3);
+  auto quantumGate = QuantumGate::Create(xGate, nullptr, {0});
+
+  quantumGate->displayInfo(std::cerr, 3);
 
   return 0;
 }

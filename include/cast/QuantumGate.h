@@ -1,87 +1,46 @@
 #ifndef CAST_QUANTUM_GATE_H
 #define CAST_QUANTUM_GATE_H
 
-#include "cast/ADT/NoiseChannel.h"
 #include "cast/ADT/GateMatrix.h"
+#include "cast/ADT/NoiseChannel.h"
+#include <vector>
+#include <cassert>
 
 namespace cast {
 
 class QuantumGate;
 using QuantumGatePtr = std::shared_ptr<QuantumGate>;
 
-/// @brief \c QuantumGate is a wrapper around \c GateMatrix and \c NoiseChannel.
-/// Each of them can be nullptr.
-/// Recommend to use \c QuantumGatePtr=std::shared_ptr<QuantumGate>.
-/// Recommand to use factory constructors \c QuantumGate::Create() 
 class QuantumGate {
-  GateMatrixPtr gateMatrix;
-  NoiseChannelPtr noiseChannel;
+private:
+  using TargetQubitsType = std::vector<int>;
+  GateMatrixPtr _gateMatrix;
+  NoiseChannelPtr _noiseChannel;
+  // qubits are sorted in ascending order
+  TargetQubitsType _qubits;
+
 public:
   QuantumGate(GateMatrixPtr gateMatrix,
-              NoiseChannelPtr noiseChannel)
-    : gateMatrix(std::move(gateMatrix))
-    , noiseChannel(std::move(noiseChannel)) {
-    checkValid();
-  }
+              NoiseChannelPtr noiseChannel,
+              const TargetQubitsType& qubits);
 
-  /* Factory constructors */
+  int nQubits() const { return _qubits.size(); }
+
+
+  TargetQubitsType& qubits() { return _qubits; }
+  const TargetQubitsType& qubits() const { return _qubits; }
+
+  std::ostream& displayInfo(std::ostream& os, int verbose) const;
 
   static QuantumGatePtr Create(GateMatrixPtr gateMatrix,
-                               NoiseChannelPtr noiseChannel) {
-    return std::make_shared<QuantumGate>(std::move(gateMatrix),
-                                         std::move(noiseChannel));
+                               NoiseChannelPtr noiseChannel,
+                               const TargetQubitsType& qubits) {
+    return std::make_shared<QuantumGate>(gateMatrix, noiseChannel, qubits);
   }
 
-  static QuantumGatePtr Create(GateMatrixPtr gateMatrix) {
-    return std::make_shared<QuantumGate>(std::move(gateMatrix), nullptr);
-  }
-
-  static QuantumGatePtr Create(NoiseChannelPtr noiseChannel) {
-    return std::make_shared<QuantumGate>(nullptr, std::move(noiseChannel));
-  }
-
-  /* End of factory constructors */
-
-  std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
-
-  void checkValid() const {
-    if (gateMatrix && noiseChannel) {
-      assert(gateMatrix->nQubits() == noiseChannel->nQubits());
-    }
-  }
-
-  int nQubits() const {
-    return gateMatrix->nQubits();
-  }
-
-  // Get the gate matrix. Gate matrix can be nullptr, in which case it means the
-  // identity matrix.
-  // The gate matrix is not always unitary.
-  GateMatrixPtr getGateMatrix() const {
-    return gateMatrix;
-  }
-
-  // Get the noise channel. Noise channel can be nullptr, in which case it means
-  // no noise.
-  NoiseChannelPtr getNoise() const {
-    return noiseChannel;
-  }
-
-  void setGateMatrix(GateMatrixPtr gateMatrix) {
-    this->gateMatrix = std::move(gateMatrix);
-  }
-
-  void setNoise(NoiseChannelPtr noise) {
-    this->noiseChannel = std::move(noise);
-  }
-
-  void setNoiseSymmetricPauliChannel(double p) {
-    this->noiseChannel = NoiseChannel::SymmetricPauliChannel(p);
-  }
 
 }; // class QuantumGate
-  
-} // namespace cast
 
+}; // namespace cast
 
 #endif // CAST_QUANTUM_GATE_H

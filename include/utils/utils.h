@@ -119,28 +119,6 @@ std::ostream& printVectorWithPrinter(
   return os << "]";
 }
 
-template <typename Printer_T, typename T>
-concept Printer_C = requires(
-    Printer_T printer, std::ostream& os, const T& value) {
-  { printer(os, value) } -> std::same_as<void>;
-};
-
-template <typename T, typename Printer_T>
-requires Printer_C<Printer_T, T>
-std::ostream& printSpanWithPrinterNoBracket(
-    std::ostream& os, std::span<T> v, Printer_T f) {
-  auto it = v.begin();
-  auto e = v.end();
-  if (it == e)
-    return os;
-  std::invoke(f, os, *it);
-  while (++it != e) {
-    os << ",";
-    std::invoke(f, os, *it);
-  }
-  return os;
-}
-
 template<typename T>
 void pushBackIfNotInVector(std::vector<T>& vec, T elem) {
   for (const auto& e : vec) {
