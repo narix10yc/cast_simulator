@@ -1,40 +1,41 @@
 #include "new_parser/Parser.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
+#include "utils/PrintSpan.h"
 
 #include "cast/LegacyCircuitGraph.h"
 
 using namespace cast::draft;
 
 /*
-    NK_Stmt,
-      NK_Stmt_GateApply,
-      NK_Stmt_GateChain,
-      NK_Stmt_GateBlock,
-      NK_Stmt_Measure,
-      NK_Stmt_If,
-      NK_Stmt_Repeat,
-      NK_Stmt_Circuit,
-      NK_Stmt_PauliComponent,
-      NK_Stmt_Channel,
-      _NK_Stmt_End,
-    NK_Expr,
-      NK_Expr_Identifier,
-      NK_Expr_ParameterDecl,
-      NK_Expr_Call,
-      NK_Expr_SimpleNumeric,
-        NK_Expr_IntegerLiteral,
-        NK_Expr_FloatingLiteral,
-        NK_Expr_FractionLiteral,
-        NK_Expr_FractionPiLiteral,
-        _NK_Expr_SimpleNumeric_End,
-      NK_Expr_Measure,
-      NK_Expr_All,
-      NK_Expr_Parameter,
-      NK_Expr_BinaryOp,
-      NK_Expr_MinusOp,
-      _NK_Expr_End,
-    NK_Root
+  NK_Stmt,
+    NK_Stmt_GateApply,
+    NK_Stmt_GateChain,
+    NK_Stmt_GateBlock,
+    NK_Stmt_Measure,
+    NK_Stmt_If,
+    NK_Stmt_Repeat,
+    NK_Stmt_Circuit,
+    NK_Stmt_PauliComponent,
+    NK_Stmt_Channel,
+    _NK_Stmt_End,
+  NK_Expr,
+    NK_Expr_Identifier,
+    NK_Expr_ParameterDecl,
+    NK_Expr_Call,
+    NK_Expr_SimpleNumeric,
+      NK_Expr_IntegerLiteral,
+      NK_Expr_FloatingLiteral,
+      NK_Expr_FractionLiteral,
+      NK_Expr_FractionPiLiteral,
+      _NK_Expr_SimpleNumeric_End,
+    NK_Expr_Measure,
+    NK_Expr_All,
+    NK_Expr_Parameter,
+    NK_Expr_BinaryOp,
+    NK_Expr_MinusOp,
+    _NK_Expr_End,
+  NK_Root
 */
 std::string ast::Node::_getKindName(ast::Node::NodeKind k) {
   switch (k) {
@@ -64,10 +65,6 @@ std::string ast::Node::_getKindName(ast::Node::NodeKind k) {
     default:
       return "<KindName>";
   }
-}
-
-void ast::CircuitStmt::toCircuitGraph(cast::LegacyCircuitGraph& graph) const {
-  assert(false && "Not implemented yet");
 }
 
 std::ostream& ast::Attribute::print(std::ostream& os) const {

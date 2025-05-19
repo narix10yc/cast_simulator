@@ -9,8 +9,9 @@ int main(int argc, char** argv) {
   std::cerr << "sizeof(ChoiRep) = " << sizeof(ChoiRep) << "\n";
   
   auto xGate = ScalarGateMatrix::X();
+  auto pauliError = NoiseChannel::SymmetricPauliChannel(0.1);
 
-  auto quantumGate = QuantumGate::Create(xGate, nullptr, {0});
+  auto quantumGate = QuantumGate::Create(xGate, pauliError, {0});
 
   quantumGate->displayInfo(std::cerr, 3);
 

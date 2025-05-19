@@ -5,7 +5,8 @@ using namespace cast::draft;
 int main(int argc, char** argv) {
   assert(argc > 1);
   ASTContext context;
-  Parser parser(context, argv[1]);
+  Parser parser(context);
+  parser.loadFromFile(argv[1]);
   parser.displayLineTable();
   auto* root = parser.parse();
   ast::PrettyPrinter p(std::cerr);

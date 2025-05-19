@@ -7,10 +7,11 @@
 
 using namespace cast::draft;
 
-SourceManager::SourceManager(const char* fileName) {
+bool SourceManager::loadFromFile(const char* fileName) {
   std::ifstream file(fileName, std::ifstream::binary);
   assert(file);
-  assert(file.is_open());
+  if (!file.is_open())
+    return true; // error opening file
 
   file.seekg(0, file.end);
   auto l = file.tellg();
@@ -28,6 +29,22 @@ SourceManager::SourceManager(const char* fileName) {
       lineTable.push_back(ptr + 1);
   }
   lineTable.push_back(bufferEnd);
+  return false;
+}
+
+bool SourceManager::loadRawBuffer(const char* buffer, size_t size) {
+  bufferBegin = new char[size];
+  bufferEnd = bufferBegin + size;
+  std::memcpy(const_cast<char*>(bufferBegin), buffer, size);
+
+  // Initialize line table
+  lineTable.push_back(bufferBegin);
+  for (const char* ptr = bufferBegin; ptr < bufferEnd; ++ptr) {
+    if (*ptr == '\n')
+      lineTable.push_back(ptr + 1);
+  }
+  lineTable.push_back(bufferEnd);
+  return false;
 }
 
 std::ostream& SourceManager::printLineInfo(

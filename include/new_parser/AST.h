@@ -15,7 +15,7 @@
 #endif
 
 namespace cast {
-  class LegacyCircuitGraph;
+  class CircuitGraph;
 } // namespace cast
 
 namespace cast::draft {
@@ -499,7 +499,7 @@ public:
 
   void updateAttribute();
 
-  void toCircuitGraph(cast::LegacyCircuitGraph& graph) const;
+  cast::CircuitGraph toCircuitGraph() const;
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Stmt_Circuit;

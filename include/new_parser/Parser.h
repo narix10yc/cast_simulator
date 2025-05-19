@@ -134,12 +134,9 @@ class Parser {
   /// program with error messages
   void requireCurTokenIs(TokenKind kind, const char* msg = nullptr) const;
 public:
-  Parser(ASTContext& ctx, const char* fileName)
-    : ctx(ctx), lexer(fileName), currentScope(nullptr) {
-    lexer.lex(curToken);
-    lexer.lex(nextToken);
-  }
-
+  Parser(ASTContext& ctx)
+    : ctx(ctx), lexer(), currentScope(nullptr) {}
+  
   Parser(const Parser&) = delete;
   Parser& operator=(const Parser&) = delete;
   Parser(Parser&&) = delete;
@@ -147,6 +144,24 @@ public:
 
   ~Parser() {
     assert(currentScope == nullptr && "Parser exits with a non-empty scope");
+  }
+
+  // return true on error
+  bool loadFromFile(const char* filename) {
+    if (lexer.loadFromFile(filename))
+      return true; // error loading file
+    lexer.lex(curToken);
+    lexer.lex(nextToken);
+    return false; // success
+  }
+  
+  // return true on error
+  bool loadRawBuffer(const char* buffer, size_t size) {
+    if (lexer.loadRawBuffer(buffer, size))
+      return true; // error loading buffer
+    lexer.lex(curToken);
+    lexer.lex(nextToken);
+    return false; // success
   }
 
   ast::RootNode* parse();
