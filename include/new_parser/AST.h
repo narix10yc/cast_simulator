@@ -549,6 +549,26 @@ public:
   }
 }; // class ChannelStmt
 
+class IfStmt : public Stmt {
+public:
+  Expr* condition;
+  std::span<Stmt*> body;
+  std::span<Stmt*> elseBody;
+
+  IfStmt(Expr* condition,
+         std::span<Stmt*> body,
+         std::span<Stmt*> elseBody)
+    : Stmt(NK_Stmt_If), condition(condition), body(body), elseBody(elseBody) {}
+
+  std::ostream& print(std::ostream& os) const override;
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Stmt_If;
+  }
+}; // class IfStmt
+
 class RootNode : public Node {
 public:
   std::span<Stmt*> stmts;

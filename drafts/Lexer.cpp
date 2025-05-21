@@ -283,10 +283,12 @@ void Lexer::lex(Token& tok) {
       tok.kind = tk_Channel;
     else if (tokStr == "If")
       tok.kind = tk_If;
-    else if (tokStr == "All")
-      tok.kind = tk_All;
+    else if (tokStr == "Else")
+      tok.kind = tk_Else;
     else if (tokStr == "Measure")
       tok.kind = tk_Measure;
+    else if (tokStr == "All")
+      tok.kind = tk_All;
     else if (tokStr == "Repeat")
       tok.kind = tk_Repeat;
 

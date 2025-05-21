@@ -265,7 +265,35 @@ ast::Stmt* Parser::parseCircuitLevelStmt() {
     }
     case tk_Identifier:
       return parseGateChainStmt();
+    case tk_If:
+      return parseIfStmt();
     default:
       return nullptr;
   }
+}
+
+std::span<ast::Stmt*> Parser::parseCircuitLevelStmtList() {
+  std::vector<ast::Stmt*> stmts;
+  if (curToken.is(tk_L_CurlyBracket)) {
+    advance(tk_L_CurlyBracket);
+    while (true) {
+      if (curToken.is(tk_R_CurlyBracket))
+        break;
+      auto* s = parseCircuitLevelStmt();
+      if (s == nullptr)
+        break;
+      stmts.push_back(s);
+    }
+    advance(tk_R_CurlyBracket);
+  }
+  else {
+    auto* s = parseCircuitLevelStmt();
+    if (s == nullptr) {
+      logErrHere("Expect a statement");
+      failAndExit();
+    }
+    stmts.push_back(s);
+  }
+
+  return ctx.createSpan(stmts.data(), stmts.size());
 }

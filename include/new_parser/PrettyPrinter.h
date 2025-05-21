@@ -27,22 +27,24 @@ public:
     states[idx] = value;
   }
 
-  void setPrefix(const std::string& prefix) {
+  PrettyPrinter& setPrefix(const std::string& prefix) {
     this->prefix = prefix;
+    return *this;
   }
 
   // prefix will be cleared after write. 
   std::ostream& write(int indent) {
-    assert(indent <= states.size());
     assert(indent >= 0);
     if (indent == 0)
       return os;
+    // col [0, indent - 2]
     for (unsigned i = 0; i < indent - 1; ++i) {
       if (states[i] == 0)
         os << "  ";
       else
         os << "| ";
     }
+    // col indent - 1
     if (states[indent - 1] == 0)
       os << "  ";
     else if (states[indent - 1] == 1) {
@@ -55,7 +57,7 @@ public:
     }
     if (!prefix.empty()) {
       // Print the prefix in purple
-      os << "\033[35m" << prefix << "\033[0m";
+      os << "\033[35m" << prefix << ": \033[0m";
       prefix.clear();
     }
     return os;

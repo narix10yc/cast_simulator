@@ -47,14 +47,23 @@ class Parser {
   ast::Expr* parseIdentifierOrCallExpr();
   
   // CircuitStmt is a top-level statement. Should only be called when curToken
-  // is 'Circuit'. This function never returns nullptr.
+  // is 'Circuit'. Never returns nullptr.
   ast::CircuitStmt* parseCircuitStmt();
 
-  // Circuit-level statements include GateChainStmt, MeasureStmt
+  // Parse an IfStmt. Never returns nullptr.
+  ast::IfStmt* parseIfStmt();
+
+  // Circuit-level statements include GateChainStmt, MeasureStmt, and IfStmt.
   // Possibly returns nullptr
   ast::Stmt* parseCircuitLevelStmt();
 
+  // Parse a list of circuit-level statements. It checks if curToken is '{',
+  // and if so, parse a list of statements (ended with '}').
+  // Otherwise it returns a single statement in a span.
+  std::span<ast::Stmt*> parseCircuitLevelStmtList();
+
   ast::GateChainStmt* parseGateChainStmt();
+
   // Never returns nullptr
   ast::GateApplyStmt* parseGateApplyStmt();
 
@@ -162,6 +171,10 @@ public:
     lexer.lex(curToken);
     lexer.lex(nextToken);
     return false; // success
+  }
+
+  bool loadRawBuffer(std::string_view buffer) {
+    return loadRawBuffer(buffer.data(), buffer.size());
   }
 
   ast::RootNode* parse();

@@ -177,3 +177,56 @@ Circuit[ecc=five_qubit_code] ecc_circuit {
   Measure 0;
 }
 ```
+
+## CAST IR
+
+```
+cast.circuit @my_qc(%q : cast.qubits<6>) -> i1
+{
+  cast.circuit_graph;
+  cast.if (cast.measure(0))
+  {
+    cast.circuit_graph;
+  } // else
+  {}
+  cast.circuit_graph;
+  cast.out(0);
+}
+```
+
+```
+cast.circuit @my_qc(%q : cast.qubits<6>) -> cast.dm<6>
+{
+  cast.circuit_graph;
+  cast.if (cast.measure(0))
+  {
+    cast.circuit_graph;
+  } // else
+  {}
+  cast.circuit_graph;
+  cast.out_dm();
+}
+```
+
+```
+Circuit my_circuit {
+  H 0;
+  CX 0 1;
+  If (Measure 0) {
+    X 0;
+  }
+  RZ(Pi/4) 0;
+}
+```
+
+```
+cast.circuit @my_circuit(%q : cast.qubits<2>) -> i1
+{
+  cast.circuit_graph;
+  cast.if_measure(0) {
+    cast.circuit_graph
+  }{}
+  cast.circuit_graph;
+  return cast.out_measure(0);
+}
+```
