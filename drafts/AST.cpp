@@ -44,6 +44,7 @@ std::string ast::Node::_getKindName(ast::Node::NodeKind k) {
     case NK_Stmt_GateBlock: return "GateBlockStmt";
     case NK_Stmt_Measure: return "MeasureStmt";
     case NK_Stmt_If: return "IfStmt";
+    case NK_Stmt_Out: return "OutStmt";
     case NK_Stmt_Repeat: return "RepeatStmt";
     case NK_Stmt_Circuit: return "CircuitStmt";
     case NK_Stmt_PauliComponent: return "PauliComponentStmt";

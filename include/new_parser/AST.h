@@ -33,6 +33,7 @@ public:
       NK_Stmt_GateBlock,
       NK_Stmt_Measure,
       NK_Stmt_If,
+      NK_Stmt_Out,
       NK_Stmt_Repeat,
       NK_Stmt_Circuit,
       NK_Stmt_PauliComponent,
@@ -568,6 +569,23 @@ public:
     return node->getKind() == NK_Stmt_If;
   }
 }; // class IfStmt
+
+class OutStmt : public Stmt {
+public:
+  Expr* expr;
+OutStmt(Expr* expr)
+    : Stmt(NK_Stmt_Out), expr(expr) {}
+
+  std::ostream& print(std::ostream& os) const override {
+    return expr->print(os << "Out ");
+  }
+
+  void prettyPrint(PrettyPrinter& p, int indent) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_Stmt_Out;
+  }
+}; // class OutStmt
 
 class RootNode : public Node {
 public:

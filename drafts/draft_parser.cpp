@@ -29,6 +29,5 @@ int main(int argc, char** argv) {
   root->prettyPrint(p, 0);
   root->print(std::cerr);
 
-
   return 0;
 }

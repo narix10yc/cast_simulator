@@ -215,7 +215,11 @@ Circuit my_circuit {
   If (Measure 0) {
     X 0;
   }
+  Else {
+    X 1;
+  }
   RZ(Pi/4) 0;
+  Out (Measure 0);
 }
 ```
 
@@ -224,8 +228,10 @@ cast.circuit @my_circuit(%q : cast.qubits<2>) -> i1
 {
   cast.circuit_graph;
   cast.if_measure(0) {
-    cast.circuit_graph
-  }{}
+    cast.circuit_graph;
+  }{
+    cast.circuit_graph;
+  }
   cast.circuit_graph;
   return cast.out_measure(0);
 }

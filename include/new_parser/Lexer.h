@@ -19,8 +19,8 @@ enum TokenKind : int {
   tk_Measure = -13,
   tk_If = -14,
   tk_Else = -15,
-  tk_All = -16,
-  tk_Repeat = -17,
+  tk_Out = -16,
+  tk_All = -17,
 
   // operators
   tk_Add = -30,          // +

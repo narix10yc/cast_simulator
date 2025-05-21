@@ -53,7 +53,11 @@ class Parser {
   // Parse an IfStmt. Never returns nullptr.
   ast::IfStmt* parseIfStmt();
 
-  // Circuit-level statements include GateChainStmt, MeasureStmt, and IfStmt.
+  // Parse an OutStmt. Never returns nullptr.
+  ast::OutStmt* parseOutStmt();
+
+  // Circuit-level statements include GateChainStmt, MeasureStmt, IfStmt, and
+  // OutStmt.
   // Possibly returns nullptr
   ast::Stmt* parseCircuitLevelStmt();
 

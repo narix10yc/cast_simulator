@@ -267,6 +267,8 @@ ast::Stmt* Parser::parseCircuitLevelStmt() {
       return parseGateChainStmt();
     case tk_If:
       return parseIfStmt();
+    case tk_Out:
+      return parseOutStmt();
     default:
       return nullptr;
   }
