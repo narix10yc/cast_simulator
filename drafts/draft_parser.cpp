@@ -3,24 +3,25 @@
 using namespace cast::draft;
 
 static const char* Program = R"(
-  Circuit my_circuit {
-    H 0;
-    CX 0 1;
-    If (Measure 0) {
-      X 0;
-    }
-    Else {
-      X 1;
-    }
-    RZ(Pi/4) 0;
-    Out (Measure 0);
+Circuit my_circuit {
+  H 0;
+  CX 0 1;
+  If (Measure 0) {
+    X 0;
   }
+  Else {
+    X 1;
+  }
+  RZ(Pi/4) 0;
+  Out (Measure 0);
+}
 )";
 
 int main(int argc, char** argv) {
   ASTContext context;
   Parser parser(context);
   parser.loadRawBuffer(Program);
+  parser.displayLineTable();
 
   // parser.loadFromFile(argv[1]);
 

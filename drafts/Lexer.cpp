@@ -264,7 +264,9 @@ void Lexer::lex(Token& tok) {
     if (!std::isalpha(c)) {
       std::cerr << RED("[Lexer Error]: ") << "Unknown char "
                 << static_cast<int>(c)
-                << ". This is likely not implemented yet.\n";
+                << ". This is likely not implemented yet.\n"
+                << "Current address: " << (void*)curPtr << ", please check "
+                << "line table.\n";
       sm.printLineInfo(std::cerr, {curPtr, curPtr + 1});
       assert(false);
     }

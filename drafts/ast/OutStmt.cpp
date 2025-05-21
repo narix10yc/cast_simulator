@@ -12,6 +12,13 @@ ast::OutStmt* Parser::parseOutStmt() {
   return new (ctx) ast::OutStmt(expr);
 }
 
+std::ostream& ast::OutStmt::print(std::ostream& os) const {
+  os << "Out";
+  if (expr != nullptr)
+    expr->print(os << "(") << ")";
+  return os << ";";
+}
+
 void ast::OutStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << "\n";
   if (expr == nullptr)

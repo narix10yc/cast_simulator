@@ -576,9 +576,7 @@ public:
 OutStmt(Expr* expr)
     : Stmt(NK_Stmt_Out), expr(expr) {}
 
-  std::ostream& print(std::ostream& os) const override {
-    return expr->print(os << "Out ");
-  }
+  std::ostream& print(std::ostream& os) const override;
 
   void prettyPrint(PrettyPrinter& p, int indent) const override;
 

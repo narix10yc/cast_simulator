@@ -17,7 +17,8 @@ bool SourceManager::loadFromFile(const char* fileName) {
   auto l = file.tellg();
   file.seekg(0, file.beg);
 
-  bufferBegin = new char[l];
+  bufferBegin = new char[static_cast<size_t>(l) + 1];
+  const_cast<char*>(bufferBegin)[static_cast<size_t>(l)] = '\0';
   bufferEnd = bufferBegin + l;
   file.read(const_cast<char*>(bufferBegin), l);
   file.close();
@@ -33,14 +34,14 @@ bool SourceManager::loadFromFile(const char* fileName) {
 }
 
 bool SourceManager::loadRawBuffer(const char* buffer, size_t size) {
-  bufferBegin = new char[size];
+  bufferBegin = new char[size + 1];
   bufferEnd = bufferBegin + size;
-  std::memcpy(const_cast<char*>(bufferBegin), buffer, size);
+  std::memcpy(const_cast<char*>(bufferBegin), buffer, size + 1ULL);
 
   // Initialize line table
   lineTable.push_back(bufferBegin);
   for (const char* ptr = bufferBegin; ptr < bufferEnd; ++ptr) {
-    if (*ptr == '\n')
+    if (*ptr == '\n' && ptr + 1 < bufferEnd)
       lineTable.push_back(ptr + 1);
   }
   lineTable.push_back(bufferEnd);
