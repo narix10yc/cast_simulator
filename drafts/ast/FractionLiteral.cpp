@@ -1,8 +1,8 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-void ast::FractionLiteral::prettyPrint(PrettyPrinter& p, int indent) const {
+void FractionLiteral::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << "(";
   print(p.os) << ")\n";
 }

@@ -6,6 +6,7 @@
 #include <cassert>
 
 namespace cast::draft {
+namespace ast {
 
 enum TokenKind : int {
   tk_Eof = -1,
@@ -168,6 +169,7 @@ public:
   void skipLine();
 };
 
+} // namespace ast
 } // namespace cast::draft
 
 #endif // NEW_PARSER_LEXER_H

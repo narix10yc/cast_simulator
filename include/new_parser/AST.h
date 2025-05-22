@@ -3,7 +3,6 @@
 
 #include "new_parser/LocationSpan.h"
 #include "new_parser/PrettyPrinter.h"
-#include "llvm/Support/Casting.h"
 #include "llvm/ADT/SmallVector.h"
 #include "utils/PODVariant.h"
 #include <iostream>
@@ -17,12 +16,11 @@
 namespace cast {
   class CircuitGraph;
 } // namespace cast
-
+  
 namespace cast::draft {
-  class ASTContext;
-  
 namespace ast {
-  
+class ASTContext;
+
 class Node {
 public:
   /// The LLVM-style RTTI. Indentation corresponds to class hirearchy.
@@ -164,9 +162,7 @@ public:
 /// the AST.
 class SimpleNumericExpr : public Expr {
 public:
-  explicit SimpleNumericExpr(NodeKind kind) : Expr(kind) {
-    assert(llvm::dyn_cast<SimpleNumericExpr>(this) != nullptr);
-  }
+  explicit SimpleNumericExpr(NodeKind kind) : Expr(kind) {}
  
   virtual double getValue() const = 0;
 

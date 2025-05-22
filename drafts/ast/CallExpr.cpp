@@ -1,16 +1,16 @@
 #include "new_parser/Parser.h"
 #include "utils/PrintSpan.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-std::ostream& ast::CallExpr::print(std::ostream& os) const {
+std::ostream& CallExpr::print(std::ostream& os) const {
   os << name << "(";
   utils::printSpanWithPrinterNoBracket(
-    os, args, [](std::ostream& os, ast::Expr* arg) { arg->print(os); });
+    os, args, [](std::ostream& os, Expr* arg) { arg->print(os); });
   return os << ")";
 }
 
-void ast::CallExpr::prettyPrint(PrettyPrinter& p, int indent) const {
+void CallExpr::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << ": " << name << ", "
                   << args.size() << " args\n";
   p.setState(indent, args.size());

@@ -3,9 +3,9 @@
 #include <cassert>
 #include "utils/iocolor.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-std::string cast::draft::internal::getNameOfTokenKind(TokenKind kind) {
+std::string cast::draft::ast::internal::getNameOfTokenKind(TokenKind kind) {
   switch (kind) {
   case tk_Eof:
     return "EoF";

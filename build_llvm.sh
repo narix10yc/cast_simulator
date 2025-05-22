@@ -32,7 +32,7 @@ cmake -S "${cast_llvm_root}/llvm-project-${llvm_version}.src/llvm" -G Ninja \
 -DLLVM_TARGETS_TO_BUILD="Native;NVPTX" \
 -DCMAKE_C_COMPILER="${cast_llvm_root}/release-install/bin/clang" \
 -DCMAKE_CXX_COMPILER="${cast_llvm_root}/release-install/bin/clang++" \
--DLLVM_USE_LINKER="${cast_llvm_root}/release-install/bin/ld.lld"
+-DCMAKE_LINKER="${cast_llvm_root}/release-install/bin/ld.lld"
 
 cmake --build "${cast_llvm_root}/debug-build"
 

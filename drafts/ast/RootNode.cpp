@@ -1,9 +1,9 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-ast::RootNode* Parser::parse() {
-  llvm::SmallVector<ast::Stmt*> stmts;
+RootNode* Parser::parse() {
+  llvm::SmallVector<Stmt*> stmts;
   pushScope();
 
   while (curToken.isNot(tk_Eof)) {
@@ -30,12 +30,12 @@ ast::RootNode* Parser::parse() {
     }
   }
   popScope();
-  return new (ctx) ast::RootNode(
+  return new (ctx) RootNode(
     ctx.createSpan(stmts.data(), stmts.size())
   );
 }
 
-std::ostream& ast::RootNode::print(std::ostream& os) const {
+std::ostream& RootNode::print(std::ostream& os) const {
   for (const auto* stmt : stmts) {
     stmt->print(os);
     os << '\n';
@@ -43,7 +43,7 @@ std::ostream& ast::RootNode::print(std::ostream& os) const {
   return os;
 }
 
-void ast::RootNode::prettyPrint(PrettyPrinter& p, int indent) const {
+void RootNode::prettyPrint(PrettyPrinter& p, int indent) const {
   unsigned size = stmts.size();
   p.write(indent) << getKindName() << ": " << size << " stmts\n";
   p.setState(indent, size);

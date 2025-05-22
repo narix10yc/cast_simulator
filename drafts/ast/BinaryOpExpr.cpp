@@ -1,18 +1,18 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-int ast::BinaryOpExpr::getPrecedence(ast::BinaryOpExpr::BinaryOpKind binOp) {
+int BinaryOpExpr::getPrecedence(BinaryOpExpr::BinaryOpKind binOp) {
   switch (binOp) {
-  case ast::BinaryOpExpr::Invalid:
+  case BinaryOpExpr::Invalid:
     return -1;
-  case ast::BinaryOpExpr::Add:
-  case ast::BinaryOpExpr::Sub:
+  case BinaryOpExpr::Add:
+  case BinaryOpExpr::Sub:
     return 10;
-  case ast::BinaryOpExpr::Mul:
-  case ast::BinaryOpExpr::Div:
+  case BinaryOpExpr::Mul:
+  case BinaryOpExpr::Div:
     return 20;
-  case ast::BinaryOpExpr::Pow:
+  case BinaryOpExpr::Pow:
     return 50;
   default:
     assert(false && "Invalid binary operator");
@@ -20,7 +20,7 @@ int ast::BinaryOpExpr::getPrecedence(ast::BinaryOpExpr::BinaryOpKind binOp) {
   }
 }
 
-std::ostream& ast::BinaryOpExpr::print(std::ostream& os) const {
+std::ostream& BinaryOpExpr::print(std::ostream& os) const {
   os << "(";
   lhs->print(os);
   os << " ";
@@ -37,7 +37,7 @@ std::ostream& ast::BinaryOpExpr::print(std::ostream& os) const {
   return os << ")";
 }
 
-void ast::BinaryOpExpr::prettyPrint(PrettyPrinter& p, int indent) const {
+void BinaryOpExpr::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << ": ";
   switch (op) {
     case Add: p.os << "+"; break;

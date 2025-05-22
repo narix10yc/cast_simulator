@@ -1,8 +1,8 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-ast::IfStmt* Parser::parseIfStmt() {
+IfStmt* Parser::parseIfStmt() {
   assert(curToken.is(tk_If) &&
          "parseIfStmt expects to be called with an 'If' token");
   advance(tk_If);
@@ -18,16 +18,16 @@ ast::IfStmt* Parser::parseIfStmt() {
   advance(tk_R_RoundBracket);
 
   auto body = parseCircuitLevelStmtList();
-  std::span<ast::Stmt*> elseBody;
+  std::span<Stmt*> elseBody;
 
   if (curToken.is(tk_Else)) {
     advance(tk_Else);
     elseBody = parseCircuitLevelStmtList();
   }
-  return new (ctx) ast::IfStmt(condition, body, elseBody);
+  return new (ctx) IfStmt(condition, body, elseBody);
 }
 
-std::ostream& ast::IfStmt::print(std::ostream& os) const {
+std::ostream& IfStmt::print(std::ostream& os) const {
   os << "If (";
   condition->print(os) << ") {\n";
   for (auto* s : body)
@@ -38,7 +38,7 @@ std::ostream& ast::IfStmt::print(std::ostream& os) const {
   return os << "\n}\n";
 }
 
-void ast::IfStmt::prettyPrint(PrettyPrinter& p, int indent) const {
+void IfStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << "\n";
   p.setState(indent, elseBody.empty() ? 2 : 3);
 

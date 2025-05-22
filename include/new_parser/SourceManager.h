@@ -7,6 +7,7 @@
 #include "utils/iocolor.h"
 
 namespace cast::draft {
+namespace ast {
 
 class SourceManager {
 public:
@@ -32,7 +33,7 @@ public:
   std::ostream& printLineInfo(std::ostream& os, LocationSpan loc) const;
 };
 
-
+} // namespace ast
 } // namespace cast::draft
 
 #endif // CAST_DRAFT_SOURCE_MANAGER_H

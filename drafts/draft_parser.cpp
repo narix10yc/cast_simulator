@@ -1,6 +1,8 @@
 #include "new_parser/Parser.h"
+#include "cast/Transform/ASTCircuit2IRCircuit.h"
 
 using namespace cast::draft;
+using namespace cast;
 
 static const char* Program = R"(
 Circuit my_circuit {
@@ -18,8 +20,8 @@ Circuit my_circuit {
 )";
 
 int main(int argc, char** argv) {
-  ASTContext context;
-  Parser parser(context);
+  ast::ASTContext context;
+  ast::Parser parser(context);
   parser.loadRawBuffer(Program);
   parser.displayLineTable();
 
@@ -29,6 +31,16 @@ int main(int argc, char** argv) {
   ast::PrettyPrinter p(std::cerr);
   root->prettyPrint(p, 0);
   root->print(std::cerr);
+  const auto* astCircuit = root->lookupCircuit("my_circuit");
+  assert(astCircuit != nullptr && "Failed to find circuit my_circuit");
+
+  auto irCircuit = cast::transform::ASTCircuit2IRCircuit(*astCircuit, context);
+
+  if (irCircuit == nullptr) {
+    std::cerr << "Failed to transform AST to IR\n";
+    return 1;
+  }
+  irCircuit->print(std::cerr);
 
   return 0;
 }

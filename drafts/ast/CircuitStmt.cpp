@@ -1,14 +1,14 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-ast::CircuitStmt* Parser::parseCircuitStmt() {
+CircuitStmt* Parser::parseCircuitStmt() {
   assert(curToken.is(tk_Circuit) &&
          "parseCircuitStmt expects to be called with a 'Circuit' token");
   advance(tk_Circuit);
 
   // circuit attributes
-  ast::CircuitAttribute attr;
+  CircuitAttribute attr;
   if (optionalAdvance(tk_Less)) {
     std::string key;
     while (true) {
@@ -72,7 +72,7 @@ ast::CircuitStmt* Parser::parseCircuitStmt() {
   requireCurTokenIs(tk_L_CurlyBracket, "Expect '{' to start circuit body");
   advance(tk_L_CurlyBracket);
   pushScope();
-  llvm::SmallVector<ast::Stmt*> body;
+  llvm::SmallVector<Stmt*> body;
   while (true) {
     auto* stmt = parseCircuitLevelStmt();
     if (stmt == nullptr)
@@ -85,7 +85,7 @@ ast::CircuitStmt* Parser::parseCircuitStmt() {
   popScope();
   // end of circuit body
 
-  auto* circuit = new (ctx) ast::CircuitStmt(
+  auto* circuit = new (ctx) CircuitStmt(
     name,
     nameLoc,
     paramDecl,
@@ -97,11 +97,11 @@ ast::CircuitStmt* Parser::parseCircuitStmt() {
   return circuit;
 }
 
-void ast::CircuitStmt::updateAttribute() {
+void CircuitStmt::updateAttribute() {
   // Not implemented yet
 }
 
-std::ostream& ast::CircuitStmt::print(std::ostream& os) const {
+std::ostream& CircuitStmt::print(std::ostream& os) const {
   os << "Circuit";
   bool hasAttr = attr.isInited();
   if (hasAttr) {
@@ -138,7 +138,7 @@ std::ostream& ast::CircuitStmt::print(std::ostream& os) const {
   return os;
 }
 
-void ast::CircuitStmt::prettyPrint(PrettyPrinter& p, int indent) const {
+void CircuitStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   unsigned size = body.size();
   p.write(indent) << getKindName() << "(" << name << "): "
                   << size << " stmts\n";

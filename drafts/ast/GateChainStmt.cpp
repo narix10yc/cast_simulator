@@ -1,9 +1,9 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-ast::GateChainStmt* Parser::parseGateChainStmt() {
-  llvm::SmallVector<ast::GateApplyStmt*> gates;
+GateChainStmt* Parser::parseGateChainStmt() {
+  llvm::SmallVector<GateApplyStmt*> gates;
   while (true) {
     if (curToken.is(tk_Semicolon))
       break;
@@ -18,12 +18,12 @@ ast::GateChainStmt* Parser::parseGateChainStmt() {
   }
   advance(tk_Semicolon);
 
-  return new (ctx) ast::GateChainStmt(
+  return new (ctx) GateChainStmt(
     ctx.createSpan(gates.data(), gates.size())
   );
 }
 
-std::ostream& ast::GateChainStmt::print(std::ostream& os) const {
+std::ostream& GateChainStmt::print(std::ostream& os) const {
   for (size_t i = 0, size = gates.size(); i < size; ++i) {
     gates[i]->print(os);
     os << ((i == size - 1) ? ";" : "\n@ ");
@@ -31,7 +31,7 @@ std::ostream& ast::GateChainStmt::print(std::ostream& os) const {
   return os;
 }
 
-void ast::GateChainStmt::prettyPrint(PrettyPrinter& p, int indent) const {
+void GateChainStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << ": " << gates.size() << " gates\n";
   p.setState(indent, gates.size());
   for (size_t i = 0; i < gates.size(); ++i)

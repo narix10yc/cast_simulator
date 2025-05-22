@@ -4,8 +4,9 @@
 #include "utils/PrintSpan.h"
 
 #include "cast/LegacyCircuitGraph.h"
+#include "llvm/Support/Casting.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
 /*
   NK_Stmt,
@@ -37,7 +38,7 @@ using namespace cast::draft;
     _NK_Expr_End,
   NK_Root
 */
-std::string ast::Node::_getKindName(ast::Node::NodeKind k) {
+std::string Node::_getKindName(Node::NodeKind k) {
   switch (k) {
     case NK_Stmt_GateApply: return "GateApplyStmt";
     case NK_Stmt_GateChain: return "GateChainStmt";
@@ -68,7 +69,7 @@ std::string ast::Node::_getKindName(ast::Node::NodeKind k) {
   }
 }
 
-std::ostream& ast::Attribute::print(std::ostream& os) const {
+std::ostream& Attribute::print(std::ostream& os) const {
   os << "<";
   bool needComma = false;
   if (nQubits != nullptr) {
@@ -89,18 +90,18 @@ std::ostream& ast::Attribute::print(std::ostream& os) const {
   return os << ">";
 }
 
-std::ostream& ast::ParameterDeclExpr::print(std::ostream& os) const {
+std::ostream& ParameterDeclExpr::print(std::ostream& os) const {
   os << "(";
   utils::printSpanWithPrinterNoBracket(
     os, parameters, 
-    [](std::ostream& os, ast::IdentifierExpr* param) {
+    [](std::ostream& os, IdentifierExpr* param) {
       param->print(os);
     }
   );
   return os << ")";
 }
 
-ast::CircuitStmt* ast::RootNode::lookupCircuit(const std::string& name) {
+CircuitStmt* RootNode::lookupCircuit(const std::string& name) {
   for (auto& stmt : stmts) {
     if (auto* circuit = llvm::dyn_cast<CircuitStmt>(stmt)) {
       if (name.empty() || circuit->name.str == name)

@@ -5,7 +5,7 @@
 #include <cmath>
 #include <fstream>
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
 bool SourceManager::loadFromFile(const char* fileName) {
   std::ifstream file(fileName, std::ifstream::binary);

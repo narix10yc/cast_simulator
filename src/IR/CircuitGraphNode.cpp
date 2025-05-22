@@ -1,9 +1,10 @@
-#include "cast/IR/CircuitGraphNode.h"
+#include "cast/IR/IRNode.h"
 #include "utils/iocolor.h"
 
 using namespace cast::ir;
 
-CircuitGraphNode::CircuitGraphNode(const CircuitGraphNode& G) {
+CircuitGraphNode::CircuitGraphNode(const CircuitGraphNode& G)
+  : IRNode(IRNode_CircuitGraph) {
   _rowSize = G._rowSize;
   _rowCapacity = G._rowCapacity;
   for (auto rowIt = G._tile.begin(), e = G._tile.end(); rowIt != e; ++rowIt) {
@@ -15,7 +16,8 @@ CircuitGraphNode::CircuitGraphNode(const CircuitGraphNode& G) {
 }
 
 CircuitGraphNode::CircuitGraphNode(CircuitGraphNode&& G) noexcept
-  : _rowSize(G._rowSize)
+  : IRNode(IRNode_CircuitGraph)
+  , _rowSize(G._rowSize)
   , _rowCapacity(G._rowCapacity)
   , _tile(std::move(G._tile))
   , _gateMap(std::move(G._gateMap)) {
@@ -133,14 +135,15 @@ void CircuitGraphNode::removeGate(row_iterator rowIt, int qubitIdx) {
   }
 }
 
-std::ostream& CircuitGraphNode::print(std::ostream& os, int verbose) const {
-  return os;
+std::ostream& CircuitGraphNode::print(std::ostream& os) const {
+  return os << "cast.circuit_graph @ " << this << ";";
 }
 
 std::ostream& CircuitGraphNode::displayInfo(std::ostream& os, int verbose) const {
   os << BOLDCYAN("=== Info of CircuitGraph @ " << this << " === ")
      << "(Verbose " << verbose << ")\n";
-  os << CYAN("- rowSize: ") << _rowSize << "\n";
+  os << CYAN("- nGates:      ") << _gateMap.size() << "\n";
+  os << CYAN("- rowSize:     ") << _rowSize << "\n";
   os << CYAN("- rowCapacity: ") << _rowCapacity << "\n";
   return os;
 }

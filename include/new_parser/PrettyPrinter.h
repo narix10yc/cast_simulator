@@ -6,7 +6,6 @@
 #include <cassert>
 
 namespace cast::draft {
-
 namespace ast {
 
 class PrettyPrinter {

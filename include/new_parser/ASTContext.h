@@ -14,6 +14,7 @@
 #include "new_parser/AST.h"
 
 namespace cast::draft {
+namespace ast {
 
 class ASTContext {
 private:
@@ -210,14 +211,15 @@ public:
   }
 };
 
+} // namespace ast
 } // namespace cast::draft
 
-inline void* operator new(size_t size, cast::draft::ASTContext& ctx) {
+inline void* operator new(size_t size, cast::draft::ast::ASTContext& ctx) {
   return ctx.allocate(size);
 }
 
 inline void* operator new(
-    size_t size, std::align_val_t align, cast::draft::ASTContext& ctx) {
+    size_t size, std::align_val_t align, cast::draft::ast::ASTContext& ctx) {
   return ctx.allocate(size, static_cast<size_t>(align));
 }
 

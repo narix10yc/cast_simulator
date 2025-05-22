@@ -1,8 +1,8 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-ast::PauliComponentStmt* Parser::parsePauliComponentStmt() {
+PauliComponentStmt* Parser::parsePauliComponentStmt() {
   assert(curToken.is(tk_Identifier) && 
     "parsePauliComponentStmt expects to be called with an identifier");
   auto str = ctx.createIdentifier(curToken.toStringView());
@@ -17,17 +17,17 @@ ast::PauliComponentStmt* Parser::parsePauliComponentStmt() {
     failAndExit();
   }
   advance(tk_Semicolon);
-  return new (ctx) ast::PauliComponentStmt(str, weight);
+  return new (ctx) PauliComponentStmt(str, weight);
 }
 
-std::ostream& ast::PauliComponentStmt::print(std::ostream& os) const {
+std::ostream& PauliComponentStmt::print(std::ostream& os) const {
   os << str << " ";
   assert(weight != nullptr && "weight should not be nullptr");
   weight->print(os);
   return os << ";";
 }
 
-void ast::PauliComponentStmt::prettyPrint(PrettyPrinter& p, int indent) const {
+void PauliComponentStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << ": " << str << "\n";
   assert(weight != nullptr && "weight should not be nullptr");
   p.setState(indent, 1);

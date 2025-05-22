@@ -1,17 +1,17 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-ast::Expr* Parser::parseIdentifierOrCallExpr() {
+Expr* Parser::parseIdentifierOrCallExpr() {
   assert(curToken.is(tk_Identifier));
   auto name = ctx.createIdentifier(curToken.toStringView());
   advance(tk_Identifier);
   if (curToken.isNot(tk_L_RoundBracket))
-    return new (ctx) ast::IdentifierExpr(name);
+    return new (ctx) IdentifierExpr(name);
 
   // A call expr
   advance(tk_L_RoundBracket);
-  std::vector<ast::Expr*> args;
+  std::vector<Expr*> args;
   while (true) {
     auto* arg = parseExpr();
     if (arg == nullptr)
@@ -28,10 +28,10 @@ ast::Expr* Parser::parseIdentifierOrCallExpr() {
   }
 
   advance(tk_R_RoundBracket);
-  return new (ctx) ast::CallExpr(name, ctx.createSpan(args));
+  return new (ctx) CallExpr(name, ctx.createSpan(args));
 }
 
-ast::Expr* Parser::parsePrimaryExpr() {
+Expr* Parser::parsePrimaryExpr() {
   // handle unary operators (+ and -)
   switch (curToken.kind) {
   case tk_Add: {
@@ -40,8 +40,8 @@ ast::Expr* Parser::parsePrimaryExpr() {
   }
   case tk_Sub: {
     advance(tk_Sub);
-    auto* operand = parseExpr(ast::MinusOpExpr::getPrecedence());
-    return new (ctx) ast::MinusOpExpr(operand);
+    auto* operand = parseExpr(MinusOpExpr::getPrecedence());
+    return new (ctx) MinusOpExpr(operand);
   }
   // Identifier
   case tk_Identifier: {
@@ -52,26 +52,26 @@ ast::Expr* Parser::parsePrimaryExpr() {
     if (curToken.convertibleToInt()) {
       auto iValue = curToken.toInt();
       advance(tk_Numeric);
-      return new (ctx) ast::IntegerLiteral(iValue);
+      return new (ctx) IntegerLiteral(iValue);
     }
     auto fValue = curToken.toDouble();
     advance(tk_Numeric);
-    return new (ctx) ast::FloatingLiteral(fValue);
+    return new (ctx) FloatingLiteral(fValue);
   }
   // Pi
   case tk_Pi: {
     advance(tk_Pi);
-    return new (ctx) ast::FractionPiLiteral(1, 1);
+    return new (ctx) FractionPiLiteral(1, 1);
   }
   // Measure
   case tk_Measure: {
     advance(tk_Measure);
-    return new (ctx) ast::MeasureExpr(parseExpr());
+    return new (ctx) MeasureExpr(parseExpr());
   }
   // All
   case tk_All: {
     advance(tk_All);
-    return new (ctx) ast::AllExpr();
+    return new (ctx) AllExpr();
   }
   // Parameter (#number)
   case tk_Hash: {
@@ -79,7 +79,7 @@ ast::Expr* Parser::parsePrimaryExpr() {
     requireCurTokenIs(tk_Numeric, "Expect a number after #");
     auto index = curToken.toInt();
     advance(tk_Numeric);
-    return new (ctx) ast::ParameterExpr(index);
+    return new (ctx) ParameterExpr(index);
   }
   // Paranthesis 
   case tk_L_RoundBracket: {
@@ -94,30 +94,30 @@ ast::Expr* Parser::parsePrimaryExpr() {
   }
 }
 
-static ast::BinaryOpExpr::BinaryOpKind toBinaryOp(TokenKind kind) {
+static BinaryOpExpr::BinaryOpKind toBinaryOp(TokenKind kind) {
   switch (kind) {
   case tk_Add:
-    return ast::BinaryOpExpr::Add;
+    return BinaryOpExpr::Add;
   case tk_Sub:
-    return ast::BinaryOpExpr::Sub;
+    return BinaryOpExpr::Sub;
   case tk_Mul:
-    return ast::BinaryOpExpr::Mul;
+    return BinaryOpExpr::Mul;
   case tk_Div:
-    return ast::BinaryOpExpr::Div;
+    return BinaryOpExpr::Div;
   case tk_Pow:
-    return ast::BinaryOpExpr::Pow;
+    return BinaryOpExpr::Pow;
   default:
-    return ast::BinaryOpExpr::Invalid;
+    return BinaryOpExpr::Invalid;
   }
 }
 
-ast::Expr* Parser::parseExpr(int precedence) {
+Expr* Parser::parseExpr(int precedence) {
   auto* lhs = parsePrimaryExpr();
   if (lhs == nullptr)
     return nullptr;
   while (true) {
     auto binOp = toBinaryOp(curToken.kind);
-    int prec = ast::BinaryOpExpr::getPrecedence(binOp);
+    int prec = BinaryOpExpr::getPrecedence(binOp);
     if (prec < precedence)
       break;
     advance();
@@ -126,7 +126,7 @@ ast::Expr* Parser::parseExpr(int precedence) {
       logErrHere("Missing RHS of a binary expression");
       failAndExit();
     }
-    lhs = new (ctx) ast::BinaryOpExpr(binOp, lhs, rhs);
+    lhs = new (ctx) BinaryOpExpr(binOp, lhs, rhs);
   }
   return lhs;
 }

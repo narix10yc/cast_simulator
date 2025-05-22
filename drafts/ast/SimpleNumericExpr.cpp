@@ -1,10 +1,10 @@
 #include "new_parser/AST.h"
 #include "new_parser/ASTContext.h"
+#include "llvm/Support/Casting.h"
 
 #include <tuple>
 #include <numeric> // for std::gcd
 
-using namespace cast::draft;
 using namespace cast::draft::ast;
 
 namespace {
@@ -50,7 +50,7 @@ std::ostream& FractionLiteral::print(std::ostream& os) const {
   return os << n << "/" << d;
 }
 
-std::ostream& ast::FractionPiLiteral::print(std::ostream& os) const {
+std::ostream& FractionPiLiteral::print(std::ostream& os) const {
   assert(d > 0 && "Denominator must be positive");
   if (n == 1) {}
   else if (n == -1) { os << "-"; }

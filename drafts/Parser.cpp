@@ -3,7 +3,7 @@
 #include <fstream>
 #include <cassert>
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
 void Parser::displayLineTable() const {
   std::cerr << "Line table:\n";
@@ -27,11 +27,11 @@ void Parser::displayLineTable() const {
             << static_cast<const void*>(lexer.sm.lineTable[nLines]) << "\n";
 }
 
-void Parser::addSymbol(ast::Identifier name, ast::Node* node) {
-  const auto locPrint = [this](ast::Node* node) {
-    if (auto* circuit = llvm::dyn_cast<ast::CircuitStmt>(node)) {
+void Parser::addSymbol(Identifier name, Node* node) {
+  const auto locPrint = [this](Node* node) {
+    if (auto* circuit = llvm::dyn_cast<CircuitStmt>(node)) {
       printLineInfo(circuit->nameLoc);
-    } else if (auto* channel = llvm::dyn_cast<ast::ChannelStmt>(node)) {
+    } else if (auto* channel = llvm::dyn_cast<ChannelStmt>(node)) {
       printLineInfo(channel->nameLoc);
     } else {
       assert(false && "Unknown node type");
@@ -49,7 +49,7 @@ void Parser::addSymbol(ast::Identifier name, ast::Node* node) {
   currentScope->symbols[name] = node;
 }
 
-ast::Node* Parser::lookup(ast::Identifier name) {
+Node* Parser::lookup(Identifier name) {
   Scope* scope = currentScope;
   while (scope) {
     auto it = scope->symbols.find(name);
@@ -132,37 +132,37 @@ std::complex<double> Parser::parseComplexNumber() {
 
 // Try to convert a general expression to a simple numeric expression.
 // Return nullptr if the conversion is not possible.
-ast::SimpleNumericExpr*
-Parser::convertExprToSimpleNumeric(ast::Expr* expr) {
+SimpleNumericExpr*
+Parser::convertExprToSimpleNumeric(Expr* expr) {
   if (expr == nullptr)
     return nullptr;
   // okay: SimpleNumericExpr
-  if (auto* e = llvm::dyn_cast<ast::SimpleNumericExpr>(expr))
+  if (auto* e = llvm::dyn_cast<SimpleNumericExpr>(expr))
     return e;
 
   // possibly okay: MinusOpExpr
-  if (auto* e = llvm::dyn_cast<ast::MinusOpExpr>(expr)) {
+  if (auto* e = llvm::dyn_cast<MinusOpExpr>(expr)) {
     auto* operand = convertExprToSimpleNumeric(e->operand);
     if (operand == nullptr)
       return nullptr;
-    return ast::SimpleNumericExpr::neg(ctx, operand);
+    return SimpleNumericExpr::neg(ctx, operand);
   }
 
   // possibly okay: BinaryOpExpr
-  if (auto* e = llvm::dyn_cast<ast::BinaryOpExpr>(expr)) {
+  if (auto* e = llvm::dyn_cast<BinaryOpExpr>(expr)) {
     auto* lhs = convertExprToSimpleNumeric(e->lhs);
     auto* rhs = convertExprToSimpleNumeric(e->rhs);
     if (!lhs || !rhs)
       return nullptr;
     switch (e->op) {
-      case ast::BinaryOpExpr::Add:
-        return ast::SimpleNumericExpr::add(ctx, lhs, rhs);
-      case ast::BinaryOpExpr::Sub:
-        return ast::SimpleNumericExpr::sub(ctx, lhs, rhs);
-      case ast::BinaryOpExpr::Mul:
-        return ast::SimpleNumericExpr::mul(ctx, lhs, rhs);
-      case ast::BinaryOpExpr::Div:
-        return ast::SimpleNumericExpr::div(ctx, lhs, rhs);
+      case BinaryOpExpr::Add:
+        return SimpleNumericExpr::add(ctx, lhs, rhs);
+      case BinaryOpExpr::Sub:
+        return SimpleNumericExpr::sub(ctx, lhs, rhs);
+      case BinaryOpExpr::Mul:
+        return SimpleNumericExpr::mul(ctx, lhs, rhs);
+      case BinaryOpExpr::Div:
+        return SimpleNumericExpr::div(ctx, lhs, rhs);
       default:
         assert(false && "Illegal binary operator");
         return nullptr;
@@ -173,12 +173,12 @@ Parser::convertExprToSimpleNumeric(ast::Expr* expr) {
   return nullptr;
 }
 
-ast::Attribute* Parser::parseAttribute() {
+Attribute* Parser::parseAttribute() {
   if (curToken.isNot(tk_Less))
     return nullptr;
-  ast::IntegerLiteral* nQubits = nullptr;
-  ast::IntegerLiteral* nParams = nullptr;
-  ast::SimpleNumericExpr* phase = nullptr;
+  IntegerLiteral* nQubits = nullptr;
+  IntegerLiteral* nParams = nullptr;
+  SimpleNumericExpr* phase = nullptr;
   
   advance(tk_L_SquareBracket);
   while (curToken.isNot(tk_R_SquareBracket)) {
@@ -191,12 +191,12 @@ ast::Attribute* Parser::parseAttribute() {
     // 'nqubits', 'nparams', and 'phase' are reserved attributes
     if (name == "nqubits") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nqubits' must be a number");
-      nQubits = new (ctx) ast::IntegerLiteral(curToken.toInt());
+      nQubits = new (ctx) IntegerLiteral(curToken.toInt());
       advance(tk_Numeric);
     }
     else if (name == "nparams") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nparams' must be a number");
-      nParams = new (ctx) ast::IntegerLiteral(curToken.toInt());
+      nParams = new (ctx) IntegerLiteral(curToken.toInt());
       advance(tk_Numeric);
     }
     else if (name == "phase") {
@@ -216,14 +216,14 @@ ast::Attribute* Parser::parseAttribute() {
     optionalAdvance(tk_Comma);
   }
   advance(tk_Greater);
-  return new (ctx) ast::Attribute(nQubits, nParams, phase);
+  return new (ctx) Attribute(nQubits, nParams, phase);
 }
 
-ast::ParameterDeclExpr* Parser::parseParameterDecl() {
+ParameterDeclExpr* Parser::parseParameterDecl() {
   if (curToken.isNot(tk_L_RoundBracket))
     return nullptr;
   advance(tk_L_RoundBracket);
-  std::vector<ast::IdentifierExpr*> params;
+  std::vector<IdentifierExpr*> params;
   while (true) {
     switch (curToken.kind) {
       case tk_R_RoundBracket: {
@@ -231,7 +231,7 @@ ast::ParameterDeclExpr* Parser::parseParameterDecl() {
       }
       case tk_Identifier: {
         auto name = ctx.createIdentifier(curToken.toStringView());
-        params.push_back(new (ctx) ast::IdentifierExpr(name));
+        params.push_back(new (ctx) IdentifierExpr(name));
         advance(tk_Identifier);
         if (curToken.is(tk_Comma))
           advance(tk_Comma);
@@ -250,18 +250,18 @@ ast::ParameterDeclExpr* Parser::parseParameterDecl() {
       break;
   }
   advance(tk_R_RoundBracket);
-  return new (ctx) ast::ParameterDeclExpr(
+  return new (ctx) ParameterDeclExpr(
     ctx.createSpan(params.data(), params.size())
   );
 }
 
-ast::Stmt* Parser::parseCircuitLevelStmt() {
+Stmt* Parser::parseCircuitLevelStmt() {
   switch (curToken.kind) {
     case tk_Measure: {
       advance(tk_Measure);
       auto* target = parseExpr();
       assert(target != nullptr);
-      return new (ctx) ast::MeasureStmt(target);
+      return new (ctx) MeasureStmt(target);
     }
     case tk_Identifier:
       return parseGateChainStmt();
@@ -274,8 +274,8 @@ ast::Stmt* Parser::parseCircuitLevelStmt() {
   }
 }
 
-std::span<ast::Stmt*> Parser::parseCircuitLevelStmtList() {
-  std::vector<ast::Stmt*> stmts;
+std::span<Stmt*> Parser::parseCircuitLevelStmtList() {
+  std::vector<Stmt*> stmts;
   if (curToken.is(tk_L_CurlyBracket)) {
     advance(tk_L_CurlyBracket);
     while (true) {

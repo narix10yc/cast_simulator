@@ -1,16 +1,16 @@
 #include "new_parser/Parser.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-ast::GateApplyStmt* Parser::parseGateApplyStmt() {
+GateApplyStmt* Parser::parseGateApplyStmt() {
   // name
   assert(curToken.is(tk_Identifier) &&
          "parseGateApplyStmt expects to be called with an identifier");
   auto name = ctx.createIdentifier(curToken.toStringView());
   advance(tk_Identifier);
   
-  llvm::SmallVector<ast::Expr*> params;
-  llvm::SmallVector<ast::Expr*> qubits;
+  llvm::SmallVector<Expr*> params;
+  llvm::SmallVector<Expr*> qubits;
   // gate parameters
   if (curToken.is(tk_L_RoundBracket)) {
     advance(tk_L_RoundBracket);
@@ -44,14 +44,14 @@ ast::GateApplyStmt* Parser::parseGateApplyStmt() {
     }
   }
 
-  return new (ctx) ast::GateApplyStmt(
+  return new (ctx) GateApplyStmt(
     name,
     ctx.createSpan(params.data(), params.size()),
     ctx.createSpan(qubits.data(), qubits.size())
   );
 }
 
-std::ostream& ast::GateApplyStmt::print(std::ostream& os) const {
+std::ostream& GateApplyStmt::print(std::ostream& os) const {
   os << name;
   auto pSize = params.size();
   if (pSize > 0) {
@@ -68,7 +68,7 @@ std::ostream& ast::GateApplyStmt::print(std::ostream& os) const {
   return os;
 }
 
-void ast::GateApplyStmt::prettyPrint(PrettyPrinter& p, int indent) const {
+void GateApplyStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << "(" << name << "): "
                   << qubits.size() << " qubits\n";
   p.setState(indent, qubits.size());

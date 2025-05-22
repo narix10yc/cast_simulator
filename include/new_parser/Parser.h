@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 namespace cast::draft {
+namespace ast {
 
 class Scope {
 private:
@@ -186,7 +187,7 @@ public:
   void displayLineTable() const;
 };
 
-
+} // namespace ast
 } // namespace cast::draft
 
 #endif // CAST_DRAFT_PARSER_H
