@@ -99,6 +99,17 @@ public:
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::H());
   }
 
+  /* [ cos(theta),        ]
+   * 
+   */
+  static ScalarGateMatrixPtr U1q(double theta, double phi, double lambda);
+
+  static ScalarGateMatrixPtr RX(double theta);
+
+  static ScalarGateMatrixPtr RY(double theta);
+  
+  static ScalarGateMatrixPtr RZ(double theta);
+
 }; // class ScalarGateMatrix
 
 class UnitaryPermGateMatrix : public GateMatrix {

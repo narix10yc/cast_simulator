@@ -160,6 +160,8 @@ public:
 /// design allows storing exact values of fraction-multiple of pi, such as pi/2
 /// and 2*pi/3. We also support basic arithmatics. They are useful in printing
 /// the AST.
+/// In order to convert a generic expression to a simple numeric expression, 
+/// use \c ast::reduceExprToSimpleNumeric() function.
 class SimpleNumericExpr : public Expr {
 public:
   explicit SimpleNumericExpr(NodeKind kind) : Expr(kind) {}
@@ -190,6 +192,12 @@ public:
            node->getKind() <= _NK_Expr_SimpleNumeric_End;
   }
 }; // class SimpleNumericExpr
+
+/// @brief Try to reduce a generic expression to a simple numeric expression.
+/// Return nullptr if the reduction fails.
+/// This function is defined in AST/SimpleNumericExpr.cpp.
+static SimpleNumericExpr* reduceExprToSimpleNumeric(ASTContext& ctx,
+                                                    Expr* expr);
 
 class IntegerLiteral : public SimpleNumericExpr {
 public:

@@ -26,7 +26,6 @@ namespace {
   }
 }
 
-
 FractionLiteral::FractionLiteral(int numerator, int denominator)
     : SimpleNumericExpr(NK_Expr_FractionLiteral) {
   auto [n, d] = simplifyFraction(numerator, denominator);
@@ -246,4 +245,38 @@ SimpleNumericExpr* SimpleNumericExpr::div(
 
   // otherwise, use floating point
   return new (ctx) FloatingLiteral(lhs->getValue() / rhs->getValue());
+}
+
+SimpleNumericExpr* cast::draft::ast::reduceExprToSimpleNumeric(
+    ASTContext& ctx, Expr* expr) {
+  if (expr == nullptr)
+    return nullptr;
+  if (auto* e = llvm::dyn_cast<SimpleNumericExpr>(expr))
+    return e;
+  if (auto* e = llvm::dyn_cast<MinusOpExpr>(expr)) {
+    auto* operand = reduceExprToSimpleNumeric(ctx, e->operand);
+    if (operand == nullptr)
+      return nullptr;
+    return SimpleNumericExpr::neg(ctx, operand);
+  }
+  if (auto* e = llvm::dyn_cast<BinaryOpExpr>(expr)) {
+    auto* lhs = reduceExprToSimpleNumeric(ctx, e->lhs);
+    auto* rhs = reduceExprToSimpleNumeric(ctx, e->rhs);
+    if (lhs == nullptr || rhs == nullptr)
+      return nullptr;
+    switch (e->op) {
+      case BinaryOpExpr::Add:
+        return SimpleNumericExpr::add(ctx, lhs, rhs);
+      case BinaryOpExpr::Sub:
+        return SimpleNumericExpr::sub(ctx, lhs, rhs);
+      case BinaryOpExpr::Mul:
+        return SimpleNumericExpr::mul(ctx, lhs, rhs);
+      case BinaryOpExpr::Div:
+        return SimpleNumericExpr::div(ctx, lhs, rhs);
+      default:
+        assert(false && "Invalid state");
+        break;
+    }
+  }
+  return nullptr;
 }

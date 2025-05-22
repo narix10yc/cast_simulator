@@ -77,3 +77,23 @@ GateMatrixPtr cast::permute(GateMatrixPtr gm, const std::vector<int>& flags) {
   assert(false && "Unknown GateMatrix type");
   return nullptr;
 }
+
+ScalarGateMatrixPtr ScalarGateMatrix::U1q(double theta, double phi, double lambda) {
+  auto matrixPtr = std::make_shared<ScalarGateMatrix>(1);
+  auto& matrix = matrixPtr->matrix();
+
+  // {std::cos(pTheta), 0.0},
+  // {-std::cos(pLambda) * std::sin(pTheta), -std::sin(pLambda) * std::sin(pTheta)},
+  // {std::cos(pPhi) * std::sin(pTheta), std::sin(pPhi) * std::sin(pTheta)},
+  // {std::cos(pPhi + pLambda) * std::cos(pTheta), std::sin(pPhi + pLambda) * std::cos(pTheta)}
+
+  matrix.real(0, 0) = std::cos(theta);
+  matrix.real(0, 1) = -std::cos(lambda) * std::sin(theta);
+  matrix.real(1, 0) = std::cos(phi) * std::sin(theta);
+  matrix.real(1, 1) = std::cos(phi + lambda) * std::cos(theta);
+  matrix.imag(0, 0) = 0.0;
+  matrix.imag(0, 1) = -std::sin(lambda) * std::sin(theta);
+  matrix.imag(1, 0) = std::sin(phi) * std::sin(theta);
+  matrix.imag(1, 1) = std::sin(phi + lambda) * std::cos(theta);
+  return matrixPtr;
+}
