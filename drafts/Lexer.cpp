@@ -126,7 +126,7 @@ void Lexer::lexTwoChar(Token& tok, char snd, TokenKind tk1, TokenKind tk2) {
 }
 
 void Lexer::lex(Token& tok) {
-  if (curPtr >= sm.bufferEnd) {
+  if (curPtr >= endPtr) {
     lexOneChar(tok, tk_Eof);
     --curPtr; // keep curPtr to its current position
     return;
@@ -267,7 +267,6 @@ void Lexer::lex(Token& tok) {
                 << ". This is likely not implemented yet. "
                 << "Current address: " << (void*)curPtr << ", please check "
                 << "line table.\n";
-      sm.printLineInfo(std::cerr, {curPtr, curPtr + 1});
       assert(false);
     }
     c = *(++curPtr);
@@ -299,7 +298,7 @@ void Lexer::lex(Token& tok) {
 }
 
 void Lexer::skipLine() {
-  while (curPtr < sm.bufferEnd) {
+  while (curPtr < endPtr) {
     if (*curPtr++ == '\n')
       break;
   }

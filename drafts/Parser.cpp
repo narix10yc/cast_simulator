@@ -5,34 +5,12 @@
 
 using namespace cast::draft::ast;
 
-void Parser::displayLineTable() const {
-  std::cerr << "Line table:\n";
-  if (lexer.sm.lineTable.empty()) {
-    std::cerr << "  Line table is empty.\n";
-    return;
-  }
-  auto nLines = lexer.sm.lineTable.size() - 1;
-  for (size_t i = 0; i < nLines; ++i) {
-    std::cerr << "Line " << i + 1 << " @ "
-              << static_cast<const void*>(lexer.sm.lineTable[i]) << " | "
-              << IOColor::CYAN_FG;
-
-    std::cerr.write(
-      lexer.sm.lineTable[i], 
-      lexer.sm.lineTable[i + 1] - lexer.sm.lineTable[i]
-    );
-    std::cerr << IOColor::RESET;
-  }
-  std::cerr << "\nEoF @ "
-            << static_cast<const void*>(lexer.sm.lineTable[nLines]) << "\n";
-}
-
 void Parser::addSymbol(Identifier name, Node* node) {
   const auto locPrint = [this](Node* node) {
     if (auto* circuit = llvm::dyn_cast<CircuitStmt>(node)) {
-      printLineInfo(circuit->nameLoc);
+      ctx.printLineInfo(std::cerr, circuit->nameLoc);
     } else if (auto* channel = llvm::dyn_cast<ChannelStmt>(node)) {
-      printLineInfo(channel->nameLoc);
+      ctx.printLineInfo(std::cerr, channel->nameLoc);
     } else {
       assert(false && "Unknown node type");
     }

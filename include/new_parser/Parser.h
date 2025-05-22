@@ -108,15 +108,11 @@ class Parser {
   std::ostream& err() const {
     return std::cerr << BOLDRED("Parser Error: ");
   }
-
-  std::ostream& printLineInfo(LocationSpan loc) const {
-    return lexer.sm.printLineInfo(std::cerr, loc);
-  }
   
   // A convenience function to print error message followed by line info.
   void logErrHere(const char* msg) const {
     err() << msg << "\n";
-    lexer.sm.printLineInfo(std::cerr, curToken.loc);
+    ctx.printLineInfo(std::cerr, curToken.loc);
   }
 
   void failAndExit() const {
@@ -149,7 +145,18 @@ class Parser {
   void requireCurTokenIs(TokenKind kind, const char* msg = nullptr) const;
 public:
   Parser(ASTContext& ctx)
-    : ctx(ctx), lexer(), currentScope(nullptr) {}
+    : ctx(ctx), lexer(), currentScope(nullptr) {
+    if (!ctx.hasSource()) {
+      std::cerr << BOLDRED("[Error] ") << "ASTContext object has no source "
+        "loaded. Call ASTContext::loadFromFile or ASTContext::loadRawBuffer "
+        "before constructing the parser.\n";
+      std::exit(1);
+    }
+    lexer.curPtr = ctx.sourceManager.bufferBegin;
+    lexer.endPtr = ctx.sourceManager.bufferEnd;
+    lexer.lex(curToken);
+    lexer.lex(nextToken);
+  }
   
   Parser(const Parser&) = delete;
   Parser& operator=(const Parser&) = delete;
@@ -160,31 +167,7 @@ public:
     assert(currentScope == nullptr && "Parser exits with a non-empty scope");
   }
 
-  // return true on error
-  bool loadFromFile(const char* filename) {
-    if (lexer.loadFromFile(filename))
-      return true; // error loading file
-    lexer.lex(curToken);
-    lexer.lex(nextToken);
-    return false; // success
-  }
-  
-  // return true on error
-  bool loadRawBuffer(const char* buffer, size_t size) {
-    if (lexer.loadRawBuffer(buffer, size))
-      return true; // error loading buffer
-    lexer.lex(curToken);
-    lexer.lex(nextToken);
-    return false; // success
-  }
-
-  bool loadRawBuffer(std::string_view buffer) {
-    return loadRawBuffer(buffer.data(), buffer.size());
-  }
-
   ast::RootNode* parse();
-
-  void displayLineTable() const;
 };
 
 } // namespace ast

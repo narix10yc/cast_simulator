@@ -1,5 +1,5 @@
 #include "new_parser/Parser.h"
-#include "cast/Transform/ASTCircuit2IRCircuit.h"
+#include "cast/Transform/Transform.h"
 
 using namespace cast::draft;
 using namespace cast;
@@ -20,11 +20,11 @@ Circuit my_circuit {
 )";
 
 int main(int argc, char** argv) {
-  ast::ASTContext context;
-  ast::Parser parser(context);
-  parser.loadRawBuffer(Program);
-  parser.displayLineTable();
-
+  ast::ASTContext astCtx;
+  astCtx.loadRawBuffer(Program);
+  astCtx.displayLineTable(std::cerr);
+  ast::Parser parser(astCtx);
+  
   // parser.loadFromFile(argv[1]);
 
   auto* root = parser.parse();
@@ -34,7 +34,7 @@ int main(int argc, char** argv) {
   const auto* astCircuit = root->lookupCircuit("my_circuit");
   assert(astCircuit != nullptr && "Failed to find circuit my_circuit");
 
-  auto irCircuit = cast::transform::ASTCircuit2IRCircuit(*astCircuit, context);
+  auto irCircuit = cast::transform::convertCircuit(*astCircuit, astCtx);
 
   if (irCircuit == nullptr) {
     std::cerr << "Failed to transform AST to IR\n";

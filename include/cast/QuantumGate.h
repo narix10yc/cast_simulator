@@ -11,6 +11,8 @@ namespace cast {
 class QuantumGate;
 using QuantumGatePtr = std::shared_ptr<QuantumGate>;
 
+/// Recommended to use QuantumGate::Create() to create a QuantumGatePtr (which
+/// is a shared_ptr<QuantumGate>).
 class QuantumGate {
 private:
   using TargetQubitsType = std::vector<int>;

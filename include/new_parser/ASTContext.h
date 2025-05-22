@@ -1,6 +1,9 @@
 #ifndef CAST_NEW_PARSER_ASTCONTEXT_H
 #define CAST_NEW_PARSER_ASTCONTEXT_H
 
+#include "new_parser/AST.h"
+#include "new_parser/SourceManager.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cassert>
@@ -11,11 +14,14 @@
 #include <vector>
 #include <span>
 
-#include "new_parser/AST.h"
-
 namespace cast::draft {
 namespace ast {
+class Parser;
 
+/// @brief The ASTContext class is responsible for (1). a SourceManager member 
+/// for source file location tracking, and (2). memory management for all AST
+/// nodes. The memory of all AST nodes is freed as a whole when the ASTContext
+/// object goes out of scope. No intermediate free is performed.
 class ASTContext {
 private:
   struct MemoryNode {
@@ -143,36 +149,9 @@ private:
   };
 
   MemoryManager memoryManager;
-public:
-  ASTContext() = default;
+  SourceManager sourceManager;
 
-  ASTContext(const ASTContext&) = delete;
-  ASTContext(ASTContext&&) = delete;
-  ASTContext& operator=(const ASTContext&) = delete;
-  ASTContext& operator=(ASTContext&&) = delete;
-
-  ~ASTContext() = default;
-
-  size_t bytesAllocated() const {
-    return memoryManager.bytesAllocated();
-  }
-
-  size_t bytesAvailable() const {
-    return memoryManager.bytesAvailable();
-  }
-
-  bool isManaging(void* ptr) const {
-    return memoryManager.isManaging(ptr);
-  }
-
-  void* allocate(size_t size) {
-    return memoryManager.allocate(size);
-  }
-
-  void* allocate(size_t size, size_t align) {
-    return memoryManager.allocate(size, align);
-  }
-
+private:
   ast::Identifier createIdentifier(const std::string& name) {
     return createIdentifier(std::string_view(name));
   }
@@ -209,7 +188,58 @@ public:
     auto* ptr = memoryManager.allocate(sizeof(T), alignof(T));
     return new (ptr) T(std::forward<Args>(args)...);
   }
-};
+public:
+  friend class Parser;
+  ASTContext() = default;
+
+  ASTContext(const ASTContext&) = delete;
+  ASTContext(ASTContext&&) = delete;
+  ASTContext& operator=(const ASTContext&) = delete;
+  ASTContext& operator=(ASTContext&&) = delete;
+
+  ~ASTContext() = default;
+
+  size_t bytesAllocated() const {
+    return memoryManager.bytesAllocated();
+  }
+
+  size_t bytesAvailable() const {
+    return memoryManager.bytesAvailable();
+  }
+
+  bool isManaging(void* ptr) const {
+    return memoryManager.isManaging(ptr);
+  }
+
+  void* allocate(size_t size) {
+    return memoryManager.allocate(size);
+  }
+
+  void* allocate(size_t size, size_t align) {
+    return memoryManager.allocate(size, align);
+  }
+
+  // return true on error
+  bool loadFromFile(const char* filename) {
+    return sourceManager.loadFromFile(filename);
+  }
+
+  // return true on error
+  bool loadRawBuffer(std::string_view buffer) {
+    return sourceManager.loadRawBuffer(buffer.begin(), buffer.size());
+  }
+
+  bool hasSource() const {
+    return sourceManager.bufferBegin != nullptr;
+  }
+
+  std::ostream& printLineInfo(std::ostream& os, LocationSpan loc) const {
+    return sourceManager.printLineInfo(os, loc);
+  }
+
+  std::ostream& displayLineTable(std::ostream& os) const;
+  
+}; // class ASTContext
 
 } // namespace ast
 } // namespace cast::draft

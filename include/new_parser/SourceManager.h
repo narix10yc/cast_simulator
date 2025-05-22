@@ -2,13 +2,17 @@
 #define CAST_DRAFT_SOURCE_MANAGER_H
 
 #include "new_parser/LocationSpan.h"
+#include "utils/iocolor.h"
 #include <iostream>
 #include <vector>
-#include "utils/iocolor.h"
 
 namespace cast::draft {
 namespace ast {
 
+// SourceManager is responsible for managing the source code buffer
+// and providing line information for error reporting and debugging.
+// To load file, use loadFromFile or loadRawBuffer.
+// Buffer is deleted in the destructor.
 class SourceManager {
 public:
   const char* bufferBegin;

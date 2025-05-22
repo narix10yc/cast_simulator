@@ -141,26 +141,10 @@ private:
   void lexTwoChar(Token& tok, char snd, TokenKind tk1, TokenKind tk2);
 
 public:
-  SourceManager sm;
   const char* curPtr;
+  const char* endPtr;
 
-  Lexer() : sm(), curPtr(nullptr) {}
-
-  // return true on error
-  bool loadFromFile(const char* filename) {
-    if (sm.loadFromFile(filename))
-      return true; // error loading file
-    curPtr = sm.bufferBegin;
-    return false; // success
-  }
-
-  // return true on error
-  bool loadRawBuffer(const char* buffer, size_t size) {
-    if (sm.loadRawBuffer(buffer, size))
-      return true; // error loading buffer
-    curPtr = sm.bufferBegin;
-    return false; // success
-  }
+  Lexer() : curPtr(nullptr), endPtr(nullptr) {}
 
   /// After this function returns, curPtr always points to the next char after 
   /// \c tok
