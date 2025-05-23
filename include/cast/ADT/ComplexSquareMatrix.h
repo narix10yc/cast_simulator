@@ -120,6 +120,11 @@ public:
     return { real(row, col), imag(row, col) };
   }
 
+  void setRC(unsigned row, unsigned col, double re, double im) {
+    real(row, col) = re;
+    imag(row, col) = im;
+  }
+
   /* Addition */
 
   ComplexSquareMatrix operator+(const ComplexSquareMatrix& other) const;

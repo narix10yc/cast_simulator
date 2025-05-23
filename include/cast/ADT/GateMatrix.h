@@ -99,15 +99,20 @@ public:
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::H());
   }
 
-  /* [ cos(theta),        ]
-   * 
-   */
+  // [cos(theta / 2),                -exp(i * lambda) * sin(theta / 2),
+  //  exp(i * phi) * sin(theta / 2), exp(i * (phi + lambda)) * cos(theta / 2)]
   static ScalarGateMatrixPtr U1q(double theta, double phi, double lambda);
 
+  // [    cos(theta/2), -i*sin(theta/2),
+  //   -i*sin(theta/2),    cos(theta/2) ]
   static ScalarGateMatrixPtr RX(double theta);
 
+  // [cos(theta/2), -sin(theta/2),
+  //  sin(theta/2),  cos(theta/2) ]
   static ScalarGateMatrixPtr RY(double theta);
   
+  // [exp(-i * theta/2),                0,
+  //                  0, exp(i * theta/2) ]
   static ScalarGateMatrixPtr RZ(double theta);
 
 }; // class ScalarGateMatrix
