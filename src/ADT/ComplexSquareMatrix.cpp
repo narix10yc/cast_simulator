@@ -3,6 +3,9 @@
 
 using namespace cast;
 
+// For code collapse
+#pragma region Constant Matrices
+
 static const ComplexSquareMatrix matX(
   // real part
   {0, 1, 1, 0},
@@ -31,6 +34,45 @@ static const ComplexSquareMatrix matH(
   {0, 0, 0, 0}
 );
 
+static const ComplexSquareMatrix matCX(
+  // real part
+  {1, 0, 0, 0,
+   0, 1, 0, 0,
+   0, 0, 0, 1,
+   0, 0, 1, 0},
+  // imag part
+  {0, 0, 0, 0,
+   0, 0, 0, 0,
+   0, 0, 0, 0,
+   0, 0, 0, 0}
+);
+
+static const ComplexSquareMatrix matCZ(
+  // real part
+  {1, 0, 0, 0,
+   0, 1, 0, 0,
+   0, 0, -1, 0,
+   0, 0, 0, -1},
+  // imag part
+  {0, 0, 0, 0,
+   0, 0, 0, 0,
+   0, 0, 0, 0,
+   0, 0, 0, 0}
+);
+
+static const ComplexSquareMatrix matSWAP(
+  // real part
+  {1, 0, 0, 0,
+   0, 0, 1, 0,
+   0, 1, 0, 0,
+   0, 0, 0, 1},
+  // imag part
+  {0, 0, 0, 0,
+   0, 0, 0, 0,
+   0, 0, 0, 0,
+   0, 0, 0, 0}
+);
+
 ComplexSquareMatrix ComplexSquareMatrix::X() {
   return matX;
 }
@@ -46,6 +88,20 @@ ComplexSquareMatrix ComplexSquareMatrix::Z() {
 ComplexSquareMatrix ComplexSquareMatrix::H() {
   return matH;
 }
+
+ComplexSquareMatrix ComplexSquareMatrix::CX() {
+  return matCX;
+}
+
+ComplexSquareMatrix ComplexSquareMatrix::CZ() {
+  return matCZ;
+}
+
+ComplexSquareMatrix ComplexSquareMatrix::SWAP() {
+  return matSWAP;
+}
+
+#pragma endregion
 
 ComplexSquareMatrix ComplexSquareMatrix::eye(size_t edgeSize) {
   ComplexSquareMatrix m(edgeSize);

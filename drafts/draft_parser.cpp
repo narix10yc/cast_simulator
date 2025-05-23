@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
     std::cerr << "Failed to transform AST to IR\n";
     return 1;
   }
-  irCircuit->print(std::cerr);
+  irCircuit->print(std::cerr, 0);
 
   return 0;
 }

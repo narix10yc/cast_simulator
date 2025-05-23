@@ -14,20 +14,19 @@ using QuantumGatePtr = std::shared_ptr<QuantumGate>;
 /// Recommended to use QuantumGate::Create() to create a QuantumGatePtr (which
 /// is a shared_ptr<QuantumGate>).
 class QuantumGate {
-private:
+public:
   using TargetQubitsType = std::vector<int>;
+private:
   GateMatrixPtr _gateMatrix;
   NoiseChannelPtr _noiseChannel;
   // qubits are sorted in ascending order
   TargetQubitsType _qubits;
-
 public:
   QuantumGate(GateMatrixPtr gateMatrix,
               NoiseChannelPtr noiseChannel,
               const TargetQubitsType& qubits);
 
   int nQubits() const { return _qubits.size(); }
-
 
   TargetQubitsType& qubits() { return _qubits; }
   const TargetQubitsType& qubits() const { return _qubits; }

@@ -30,7 +30,7 @@ IfStmt* Parser::parseIfStmt() {
 std::ostream& IfStmt::print(std::ostream& os) const {
   os << "If (";
   condition->print(os) << ") {\n";
-  for (auto* s : body)
+  for (auto* s : thenBody)
     s->print(os << "  ");
   os << "\n} Else {\n";
   for (auto* s : elseBody)
@@ -45,9 +45,9 @@ void IfStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   p.setPrefix("condition").write(indent + 1);
   condition->print(p.os) << "\n";
 
-  p.setPrefix("body").write(indent + 1) << body.size() << " stmts\n";
-  p.setState(indent + 1, body.size());
-  for (auto* s : body)
+  p.setPrefix("body").write(indent + 1) << thenBody.size() << " stmts\n";
+  p.setState(indent + 1, thenBody.size());
+  for (auto* s : thenBody)
     s->prettyPrint(p, indent + 2);
   if (!elseBody.empty()) {
     p.setPrefix("elsebody").write(indent + 1) << elseBody.size() << " stmts\n";

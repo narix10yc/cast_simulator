@@ -556,13 +556,14 @@ public:
 class IfStmt : public Stmt {
 public:
   Expr* condition;
-  std::span<Stmt*> body;
+  std::span<Stmt*> thenBody;
   std::span<Stmt*> elseBody;
 
   IfStmt(Expr* condition,
-         std::span<Stmt*> body,
+         std::span<Stmt*> thenBody,
          std::span<Stmt*> elseBody)
-    : Stmt(NK_Stmt_If), condition(condition), body(body), elseBody(elseBody) {}
+    : Stmt(NK_Stmt_If)
+    , condition(condition), thenBody(thenBody), elseBody(elseBody) {}
 
   std::ostream& print(std::ostream& os) const override;
 

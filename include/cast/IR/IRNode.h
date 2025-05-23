@@ -31,7 +31,14 @@ public:
 
   virtual ~IRNode() = default;
 
-  virtual std::ostream& print(std::ostream& os) const {
+  std::ostream& writeIndent(std::ostream& os, int indent) const {
+    assert(indent >= 0);
+    for (int i = 0; i < indent; ++i)
+      os.put(' ');
+    return os;
+  }
+
+  virtual std::ostream& print(std::ostream& os, int indent) const {
     return os << "IRNode @ " << this;
   }
 }; // class IRNode
@@ -46,7 +53,9 @@ public:
     nodes.push_back(std::move(node));
   }
 
-  std::ostream& print(std::ostream& os) const override;
+  size_t size() const { return nodes.size(); }
+
+  std::ostream& print(std::ostream& os, int indent) const override;
 
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_Compound;
@@ -62,7 +71,7 @@ public:
   IfMeasureNode(int qubit)
     : IRNode(IRNode_IfMeasure), qubit(qubit), thenBody(), elseBody() {}
 
-  std::ostream& print(std::ostream& os) const override;
+  std::ostream& print(std::ostream& os, int indent) const override;
 
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_IfMeasure;
@@ -77,7 +86,7 @@ public:
   CircuitNode(const std::string& name)
     : IRNode(IRNode_Circuit), name(name), body() {}
 
-  std::ostream& print(std::ostream& os) const override;
+  std::ostream& print(std::ostream& os, int indent) const override;
 
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_Circuit;
@@ -88,7 +97,7 @@ class CircuitGraphNode : public IRNode {
 private:
   int _rowSize;
   int _rowCapacity;
-  using row_t = QuantumGate**;
+  using row_t = std::vector<QuantumGate*>;
   std::list<row_t> _tile;
   // struct TransparentHash {
   //   using is_transparent = void;
@@ -129,7 +138,6 @@ private:
   using row_iterator = std::list<row_t>::iterator;
   using const_row_iterator = std::list<row_t>::const_iterator;
 
-  void resizeRows(int size);
   void reserveRows(int capacity);
 public:
   CircuitGraphNode(int desiredNQubits = 32)
@@ -137,16 +145,6 @@ public:
     , _rowSize(desiredNQubits)
     , _rowCapacity(desiredNQubits)
     , _tile() {}
-
-  CircuitGraphNode(const CircuitGraphNode&);
-  CircuitGraphNode(CircuitGraphNode&&) noexcept;
-  CircuitGraphNode& operator=(const CircuitGraphNode&);
-  CircuitGraphNode& operator=(CircuitGraphNode&&) noexcept;
-
-  ~CircuitGraphNode() {
-    for (auto rowIt = _tile.begin(), e = _tile.end(); rowIt != e; ++rowIt)
-      delete[] *rowIt;
-  }
 
   /// Use this method to add gates into the circuit graph. It will be stored in
   /// an unordered_map \c _gateMap for memory management and index tracking.
@@ -157,9 +155,11 @@ public:
 
   void removeGate(row_iterator rowIt, int qubitIdx);
 
+  bool isRowVacant(row_iterator rowIt, const QuantumGate& gate) const;
+
   size_t nGates() const { return _gateMap.size(); }
 
-  std::ostream& print(std::ostream& os) const override;
+  std::ostream& print(std::ostream& os, int indent) const override;
 
   std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
 

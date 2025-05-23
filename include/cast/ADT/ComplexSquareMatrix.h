@@ -159,6 +159,11 @@ public:
   static ComplexSquareMatrix I1() { return eye(2); }
   static ComplexSquareMatrix I2() { return eye(4); }
 
+  static ComplexSquareMatrix CX();
+  static ComplexSquareMatrix CNOT() { return CX(); }
+  static ComplexSquareMatrix CZ();
+  static ComplexSquareMatrix SWAP();
+
 }; // class ComplexSquareMatrix
 
 double maximum_norm(const ComplexSquareMatrix& A,

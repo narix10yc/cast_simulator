@@ -1,9 +1,11 @@
 #include "cast/Transform/Transform.h"
 #include "llvm/Support/Casting.h"
+#include "utils/iocolor.h"
 
 using namespace cast;
 using namespace cast::draft;
 
+// forward declaration
 static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
     ast::IfStmt* astIf, ast::ASTContext& astCtx);
 
@@ -12,36 +14,66 @@ static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
 /// vector \c irStmts. 
 static int convertSpanOfStmts(
     std::span<ast::Stmt*> astStmts, ast::ASTContext& astCtx,
-    std::vector<std::unique_ptr<ir::IRNode>>& irStmts) {
+    ir::CompoundNode& irCompoundNode) {
   if (astStmts.empty())
     return 0;
 
-  const auto initialSize = irStmts.size();
+  const auto initialSize = irCompoundNode.size();
   std::unique_ptr<ir::CircuitGraphNode> irCircuitGraphNode =
     std::make_unique<ir::CircuitGraphNode>();
+
   const auto cutCircuitGraphNode = [&]() {
     assert(irCircuitGraphNode != nullptr);
-    irStmts.push_back(std::move(irCircuitGraphNode));
+    irCompoundNode.push_back(std::move(irCircuitGraphNode));
     irCircuitGraphNode = std::make_unique<ir::CircuitGraphNode>();
   };
+
   const auto appendGateToCircuitGraphNode = [&](ast::GateApplyStmt* astGate) {
     assert(irCircuitGraphNode != nullptr);
+    auto gateMatrix = transform::convertGate(astGate, astCtx);
+    assert(gateMatrix != nullptr && "Failed to convert astGate to gateMatrix");
+    QuantumGate::TargetQubitsType qubits;
+    for (auto* qubitExpr : astGate->qubits) {
+      auto* qubitLit = llvm::dyn_cast<ast::IntegerLiteral>(qubitExpr);
+      if (qubitLit == nullptr) {
+        std::cerr << "Error: Qubit index must be an integer literal\n";
+        return;
+      }
+      qubits.push_back(qubitLit->value);
+    }
+    auto qGate = QuantumGate::Create(gateMatrix, nullptr, qubits);
+    qGate->displayInfo(std::cerr, 3);
+    irCircuitGraphNode->insertGate(qGate);
   };
 
+  // main loop
   for (auto it = astStmts.begin(), end = astStmts.end(); it != end; ++it) {
     // AST IfStmt acts like a barrier. It cuts current circuit graph node
     if (auto* astIf = llvm::dyn_cast<ast::IfStmt>(*it)) {
       cutCircuitGraphNode();
       auto irIf = convertIfMeasure(astIf, astCtx);
       assert(irIf);
-      irStmts.push_back(std::move(irIf));
+      irCompoundNode.push_back(std::move(irIf));
       continue;
     }
-    // otherwise, append a gate to the circuit graph node
-    auto* astGateChain = llvm::dyn_cast<ast::GateChainStmt>(*it);
-    // astGateChain->gates
-
+    // otherwise, append gate(s) to the circuit graph node
+    if (auto* astGateChain = llvm::dyn_cast<ast::GateChainStmt>(*it)) {
+      for (auto* astGate : astGateChain->gates)
+        appendGateToCircuitGraphNode(astGate);
+      continue;
+    }
+    if (auto* astGate = llvm::dyn_cast<ast::GateApplyStmt>(*it)) {
+      appendGateToCircuitGraphNode(astGate);
+      continue;
+    }
+    std::cerr << YELLOW("Warning: ")
+              << "In converting AST to IR, "
+              << "skipped unsupported statement type: " << (*it)->getKindName()
+              << "\n";
   }
+  if (irCircuitGraphNode->nGates() > 0)
+    cutCircuitGraphNode();
+  return irCompoundNode.size() - initialSize;
 }
 
 static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
@@ -59,24 +91,17 @@ static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
     return nullptr;
   }
   auto* irNode = new ir::IfMeasureNode(astTargetQubitExpr->value);
+  convertSpanOfStmts(astIf->thenBody, astCtx, irNode->thenBody);
+  convertSpanOfStmts(astIf->elseBody, astCtx, irNode->elseBody);
 
   return std::unique_ptr<ir::IfMeasureNode>(irNode);
-}
-
-  
-static std::unique_ptr<ir::IRNode> convert(
-    ast::Stmt* astStmt, ast::ASTContext& astCtx) {
-  if (auto* s = llvm::dyn_cast<ast::IfStmt>(astStmt)) {
-    return convertIfMeasure(s, astCtx);
-  }
-  assert(false && "Unsupported statement type");
-  return nullptr;
 }
 
 std::unique_ptr<ir::CircuitNode> transform::convertCircuit(
     const ast::CircuitStmt& astCircuit, ast::ASTContext& astCtx) {
   auto* irCircuit = new ir::CircuitNode(std::string(astCircuit.name.str));
-
+  auto nCvted = convertSpanOfStmts(astCircuit.body, astCtx, irCircuit->body);
+  std::cerr << "Converted " << nCvted << " statements\n";
 
   return std::unique_ptr<ir::CircuitNode>(irCircuit);
 }

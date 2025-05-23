@@ -115,6 +115,10 @@ public:
   //                  0, exp(i * theta/2) ]
   static ScalarGateMatrixPtr RZ(double theta);
 
+  static ScalarGateMatrixPtr CX() {
+    return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::CX());
+  }
+
 }; // class ScalarGateMatrix
 
 class UnitaryPermGateMatrix : public GateMatrix {
