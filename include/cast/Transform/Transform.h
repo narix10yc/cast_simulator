@@ -13,8 +13,6 @@ namespace transform {
 GateMatrixPtr convertGate(cast::draft::ast::GateApplyStmt* astGate,
                           cast::draft::ast::ASTContext& astCtx);
 
-                          
-
 std::unique_ptr<ir::CircuitNode> convertCircuit(
     const draft::ast::CircuitStmt& astCircuit, draft::ast::ASTContext& astCtx);
 

@@ -9,12 +9,12 @@ std::ostream& ASTContext::displayLineTable(std::ostream& os) const {
     return os << "  Line table is empty.\n";
   auto nLines = sourceManager.lineTable.size() - 1;
   for (size_t i = 0; i < nLines; ++i) {
-    std::cerr << "Line " << i + 1 << " @ "
-              << static_cast<const void*>(table[i]) << " | "
-              << IOColor::CYAN_FG;
-    std::cerr.write(table[i], table[i + 1] - table[i]);
-    std::cerr << IOColor::RESET;
+    os << "Line " << i + 1 << " @ "
+       << static_cast<const void*>(table[i]) << " | "
+       << IOColor::CYAN_FG;
+    os.write(table[i], table[i + 1] - table[i]);
+    os << IOColor::RESET;
   }
-  std::cerr << "EoF @ "
-            << static_cast<const void*>(table[nLines]) << "\n";
+  os << "EoF @ " << static_cast<const void*>(table[nLines]) << "\n";
+  return os;
 }

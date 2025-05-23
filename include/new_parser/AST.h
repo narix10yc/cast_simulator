@@ -196,8 +196,7 @@ public:
 /// @brief Try to reduce a generic expression to a simple numeric expression.
 /// Return nullptr if the reduction fails.
 /// This function is defined in AST/SimpleNumericExpr.cpp.
-static SimpleNumericExpr* reduceExprToSimpleNumeric(ASTContext& ctx,
-                                                    Expr* expr);
+SimpleNumericExpr* reduceExprToSimpleNumeric(ASTContext& ctx, Expr* expr);
 
 class IntegerLiteral : public SimpleNumericExpr {
 public:
