@@ -42,7 +42,6 @@ static int convertSpanOfStmts(
       qubits.push_back(qubitLit->value);
     }
     auto qGate = QuantumGate::Create(gateMatrix, nullptr, qubits);
-    qGate->displayInfo(std::cerr, 3);
     irCircuitGraphNode->insertGate(qGate);
   };
 
@@ -101,7 +100,6 @@ std::unique_ptr<ir::CircuitNode> transform::cvtAstCircuitToIrCircuit(
     const ast::CircuitStmt& astCircuit, ast::ASTContext& astCtx) {
   auto* irCircuit = new ir::CircuitNode(std::string(astCircuit.name.str));
   auto nCvted = convertSpanOfStmts(astCircuit.body, astCtx, irCircuit->body);
-  std::cerr << "Converted " << nCvted << " statements\n";
 
   return std::unique_ptr<ir::CircuitNode>(irCircuit);
 }

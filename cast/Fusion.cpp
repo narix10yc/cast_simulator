@@ -269,3 +269,4 @@ void cast::applyGateFusion(
     graph.squeeze();
   } while (nFused > 0 && ++curMaxK <= max_k);
 }
+

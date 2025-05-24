@@ -24,27 +24,36 @@ std::ostream& CircuitNode::displayInfo(std::ostream& os, int verbose) const {
 
 // implementation of countNumCircuitGraphs
 namespace {
-  unsigned impl_countNumCircuitGraphs(IRNode* node);
+  void impl_getAllCircuitGraphs(IRNode* node,
+                                std::vector<CircuitGraphNode*>& graphs);
 
-  unsigned impl_countNumCircuitGraphs(const CompoundNode& compoundNode) {
-    unsigned count = 0;
+  void impl_getAllCircuitGraphs(const CompoundNode& compoundNode,
+                                std::vector<CircuitGraphNode*>& graphs) {
     for (const auto& node : compoundNode.nodes)
-      count += impl_countNumCircuitGraphs(node.get());
-    return count;
+      impl_getAllCircuitGraphs(node.get(), graphs);
   }
 
-  unsigned impl_countNumCircuitGraphs(IRNode* node) {
-    if (llvm::isa<CircuitGraphNode>(node))
-      return 1;
+  void impl_getAllCircuitGraphs(IRNode* node, 
+                                std::vector<CircuitGraphNode*>& graphs) {
+    if (auto* graphNode = llvm::dyn_cast<CircuitGraphNode>(node)) {
+      graphs.push_back(graphNode);
+      return ;
+    }
     if (auto* ifNode = llvm::dyn_cast<IfMeasureNode>(node)) {
-      return impl_countNumCircuitGraphs(ifNode->thenBody) +
-             impl_countNumCircuitGraphs(ifNode->elseBody);
+      impl_getAllCircuitGraphs(ifNode->thenBody, graphs);
+      impl_getAllCircuitGraphs(ifNode->elseBody, graphs);
+      return;
     }
     assert(false && "Unknown node type");
-    return 0;
   }
 }
 
+std::vector<CircuitGraphNode*> CircuitNode::getAllCircuitGraphs() const {
+  std::vector<CircuitGraphNode*> graphs;
+  impl_getAllCircuitGraphs(body, graphs);
+  return graphs;
+}
+
 unsigned CircuitNode::countNumCircuitGraphs() const {
-  return impl_countNumCircuitGraphs(body);
+  return getAllCircuitGraphs().size();
 }

@@ -78,28 +78,9 @@ public:
   }
 }; // class IfMeasureNode
 
-class CircuitNode : public IRNode {
-public:
-  std::string name;
-  CompoundNode body;
-
-  CircuitNode(const std::string& name)
-    : IRNode(IRNode_Circuit), name(name), body() {}
-
-  std::ostream& print(std::ostream& os, int indent) const override;
-
-  unsigned countNumCircuitGraphs() const;
-
-  std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
-
-  static bool classof(const IRNode* node) {
-    return node->getKind() == IRNode_Circuit;
-  }
-}; // class CircuitNode
-
 class CircuitGraphNode : public IRNode {
 private:
-  int _rowSize;
+  int _nQubits;
   int _rowCapacity;
   using row_t = std::vector<QuantumGate*>;
   std::list<row_t> _tile;
@@ -139,6 +120,7 @@ private:
 
   // _gateMap manages memory and stores the id of gates
   std::unordered_map<QuantumGatePtr, int> _gateMap;
+  static int _gateMapId;
   using row_iterator = std::list<row_t>::iterator;
   using const_row_iterator = std::list<row_t>::const_iterator;
 
@@ -146,9 +128,12 @@ private:
 public:
   CircuitGraphNode(int desiredNQubits = 32)
     : IRNode(IRNode_CircuitGraph)
-    , _rowSize(desiredNQubits)
+    , _nQubits(desiredNQubits)
     , _rowCapacity(desiredNQubits)
     , _tile() {}
+
+  // This is not a check method. Recommend to use assert(checkConsistency()) 
+  bool checkConsistency() const;
 
   /// Use this method to add gates into the circuit graph. It will be stored in
   /// an unordered_map \c _gateMap for memory management and index tracking.
@@ -161,17 +146,63 @@ public:
 
   bool isRowVacant(row_iterator rowIt, const QuantumGate& gate) const;
 
+  const std::unordered_map<QuantumGatePtr, int>& gateMap() const {
+    return _gateMap;
+  }
+
+  // Return the id of the gate in the circuit graph. Return -1 if gate is not
+  // in this circuit graph.
+  int gateId(const QuantumGate& gate) const;
+
+  std::list<row_t>& tile() { return _tile; }
+  const std::list<row_t>& tile() const { return _tile; }
+
+  row_iterator tile_begin() { return _tile.begin(); }
+  const_row_iterator tile_begin() const { return _tile.begin(); }
+
+  row_iterator tile_end() { return _tile.end(); }
+  const_row_iterator tile_end() const { return _tile.end(); }
+
+  int nQubits() const { return _nQubits; }
+
+  size_t rowCapacity() const { return _rowCapacity; }
+
   size_t nGates() const { return _gateMap.size(); }
 
   std::ostream& print(std::ostream& os, int indent) const override;
 
   std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
 
+  std::ostream& visualize(std::ostream& os, int verbose=1) const;
+
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_CircuitGraph;
   }
 
 }; // class CircuitGraphNode
+
+class CircuitNode : public IRNode {
+public:
+  std::string name;
+  CompoundNode body;
+
+  CircuitNode(const std::string& name)
+    : IRNode(IRNode_Circuit), name(name), body() {}
+
+  std::ostream& print(std::ostream& os, int indent) const override;
+
+  // Grab all circuit graphs inside this circuit. Notice that when `this` goes
+  // out of scope, the returned pointers will be invalidated.
+  std::vector<CircuitGraphNode*> getAllCircuitGraphs() const;
+
+  unsigned countNumCircuitGraphs() const;
+
+  std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
+
+  static bool classof(const IRNode* node) {
+    return node->getKind() == IRNode_Circuit;
+  }
+}; // class CircuitNode
 
 } // namespace cast::ir
 

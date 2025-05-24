@@ -16,6 +16,16 @@ int main(int argc, char** argv) {
   castCircuit->updateAttribute();
   auto irCircuit = transform::cvtAstCircuitToIrCircuit(*castCircuit, astCtx);
 
+  assert(irCircuit != nullptr);
+  irCircuit->displayInfo(std::cerr, 3);
   irCircuit->print(std::cerr, 0);
+  
+  auto circuitGraphs = irCircuit->getAllCircuitGraphs();
+  for (const auto* graph : circuitGraphs) {
+    graph->displayInfo(std::cerr, 3);
+    // graph->visualize(std::cerr, 3);
+    assert(graph->checkConsistency());
+  }
+
   return 0;
 }
