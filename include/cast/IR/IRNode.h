@@ -121,10 +121,10 @@ private:
   // _gateMap manages memory and stores the id of gates
   std::unordered_map<QuantumGatePtr, int> _gateMap;
   static int _gateMapId;
+  void reserveRows(int capacity);
+public:
   using row_iterator = std::list<row_t>::iterator;
   using const_row_iterator = std::list<row_t>::const_iterator;
-
-  void reserveRows(int capacity);
 public:
   CircuitGraphNode(int desiredNQubits = 32)
     : IRNode(IRNode_CircuitGraph)
@@ -142,9 +142,11 @@ public:
   void insertGate(QuantumGatePtr gate);
   void insertGate(QuantumGatePtr gate, row_iterator rowIt);
 
-  void removeGate(row_iterator rowIt, int qubitIdx);
+  void removeGate(row_iterator rowIt, int qubit);
 
   bool isRowVacant(row_iterator rowIt, const QuantumGate& gate) const;
+
+  void squeeze();
 
   const std::unordered_map<QuantumGatePtr, int>& gateMap() const {
     return _gateMap;

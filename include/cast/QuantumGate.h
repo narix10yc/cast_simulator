@@ -28,6 +28,12 @@ public:
 
   int nQubits() const { return _qubits.size(); }
 
+  GateMatrixPtr gateMatrix() { return _gateMatrix; }
+  const GateMatrixPtr& gateMatrix() const { return _gateMatrix; }
+
+  NoiseChannelPtr noiseChannel() { return _noiseChannel; }
+  const NoiseChannelPtr& noiseChannel() const { return _noiseChannel; }
+
   TargetQubitsType& qubits() { return _qubits; }
   const TargetQubitsType& qubits() const { return _qubits; }
 
@@ -38,9 +44,9 @@ public:
                                const TargetQubitsType& qubits) {
     return std::make_shared<QuantumGate>(gateMatrix, noiseChannel, qubits);
   }
-
-
 }; // class QuantumGate
+
+QuantumGatePtr matmul(const QuantumGate& gateA, const QuantumGate& gateB);
 
 }; // namespace cast
 
