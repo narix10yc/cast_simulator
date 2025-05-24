@@ -34,13 +34,14 @@ int main(int argc, char** argv) {
   const auto* astCircuit = root->lookupCircuit("my_circuit");
   assert(astCircuit != nullptr && "Failed to find circuit my_circuit");
 
-  auto irCircuit = cast::transform::convertCircuit(*astCircuit, astCtx);
+  auto irCircuit = cast::transform::cvtAstCircuitToIrCircuit(*astCircuit, astCtx);
 
   if (irCircuit == nullptr) {
     std::cerr << "Failed to transform AST to IR\n";
     return 1;
   }
   irCircuit->print(std::cerr, 0);
+  irCircuit->displayInfo(std::cerr, 3);
 
   return 0;
 }

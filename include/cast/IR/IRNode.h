@@ -88,6 +88,10 @@ public:
 
   std::ostream& print(std::ostream& os, int indent) const override;
 
+  unsigned countNumCircuitGraphs() const;
+
+  std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
+
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_Circuit;
   }

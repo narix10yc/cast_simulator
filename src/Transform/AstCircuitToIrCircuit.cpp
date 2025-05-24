@@ -30,7 +30,7 @@ static int convertSpanOfStmts(
 
   const auto appendGateToCircuitGraphNode = [&](ast::GateApplyStmt* astGate) {
     assert(irCircuitGraphNode != nullptr);
-    auto gateMatrix = transform::convertGate(astGate, astCtx);
+    auto gateMatrix = transform::cvtAstGateToGateMatrix(astGate, astCtx);
     assert(gateMatrix != nullptr && "Failed to convert astGate to gateMatrix");
     QuantumGate::TargetQubitsType qubits;
     for (auto* qubitExpr : astGate->qubits) {
@@ -97,7 +97,7 @@ static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
   return std::unique_ptr<ir::IfMeasureNode>(irNode);
 }
 
-std::unique_ptr<ir::CircuitNode> transform::convertCircuit(
+std::unique_ptr<ir::CircuitNode> transform::cvtAstCircuitToIrCircuit(
     const ast::CircuitStmt& astCircuit, ast::ASTContext& astCtx) {
   auto* irCircuit = new ir::CircuitNode(std::string(astCircuit.name.str));
   auto nCvted = convertSpanOfStmts(astCircuit.body, astCtx, irCircuit->body);

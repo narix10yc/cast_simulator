@@ -81,5 +81,7 @@ std::ostream& CircuitGraphNode::displayInfo(std::ostream& os, int verbose) const
      << "(Verbose " << verbose << ")\n";
   os << CYAN("- nGates:      ") << _gateMap.size() << "\n";
   os << CYAN("- rowCapacity: ") << _rowCapacity << "\n";
+  
+  os << BOLDCYAN("====================================") << "\n";
   return os;
 }

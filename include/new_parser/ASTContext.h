@@ -151,11 +151,7 @@ private:
   MemoryManager memoryManager;
   SourceManager sourceManager;
 
-private:
-  ast::Identifier createIdentifier(const std::string& name) {
-    return createIdentifier(std::string_view(name));
-  }
-
+public:
   ast::Identifier createIdentifier(std::string_view name) {
     auto size = name.size();
     auto* ptr = memoryManager.allocate(size);

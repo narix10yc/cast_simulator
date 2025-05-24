@@ -386,6 +386,8 @@ public:
   IntegerLiteral* nQubits;
   IntegerLiteral* nParams;
   SimpleNumericExpr* phase;
+
+  Attribute() : nQubits(nullptr), nParams(nullptr), phase(nullptr) {}
   
   Attribute(IntegerLiteral* nQubits,
             IntegerLiteral* nParams,
