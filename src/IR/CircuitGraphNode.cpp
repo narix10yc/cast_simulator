@@ -266,7 +266,7 @@ void CircuitGraphNode::squeeze() {
         continue;
       // find the top-most vacant row
       auto rowVacant = std::prev(rowIt);
-      while (rowVacant != tile_begin() && isRowVacant(rowVacant, *gate)) {
+      while (rowVacant != tile_end() && isRowVacant(rowVacant, *gate)) {
         --rowVacant;
       }
       ++rowVacant; // move to the next row, which is vacant
