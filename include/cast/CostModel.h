@@ -113,6 +113,8 @@ public:
 
 #ifdef CAST_USE_CUDA
 
+__global__ void emptyKernel();
+
 class CUDAPerformanceCache {
 public:
   struct Item {
@@ -151,10 +153,13 @@ class CUDACostModel : public CostModel {
     double zeroTol;
     int currentBlockSize;
     double minGibTimeCap;
+    double measuredLaunchOverhead;
     
 public:
     explicit CUDACostModel(const CUDAPerformanceCache* c, double zt = 1e-8)
-      : cache(c), zeroTol(zt), currentBlockSize(256), minGibTimeCap(1e-9) {}
+      : cache(c), zeroTol(zt), currentBlockSize(256), minGibTimeCap(1e-9) {
+        measureLaunchOverheadOnce();
+      }
     
     double computeGiBTime(const QuantumGate& gate, int precision, int) const override;
 
@@ -166,6 +171,8 @@ public:
       }
       currentBlockSize = blockSize;
     }
+
+    void measureLaunchOverheadOnce();
     
 private:
     double calculateOccupancyPenalty(const CUDAPerformanceCache::Item& item) const;

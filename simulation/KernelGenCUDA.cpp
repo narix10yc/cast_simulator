@@ -1,5 +1,5 @@
 #include <llvm/IR/IntrinsicsNVPTX.h>
-
+#include <llvm/IR/Verifier.h>
 #include "cast/QuantumGate.h"
 #include "cast/CircuitGraph.h"
 
@@ -186,170 +186,660 @@ Value* getGlobalTidCUDA(IRBuilder<>& B) {
 }
 } // anonymous namespace
 
+static void attachNoUnrollMetadata(llvm::IRBuilder<>& B, llvm::BasicBlock* latchBB)
+{
+    using namespace llvm;
+    Instruction* latchTerm = latchBB->getTerminator();
+    if (!latchTerm) return; // safety
+    LLVMContext &ctx = B.getContext();
+    MDNode* noUnrollMD = MDNode::get(ctx, {
+        MDString::get(ctx, "llvm.loop.unroll.disable")
+    });
+    latchTerm->setMetadata("llvm.loop", noUnrollMD);
+}
+
+/**
+ *  Create a global array [2*K*K x scalarTy] to store the real/imag parts 
+ *    from matData. That way, we can do a run-time IR loop to read them, 
+ *    instead of unrolling a for-loop in C++.
+ */
+static llvm::GlobalVariable* createGlobalMatrixArray_NoUnroll(
+    llvm::Module &M,
+    llvm::Type   *scalarTy,
+    const std::vector<IRMatDataCUDA> &matData,
+    unsigned K,
+    const std::string &globalName
+)
+{
+    using namespace llvm;
+
+    unsigned totalElems = 2 * K * K;
+    ArrayType* arrTy    = ArrayType::get(scalarTy, totalElems);
+
+    // Build a ConstantArray with the imm real/imag values.
+    std::vector<Constant*> constVals;
+    constVals.reserve(totalElems);
+
+    for (unsigned i = 0; i < K*K; i++) {
+        const auto &md = matData[i];
+        // If md.reVal is a ConstantFP, we can cast directly:
+        ConstantFP *cRe = llvm::dyn_cast_or_null<ConstantFP>(md.reVal);
+        ConstantFP *cIm = llvm::dyn_cast_or_null<ConstantFP>(md.imVal);
+
+        double fallbackRe = 0.0, fallbackIm = 0.0;
+        // If not SK_ImmValue, fallback to 0 or do more logic
+        if (md.reKind == SK_ImmValue && cRe) {
+            constVals.push_back(cRe);
+        } else if (md.reKind == SK_One) {
+            constVals.push_back(ConstantFP::get(scalarTy, 1.0));
+        } else if (md.reKind == SK_MinusOne) {
+            constVals.push_back(ConstantFP::get(scalarTy, -1.0));
+        } else if (md.reKind == SK_Zero) {
+            constVals.push_back(ConstantFP::get(scalarTy, 0.0));
+        } else {
+            // e.g. SK_General => fallback or store 0.0 
+            constVals.push_back(ConstantFP::get(scalarTy, fallbackRe));
+        }
+
+        if (md.imKind == SK_ImmValue && cIm) {
+            constVals.push_back(cIm);
+        } else if (md.imKind == SK_One) {
+            constVals.push_back(ConstantFP::get(scalarTy, 1.0));
+        } else if (md.imKind == SK_MinusOne) {
+            constVals.push_back(ConstantFP::get(scalarTy, -1.0));
+        } else if (md.imKind == SK_Zero) {
+            constVals.push_back(ConstantFP::get(scalarTy, 0.0));
+        } else {
+            // fallback
+            constVals.push_back(ConstantFP::get(scalarTy, fallbackIm));
+        }
+    }
+
+    Constant* arrInit = ConstantArray::get(arrTy, constVals);
+
+    // Create a private global 
+    auto* gVar = new GlobalVariable(
+        M,
+        arrTy,
+        /*isConstant=*/true,
+        llvm::GlobalValue::PrivateLinkage,
+        arrInit,
+        globalName
+    );
+    gVar->setAlignment(llvm::MaybeAlign(8));
+    return gVar;
+}
+
+
 void genMatrixVectorMultiply(
-    llvm::IRBuilder<>& B,
-    const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
-    const llvm::ArrayRef<int> qubits,
+    llvm::IRBuilder<>&            B,
+    const CUDAKernelGenConfig&    config,
+    const GateMatrix&             gateMat,
+    llvm::ArrayRef<int>           qubits,
     const std::vector<IRMatDataCUDA>& matData,
-    llvm::Value* svPtrV,
-    llvm::Type* scalarTy)
+    llvm::Value*                  svPtrV,
+    llvm::Type*                   scalarTy
+)
 {
-    // For k-qubit gate, dimension = 1 << k
+    using namespace llvm;
+
     unsigned k = gateMat.nQubits();
     unsigned K = 1u << k;
+    LLVMContext &ctx = B.getContext();
 
-    // Load old amplitudes from svPtrV
-    std::vector<llvm::Value*> reAmpPtrs(K), imAmpPtrs(K);
-    std::vector<llvm::Value*> reAmps(K), imAmps(K);
+    BasicBlock *curBB = B.GetInsertBlock();
+    Function   *func  = curBB->getParent();
+    Module     &M     = *func->getParent();
 
-    for (unsigned i = 0; i < K; i++) {
-        uint64_t delta = 0;
+    GlobalVariable* gMatImmediate = createGlobalMatrixArray_NoUnroll(
+        M, scalarTy, matData, K, "gMatImmediate"
+    );
+
+    ArrayType *arrTy = ArrayType::get(scalarTy, K);
+    AllocaInst* reAmpsAlloca = B.CreateAlloca(arrTy, nullptr, "reAmps");
+    AllocaInst* imAmpsAlloca = B.CreateAlloca(arrTy, nullptr, "imAmps");
+
+    BasicBlock* entryBB     = curBB;
+    BasicBlock* loadCheckBB = BasicBlock::Create(ctx, "load.check", func);
+    BasicBlock* loadBodyBB  = BasicBlock::Create(ctx, "load.body",  func);
+    BasicBlock* loadIncBB   = BasicBlock::Create(ctx, "load.inc",   func);
+    BasicBlock* loadExitBB  = BasicBlock::Create(ctx, "load.exit",  func);
+
+    B.CreateBr(loadCheckBB);
+    B.SetInsertPoint(loadCheckBB);
+
+    PHINode* iPHI = B.CreatePHI(B.getInt32Ty(), 2, "i");
+    iPHI->addIncoming(ConstantInt::get(B.getInt32Ty(), 0), entryBB);
+
+    Value* condLoad = B.CreateICmpSLT(iPHI, ConstantInt::get(B.getInt32Ty(), K));
+    B.CreateCondBr(condLoad, loadBodyBB, loadExitBB);
+
+    B.SetInsertPoint(loadBodyBB);
+    {
+        // compute delta
+        Value* deltaVal = ConstantInt::get(B.getInt64Ty(), 0);
         for (unsigned b = 0; b < k; b++) {
-            if (i & (1ull << b)) {
-                delta |= (1ull << qubits[b]);
-            }
+            Value* maskB = ConstantInt::get(B.getInt32Ty(), 1u << b);
+            Value* test  = B.CreateAnd(iPHI, maskB);
+            Value* cond  = B.CreateICmpNE(test, ConstantInt::get(B.getInt32Ty(), 0));
+            Value* shiftVal = ConstantInt::get(B.getInt64Ty(), 1ULL << qubits[b]);
+            Value* orVal = B.CreateOr(deltaVal, shiftVal);
+            deltaVal = B.CreateSelect(cond, orVal, deltaVal);
         }
-        // Real pointer = svPtrV + (2 * delta)
-        reAmpPtrs[i] = B.CreateConstGEP1_64(scalarTy, svPtrV, 2*delta, "reAmpPtr"+std::to_string(i));
-        imAmpPtrs[i] = B.CreateConstGEP1_64(scalarTy, svPtrV, 2*delta+1, "imAmpPtr"+std::to_string(i));
+        // rePtr = svPtrV + 2*deltaVal
+        // imPtr = svPtrV + 2*deltaVal+1
+        Value* twoDelta = B.CreateMul(ConstantInt::get(B.getInt64Ty(), 2), deltaVal);
+        Value* rePtr = B.CreateGEP(scalarTy, svPtrV, twoDelta, "rePtr");
+        Value* imPtr = B.CreateGEP(
+            scalarTy, svPtrV,
+            B.CreateAdd(twoDelta, ConstantInt::get(B.getInt64Ty(), 1)),
+            "imPtr"
+        );
+        // load oldRe, oldIm
+        Value* oldRe = B.CreateLoad(scalarTy, rePtr, "oldRe");
+        Value* oldIm = B.CreateLoad(scalarTy, imPtr, "oldIm");
 
-        reAmps[i] = B.CreateLoad(scalarTy, reAmpPtrs[i], "oldRe."+std::to_string(i));
-        imAmps[i] = B.CreateLoad(scalarTy, imAmpPtrs[i], "oldIm."+std::to_string(i));
+        // store into reAmpsAlloca[i], imAmpsAlloca[i]
+        Value* reSlot = B.CreateGEP(arrTy, reAmpsAlloca,
+                         { ConstantInt::get(B.getInt32Ty(),0), iPHI });
+        Value* imSlot = B.CreateGEP(arrTy, imAmpsAlloca,
+                         { ConstantInt::get(B.getInt32Ty(),0), iPHI });
+        B.CreateStore(oldRe, reSlot);
+        B.CreateStore(oldIm, imSlot);
+    }
+    B.CreateBr(loadIncBB);
+
+    B.SetInsertPoint(loadIncBB);
+    {
+        Value* iNext = B.CreateAdd(iPHI, ConstantInt::get(B.getInt32Ty(), 1));
+        iPHI->addIncoming(iNext, loadIncBB);
+        B.CreateBr(loadCheckBB);
     }
 
-    // For each row r in [0..K-1], accumulate
-    for (unsigned r = 0; r < K; ++r) {
-        // build partial sums for real and imaginary
-        llvm::Value* zeroVal = llvm::ConstantFP::get(scalarTy, 0.0);
-        llvm::Value* updatedReAmp0 = zeroVal; // sum( matRe[r,c]* oldRe[c] )
-        llvm::Value* updatedReAmp1 = zeroVal; // sum( matIm[r,c]* oldIm[c] )
-        llvm::Value* updatedImAmp  = zeroVal; // sum of cross terms
+    B.SetInsertPoint(loadExitBB);
+    attachNoUnrollMetadata(B, loadIncBB); // disable unroll for amplitude-load loop
 
-        for (unsigned c = 0; c < K; ++c) {
-            // Gather matrix data for row r, col c
-            const auto& md = matData[r*K + c];
+    BasicBlock* outerCheckBB = BasicBlock::Create(ctx, "outer.check", func);
+    BasicBlock* outerBodyBB  = BasicBlock::Create(ctx, "outer.body",  func);
+    BasicBlock* outerIncBB   = BasicBlock::Create(ctx, "outer.inc",   func);
+    BasicBlock* outerExitBB  = BasicBlock::Create(ctx, "outer.exit",  func);
 
-            llvm::Value* oldRe = reAmps[c];
-            llvm::Value* oldIm = imAmps[c];
+    B.CreateBr(outerCheckBB);
+    B.SetInsertPoint(outerCheckBB);
+    PHINode* rPHI = B.CreatePHI(B.getInt32Ty(), 2, "r");
+    rPHI->addIncoming(ConstantInt::get(B.getInt32Ty(), 0), loadExitBB);
 
-            // updatedReAmp0 += matReVal*oldRe
-            llvm::Value* mulReRe = genOptFMul(md.reVal, oldRe, md.reKind, B);
-            if (mulReRe) {
-                updatedReAmp0 = B.CreateFAdd(updatedReAmp0, mulReRe);
-            }
+    Value* condOuter = B.CreateICmpSLT(rPHI, ConstantInt::get(B.getInt32Ty(), K));
+    B.CreateCondBr(condOuter, outerBodyBB, outerExitBB);
 
-            // updatedReAmp1 += matImVal*oldIm
-            llvm::Value* mulImIm = genOptFMul(md.imVal, oldIm, md.imKind, B);
-            if (mulImIm) {
-                updatedReAmp1 = B.CreateFAdd(updatedReAmp1, mulImIm);
-            }
+    B.SetInsertPoint(outerBodyBB);
+    {
+        // partial sums in local allocas
+        AllocaInst* reAmp0A = B.CreateAlloca(scalarTy, nullptr, "reAmp0A");
+        AllocaInst* reAmp1A = B.CreateAlloca(scalarTy, nullptr, "reAmp1A");
+        AllocaInst* imAmpA  = B.CreateAlloca(scalarTy, nullptr, "imAmpA");
 
-            // updatedImAmp += (matReVal*oldIm + matImVal*oldRe)
-            llvm::Value* sumIm = zeroVal;
+        Value* zeroVal = ConstantFP::get(scalarTy, 0.0);
+        B.CreateStore(zeroVal, reAmp0A);
+        B.CreateStore(zeroVal, reAmp1A);
+        B.CreateStore(zeroVal, imAmpA);
 
-            llvm::Value* mulReIm = genOptFMul(md.reVal, oldIm, md.reKind, B);
-            if (mulReIm) {
-                sumIm = B.CreateFAdd(sumIm, mulReIm);
-            }
-            llvm::Value* mulImRe = genOptFMul(md.imVal, oldRe, md.imKind, B);
-            if (mulImRe) {
-                sumIm = B.CreateFAdd(sumIm, mulImRe);
-            }
-            updatedImAmp = B.CreateFAdd(updatedImAmp, sumIm);
+        // Inner loop c in [0..K)
+        BasicBlock* innerCheckBB = BasicBlock::Create(ctx, "inner.check", func);
+        BasicBlock* innerBodyBB  = BasicBlock::Create(ctx, "inner.body",  func);
+        BasicBlock* innerIncBB   = BasicBlock::Create(ctx, "inner.inc",   func);
+        BasicBlock* innerExitBB  = BasicBlock::Create(ctx, "inner.exit",  func);
+
+        B.CreateBr(innerCheckBB);
+        B.SetInsertPoint(innerCheckBB);
+        PHINode* cPHI = B.CreatePHI(B.getInt32Ty(), 2, "c");
+        cPHI->addIncoming(ConstantInt::get(B.getInt32Ty(), 0), outerBodyBB);
+
+        Value* condInner = B.CreateICmpSLT(cPHI, ConstantInt::get(B.getInt32Ty(), K));
+        B.CreateCondBr(condInner, innerBodyBB, innerExitBB);
+
+        // innerBody: read M[r,c] from the global array, read oldAmp[c], do partial sums
+        B.SetInsertPoint(innerBodyBB);
+        {
+            // linear index = r*K + c => 2*(r*K + c) => re/im
+            Value* r64 = B.CreateIntCast(rPHI, B.getInt64Ty(), false);
+            Value* c64 = B.CreateIntCast(cPHI, B.getInt64Ty(), false);
+            Value* bigK = ConstantInt::get(B.getInt64Ty(), K);
+            Value* rK   = B.CreateMul(r64, bigK);
+            Value* rc   = B.CreateAdd(rK, c64);
+            Value* base2= B.CreateMul(ConstantInt::get(B.getInt64Ty(), 2), rc);
+
+            // GEP into gMatImmediate => real, imag
+            // global array type is [2*K*K x scalarTy]
+            auto arrTy2 = llvm::cast<ArrayType>(gMatImmediate->getValueType());
+            // rePtr => gMatImmediate[0, base2], imPtr => gMatImmediate[0, base2+1]
+            Value* idxRe = base2;
+            Value* idxIm = B.CreateAdd(base2, ConstantInt::get(B.getInt64Ty(), 1));
+
+            Value* rePtr = B.CreateGEP(
+                arrTy2, gMatImmediate,
+                { ConstantInt::get(B.getInt32Ty(),0),
+                  B.CreateIntCast(idxRe, B.getInt32Ty(), false) },
+                "matRePtr"
+            );
+            Value* imPtr = B.CreateGEP(
+                arrTy2, gMatImmediate,
+                { ConstantInt::get(B.getInt32Ty(),0),
+                  B.CreateIntCast(idxIm, B.getInt32Ty(), false) },
+                "matImPtr"
+            );
+
+            Value* matRe = B.CreateLoad(scalarTy, rePtr, "matRe");
+            Value* matIm = B.CreateLoad(scalarTy, imPtr, "matIm");
+
+            // oldAmp[c]
+            Value* oldReSlot = B.CreateGEP(
+                arrTy, reAmpsAlloca,
+                { ConstantInt::get(B.getInt32Ty(),0), cPHI }
+            );
+            Value* oldImSlot = B.CreateGEP(
+                arrTy, imAmpsAlloca,
+                { ConstantInt::get(B.getInt32Ty(),0), cPHI }
+            );
+            Value* oldRe = B.CreateLoad(scalarTy, oldReSlot, "oldRe");
+            Value* oldIm = B.CreateLoad(scalarTy, oldImSlot, "oldIm");
+
+            // partial sums
+            Value* reA0 = B.CreateLoad(scalarTy, reAmp0A);
+            Value* reA1 = B.CreateLoad(scalarTy, reAmp1A);
+            Value* imA  = B.CreateLoad(scalarTy, imAmpA);
+
+            // reA0 += matRe * oldRe
+            Value* addRe0 = B.CreateFAdd(reA0, B.CreateFMul(matRe, oldRe));
+            B.CreateStore(addRe0, reAmp0A);
+
+            // reA1 += matIm * oldIm
+            Value* addRe1 = B.CreateFAdd(reA1, B.CreateFMul(matIm, oldIm));
+            B.CreateStore(addRe1, reAmp1A);
+
+            // imA  += matRe*oldIm + matIm*oldRe
+            Value* cross = B.CreateFAdd(
+                B.CreateFMul(matRe, oldIm),
+                B.CreateFMul(matIm, oldRe)
+            );
+            Value* addIm = B.CreateFAdd(imA, cross);
+            B.CreateStore(addIm, imAmpA);
+        }
+        B.CreateBr(innerIncBB);
+
+        B.SetInsertPoint(innerIncBB);
+        {
+            Value* cNext = B.CreateAdd(cPHI, ConstantInt::get(B.getInt32Ty(),1));
+            cPHI->addIncoming(cNext, innerIncBB);
+            B.CreateBr(innerCheckBB);
         }
 
-        // final real = updatedReAmp0 - updatedReAmp1
-        llvm::Value* newReAmp = B.CreateFSub(updatedReAmp0, updatedReAmp1);
-        llvm::Value* newImAmp = updatedImAmp;
+        B.SetInsertPoint(innerExitBB);
+        attachNoUnrollMetadata(B, innerIncBB);
 
-        // store back
-        B.CreateStore(newReAmp, reAmpPtrs[r]);
-        B.CreateStore(newImAmp, imAmpPtrs[r]);
+        // finalize amplitude: newReAmp = reA0 - reA1, newImAmp = imA
+        Value* reA0 = B.CreateLoad(scalarTy, reAmp0A);
+        Value* reA1 = B.CreateLoad(scalarTy, reAmp1A);
+        Value* imA  = B.CreateLoad(scalarTy, imAmpA);
+
+        Value* newReAmp = B.CreateFSub(reA0, reA1);
+        Value* newImAmp = imA;
+
+        // store back to row r
+        Value* deltaVal = ConstantInt::get(B.getInt64Ty(), 0);
+        for (unsigned b = 0; b < k; b++) {
+            Value* maskB = ConstantInt::get(B.getInt32Ty(), 1u << b);
+            Value* test  = B.CreateAnd(rPHI, maskB);
+            Value* cond  = B.CreateICmpNE(test, ConstantInt::get(B.getInt32Ty(), 0));
+            Value* shiftVal = ConstantInt::get(B.getInt64Ty(), 1ULL << qubits[b]);
+            Value* orVal = B.CreateOr(deltaVal, shiftVal);
+            deltaVal = B.CreateSelect(cond, orVal, deltaVal);
+        }
+        Value* twoDelta = B.CreateMul(ConstantInt::get(B.getInt64Ty(),2), deltaVal);
+        Value* outRePtr = B.CreateGEP(scalarTy, svPtrV, twoDelta);
+        Value* outImPtr = B.CreateGEP(
+            scalarTy, svPtrV,
+            B.CreateAdd(twoDelta, ConstantInt::get(B.getInt64Ty(),1))
+        );
+
+        B.CreateStore(newReAmp, outRePtr);
+        B.CreateStore(newImAmp, outImPtr);
     }
+    B.CreateBr(outerIncBB);
+
+    B.SetInsertPoint(outerIncBB);
+    {
+        Value* rNext = B.CreateAdd(rPHI, ConstantInt::get(B.getInt32Ty(),1));
+        rPHI->addIncoming(rNext, outerIncBB);
+        B.CreateBr(outerCheckBB);
+    }
+
+    B.SetInsertPoint(outerExitBB);
+    attachNoUnrollMetadata(B, outerIncBB);
+
+    // IR now has run-time loops for loading amplitudes, 
+    // for (r,c) partial sums, and unrolling has been disabled.
 }
 
-void genMatrixVectorMultiplyFromPointer(
-    llvm::IRBuilder<>& B,
-    const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
-    const llvm::ArrayRef<int> qubits,
-    llvm::Value* matBasePtr,
-    llvm::Value* svPtrV,
-    llvm::Type* scalarTy)
+static GlobalVariable* createGlobalMatrixArray_SharedTiledImm(
+    Module &M,
+    Type* scalarTy,
+    unsigned N,
+    const std::vector<IRMatDataCUDA> &matData,
+    const std::string &globalName
+)
 {
-    unsigned k = gateMat.nQubits();
-    unsigned K = 1u << k;
+    // The array type: [2*N*N x scalarTy].
+    unsigned totalElems = 2 * N * N;
+    ArrayType *arrTy = ArrayType::get(scalarTy, totalElems);
 
-    std::vector<llvm::Value*> reAmpPtrs(K), imAmpPtrs(K);
-    std::vector<llvm::Value*> reAmps(K),    imAmps(K);
+    std::vector<Constant*> initVals;
+    initVals.reserve(totalElems);
 
-    for (unsigned i = 0; i < K; i++) {
-        uint64_t delta = 0;
-        for (unsigned b = 0; b < k; b++) {
-            if (i & (1u << b))
-                delta |= (1ull << qubits[b]);
+    // Fill them from matData. We assume matData.size() == (N*N).
+    // For each index i => matData[i] => reVal, imVal
+    // We'll place them in positions [2*i], [2*i + 1].
+    for (unsigned i = 0; i < N*N; i++) {
+        const auto &md = matData[i];
+        // Attempt to cast reVal, imVal to ConstantFP if SK_ImmValue
+        ConstantFP *cRe = dyn_cast_or_null<ConstantFP>(md.reVal);
+        ConstantFP *cIm = dyn_cast_or_null<ConstantFP>(md.imVal);
+
+        // Fallback
+        if (md.reKind == SK_ImmValue && cRe) {
+            initVals.push_back(cRe);
         }
-        // pointer arithmetic for real, imag
-        reAmpPtrs[i] = B.CreateConstGEP1_64(
-            scalarTy, svPtrV, 2 * delta, "reAmpPtr." + std::to_string(i));
-        imAmpPtrs[i] = B.CreateConstGEP1_64(
-            scalarTy, svPtrV, 2 * delta + 1, "imAmpPtr." + std::to_string(i));
-
-        reAmps[i] = B.CreateLoad(scalarTy, reAmpPtrs[i], "oldRe." + std::to_string(i));
-        imAmps[i] = B.CreateLoad(scalarTy, imAmpPtrs[i], "oldIm." + std::to_string(i));
-    }
-
-    // For each row r, compute the new amplitude
-    for (unsigned r = 0; r < K; ++r) {
-        llvm::Value* updatedReAmp0 = nullptr; 
-        llvm::Value* updatedReAmp1 = nullptr;
-        llvm::Value* updatedImAmp  = nullptr;
-
-        llvm::Value* zeroVal = llvm::ConstantFP::get(scalarTy, 0.0);
-        updatedReAmp0 = zeroVal;
-        updatedReAmp1 = zeroVal;
-        updatedImAmp  = zeroVal;
-
-        for (unsigned c = 0; c < K; ++c) {
-            // read the real & imag parts from matBasePtr
-            uint64_t baseIndex = 2ull * (r * K + c);
-            llvm::Value* idxReal = B.getInt64(baseIndex + 0);
-            llvm::Value* idxImag = B.getInt64(baseIndex + 1);
-
-            llvm::Value* realPtr = B.CreateGEP(scalarTy, matBasePtr, idxReal, "matRePtr");
-            llvm::Value* imagPtr = B.CreateGEP(scalarTy, matBasePtr, idxImag, "matImPtr");
-
-            llvm::Value* matRe = B.CreateLoad(scalarTy, realPtr, "matRe");
-            llvm::Value* matIm = B.CreateLoad(scalarTy, imagPtr, "matIm");
-
-            llvm::Value* oldRe = reAmps[c];
-            llvm::Value* oldIm = imAmps[c];
-
-            // updatedReAmp0 += matRe*oldRe
-            llvm::Value* mulReRe = B.CreateFMul(matRe, oldRe);
-            updatedReAmp0 = B.CreateFAdd(updatedReAmp0, mulReRe);
-
-            // updatedReAmp1 += matIm*oldIm
-            llvm::Value* mulImIm = B.CreateFMul(matIm, oldIm);
-            updatedReAmp1 = B.CreateFAdd(updatedReAmp1, mulImIm);
-
-            // updatedImAmp += matRe*oldIm + matIm*oldRe
-            llvm::Value* mulReIm = B.CreateFMul(matRe, oldIm);
-            llvm::Value* mulImRe = B.CreateFMul(matIm, oldRe);
-            llvm::Value* sumIm   = B.CreateFAdd(mulReIm, mulImRe);
-            updatedImAmp  = B.CreateFAdd(updatedImAmp, sumIm);
+        else if (md.reKind == SK_One) {
+            initVals.push_back(ConstantFP::get(scalarTy, 1.0));
+        }
+        else if (md.reKind == SK_MinusOne) {
+            initVals.push_back(ConstantFP::get(scalarTy, -1.0));
+        }
+        else if (md.reKind == SK_Zero) {
+            initVals.push_back(ConstantFP::get(scalarTy, 0.0));
+        }
+        else {
+            // e.g. SK_General => fallback to 0.0 or handle differently
+            initVals.push_back(ConstantFP::get(scalarTy, 0.0));
         }
 
-        // final real = updatedReAmp0 - updatedReAmp1
-        llvm::Value* newReAmp = B.CreateFSub(updatedReAmp0, updatedReAmp1);
-        llvm::Value* newImAmp = updatedImAmp;
-
-        // store them
-        B.CreateStore(newReAmp, reAmpPtrs[r]);
-        B.CreateStore(newImAmp, imAmpPtrs[r]);
+        if (md.imKind == SK_ImmValue && cIm) {
+            initVals.push_back(cIm);
+        }
+        else if (md.imKind == SK_One) {
+            initVals.push_back(ConstantFP::get(scalarTy, 1.0));
+        }
+        else if (md.imKind == SK_MinusOne) {
+            initVals.push_back(ConstantFP::get(scalarTy, -1.0));
+        }
+        else if (md.imKind == SK_Zero) {
+            initVals.push_back(ConstantFP::get(scalarTy, 0.0));
+        }
+        else {
+            initVals.push_back(ConstantFP::get(scalarTy, 0.0));
+        }
     }
+
+    Constant* arrInit = ConstantArray::get(arrTy, initVals);
+
+    auto* gVar = new GlobalVariable(
+        M,
+        arrTy,
+        /*isConstant=*/true,
+        GlobalValue::PrivateLinkage, // or InternalLinkage
+        arrInit,
+        globalName
+    );
+    gVar->setAlignment(MaybeAlign(8));
+    return gVar;
 }
+
+void genMatrixVectorMultiply_SharedTiled(
+    IRBuilder<> &B,
+    const CUDAKernelGenConfig &config,
+    const GateMatrix &gateMat,
+    llvm::ArrayRef<int> qubits,
+    const std::vector<IRMatDataCUDA> &matData,
+    Value *svPtrV,
+    Type *scalarTy
+)
+{
+    using namespace llvm;
+
+    // Dimension
+    unsigned k = gateMat.nQubits();
+    unsigned N = (1u << k);
+
+    // Global matrix array
+    Function *func = B.GetInsertBlock()->getParent();
+    Module   &M    = *func->getParent();
+    GlobalVariable *gMatImm = createGlobalMatrixArray_SharedTiledImm(
+        M, scalarTy, N, matData, "gMatImmSharedTiled"
+    );
+
+    // Create static shared arrays tileM, tileX
+    constexpr unsigned TILE_SIZE = 256;
+    ArrayType *tileArrTy = ArrayType::get(scalarTy, 2ULL * TILE_SIZE);
+
+    auto* tileM_GV = new GlobalVariable(
+        M, tileArrTy, false,
+        GlobalValue::PrivateLinkage,
+        UndefValue::get(tileArrTy),
+        "TileM",
+        nullptr,
+        GlobalValue::NotThreadLocal,
+        /*AddressSpace=*/3
+    );
+    tileM_GV->setAlignment(MaybeAlign(8));
+
+    auto* tileX_GV = new GlobalVariable(
+        M, tileArrTy, false,
+        GlobalValue::PrivateLinkage,
+        UndefValue::get(tileArrTy),
+        "TileX",
+        nullptr,
+        GlobalValue::NotThreadLocal,
+        3
+    );
+    tileX_GV->setAlignment(MaybeAlign(8));
+
+    Value *zero32 = B.getInt32(0);
+    Value *tileMBase = B.CreateGEP(tileArrTy, tileM_GV, { zero32, zero32 }, "tileM.base");
+    Value *tileXBase = B.CreateGEP(tileArrTy, tileX_GV, { zero32, zero32 }, "tileX.base");
+
+    //
+    Value *row64 = getGlobalTidCUDA(B);
+    Function *f = B.GetInsertBlock()->getParent();
+
+    BasicBlock *checkEndBB = BasicBlock::Create(B.getContext(), "rowCheck.end", f);
+    BasicBlock *rowOkBB    = BasicBlock::Create(B.getContext(), "rowOk", f);
+
+    Value *condRowOk = B.CreateICmpULT(row64, B.getInt64(N), "condRowOk");
+    B.CreateCondBr(condRowOk, rowOkBB, checkEndBB);
+
+    // Create them in the *entry* block of the function
+    IRBuilder<> entryBuilder(&f->getEntryBlock(), f->getEntryBlock().begin());
+    AllocaInst *sumReAlloca = entryBuilder.CreateAlloca(scalarTy, nullptr, "sumReA");
+    AllocaInst *sumImAlloca = entryBuilder.CreateAlloca(scalarTy, nullptr, "sumImA");
+
+    // Initialize them to 0.0 in the entry block
+    entryBuilder.CreateStore(ConstantFP::get(scalarTy, 0.0), sumReAlloca);
+    entryBuilder.CreateStore(ConstantFP::get(scalarTy, 0.0), sumImAlloca);
+
+    B.SetInsertPoint(rowOkBB);
+
+    // 5) Outer loop over cStart
+    BasicBlock *loopCheckBB = BasicBlock::Create(B.getContext(), "cStart.check", f);
+    BasicBlock *loopBodyBB  = BasicBlock::Create(B.getContext(), "cStart.body",  f);
+    BasicBlock *loopIncBB   = BasicBlock::Create(B.getContext(), "cStart.inc",   f);
+    BasicBlock *loopExitBB  = BasicBlock::Create(B.getContext(), "cStart.exit",  f);
+
+    B.CreateBr(loopCheckBB);
+    B.SetInsertPoint(loopCheckBB);
+
+    PHINode *cStartPHI = B.CreatePHI(B.getInt64Ty(), 2, "cStart");
+    cStartPHI->addIncoming(B.getInt64(0), rowOkBB);
+
+    Value *condC = B.CreateICmpSLT(cStartPHI, B.getInt64(N), "condC");
+    B.CreateCondBr(condC, loopBodyBB, loopExitBB);
+
+    B.SetInsertPoint(loopBodyBB);
+    Value *cStartVal = cStartPHI;
+
+    auto barrierFunc = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0);
+
+    Value *threadIdx32 = B.CreateIntrinsic(
+        B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_tid_x, {});
+
+    // cVal = cStartVal + threadIdx.x
+    Value *cVal = B.CreateAdd(cStartVal, B.CreateZExt(threadIdx32, B.getInt64Ty()), "cVal");
+
+    // Check inRange
+    BasicBlock *thenBB = BasicBlock::Create(B.getContext(), "load.inRange", f);
+    BasicBlock *elseBB = BasicBlock::Create(B.getContext(), "load.outRange", f);
+    BasicBlock *contBB = BasicBlock::Create(B.getContext(), "load.cont", f);
+    Value *condInRange = B.CreateICmpULT(cVal, B.getInt64(N));
+    B.CreateCondBr(condInRange, thenBB, elseBB);
+
+    // thenBB => load from global => store to tileM, tileX
+    B.SetInsertPoint(thenBB);
+    {
+        Value *rowTimesN = B.CreateMul(row64, B.getInt64(N));
+        Value *matIdx    = B.CreateAdd(rowTimesN, cVal);
+        Value *matIdx2   = B.CreateMul(matIdx, B.getInt64(2));
+
+        auto arrTy2 = llvm::cast<ArrayType>(gMatImm->getValueType());
+        Value *rePtr = B.CreateGEP(
+            arrTy2, gMatImm,
+            { B.getInt32(0), B.CreateIntCast(matIdx2, B.getInt32Ty(), false) }
+        );
+        Value *imPtr = B.CreateGEP(
+            arrTy2, gMatImm,
+            { B.getInt32(0),
+              B.CreateAdd(B.CreateIntCast(matIdx2, B.getInt32Ty(), false),
+                          B.getInt32(1)) }
+        );
+        Value *mReVal = B.CreateLoad(scalarTy, rePtr);
+        Value *mImVal = B.CreateLoad(scalarTy, imPtr);
+
+        Value *i64ThreadIdx = B.CreateZExt(threadIdx32, B.getInt64Ty());
+        Value *tileOff = B.CreateMul(i64ThreadIdx, B.getInt64(2));
+        B.CreateStore(mReVal, B.CreateGEP(scalarTy, tileMBase, tileOff));
+        B.CreateStore(mImVal, B.CreateGEP(scalarTy, tileMBase, B.CreateAdd(tileOff, B.getInt64(1))));
+
+        // X[cVal]
+        Value *xIdx2 = B.CreateMul(cVal, B.getInt64(2));
+        Value *xRePtr = B.CreateGEP(scalarTy, svPtrV, xIdx2);
+        Value *xImPtr = B.CreateGEP(scalarTy, svPtrV, B.CreateAdd(xIdx2, B.getInt64(1)));
+        Value *xReVal = B.CreateLoad(scalarTy, xRePtr);
+        Value *xImVal = B.CreateLoad(scalarTy, xImPtr);
+        B.CreateStore(xReVal, B.CreateGEP(scalarTy, tileXBase, tileOff));
+        B.CreateStore(xImVal, B.CreateGEP(scalarTy, tileXBase, B.CreateAdd(tileOff, B.getInt64(1))));
+        B.CreateBr(contBB);
+    }
+
+    // elseBB => store zeros
+    B.SetInsertPoint(elseBB);
+    {
+        Value *i64ThreadIdx = B.CreateZExt(threadIdx32, B.getInt64Ty());
+        Value *tileOff = B.CreateMul(i64ThreadIdx, B.getInt64(2));
+        Value *zeroVal = ConstantFP::get(scalarTy, 0.0);
+        B.CreateStore(zeroVal, B.CreateGEP(scalarTy, tileMBase, tileOff));
+        B.CreateStore(zeroVal, B.CreateGEP(scalarTy, tileMBase, B.CreateAdd(tileOff, B.getInt64(1))));
+        B.CreateStore(zeroVal, B.CreateGEP(scalarTy, tileXBase, tileOff));
+        B.CreateStore(zeroVal, B.CreateGEP(scalarTy, tileXBase, B.CreateAdd(tileOff, B.getInt64(1))));
+        B.CreateBr(contBB);
+    }
+
+    // barrier
+    B.SetInsertPoint(contBB);
+    B.CreateCall(barrierFunc);
+
+    // Dot-product => for j in [0..TILE_SIZE)
+    BasicBlock *dotCheckBB = BasicBlock::Create(B.getContext(), "dot.check", f);
+    BasicBlock *dotBodyBB  = BasicBlock::Create(B.getContext(), "dot.body",  f);
+    BasicBlock *dotIncBB   = BasicBlock::Create(B.getContext(), "dot.inc",   f);
+    BasicBlock *dotExitBB  = BasicBlock::Create(B.getContext(), "dot.exit",  f);
+
+    B.CreateBr(dotCheckBB);
+    B.SetInsertPoint(dotCheckBB);
+
+    PHINode *jPHI = B.CreatePHI(B.getInt64Ty(), 2, "j");
+    jPHI->addIncoming(B.getInt64(0), contBB);
+
+    Value *condJ = B.CreateICmpSLT(jPHI, B.getInt64(TILE_SIZE));
+    B.CreateCondBr(condJ, dotBodyBB, dotExitBB);
+
+    // dotBodyBB
+    B.SetInsertPoint(dotBodyBB);
+    {
+        // load partial sums from alloca each iteration
+        Value *oldRe = B.CreateLoad(scalarTy, sumReAlloca, "oldReSum");
+        Value *oldIm = B.CreateLoad(scalarTy, sumImAlloca, "oldImSum");
+
+        Value *off2 = B.CreateMul(jPHI, B.getInt64(2));
+        Value *mRePtr = B.CreateGEP(scalarTy, tileMBase, off2);
+        Value *mImPtr = B.CreateGEP(scalarTy, tileMBase, B.CreateAdd(off2, B.getInt64(1)));
+        Value *xRePtr = B.CreateGEP(scalarTy, tileXBase, off2);
+        Value *xImPtr = B.CreateGEP(scalarTy, tileXBase, B.CreateAdd(off2, B.getInt64(1)));
+
+        Value *Mre = B.CreateLoad(scalarTy, mRePtr, "Mre");
+        Value *Mim = B.CreateLoad(scalarTy, mImPtr, "Mim");
+        Value *Xre = B.CreateLoad(scalarTy, xRePtr, "Xre");
+        Value *Xim = B.CreateLoad(scalarTy, xImPtr, "Xim");
+
+        // partial product
+        Value *prodRe = B.CreateFSub(B.CreateFMul(Mre, Xre), B.CreateFMul(Mim, Xim));
+        Value *prodIm = B.CreateFAdd(B.CreateFMul(Mre, Xim), B.CreateFMul(Mim, Xre));
+
+        // new partial sums
+        Value *sumReNew = B.CreateFAdd(oldRe, prodRe, "sumReNew");
+        Value *sumImNew = B.CreateFAdd(oldIm, prodIm, "sumImNew");
+
+        // store them back
+        B.CreateStore(sumReNew, sumReAlloca);
+        B.CreateStore(sumImNew, sumImAlloca);
+
+        Value *jNext = B.CreateAdd(jPHI, B.getInt64(1));
+        B.CreateBr(dotIncBB);
+
+        // dotIncBB
+        B.SetInsertPoint(dotIncBB);
+        jPHI->addIncoming(jNext, dotIncBB);
+        B.CreateBr(dotCheckBB);
+    }
+
+    // dotExitBB
+    B.SetInsertPoint(dotExitBB);
+    B.CreateCall(barrierFunc);
+
+    B.CreateBr(loopIncBB);
+
+    // loopIncBB => next cStart = cStart + TILE_SIZE
+    B.SetInsertPoint(loopIncBB);
+    Value *cNextVal = B.CreateAdd(cStartVal, B.getInt64(TILE_SIZE));
+    cStartPHI->addIncoming(cNextVal, loopIncBB);
+    B.CreateBr(loopCheckBB);
+
+    // loopExitBB => now have final partial sums in sumReAlloca / sumImAlloca
+    B.SetInsertPoint(loopExitBB);
+
+    // read them out
+    Value *finalSumRe = B.CreateLoad(scalarTy, sumReAlloca);
+    Value *finalSumIm = B.CreateLoad(scalarTy, sumImAlloca);
+
+    // store to row
+    Value *rowTimes2 = B.CreateMul(row64, B.getInt64(2));
+    Value *outRePtr = B.CreateGEP(scalarTy, svPtrV, rowTimes2);
+    Value *outImPtr = B.CreateGEP(scalarTy, svPtrV, B.CreateAdd(rowTimes2, B.getInt64(1)));
+
+    B.CreateStore(finalSumRe, outRePtr);
+    B.CreateStore(finalSumIm, outImPtr);
+
+    B.CreateBr(checkEndBB);
+    B.SetInsertPoint(checkEndBB);
+}
+
 
 void genMatrixVectorMultiplyFromPointer_SharedTiled(
     llvm::IRBuilder<>           &B,
@@ -430,7 +920,6 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
   Value *condRowOk = B.CreateICmpULT(row64, B.getInt64(N), "condRowOk");
   B.CreateCondBr(condRowOk, rowOkBB, checkEndBB);
 
-  // rowOkBB
   B.SetInsertPoint(rowOkBB);
 
   // keep partial sum in local Values
@@ -803,6 +1292,8 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
 
   Value* svPtrV;
   {
+    // Value* twoTimesCounter = B.CreateMul(counterV, B.getInt64(2), "times2");
+    // svPtrV = B.CreateGEP(scalarTy, args.pSvArg, twoTimesCounter, "sv.ptr");
     Value* idxStartV = B.getInt64(0ULL);
     Value* tmpCounterV;
     uint64_t mask = 0ULL;
@@ -853,13 +1344,14 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
   */
   // the pointer of sv start in this thread
   auto matData = getMatDataCUDA(B, gate->gateMatrix, config);
-  // unsigned asArg = llvm::cast<llvm::PointerType>(args.pMatArg->getType())->getAddressSpace();
 
   switch (config.matrixLoadMode) {
     case CUDAKernelGenConfig::UseMatImmValues: {
       const auto* gateCMat = gate->gateMatrix.getConstantMatrix();
       assert(gateCMat && "Runtime matrix incompatible with UseMatImmValues load mode");
-      genMatrixVectorMultiply(
+      // genMatrixVectorMultiply(
+      //     B, config, gate->gateMatrix, gate->qubits, matData, svPtrV, scalarTy);
+      genMatrixVectorMultiply_SharedTiled(
           B, config, gate->gateMatrix, gate->qubits, matData, svPtrV, scalarTy);
       break;
     }
@@ -940,6 +1432,265 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraph(
     genCUDAGate(
       config, block->quantumGate, mangledName + std::to_string(block->id));
   }
+  return *this;
+}
+
+
+// Attempt to implement kernel sharing for gates that meet the conditions
+static constexpr double SIMILARITY_THRESHOLD = 0.85;
+static constexpr unsigned MAX_GATES_PER_KERNEL = 4;
+static constexpr unsigned MAX_QUBITS_PER_GATE = 8;
+
+double qubitSimilarity(const QuantumGate &A, const QuantumGate &B) {
+    // Convert each qubit list to a std::set.
+    std::set<int> setA(A.qubits.begin(), A.qubits.end());
+    std::set<int> setB(B.qubits.begin(), B.qubits.end());
+
+    // Compute intersection
+    std::vector<int> interAB;
+    std::set_intersection(
+        setA.begin(), setA.end(),
+        setB.begin(), setB.end(),
+        std::back_inserter(interAB)
+    );
+
+    // Compute union
+    std::vector<int> unionAB;
+    std::set_union(
+        setA.begin(), setA.end(),
+        setB.begin(), setB.end(),
+        std::back_inserter(unionAB)
+    );
+
+    if (unionAB.empty()) {
+        return 0.0;
+    }
+    return double(interAB.size()) / double(unionAB.size());
+}
+
+static Function* getMultiKernelDeclaration(
+    IRBuilder<>& B, 
+    Module& M,
+    const std::string& funcName
+) {
+    FunctionType* fty = FunctionType::get(B.getVoidTy(), { B.getPtrTy() }, false);
+    auto* func = Function::Create(
+        fty,
+        Function::ExternalLinkage,
+        funcName,
+        M
+    );
+
+    // Mark as a kernel
+    auto& ctx = M.getContext();
+    auto* mdString = MDString::get(ctx, "kernel");
+    auto* mdOne = ConstantAsMetadata::get(B.getInt32(1));
+    auto* kernelMetadata = MDNode::get(ctx, {
+        ValueAsMetadata::get(func), mdString, mdOne
+    });
+    M.getOrInsertNamedMetadata("nvvm.annotations")->addOperand(kernelMetadata);
+
+    // Name the argument
+    func->getArg(0)->setName("p.sv");
+    return func;
+}
+
+/**
+ * Only group gates that pass threshold for qubitSimilarity, MAX_QUBITS_PER_GATE, and cap the group at MAX_GATES_PER_KERNEL.
+ */
+std::vector<std::vector<std::shared_ptr<QuantumGate>>>
+groupGatesByOverlapAndSize(const std::vector<std::shared_ptr<QuantumGate>>& allGates)
+{
+  std::vector<std::vector<std::shared_ptr<QuantumGate>>> groups;
+  groups.reserve(allGates.size());
+
+  for (auto &g : allGates) {
+    // also skip if gate is too large
+    if (g->nQubits() > MAX_QUBITS_PER_GATE) {
+      // put it alone in its own group
+      groups.push_back({ g });
+      continue;
+    }
+
+    bool placed = false;
+    for (auto &grp : groups) {
+      if (grp.size() >= MAX_GATES_PER_KERNEL) continue; // group full
+      // check similarity vs group[0]
+      double sim = qubitSimilarity(*g, *grp.front());
+      if (sim >= SIMILARITY_THRESHOLD) {
+        grp.push_back(g);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      groups.emplace_back();
+      groups.back().push_back(g);
+    }
+  }
+
+  return groups;
+}
+
+CUDAKernelManager& CUDAKernelManager::genCUDAGateMulti(
+    const CUDAKernelGenConfig& config,
+    const std::vector<std::shared_ptr<QuantumGate>>& gateList,
+    const std::string& funcName
+)
+{
+  // 1) create new module
+  auto& cmp = createNewLLVMContextModulePair(funcName + "_Module");
+  IRBuilder<> B(*cmp.llvmContext);
+  Module& M = *cmp.llvmModule;
+
+  // 2) Build a function: “__global__ void kernel(double *pSv)”
+  FunctionType* fty = FunctionType::get(B.getVoidTy(), { B.getPtrTy() }, false);
+  Function* func = Function::Create(
+      fty,
+      Function::ExternalLinkage,
+      funcName,
+      &M  // place it in module M
+  );
+
+  // Mark as a kernel via metadata
+  {
+    auto& ctx = M.getContext();
+    auto* mdString = MDString::get(ctx, "kernel");
+    auto* mdOne    = ConstantAsMetadata::get(B.getInt32(1));
+    auto* mdNode   = MDNode::get(ctx, {
+        ValueAsMetadata::get(func), mdString, mdOne
+    });
+    M.getOrInsertNamedMetadata("nvvm.annotations")->addOperand(mdNode);
+  }
+
+  // Name the single argument
+  Argument* pSvArg = func->getArg(0);
+  pSvArg->setName("p.sv");
+
+  // 3) Create the “entry” basic block and set insertion point
+  BasicBlock* entryBB = BasicBlock::Create(B.getContext(), "entry", func);
+  B.SetInsertPoint(entryBB);
+
+  // 4) Get global thread ID in 64-bit
+  Value* threadIdx64 = getGlobalTidCUDA(B); // e.g. 0..(some large)
+
+  // track total ops
+  size_t totalOps = 0;
+
+  // 5) For each gate, do:
+  for (auto &g : gateList) {
+    // (A) Create the bit-mask pointer. This replicates the single-gate “idxStartV” logic.
+    const auto& qubits = g->qubits;
+    int k = (int) qubits.size();
+    int highestQ = qubits.back();
+
+    // need the scalar type for the GEP
+    Type* scalarTy = (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
+
+    // Build idxStartV
+    Value* idxStartV = B.getInt64(0);
+    {
+      Value* tmpCounterV;
+      uint64_t mask = 0ULL;
+      int qIdx = 0;
+      int counterQ = 0;
+
+      // for each integer q in [0..highestQ], build partial mask
+      for (int q = 0; q <= highestQ; q++) {
+        if (q < qubits[qIdx]) {
+          // accumulate bits
+          mask |= (1ULL << (counterQ++));
+          continue;
+        }
+        // else q == qubits[qIdx]
+        ++qIdx;
+        if (mask != 0ULL) {
+          tmpCounterV = B.CreateAnd(threadIdx64, B.getInt64(mask), "tmpCounter");
+          // shift by (qIdx - 1)
+          tmpCounterV = B.CreateShl(tmpCounterV, B.getInt64(qIdx - 1), "tmpCounter");
+          idxStartV = B.CreateAdd(idxStartV, tmpCounterV, "tmpIdx");
+          mask = 0ULL;
+        }
+        if (qIdx >= k) {
+          break; // done if we've processed all gate qubits
+        }
+      }
+
+      // Now handle bits above the last qubit
+      // mask = ~((1ULL << (gate->qubits.back() - k + 1)) - 1);
+      mask = ~((1ULL << (highestQ - k + 1)) - 1ULL);
+
+      tmpCounterV = B.CreateAnd(threadIdx64, B.getInt64(mask), "tmpCounter");
+      tmpCounterV = B.CreateShl(tmpCounterV, B.getInt64(k), "tmpCounter");
+      idxStartV = B.CreateAdd(idxStartV, tmpCounterV, "idxStart");
+    }
+
+    // multiply by 2 (for real+imag)
+    idxStartV = B.CreateShl(idxStartV, 1, "idxStart");
+
+    // Now do GEP
+    Value* maskedSvPtr = B.CreateGEP(scalarTy, pSvArg, idxStartV, "maskedSvPtr");
+
+    // (B) Get matrix data
+    auto matData = getMatDataCUDA(B, g->gateMatrix, config);
+
+    // (C) Call genMatrixVectorMultiply_SharedTiled with this masked pointer
+    genMatrixVectorMultiply_SharedTiled(
+        B,
+        config,
+        g->gateMatrix,
+        g->qubits,
+        matData,
+        maskedSvPtr, // use the bit-masked pointer
+        scalarTy
+    );
+
+    // track ops
+    totalOps += g->opCount(config.zeroTol);
+  }
+
+  // 6) return void
+  B.CreateRetVoid();
+
+  // 7) verify
+  if (verifyFunction(*func, &errs())) {
+    errs() << "[ERROR] multi function invalid.\n";
+  }
+
+  // 8) store kernel info
+  CUDAKernelInfo::CUDATuple emptyCT;
+  _cudaKernels.emplace_back(
+    CUDAKernelInfo::PTXStringType(),
+    config.precision,
+    func->getName().str(),
+    nullptr, // no single gate
+    emptyCT,
+    totalOps
+  );
+
+  return *this;
+}
+
+CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraphMulti(
+    const CUDAKernelGenConfig& config,
+    const CircuitGraph& graph,
+    const std::string& graphName)
+{
+  // gather all gates
+  std::vector<std::shared_ptr<QuantumGate>> allGates;
+  for (auto& block : graph.getAllBlocks()) {
+    allGates.push_back(block->quantumGate);
+  }
+
+  // group them
+  auto grouped = groupGatesByOverlapAndSize(allGates);
+
+  // for each group => build a single multi kernel
+  for (size_t i = 0; i < grouped.size(); i++) {
+    std::string fnName = graphName + "_multi_" + std::to_string(i);
+    genCUDAGateMulti(config, grouped[i], fnName);
+  }
+
   return *this;
 }
 

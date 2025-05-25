@@ -698,67 +698,182 @@ inline double regPenalty(int regsPerThr, int blk, int regsPerSM = 65536)
   return 1.0 / std::max(0.05, occLimit);
 }
 
-double CUDACostModel::computeGiBTime(const QuantumGate& gate,
-                                     int precision, int) const
+// double CUDACostModel::computeGiBTime(const QuantumGate& gate,
+//                                      int precision, int) const
+// {
+//   const double gpuPeakTFLOPs = (precision == 32 ? 35.6 : 0.556); // RTX‑3090
+//   const double launchOverhead = 3.0e-6;
+//   const double opCnt = gate.opCount(zeroTol);
+//   const int nQ = gate.nQubits();
+
+//   // pick the best anchor (same precision, closest nQ & blockSize)
+//   const CUDAPerformanceCache::Item* anchor = nullptr;
+//   double bestScore = -1.0;
+//   for (const auto& it : cache->items) {
+//       if (it.precision != precision) continue;
+//       double s  = (it.blockSize == currentBlockSize ? 1.0 : 0.25);
+//       s        += 1.0 / (1.0 + std::abs(it.nQubits - nQ));
+//       if (s > bestScore) { bestScore = s; anchor = &it; }
+//   }
+//   if (!anchor) return 1e8; // no data → discourage fuse
+
+//   // live resource estimates for the fused candidate gate
+//   CUDAKernelInfo tmp;
+//   tmp.setGate(&gate);
+//   tmp.setKernelFunction(nullptr);   // metadata only
+
+//   auto estSmemBytes = [&](const QuantumGate& g) {
+//       int localQ = g.nQubits();
+//       const int bytesPerAmp = (precision == 32 ? 8 : 16);
+//       return (localQ <= 5 ? 0
+//                           : (std::size_t{1} << localQ) * bytesPerAmp);
+//   };
+//   auto estRegisters = [&](const QuantumGate& g) {
+//       return 32 + 4 * g.nQubits();
+//   };
+
+//   tmp.setSharedMemUsage(estSmemBytes(gate));
+//   tmp.setRegisterUsage(estRegisters(gate));
+
+//   double occLive  = std::clamp(estimateOccupancy(tmp, currentBlockSize), 0.05, 1.0);
+//   double coalLive = std::clamp(estimateCoalescingScore(gate, nQ), 0.05, 1.0);
+
+//   // scale the anchor bandwidth by live penalties
+//   double blkScale = std::pow(double(anchor->blockSize) / currentBlockSize, 0.5);
+//   double occScale = occLive/std::max(0.05, anchor->occupancy);
+//   double coalScale = std::pow(coalLive/std::max(0.05, anchor->coalescingScore), 1.5);
+
+//   double effGiBps = anchor->memUpdateSpeed * occScale * blkScale * coalScale;
+//   effGiBps = std::min(effGiBps, 1.0 / minGibTimeCap);
+//   // effGiBps = std::max(effGiBps, 1.0 / minGibTimeCap); // clamp
+
+//   // turn bandwidth into time (memory + FLOP + launch const)
+//   const double bytesPerAmp = (precision == 32 ? 8.0 : 16.0);
+//   double memGiB = bytesPerAmp * opCnt / (1ULL << 30);
+//   double memTime = memGiB / effGiBps;
+//   double flopTime = opCnt * 2.0 / (gpuPeakTFLOPs * 1e12);
+
+//   constexpr double gpuBW_Bytes = 840.0 * (1ULL << 30);
+//   double ridgeAI = (gpuPeakTFLOPs * 1e12) / gpuBW_Bytes;
+//   double ai = 2.0 / bytesPerAmp;
+//   double execCore = (ai < ridgeAI) ? memTime : flopTime;
+
+//   return execCore + launchOverhead;
+// }
+
+double cast::CUDACostModel::computeGiBTime(const QuantumGate &gate,
+                                           int precision, int /*nThreads*/) const
 {
-  const double gpuPeakTFLOPs = (precision == 32 ? 35.6 : 0.556); // RTX‑3090
-  const double launchOverhead = 3.0e-6;
-  const double opCnt = gate.opCount(zeroTol);
-  const int nQ = gate.nQubits();
+    // ── 1.  pick the best anchor sample from performance cache ───────────
+    const int nQ = gate.nQubits();
+    const CUDAPerformanceCache::Item *anchor = nullptr;
+    double bestScore = -1.0;
 
-  // pick the best anchor (same precision, closest nQ & blockSize)
-  const CUDAPerformanceCache::Item* anchor = nullptr;
-  double bestScore = -1.0;
-  for (const auto& it : cache->items) {
-      if (it.precision != precision) continue;
-      double s  = (it.blockSize == currentBlockSize ? 1.0 : 0.25);
-      s        += 1.0 / (1.0 + std::abs(it.nQubits - nQ));
-      if (s > bestScore) { bestScore = s; anchor = &it; }
-  }
-  if (!anchor) return 1e8; // no data → discourage fuse
+    for (const auto &it : cache->items) {
+        if (it.precision != precision) continue;
+        double s  = (it.blockSize == currentBlockSize ? 1.0 : 0.3);
+        s        += 1.0 / (1.0 + std::abs(it.nQubits - nQ));
+        if (s > bestScore) { bestScore = s; anchor = &it; }
+    }
+    if (!anchor) return 1e8;                // no data → discourage fuse
 
-  // live resource estimates for the fused candidate gate
-  CUDAKernelInfo tmp;
-  tmp.setGate(&gate);
-  tmp.setKernelFunction(nullptr);   // metadata only
+    // ── 2.  live‑kernel resource estimates --------------------------------
+    CUDAKernelInfo tmp; tmp.setGate(&gate); tmp.setKernelFunction(nullptr);
+    const double liveOcc  = std::clamp(estimateOccupancy(tmp, currentBlockSize), 0.05, 1.0);
+    const double liveCoal = std::clamp(estimateCoalescingScore(gate, nQ),          0.05, 1.0);
 
-  auto estSmemBytes = [&](const QuantumGate& g) {
-      int localQ = g.nQubits();
-      const int bytesPerAmp = (precision == 32 ? 8 : 16);
-      return (localQ <= 5 ? 0
-                          : (std::size_t{1} << localQ) * bytesPerAmp);
-  };
-  auto estRegisters = [&](const QuantumGate& g) {
-      return 32 + 4 * g.nQubits();
-  };
+    // ── 3.  scaling factors, *clamped* to sane envelopes ------------------
+    double blkScale = std::sqrt(double(anchor->blockSize) / currentBlockSize);
+    blkScale = std::clamp(blkScale, 0.5, 1.5);
 
-  tmp.setSharedMemUsage(estSmemBytes(gate));
-  tmp.setRegisterUsage(estRegisters(gate));
+    double occScale = liveOcc / std::max(anchor->occupancy, 0.05);
+    occScale = std::clamp(occScale, 0.5, 2.0);
 
-  double occLive  = std::clamp(estimateOccupancy(tmp, currentBlockSize), 0.05, 1.0);
-  double coalLive = std::clamp(estimateCoalescingScore(gate, nQ), 0.05, 1.0);
+    double coalScale = liveCoal / std::max(anchor->coalescingScore, 0.05);
+    coalScale = std::clamp(coalScale, 0.3, 3.0);          // linear, no exponent
 
-  // scale the anchor bandwidth by live penalties
-  double blkScale = std::pow(double(anchor->blockSize) / currentBlockSize, 0.5);
-  double occScale = occLive/std::max(0.05, anchor->occupancy);
-  double coalScale = std::pow(coalLive/std::max(0.05, anchor->coalescingScore), 1.5);
+    // ── 4.  effective bandwidth (GiB/s), bound by physical limit ----------
+    double effGiBps = anchor->memUpdateSpeed * blkScale * occScale * coalScale;
+    effGiBps = std::min(effGiBps, 873.0);
+    effGiBps = std::max(effGiBps, 1.0 / 1e-4);
 
-  double effGiBps = anchor->memUpdateSpeed * occScale * blkScale * coalScale;
-  effGiBps = std::max(effGiBps, 1.0 / minGibTimeCap); // clamp
+    // ── 5.  traffic         (R + W of full state)
+    const double bytesPerAmp = (precision == 32 ? 8.0 : 16.0);
+    const double ampsTouched = std::pow(2.0, nQ);
+    const double memGiB      = bytesPerAmp * 2.0 * ampsTouched / double(1ULL << 30);
+    const double memTime     = memGiB / effGiBps;
 
-  // turn bandwidth into time (memory + FLOP + launch const)
-  const double bytesPerAmp = (precision == 32 ? 8.0 : 16.0);
-  double memGiB = bytesPerAmp * opCnt / (1ULL << 30);
-  double memTime = memGiB / effGiBps;
-  double flopTime = opCnt * 2.0 / (gpuPeakTFLOPs * 1e12);
+    // ── 6.  compute time (FLOPs) ------------------------------------------
+    const double opCount      = gate.opCount(zeroTol);
+    const double gpuPeakTFLOPs = (precision == 32 ? 35.6 : 0.556); // RTX‑3090 spec
+    const double flopTime     = (opCount * 2.0) / (gpuPeakTFLOPs * 1e12);
 
-  constexpr double gpuBW_Bytes = 840.0 * (1ULL << 30);
-  double ridgeAI = (gpuPeakTFLOPs * 1e12) / gpuBW_Bytes;
-  double ai = 2.0 / bytesPerAmp;
-  double execCore = (ai < ridgeAI) ? memTime : flopTime;
-
-  return execCore + launchOverhead;
+    // ── 7.  choose longer of memory vs compute + launch overhead ----------
+    const double execCore = std::max(memTime, flopTime);
+    return execCore + measuredLaunchOverhead;   // ~3 µs measured once
 }
+
+
+
+// double CUDACostModel::computeGiBTime(const QuantumGate& gate, int precision, int) const
+// {
+//     // Locate best anchor in performance cache
+//     const int nQ = gate.nQubits();
+//     const CUDAPerformanceCache::Item* anchor = nullptr;
+//     double bestScore = -1.0;
+
+//     for (const auto& it : cache->items) {
+//         if (it.precision != precision) continue;
+//         double s = (it.blockSize == currentBlockSize ? 1.0 : 0.3);
+//         s       += 1.0 / (1.0 + std::abs(it.nQubits - nQ));
+//         if (s > bestScore) {
+//             bestScore = s;
+//             anchor    = &it;
+//         }
+//     }
+//     if (!anchor) {
+//         // no data => large cost to discourage fuse
+//         return 1e8;
+//     }
+
+//     // Adjust anchor memory speed by occupancy & coalescing
+//     double anchorMemSpd = anchor->memUpdateSpeed; // e.g. GiB/s from CSV
+//     double anchorOcc    = anchor->occupancy;
+//     double anchorCoal   = anchor->coalescingScore;
+
+//     // Estimate for the current gate
+//     CUDAKernelInfo tmp;
+//     tmp.setGate(&gate);
+//     tmp.setKernelFunction(nullptr);  // metadata only
+//     double liveOcc  = std::clamp(estimateOccupancy(tmp, currentBlockSize), 0.05, 1.0);
+//     double liveCoal = std::clamp(estimateCoalescingScore(gate, nQ), 0.05, 1.0);
+
+//     // mild blockSize mismatch factor
+//     double blkScale  = std::pow(double(anchor->blockSize) / currentBlockSize, 0.5);
+//     double occScale  = liveOcc / std::max(0.05, anchorOcc);
+//     double coalScale = std::pow(liveCoal / std::max(0.05, anchorCoal), 1.5);
+
+//     double effMemSpeed = anchorMemSpd * blkScale * occScale * coalScale;
+//     effMemSpeed = std::clamp(effMemSpeed, 1.0 / 1e8, 1.0 / minGibTimeCap);
+
+//     // Memory & flop times
+//     double opCount      = gate.opCount(zeroTol);
+//     double bytesPerAmp  = (precision == 32 ? 8.0 : 16.0);
+//     // double memGiB       = (bytesPerAmp * opCount) / double(1ULL << 30);
+
+//     double ampsTouched = std::pow(2.0, nQ);        // full state size
+//     double memGiB = (bytesPerAmp * 2.0 /*R+W*/ * ampsTouched)/double(1ULL << 30);
+//     double memTime      = memGiB / effMemSpeed;
+
+//     double gpuPeakTFLOPs = (precision == 32 ? 35.6 : 0.556); // or a measured value
+//     double flopTime      = (opCount * 2.0) / (gpuPeakTFLOPs * 1e12);
+
+//     // “Roofline”: pick the larger => memory-bound vs compute-bound
+//     double execCore = std::max(memTime, flopTime);
+
+//     // Return total => kernel time + measured overhead
+//     return execCore + this->measuredLaunchOverhead;;
+// }
 
 
 double CUDACostModel::calculateOccupancyPenalty(const CUDAPerformanceCache::Item& item) const {
@@ -974,15 +1089,38 @@ void CUDAPerformanceCache::runExperiments(
     double avgTimeSec = milliseconds * 1e-3 / measurementRuns;
 
     // Calculate GPU-specific metrics
+    // double occupancy = estimateOccupancy(kernel, blockSize);
+    // double coalescing = estimateCoalescingScore(*kernel.gate, nQubits);
+    // double memSpeed = calculateMemUpdateSpeedCuda(
+    //   nQubits, 
+    //   kernel.precision, 
+    //   avgTimeSec,
+    //   coalescing,
+    //   occupancy
+    // );
+
+    // items.emplace_back(Item{
+    //     kernel.gate->nQubits(),
+    //     kernel.opCount,
+    //     kernel.precision,
+    //     blockSize,
+    //     occupancy,
+    //     coalescing,
+    //     memSpeed
+    // });
+
+    // 1. Convert the measured time (avgTimeSec) into raw bandwidth.
+    double bytesPerAmp = (kernel.precision == 32 ? 8.0 : 16.0);
+    double amps = double(1ULL << nQubits);
+    double bytesTotal = amps * bytesPerAmp * 2.0; // R+W
+
+    // rawBW = bytes / seconds => in bytes/s
+    double rawBW = bytesTotal / avgTimeSec; 
+    double rawGiBps = rawBW / double(1ULL << 30);
+
+    double referenceBW = 840.0; // Adjust to actual known peak
+    double measuredCoal = std::clamp(rawGiBps / referenceBW, 0.05, 1.0);
     double occupancy = estimateOccupancy(kernel, blockSize);
-    double coalescing = estimateCoalescingScore(*kernel.gate, nQubits);
-    double memSpeed = calculateMemUpdateSpeedCuda(
-      nQubits, 
-      kernel.precision, 
-      avgTimeSec,
-      coalescing,
-      occupancy
-    );
 
     items.emplace_back(Item{
         kernel.gate->nQubits(),
@@ -990,8 +1128,8 @@ void CUDAPerformanceCache::runExperiments(
         kernel.precision,
         blockSize,
         occupancy,
-        coalescing,
-        memSpeed
+        measuredCoal,
+        rawGiBps
     });
 
     CUDA_CHECK(cudaEventDestroy(start));
@@ -1000,9 +1138,9 @@ void CUDAPerformanceCache::runExperiments(
     std::cerr << "Benchmarked gate @ ";
     utils::printArray(
       std::cerr, ArrayRef(kernel.gate->qubits.begin(), kernel.gate->qubits.size()));
-    std::cerr << ": " << memSpeed << " GiB/s, "
-              << "occupancy=" << occupancy << ", "
-              << "coalescing=" << coalescing << "\n";
+    std::cerr << ": " << rawGiBps << " GiB/s, "
+          << "occupancy=" << occupancy << ", "
+          << "coalescing=" << measuredCoal << "\n";
   }
 }
 

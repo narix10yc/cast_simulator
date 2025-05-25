@@ -67,30 +67,18 @@ static void printTimingStats(const std::string& label, const timeit::TimingResul
             << " ms (median=" << medianMs << " ms, n=" << tr.tArr.size() << ")\n";
 }
 
-
-// Using identity matrix for now! (TODO)
-void buildGateMatrixForBlock(unsigned fusedQubits, std::vector<double>& hostMatrix) {
-  size_t dim = 1ULL << fusedQubits;
-  // Fill everything with 0.0
-  for (size_t i = 0; i < hostMatrix.size(); i++) {
-    hostMatrix[i] = 0.0;
-  }
-  // Insert 1.0 on the diagonal
-  for (size_t r = 0; r < dim; r++) {
-    size_t base = 2ULL * (r * dim + r); // each matrix element has 2 doubles
-    hostMatrix[base + 0] = 1.0; // real part of diagonal element
-    hostMatrix[base + 1] = 0.0; // imaginary part is zero
-  }
-}
-
 int main() {
   using namespace timeit;
 
-  std::string qasmFile          = "../examples/qft/qft-16-cp.qasm";
+  // std::string qasmFile = "../examples/qft/qft-16-cp.qasm";
+  // std::string qasmFile = "../examples/rqc/q12_189_128.qasm";
+  // std::string qasmFile = "../examples/rqc/q20_592_427.qasm";
+  // std::string qasmFile = "../examples/rqc/q30_521_379.qasm";
+  std::string qasmFile = "../examples/rqc/q30_4299_3272.qasm";
   std::string adaptiveModelPath = "cost_model_simd1.csv";
   std::string cudaModelPath     = "cuda128test.csv";
   int naiveMaxK    = 2;
-  int nReps        = 5;
+  int nReps        = 3;
   int blockSize    = 256;
   int nThreads     = 1;
   auto optLevel    = llvm::OptimizationLevel::O1;
@@ -102,6 +90,8 @@ int main() {
     openqasm::Parser parser(qasmFile, 0);
     auto r = parser.parse();
   });
+
+  printTimingStats("1) Parse Time", parseTR);
 
   // Parse again for the real AST we will use
   openqasm::Parser parser(qasmFile, 0);
@@ -117,6 +107,8 @@ int main() {
     auto tmp = std::make_unique<cast::CircuitGraph>();
     root->toCircuitGraph(*tmp);
   });
+
+  printTimingStats("2) Build Time", buildTR);
 
   // Build the real CircuitGraph we will keep
   auto graphPtr = std::make_unique<cast::CircuitGraph>();
@@ -137,14 +129,12 @@ int main() {
     );
   }
 
-  // Create cost-model objects **outside** ephemeral blocks so that
+  // Create cost-model objects outside ephemeral blocks so that
   // if the fusion or circuit references them, they do not go out of scope.
   NaiveCostModel     naiveModel(naiveMaxK, -1, 1e-8);
   StandardCostModel* scModelPtr = nullptr;
   CUDACostModel*     cudaModelPtr = nullptr;
 
-  // create these on the heap if needed, so they live until main() returns.
-  // An alternative is to store them as members in main scope (not pointers).
   std::unique_ptr<StandardCostModel> scModel;
   std::unique_ptr<CUDACostModel> cudaModel;
   if (adaptiveCachePtr) {
@@ -189,6 +179,8 @@ int main() {
     }
   });
 
+  printTimingStats("3) Fusion Time", fusionTR);
+
   {
     FusionConfig fusionConfig = FusionConfig::Aggressive;
     fusionConfig.nThreads  = -1;
@@ -218,8 +210,8 @@ int main() {
 
   // Configure kernel generation
   CUDAKernelGenConfig genConfig;
-  genConfig.blockSize      = blockSize;
-  genConfig.precision      = 64;
+  genConfig.blockSize = blockSize;
+  genConfig.precision = 64;
   genConfig.matrixLoadMode = CUDAKernelGenConfig::UseMatImmValues;
 
   // Kernel Gen Time (ephemeral test)
@@ -229,22 +221,67 @@ int main() {
     localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
   });
 
+  printTimingStats("4) Kernel Gen Time", kernelGenTR);
+
   // PTX Time (ephemeral test)
   Timer ptxTimer(nReps);
-  TimingResult ptxTR = ptxTimer.timeit([&]() {
-    CUDAKernelManager localKM;
-    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
-    localKM.emitPTX(nThreads, optLevel, 0);
-  });
+  std::unique_ptr<CUDAKernelManager> localKMptx;
 
-  // JIT Time (ephemeral test)
+  TimingResult ptxTR = ptxTimer.timeitPartial(
+    // preMethod:
+    [&]() {
+      localKMptx = std::make_unique<CUDAKernelManager>();
+      localKMptx->genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+    },
+    // timedMethod: measure initCUJIT
+    [&]() {
+      localKMptx->emitPTX(nThreads, optLevel, 0);
+    },
+    // postMethod:
+    [&]() {
+      localKMptx.reset();
+    },
+    // setup:
+    []() {
+    },
+    // teardown:
+    []() {
+    }
+  );
+
+  printTimingStats("5) PTX Time", ptxTR);
+
+
   Timer jitTimer(nReps);
-  TimingResult jitTR = jitTimer.timeit([&]() {
-    CUDAKernelManager localKM;
-    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
-    localKM.emitPTX(nThreads, optLevel, 0);
-    localKM.initCUJIT(nThreads, 0);
-  });
+  std::unique_ptr<CUDAKernelManager> localKM;
+
+  TimingResult jitTR = jitTimer.timeitPartial(
+    // preMethod:
+    [&]() {
+      localKM = std::make_unique<CUDAKernelManager>();
+      localKM->genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+      localKM->emitPTX(nThreads, optLevel, 0);
+    },
+    // timedMethod: measure initCUJIT
+    [&]() {
+      localKM->initCUJIT(nThreads, 0);
+    },
+
+    // postMethod:
+    [&]() {
+      localKM.reset();
+    },
+
+    // setup:
+    []() {
+    },
+
+    // teardown:
+    []() {
+    }
+  );
+
+  printTimingStats("6) JIT Time", jitTR);
 
   std::cout << "=== Post-Fusion Block Summary ===\n";
   for (const auto& block : graphPtr->getAllBlocks()) {
@@ -262,11 +299,23 @@ int main() {
   // Final kernel manager that we'll actually use for execution
   CUDAKernelManager kernelMgr;
   kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+
+  auto& allKernels = kernelMgr.kernels(); // returns std::vector<CUDAKernelInfo>
+  std::cout << "[LOG] Number of generated GPU kernels: " 
+            << allKernels.size() << std::endl;
+
+  for (const auto& kInfo : allKernels) {
+      std::cout << "  - Kernel name: " << kInfo.llvmFuncName << "\n";
+  }
+
+
   kernelMgr.emitPTX(nThreads, optLevel, 0);
   
   kernelMgr.initCUJIT(nThreads, 0);
 
   auto kernels = kernelMgr.collectCUDAKernelsFromCircuitGraph("testCircuit");
+
+  std::cerr << "Timing execution now!\n";
 
   // Execution Time
   Timer execTimer(nReps);
@@ -278,6 +327,8 @@ int main() {
     }
     cudaDeviceSynchronize();
   });
+
+  printTimingStats("7) Execution Time", execTR);
 
   // Print timing stats
   std::cout << "======== Timing Results ========\n";

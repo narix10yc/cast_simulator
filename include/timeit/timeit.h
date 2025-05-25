@@ -74,6 +74,13 @@ public:
       const std::function<void()>& method, int _repeat,
       const std::function<void()>& setup = []() {},
       const std::function<void()>& teardown = []() {}) const;
+  
+  TimingResult timeitPartial(
+    const std::function<void()>& preMethod,
+    const std::function<void()>& timedMethod,
+    const std::function<void()>& postMethod,
+    const std::function<void()>& setup,
+    const std::function<void()>& teardown) const;
 };
 
 } // namespace timeit

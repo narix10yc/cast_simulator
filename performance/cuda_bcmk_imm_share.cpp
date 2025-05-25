@@ -70,13 +70,15 @@ static void printTimingStats(const std::string& label, const timeit::TimingResul
 int main() {
   using namespace timeit;
 
+  // std::string qasmFile = "../examples/qft/qft-16-cp.qasm";
   // std::string qasmFile = "../examples/rqc/q12_189_128.qasm";
   // std::string qasmFile = "../examples/rqc/q20_592_427.qasm";
-  std::string qasmFile = "../examples/rqc/q30_521_379.qasm";
+  // std::string qasmFile = "../examples/rqc/q30_521_379.qasm";
+  std::string qasmFile = "../examples/rqc/q30_4299_3272.qasm";
   std::string adaptiveModelPath = "cost_model_simd1.csv";
   std::string cudaModelPath     = "cuda128test.csv";
   int naiveMaxK    = 2;
-  int nReps        = 2;
+  int nReps        = 3;
   int blockSize    = 256;
   int nThreads     = 1;
   auto optLevel    = llvm::OptimizationLevel::O1;
@@ -89,9 +91,7 @@ int main() {
     auto r = parser.parse();
   });
 
-  // printTimingStats("1) Parse Time", parseTR);
-
-  // Parse again for the real AST that will be used
+  // Parse again for the real AST to be used
   openqasm::Parser parser(qasmFile, 0);
   auto root = parser.parse();
   if (!root) {
@@ -106,9 +106,7 @@ int main() {
     root->toCircuitGraph(*tmp);
   });
 
-  // printTimingStats("2) Build Time", buildTR);
-
-  // Build the real CircuitGraph we will keep
+  // Build the real CircuitGraph
   auto graphPtr = std::make_unique<cast::CircuitGraph>();
   root->toCircuitGraph(*graphPtr);
 
@@ -127,7 +125,7 @@ int main() {
     );
   }
 
-  // Create cost-model objects **outside** ephemeral blocks so that
+  // Create cost-model objects outside ephemeral blocks so that
   // if the fusion or circuit references them, they do not go out of scope.
   NaiveCostModel     naiveModel(naiveMaxK, -1, 1e-8);
   StandardCostModel* scModelPtr = nullptr;
@@ -177,8 +175,7 @@ int main() {
     }
   });
 
-  // printTimingStats("3) Fusion Time", fusionTR);
-
+  // Real fuse
   {
     FusionConfig fusionConfig = FusionConfig::Aggressive;
     fusionConfig.nThreads  = -1;
@@ -210,16 +207,14 @@ int main() {
   CUDAKernelGenConfig genConfig;
   genConfig.blockSize      = blockSize;
   genConfig.precision      = 64;
-  genConfig.matrixLoadMode = CUDAKernelGenConfig::LoadInDefaultMemSpace;
+  genConfig.matrixLoadMode = CUDAKernelGenConfig::UseMatImmValues;
 
   // Kernel Gen Time (ephemeral test)
   Timer kernelGenTimer(nReps);
   TimingResult kernelGenTR = kernelGenTimer.timeit([&]() {
     CUDAKernelManager localKM;
-    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+    localKM.genCUDAGatesFromCircuitGraphMulti(genConfig, *graphPtr, "testCircuit");
   });
-
-  // printTimingStats("4) Kernel Gen Time", kernelGenTR);
 
   // PTX Time (ephemeral test)
   Timer ptxTimer(nReps);
@@ -235,19 +230,21 @@ int main() {
     [&]() {
       localKMptx->emitPTX(nThreads, optLevel, 0);
     },
+
     // postMethod:
     [&]() {
       localKMptx.reset();
     },
+
     // setup:
     []() {
     },
+
     // teardown:
     []() {
     }
   );
 
-  // printTimingStats("5) PTX Time", ptxTR);
 
   Timer jitTimer(nReps);
   std::unique_ptr<CUDAKernelManager> localKM;
@@ -278,8 +275,6 @@ int main() {
     }
   );
 
-  // printTimingStats("6) JIT Time", jitTR);
-
   std::cout << "=== Post-Fusion Block Summary ===\n";
   for (const auto& block : graphPtr->getAllBlocks()) {
     auto gate = block->quantumGate;
@@ -295,77 +290,48 @@ int main() {
 
   // Final kernel manager that we'll actually use for execution
   CUDAKernelManager kernelMgr;
-  kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+  // kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+  kernelMgr.genCUDAGatesFromCircuitGraphMulti(genConfig, *graphPtr, "testCircuit");
+  auto& allKernels = kernelMgr.kernels(); // returns std::vector<CUDAKernelInfo>
+  std::cout << "[LOG] Number of generated GPU kernels: " 
+            << allKernels.size() << std::endl;
+
+  for (const auto& kInfo : allKernels) {
+      std::cout << "  - Kernel name: " << kInfo.llvmFuncName << "\n";
+  }
   kernelMgr.emitPTX(nThreads, optLevel, 0);
   
   kernelMgr.initCUJIT(nThreads, 0);
+
   // for (auto &kInfo : kernelMgr.kernels()) {
   //   std::string fnName = kInfo.llvmFuncName;
   //   llvm::outs() << "\n=== PTX for " << fnName << " ===\n";
   //   kernelMgr.dumpPTX(fnName, llvm::outs());
   // }
 
-  auto kernels = kernelMgr.collectCUDAKernelsFromCircuitGraph("testCircuit");
 
-  // Execution Time
   Timer execTimer(nReps);
   TimingResult execTR = execTimer.timeit([&]() {
-    utils::StatevectorCUDA<double> sv(graphPtr->nQubits);
-    sv.initialize();
-    for (int i = 0; i < (int)kernels.size(); ++i) {
-      auto* kInfo   = kernels[i];
-      auto* block = graphPtr->getAllBlocks()[i];
-      unsigned fusedQubits = block->quantumGate->qubits.size();
-      size_t dim = (1ULL << fusedQubits);
-      // auto gate = block->quantumGate;
+      // Create statevector
+      utils::StatevectorCUDA<double> sv(graphPtr->nQubits);
+      sv.initialize();
 
-      std::vector<double> hostMatrix(2ULL * dim * dim, 0.0);
-      // buildGateMatrixForBlock(fusedQubits, hostMatrix);
-      auto gateMatPtr = block->quantumGate->gateMatrix.getConstantMatrix();
-      if (!gateMatPtr) {
-          // with parametric gates, this will be more complex
-          std::cerr << "Gate matrix not constant or not supported.\n";
-          continue;
-      }
-      auto* cmplxData = gateMatPtr->data();
+      // Get the entire kernel list
+      auto& allKernels = kernelMgr.kernels();  // returns std::vector<CUDAKernelInfo>
 
-      size_t totalElems = (size_t)dim * (size_t)dim;  // K*K
-      // std::cerr << "Gate block " << block->id << ": fusedQubits=" << fusedQubits << "\n";
-      // std::cerr << "  Some matrix entries:\n";
-      // for (int debugIdx = 0; debugIdx < std::min<size_t>(5, totalElems); debugIdx++) {
-      //     std::cerr << "    [" << debugIdx << "]: "
-      //               << cmplxData[debugIdx].real() << " + i"
-      //               << cmplxData[debugIdx].imag() << "\n";
-      // }
-      for (size_t j = 0; j < totalElems; j++) {
-          hostMatrix[2*j + 0] = cmplxData[j].real();
-          hostMatrix[2*j + 1] = cmplxData[j].imag();
+      // Launch each kernel in the manager
+      for (auto& kInfo : allKernels) {
+          kernelMgr.launchCUDAKernel(
+              sv.dData(),       // device pointer to statevector
+              sv.nQubits(),     // number of qubits
+              kInfo,            // the kernel info
+              blockSize         // your chosen block size
+          );
       }
 
-      double* dMatPtr = nullptr;
-      size_t numElems = hostMatrix.size();
-      cudaError_t err = cudaMalloc(&dMatPtr, numElems * sizeof(double));
-      if (err != cudaSuccess) {
-        std::cerr << "cudaMalloc failed\n";
-        continue; // or handle error
-      }
-      cudaMemcpy(dMatPtr, hostMatrix.data(),
-                  hostMatrix.size() * sizeof(double),
-                  cudaMemcpyHostToDevice);
-
-      kernelMgr.launchCUDAKernelParam(
-        sv.dData(),       // pointer to statevector
-        sv.nQubits(),     // number of qubits
-        *kInfo,           // the CUDAKernelInfo
-        dMatPtr,          // pointer to matrix in GPU memory
-        blockSize
-      );
-      cudaFree(dMatPtr);
-    }
-    cudaDeviceSynchronize();
+      // Sync the device to ensure full completion
+      cudaDeviceSynchronize();
   });
-
-  // printTimingStats("7) Execution Time", execTR);
 
   // Print timing stats
   std::cout << "======== Timing Results ========\n";

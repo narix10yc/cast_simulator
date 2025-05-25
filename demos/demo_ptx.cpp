@@ -45,7 +45,7 @@ ArgBlockSize("blocksize",
 
 cl::opt<int>
 ArgReplication("replication",
-  cl::desc("Number of replications"), cl::init(1));
+  cl::desc("Number of replications"), cl::init(5));
 
 cl::opt<std::string>
 ArgCUDAModelPath("cuda-model",
@@ -86,6 +86,7 @@ int main(int argc, const char** argv) {
   if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
     auto cudaCache = CUDAPerformanceCache::LoadFromCSV(ArgCUDAModelPath);
     CUDACostModel cudaCostModel(&cudaCache);
+    cudaCostModel.setBlockSize(ArgBlockSize);
     // standardCostModel.display(std::cerr);
     applyGateFusion(fusionConfigAggresive, &cudaCostModel, graphCudaFuse);
   }

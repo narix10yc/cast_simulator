@@ -184,3 +184,107 @@ TimingResult Timer::timeitFixedRepeat(
   teardown();
   return TimingResult(_repeat, replication, tArr);
 }
+
+
+TimingResult Timer::timeitPartial(
+    const std::function<void()>& preMethod,
+    const std::function<void()>& timedMethod,
+    const std::function<void()>& postMethod,
+    const std::function<void()>& setup,
+    const std::function<void()>& teardown
+) const {
+  using Clock = std::chrono::high_resolution_clock;
+  using TimePoint = std::chrono::time_point<Clock>;
+  using Duration = std::chrono::duration<double>;
+
+  int repeat = 1;
+  std::vector<double> tArr(replication);
+
+  TimePoint tic, toc;
+  TimePoint totalT0, totalT1;
+  
+  double dur = 0.0;
+
+  if (verbose > 0) {
+    std::cerr << "Desired warm-up/run time: "
+              << warmupTime << "/" << runTime << " s\n";
+    std::cerr << "Number of Replication(s): " << replication << "\n";
+  }
+
+  setup();
+
+  if (verbose > 0) {
+    totalT0 = Clock::now();
+  }
+  
+  {
+    preMethod();
+    tic = Clock::now();
+    timedMethod();
+    toc = Clock::now();
+    postMethod();
+    dur = Duration(toc - tic).count();
+  }
+
+  int r0 = 0;
+  if (dur > runTime) {
+    r0 = 1;
+    tArr[0] = dur;
+  }
+
+  if (r0 == 0) {
+    double warmupTotal = 0.0;
+    while (warmupTotal < warmupTime) {
+      repeat *= 2;
+      tic = Clock::now();
+      for (int i = 0; i < repeat; ++i) {
+        preMethod();
+        timedMethod();
+        postMethod();
+      }
+      toc = Clock::now();
+      warmupTotal = Duration(toc - tic).count();
+    }
+  }
+
+  if (r0 == 0) {
+    tic = Clock::now();
+    for (int i = 0; i < repeat; ++i) {
+      preMethod();
+      timedMethod();
+      postMethod();
+    }
+    toc = Clock::now();
+    dur = Duration(toc - tic).count();
+
+    repeat = static_cast<int>(static_cast<double>(repeat) * runTime / dur) + 1;
+  } else {
+    tArr[0] *= repeat;
+  }
+
+  for (unsigned r = r0; r < replication; ++r) {
+    tic = Clock::now();
+    double partialSum = 0.0;
+    for (int i = 0; i < repeat; ++i) {
+      preMethod();
+      auto innerTic = Clock::now();
+      timedMethod();
+      auto innerToc = Clock::now();
+      postMethod();
+
+      partialSum += Duration(innerToc - innerTic).count();
+    }
+    toc = Clock::now();
+    tArr[r] = partialSum;
+  }
+
+  if (verbose > 0) {
+    totalT1 = Clock::now();
+    std::cerr << "Actual running time: "
+              << Duration(totalT1 - totalT0).count() << " s\n";
+  }
+
+  teardown();
+
+  return TimingResult(repeat, replication, tArr);
+}
