@@ -3,6 +3,7 @@
 
 #include "simulation/KernelManager.h"
 #include "cast/LegacyQuantumGate.h"
+#include "cast/QuantumGate.h"
 #include "cast/CircuitGraphContext.h"
 #include <cassert>
 #include <string>
@@ -25,6 +26,9 @@ public:
   /// updating each 1GiB of memory. 
   virtual double computeGiBTime(
       const LegacyQuantumGate& gate, int precision, int nThreads) const = 0;
+
+  virtual double computeGiBTime(
+      const QuantumGate& gate, int precision, int nThreads) const = 0;
 };
 
 /// @brief \c NaiveCostModel is based on the size and operation count of fused
@@ -40,6 +44,9 @@ public:
 
   double computeGiBTime(
       const LegacyQuantumGate& gate, int precision, int nThreads) const override;
+
+  double computeGiBTime(
+      const QuantumGate& gate, int precision, int nThreads) const override;
 };
 
 /// \c StandardCostModel assumes simulation time is proportional to opCount and
@@ -70,12 +77,21 @@ public:
 
   double computeGiBTime(
     const LegacyQuantumGate& gate, int precision, int nThreads) const override;
+
+  double computeGiBTime(
+    const QuantumGate& gate, int precision, int nThreads) const override;
 };
 
 class AdaptiveCostModel : public CostModel {
 public:
   double computeGiBTime(
       const LegacyQuantumGate &gate, int precision, int nThreads) const override {
+    assert(false && "Not Implemented");
+    return 0.0;
+  }
+
+  double computeGiBTime(
+      const QuantumGate &gate, int precision, int nThreads) const override {
     assert(false && "Not Implemented");
     return 0.0;
   }

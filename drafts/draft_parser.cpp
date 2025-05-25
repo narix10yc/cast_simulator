@@ -1,5 +1,6 @@
 #include "new_parser/Parser.h"
 #include "cast/Transform/Transform.h"
+#include "cast/Fusion.h"
 
 using namespace cast::draft;
 using namespace cast;

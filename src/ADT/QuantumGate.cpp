@@ -68,6 +68,33 @@ std::ostream& QuantumGate::displayInfo(std::ostream& os, int verbose) const {
   return os;
 }
 
+/**** op count *****/
+namespace {
+  double opCount_scalar(const ScalarGateMatrix& matrix, double zeroTol) {
+    double count = 0.0;
+    size_t len = matrix.matrix().size();
+    const auto* data = matrix.matrix().data();
+    for (size_t i = 0; i < len; ++i) {
+      if (std::abs(data[i]) > zeroTol)
+        count += 1.0;
+    }
+    return count * std::pow<double>(2.0, 1 - matrix.nQubits());
+  }
+} // anonymous namespace
+double QuantumGate::opCount(double zeroTol) const {
+  if (_gateMatrix == nullptr)
+    return 0.0;
+
+  if (auto* sMat = llvm::dyn_cast<ScalarGateMatrix>(_gateMatrix.get())) {
+    return opCount_scalar(*sMat, zeroTol);
+  }
+
+  assert(false && "Not Implemented yet");
+  return 0.0;
+}
+
+/**** Matmul of Quantum Gates ****/
+
 QuantumGatePtr cast::matmul(const QuantumGate& gateA,
                             const QuantumGate& gateB) {
   // C = AB
@@ -165,7 +192,8 @@ QuantumGatePtr cast::matmul(const QuantumGate& gateA,
   //     return lmatmul_up_up(aUpMat.value(), bUpMat.value(), qubits,
   //     other.qubits);
   // }
-
+  assert(gateA.gateMatrix() != nullptr && "gateA has no gate matrix");
+  assert(gateB.gateMatrix() != nullptr && "gateB has no gate matrix");
   const auto* aScalarMatPtr = llvm::dyn_cast<ScalarGateMatrix>(gateA.gateMatrix().get());
   const auto* bScalarMatPtr = llvm::dyn_cast<ScalarGateMatrix>(gateB.gateMatrix().get());
   assert(aScalarMatPtr != nullptr && bScalarMatPtr != nullptr &&
@@ -203,9 +231,9 @@ QuantumGatePtr cast::matmul(const QuantumGate& gateA,
       // std::cerr << "  aIdx = " << aIdx << ": " << aCMat->data()[aIdx] << ";"
                 // << "  bIdx = " << bIdx << ": " << bCMat->data()[bIdx] << "\n";
       cCMat.reData()[cIdx] += aCMat.reData()[aIdx] * bCMat.reData()[bIdx] -
-                           aCMat.imData()[aIdx] * bCMat.imData()[bIdx];
+                              aCMat.imData()[aIdx] * bCMat.imData()[bIdx];
       cCMat.imData()[cIdx] += aCMat.reData()[aIdx] * bCMat.imData()[bIdx] +
-                           aCMat.imData()[aIdx] * bCMat.reData()[bIdx];
+                              aCMat.imData()[aIdx] * bCMat.reData()[bIdx];
     }
   }
   return QuantumGate::Create(

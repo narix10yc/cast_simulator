@@ -80,10 +80,13 @@ public:
 
 class CircuitGraphNode : public IRNode {
 private:
+  // _nQubits always equal to the size of each row
   int _nQubits;
-  int _rowCapacity;
   using row_t = std::vector<QuantumGate*>;
   std::list<row_t> _tile;
+public:
+  using row_iterator = std::list<row_t>::iterator;
+  using const_row_iterator = std::list<row_t>::const_iterator;
   // struct TransparentHash {
   //   using is_transparent = void;
     
@@ -118,21 +121,39 @@ private:
    * We prefer to look up gates using raw pointers. Current approach is O(n)
    */
 
+private:
   // _gateMap manages memory and stores the id of gates
   std::unordered_map<QuantumGatePtr, int> _gateMap;
   static int _gateMapId;
-  void reserveRows(int capacity);
+  static constexpr int DefaultRowCapacity = 32;
+
+  void resizeRowsIfNeeded(int size);
 public:
-  using row_iterator = std::list<row_t>::iterator;
-  using const_row_iterator = std::list<row_t>::const_iterator;
+  /** TODO: a bit awkward to expose the following functions used in fusion
+   * as public.
+   **/
+
+  // This simply calls _tile.emplace(rowIt, row_t(DefaultRowCapacity, nullptr));
+  row_iterator insertNewRow(row_iterator rowIt) {
+    return _tile.emplace(rowIt, row_t(DefaultRowCapacity, nullptr));
+  }
+
+  /// Fuse two gates on the same row given by (*rowIt)[q0] and (*rowIt)[q1].
+  /// This function removes old gates from the graph and inserts the fused gate.
+  void fuseAndInsertSameRow(row_iterator rowIt, int q0, int q1);
+
+  /// Fuse two gates on different rows given by (*rowItL)[qubit] and
+  /// (*std::next(rowItL))[qubit].
+  /// This function removes old gates from the graph and inserts the fused gate.
+  /// @return the tile iterator of the fused gate
+  row_iterator fuseAndInsertDiffRow(row_iterator rowItL, int qubit);
 public:
-  CircuitGraphNode(int desiredNQubits = 32)
+  CircuitGraphNode()
     : IRNode(IRNode_CircuitGraph)
-    , _nQubits(desiredNQubits)
-    , _rowCapacity(desiredNQubits)
+    , _nQubits(0)
     , _tile() {}
 
-  // This is not a check method. Recommend to use assert(checkConsistency()) 
+  // Recommend to use assert(checkConsistency()) 
   bool checkConsistency() const;
 
   /// Use this method to add gates into the circuit graph. It will be stored in
@@ -156,6 +177,9 @@ public:
   // in this circuit graph.
   int gateId(const QuantumGate& gate) const;
 
+  // Look up a gate in the graph. Return nullptr if not found.
+  QuantumGatePtr lookup(QuantumGate* gate) const;
+
   std::list<row_t>& tile() { return _tile; }
   const std::list<row_t>& tile() const { return _tile; }
 
@@ -166,8 +190,6 @@ public:
   const_row_iterator tile_end() const { return _tile.end(); }
 
   int nQubits() const { return _nQubits; }
-
-  size_t rowCapacity() const { return _rowCapacity; }
 
   size_t nGates() const { return _gateMap.size(); }
 

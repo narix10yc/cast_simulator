@@ -28,6 +28,9 @@ public:
 
   int nQubits() const { return _qubits.size(); }
 
+  /// @brief The operation count. This function is not fully implemented yet.
+  double opCount(double zeroTol = 1e-8) const;
+
   GateMatrixPtr gateMatrix() { return _gateMatrix; }
   const GateMatrixPtr& gateMatrix() const { return _gateMatrix; }
 

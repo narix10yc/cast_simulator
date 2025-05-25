@@ -2,7 +2,9 @@
 #include "utils/iocolor.h"
 
 #include <set>
+#include <iomanip>
 
+using namespace cast;
 using namespace cast::ir;
 
 int CircuitGraphNode::_gateMapId = 0;
@@ -13,12 +15,23 @@ static bool checkConsistency_rowSize(const CircuitGraphNode& graph) {
   const auto end = graph.tile_end();
   if (it == end)
     return true; // empty graph is consistent
+  int row = -1;
   for (; it != end; ++it) {
-    if (it->capacity() != graph.rowCapacity()) {
+    ++row;
+    if (it->size() < graph.nQubits()) {
       std::cerr << BOLDRED("Err: ") << "In checkConsistency_rowSize(): "
-        "Inconsistent row capacity: graph capacity is " << graph.rowCapacity()
-        << ", but row capacity is " << it->capacity() << "\n";
+        "The size of row " << row << " is too small: "
+        "size = " << it->size()
+        << " while graph nQubits is " << graph.nQubits() << "\n";
       return false;
+    }
+    for (int q = graph.nQubits(); q < it->size(); ++q) {
+      if ((*it)[q] != nullptr) {
+        std::cerr << BOLDRED("Err: ") << "In checkConsistency_rowSize(): "
+          "Row " << row << " has a gate at qubit " << q
+          << ", but nQubits is " << graph.nQubits() << "\n";
+        return false;
+      }
     }
   }
   return true;
@@ -109,17 +122,17 @@ bool CircuitGraphNode::checkConsistency() const {
          checkConsistency_gateMemory(*this);
 }
 
-void CircuitGraphNode::reserveRows(int capacity) {
-  if (capacity <= _rowCapacity)
+void CircuitGraphNode::resizeRowsIfNeeded(int newNQubits) {
+  if (newNQubits <= _nQubits)
     return;
-  _rowCapacity = capacity;
-  for (auto rowIt = _tile.begin(), e = _tile.end(); rowIt != e; ++rowIt)
-    rowIt->reserve(capacity);
+  for (auto rowIt = tile_begin(), e = tile_end(); rowIt != e; ++rowIt)
+    rowIt->resize(newNQubits);
+  _nQubits = newNQubits;
 }
 
 void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
-  assert(gate != nullptr);
-  reserveRows(gate->qubits().back() + 1);
+  assert(gate != nullptr && "Inserting a null gate");
+  resizeRowsIfNeeded(gate->qubits().back() + 1);
   // add gate to gateMap
   auto [gateMapIt, inserted] = _gateMap.insert({gate, _gateMapId++});
   assert(inserted && "Gate already exists");
@@ -127,7 +140,7 @@ void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
   auto rowIt = --_tile.end();
   if (rowIt == _tile.end() || !isRowVacant(rowIt, *gate)) {
     // insert a new row if either tile is empty or the last row is not vacant
-    rowIt = _tile.insert(_tile.end(), row_t(_rowCapacity, nullptr));
+    rowIt = insertNewRow(tile_end());
   }
 
   for (auto q : gate->qubits()) {
@@ -137,8 +150,8 @@ void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
 }
 
 void CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
-  assert(gate != nullptr);
-  reserveRows(gate->qubits().back() + 1);
+  assert(gate != nullptr && "Inserting a null gate");
+  resizeRowsIfNeeded(gate->qubits().back() + 1);
   // add gate to gateMap
   auto [it, inserted] = _gateMap.insert({gate, _gateMapId++});
   assert(inserted && "Gate already exists");
@@ -149,13 +162,16 @@ void CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
   }
 }
 
-void CircuitGraphNode::removeGate(row_iterator rowIt, int qubitIdx) {
+void CircuitGraphNode::removeGate(row_iterator rowIt, int qubit) {
   assert(rowIt != _tile.end());
-  assert(qubitIdx >= 0 && qubitIdx < _nQubits);
-  auto gate = (*rowIt)[qubitIdx];
-  if (gate == nullptr)
-    return;
-  (*rowIt)[qubitIdx] = nullptr;
+  assert(qubit >= 0 && qubit < _nQubits);
+  auto gate = (*rowIt)[qubit];
+  assert(gate != nullptr && "Removing a null gate");
+  // erase from tile
+  for (const auto& q : gate->qubits()) {
+    assert((*rowIt)[q] == gate && "Gate not found in the row");
+    (*rowIt)[q] = nullptr;
+  }
   // erase from gateMap
   for (auto it = _gateMap.begin(), e = _gateMap.end(); it != e; ++it) {
     if (it->first.get() == gate) {
@@ -168,12 +184,57 @@ void CircuitGraphNode::removeGate(row_iterator rowIt, int qubitIdx) {
 bool CircuitGraphNode::isRowVacant(row_iterator rowIt,
                                    const QuantumGate& gate) const {
   assert(rowIt != _tile.end());
-  assert(gate.qubits().back() < _rowCapacity);
   for (auto q : gate.qubits()) {
+    assert(q >= 0);
+    if (q >= _nQubits)
+      continue;
     if ((*rowIt)[q] != nullptr)
       return false;
   }
   return true;
+}
+
+void CircuitGraphNode::fuseAndInsertSameRow(
+    row_iterator rowIt, int q0, int q1) {
+  assert(rowIt != tile_end());
+  auto* gate0 = (*rowIt)[q0];
+  assert(gate0 != nullptr);
+  auto* gate1 = (*rowIt)[q1];
+  assert(gate1 != nullptr);
+  assert(gate0 != gate1 && "Fusing the same gate");
+
+  auto gateFused = cast::matmul(*gate0, *gate1);
+  removeGate(rowIt, q0);
+  removeGate(rowIt, q1);
+  insertGate(gateFused, rowIt);
+}
+
+CircuitGraphNode::row_iterator
+CircuitGraphNode::fuseAndInsertDiffRow(row_iterator rowItL, int qubit) {
+  assert(rowItL != tile_end());
+  auto* gateL = (*rowItL)[qubit];
+  assert(gateL != nullptr);
+  auto rowItR = std::next(rowItL);
+  assert(rowItR != tile_end());
+  auto* gateR = (*rowItR)[qubit];
+  assert(gateR != nullptr);
+
+  auto gateFused = cast::matmul(*gateL, *gateR);
+  removeGate(rowItL, gateL->qubits()[0]);
+  removeGate(rowItR, gateR->qubits()[0]);
+
+  // prioritize iterR > iterL > between iterL and iterR
+  if (isRowVacant(rowItR, *gateFused)) {
+    insertGate(gateFused, rowItR);
+    return rowItR;
+  }
+  if (isRowVacant(rowItL, *gateFused)) {
+    insertGate(gateFused, rowItL);
+    return rowItL;
+  }
+  auto rowItInserted = insertNewRow(rowItR);
+  insertGate(gateFused, rowItInserted);
+  return rowItInserted;
 }
 
 int CircuitGraphNode::gateId(const QuantumGate& gate) const {
@@ -182,6 +243,64 @@ int CircuitGraphNode::gateId(const QuantumGate& gate) const {
       return id;
   }
   return -1; // gate not found
+}
+
+QuantumGatePtr CircuitGraphNode::lookup(QuantumGate* gate) const {
+  if (gate == nullptr)
+    return nullptr;
+  for (const auto& [itGate, id] : _gateMap) {
+    if (itGate.get() == gate)
+      return itGate;
+  }
+  return nullptr; // gate not found
+}
+
+void CircuitGraphNode::squeeze() {
+  // first step: relocate gates to the top
+  for (auto rowIt = ++tile_begin(), rowEnd = tile_end();
+       rowIt != rowEnd;
+       ++rowIt) {
+    for (int q = 0; q < _nQubits; ++q) {
+      auto* gate = (*rowIt)[q];
+      if (gate == nullptr)
+        continue;
+      // find the top-most vacant row
+      auto rowVacant = std::prev(rowIt);
+      while (rowVacant != tile_begin() && isRowVacant(rowVacant, *gate)) {
+        --rowVacant;
+      }
+      ++rowVacant; // move to the next row, which is vacant
+      if (rowVacant == rowIt)
+        continue;
+      // relocate the gate
+      for (const auto& qq : gate->qubits()) {
+        assert((*rowIt)[qq] == gate);
+        assert((*rowVacant)[qq] == nullptr);
+        (*rowIt)[qq] = nullptr;
+        (*rowVacant)[qq] = gate;
+      }
+    }
+  }
+
+  // second step: remove empty rows
+  auto rowIt = tile_end();
+  auto rowBegin = tile_begin();
+  while (rowIt != rowBegin) {
+    --rowIt;
+    bool isEmpty = true;
+    for (int q = 0; q < _nQubits; ++q) {
+      if ((*rowIt)[q] != nullptr) {
+        isEmpty = false;
+        break;
+      }
+    }
+    if (!isEmpty) {
+      // we are sure all gates are squeezed in step 1.
+      // so terminate as soon as there is a non-empty row.
+      break;
+    }
+    rowIt = _tile.erase(rowIt);
+  }
 }
 
 std::ostream& CircuitGraphNode::print(std::ostream& os, int indent) const {
@@ -193,9 +312,9 @@ std::ostream& CircuitGraphNode::print(std::ostream& os, int indent) const {
 std::ostream& CircuitGraphNode::displayInfo(std::ostream& os, int verbose) const {
   os << BOLDCYAN("=== Info of CircuitGraph @ " << this << " === ")
      << "(Verbose " << verbose << ")\n";
+  os << CYAN("- nQubits:       ") << _nQubits << "\n";
   os << CYAN("- Num Gates:      ") << _gateMap.size() << "\n";
   os << CYAN("- Num Rows:       ") << _tile.size() << "\n";
-  os << CYAN("- rowCapacity:    ") << _rowCapacity << "\n";
   
   os << BOLDCYAN("====================================") << "\n";
   return os;
@@ -204,18 +323,26 @@ std::ostream& CircuitGraphNode::displayInfo(std::ostream& os, int verbose) const
 std::ostream& CircuitGraphNode::visualize(std::ostream& os, int verbose) const {
   os << BOLDCYAN("=== Visualizing CircuitGraph @ " << this << " === ")
      << "(Verbose " << verbose << ")\n";
-  
+  if (_tile.empty())
+    return os << "<empty tile>\n";
+  int width = static_cast<int>(std::log10(_gateMapId) + 1);
+  if ((width & 1) == 0)
+    width++;
+
+  const std::string vbar =
+      std::string(width / 2, ' ') + "|" + std::string(width / 2 + 1, ' ');
+
   for (const auto& row : _tile) {
-    for (const auto& gate : row) {
-      if (gate != nullptr) {
-        os << gateId(*gate) << " ";
-      } else {
-        os << ". ";
-      }
+    if (verbose > 1)
+      os << &row << ": ";
+    for (unsigned q = 0; q < nQubits(); q++) {
+      if (const auto* gate = row[q]; gate != nullptr)
+        os << std::setw(width) << std::setfill('0') << gateId(*gate) << " ";
+      else
+        os << vbar;
     }
     os << "\n";
   }
-  
   os << BOLDCYAN("====================================") << "\n";
   return os;
 }

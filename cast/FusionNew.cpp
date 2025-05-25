@@ -1,241 +1,200 @@
-// #include "cast/Fusion.h"
+#include "cast/Fusion.h"
 
-// #include "utils/iocolor.h"
+#include "utils/iocolor.h"
+#include "utils/PrintSpan.h"
 
-// #define DEBUG_TYPE "fusion-new"
-// #include "llvm/Support/Debug.h"
-// // #define LLVM_DEBUG(X) X
+#define DEBUG_TYPE "fusion-new"
+#include "llvm/Support/Debug.h"
+// #define LLVM_DEBUG(X) X
 
-// using namespace cast;
+using namespace cast;
 
-// namespace {
+namespace {
 
-// // Get the number of qubits after fusion of two quantum gates.
-// // We want this function because computing the matrix could be much more
-// // expensive.
-// int getKAfterFusion(const QuantumGate& gateA, const QuantumGate& gateB) {
-//   int count = 0;
-//   auto itA = gateA.qubits().begin();
-//   auto itB = gateB.qubits().begin();
-//   const auto endA = gateA.qubits().end();
-//   const auto endB = gateB.qubits().end();
-//   while (itA != endA || itB != endB) {
-//     count++;
-//     if (itA == endA) {
-//       ++itB;
-//       continue;
-//     }
-//     if (itB == endB) {
-//       ++itA;
-//       continue;
-//     }
-//     if (*itA == *itB) {
-//       ++itA;
-//       ++itB;
-//       continue;
-//     }
-//     if (*itA > *itB) {
-//       ++itB;
-//       continue;
-//     }
-//     assert(*itA < *itB);
-//     ++itA;
-//     continue;
-//   }
+// Get the number of qubits after fusion of two quantum gates.
+// We want this function because computing the matrix could be much more
+// expensive.
+int getKAfterFusion(QuantumGate* gateA, QuantumGate* gateB) {
+  if (gateA == nullptr || gateB == nullptr)
+    return 0; // no qubits
+  int count = 0;
+  auto itA = gateA->qubits().begin();
+  auto itB = gateB->qubits().begin();
+  const auto endA = gateA->qubits().end();
+  const auto endB = gateB->qubits().end();
+  while (itA != endA || itB != endB) {
+    count++;
+    if (itA == endA) {
+      ++itB;
+      continue;
+    }
+    if (itB == endB) {
+      ++itA;
+      continue;
+    }
+    if (*itA == *itB) {
+      ++itA;
+      ++itB;
+      continue;
+    }
+    if (*itA > *itB) {
+      ++itB;
+      continue;
+    }
+    assert(*itA < *itB);
+    ++itA;
+    continue;
+  }
 
-//   return count;
-// }
+  return count;
+}
 
-// /// Fuse two blocks on the same row. \c graph will be updated.
-// /// Notice this function will NOT delete old blocks.
-// /// @return fused block
-// GateBlock* fuseAndInsertSameRow(
-//     LegacyCircuitGraph& graph, tile_iter_t iter,
-//     GateBlock* blockA, GateBlock* blockB) {
-//   auto* blockFused = graph.acquireGateBlock(blockA, blockB);
-//   for (const auto& wireA : blockA->wires)
-//     (*iter)[wireA.qubit] = blockFused;
-//   for (const auto& wireB : blockB->wires)
-//     (*iter)[wireB.qubit] = blockFused;
-//   return blockFused;
-// }
+using row_iterator = ir::CircuitGraphNode::row_iterator;
 
-// /// Fuse two blocks on different rows. \c graph will be updated.
-// /// Notice this function will NOT delete old blocks.
-// /// @return the tile iterator of the fused block
-// tile_iter_t fuseAndInsertDiffRow(
-//     LegacyCircuitGraph& graph, tile_iter_t iterL, int qubit) {
-//   assert(iterL != nullptr);
-//   auto* blockL = (*iterL)[qubit];
-//   assert(blockL != nullptr);
-//   auto iterR = iterL.next();
-//   assert(iterR != nullptr);
-//   auto* blockR = (*iterR)[qubit];
-//   assert(blockR);
+struct TentativeFusedItem {
+  // We must use shared pointers here because intermediate fusion steps may
+  // remove gates from the graph, yet these gates may need to be restored.
+  QuantumGatePtr gate;
+  row_iterator iter;
+};
 
-//   auto* blockFused = graph.acquireGateBlock(blockL, blockR);
-//   for (const auto& wireL : blockL->wires)
-//     (*iterL)[wireL.qubit] = nullptr;
-//   for (const auto& wireR : blockR->wires)
-//     (*iterR)[wireR.qubit] = nullptr;
+/// @return Number of fused gates
+int startFusion(ir::CircuitGraphNode& graph,
+                const FusionConfig& config,
+                const CostModel* costModel,
+                const int maxK,
+                row_iterator curIt,
+                const int qubit) {
+  
+  // In the first stage of fusion, we greedily collect gates that may possibly
+  // be fused together.
+  // Later we will check if the fusion is beneficial. If not, we reject the
+  // fusion and put back all these gates to their original positions.
 
-//   // prioritize iterR > iterL > between iterL and iterR
-//   if (graph.isRowVacant(*iterR, blockFused)) {
-//     for (const auto& wireF : blockFused->wires)
-//       (*iterR)[wireF.qubit] = blockFused;
-//     return iterR;
-//   }
-//   if (graph.isRowVacant(*iterL, blockFused)) {
-//     for (const auto& wireF : blockFused->wires)
-//       (*iterL)[wireF.qubit] = blockFused;
-//     return iterL;
-//   }
-//   auto iterInserted = graph.tile().emplace_insert(iterL);
-//   for (const auto& wireF : blockFused->wires)
-//     (*iterInserted)[wireF.qubit] = blockFused;
-//   return iterInserted;
-// }
+  // productGate is the product of all fusedGates
+  auto productGate = graph.lookup((*curIt)[qubit]);
+  if (productGate == nullptr)
+    return 0;
+  auto fusedIt = curIt;
 
-// struct TentativeFusedItem {
-//   GateBlock* block;
-//   tile_iter_t iter;
-// };
+  // keep track of all gates that are being fused, and restore them upon
+  // rejecting the fusion
+  std::vector<TentativeFusedItem> fusedGates;
+  fusedGates.reserve(8);
+  fusedGates.emplace_back(productGate, fusedIt);
 
-// /// @return Number of fused blocks
-// int startFusion(
-//     LegacyCircuitGraph& graph, const FusionConfig& config,
-//     const CostModel* costModel,
-//     const int maxK, tile_iter_t curIt, const int qubit) {
-//   auto* fusedBlock = (*curIt)[qubit];
-//   auto fusedIt = curIt;
-//   if (fusedBlock == nullptr)
-//     return 0;
+  // function that checks if candidateGate can be added to the fusedGates
+  const auto checkFuseable = [&](QuantumGate* candidateGate) {
+    if (candidateGate == nullptr)
+      return false;
+    // is candidateGate already in the fusedGates?
+    for (const auto& [gate, row] : fusedGates) {
+      if (gate.get() == candidateGate)
+        return false;
+    }
+    return getKAfterFusion(productGate.get(), candidateGate) <= maxK;
+  };
 
-//   std::vector<TentativeFusedItem> fusedBlocks;
-//   fusedBlocks.reserve(8);
-//   fusedBlocks.emplace_back(fusedBlock, fusedIt);
+  // Start with same-row gates
+  for (int q = qubit+1; q < graph.nQubits(); ++q) {
+    auto* candidateGate = (*curIt)[q];
+    if (productGate.get() == candidateGate)
+      continue;
+    if (checkFuseable(candidateGate) == false)
+      continue;
 
-//   const auto checkFuseable = [&](GateBlock* candidateBlock) {
-//     if (candidateBlock == nullptr)
-//       return false;
-//     if (std::ranges::find_if(fusedBlocks,
-//         [b=candidateBlock](const auto& item) {
-//           return item.block == b;
-//         }) != fusedBlocks.end()) {
-//       return false;
-//     }
-//     return getKAfterFusion(fusedBlock, candidateBlock) <= maxK;
-//   };
+    // candidateGate could be added to the fusedGates
+    fusedGates.emplace_back(graph.lookup(candidateGate), curIt);
+    graph.fuseAndInsertSameRow(curIt, q, productGate->qubits()[0]);
+    productGate = graph.lookup((*curIt)[q]);
+    assert(productGate != nullptr);
+  }
 
-//   // Start with same-row blocks
-//   for (int q = qubit+1; q < graph.nQubits; ++q) {
-//     auto* candidateBlock = (*curIt)[q];
-//     if (candidateBlock == fusedBlock)
-//       continue;
-//     if (checkFuseable(candidateBlock) == false)
-//       continue;
+  assert(curIt == fusedIt);
 
-//     // candidateBlock is accepted
-//     fusedBlocks.emplace_back(candidateBlock, curIt);
-//     fusedBlock = fuseAndInsertSameRow(graph, curIt, fusedBlock, candidateBlock);
-//   }
+  // TODO: check logic here
+  bool progress;
+  do {
+    curIt = std::next(fusedIt);
+    if (curIt == graph.tile_end())
+      break;
 
-//   assert(curIt == fusedIt);
+    progress = false;
+    for (const auto& q : productGate->qubits()) {
+      auto* candidateGate = (*curIt)[q];
+      if (checkFuseable(candidateGate) == false)
+        continue;
+      // candidateGate is accepted
+      fusedGates.emplace_back(graph.lookup(candidateGate), curIt);
+      fusedIt = graph.fuseAndInsertDiffRow(std::prev(curIt), q);
+      productGate = graph.lookup((*fusedIt)[candidateGate->qubits()[0]]);
+      assert(productGate != nullptr);
+      progress = true;
+      break;
+    }
+  } while (progress == true);
 
-//   // TODO: check logic here
-//   bool progress;
-//   do {
-//     curIt = fusedIt.next();
-//     if (curIt == graph.tile_end())
-//       break;
+  assert(fusedGates.size() > 0);
+  if (fusedGates.size() == 1)
+    return 0;
 
-//     progress = false;
-//     for (const auto& q : fusedBlock->quantumGate->qubits) {
-//       auto* candidateBlock = (*curIt)[q];
-//       if (checkFuseable(candidateBlock) == false)
-//         continue;
-//       // candidateBlock is accepted
-//       fusedBlocks.emplace_back(candidateBlock, curIt);
-//       fusedIt = fuseAndInsertDiffRow(graph, curIt.prev(), q);
-//       fusedBlock = (*fusedIt)[candidateBlock->quantumGate->qubits[0]];
-//       progress = true;
-//       break;
-//     }
-//   } while (progress == true);
+  assert(fusedIt != graph.tile_end());
 
-//   assert(fusedBlocks.size() > 0);
-//   if (fusedBlocks.size() == 1)
-//     return 0;
+  // Check benefit
+  double oldTime = 0.0;
+  for (const auto& [gate, iter] : fusedGates) {
+    oldTime += costModel->computeGiBTime(
+      *gate, config.precision, config.nThreads);
+  }
+  double newTime = costModel->computeGiBTime(
+    *productGate, config.precision, config.nThreads);
+  double benefit = oldTime / newTime - 1.0;
+  LLVM_DEBUG(
+    utils::printSpanWithPrinter(std::cerr,
+      std::span(fusedGates.data(), fusedGates.size()),
+      [&graph](std::ostream& os, const TentativeFusedItem& item) {
+        os << graph.gateId(*item.gate)
+           << "(nQubits=" << item.gate->nQubits()
+           << ", opCount=" << item.gate->opCount(1e-8) << ")";
+      });
+    std::cerr << " => " << graph.gateId(*productGate)
+              << "(nQubits=" << productGate->nQubits()
+              << ", opCount=" << productGate->opCount(1e-8) << "). "
+              << "Benefit = " << benefit << "; ";
+  );
 
-//   assert(fusedIt != graph.tile_end());
+  // not enough benefit, undo this fusion
+  if (benefit < config.benefitMargin) {
+    LLVM_DEBUG(std::cerr << "Fusion Rejected\n");
+    graph.removeGate(fusedIt, productGate->qubits()[0]);
+    for (const auto& [gate, iter] : fusedGates)
+      graph.insertGate(gate, iter);
+    return 0;
+  }
+  // otherwise, enough benefit, accept this fusion
+  LLVM_DEBUG(std::cerr << "Accepted\n";);
+  // memory of fusedGates will be freed when this function returns
+  return fusedGates.size() - 1;
+}
 
-//   // Check benefit
-//   double oldTime = 0.0;
-//   for (const auto& [block, iter] : fusedBlocks) {
-//     oldTime += costModel->computeGiBTime(
-//       *block->quantumGate, config.precision, config.nThreads);
-//   }
-//   double newTime = costModel->computeGiBTime(
-//     *fusedBlock->quantumGate, config.precision, config.nThreads);
-//   double benefit = oldTime / newTime - 1.0;
-//   LLVM_DEBUG(
-//     utils::printArray(std::cerr,
-//       llvm::ArrayRef(fusedBlocks.data(), fusedBlocks.size()),
-//       [](std::ostream& os, const TentativeFusedItem& item) {
-//         os << item.block->id << "(" << item.block->nQubits()
-//            << "," << item.block->quantumGate->opCount(1e-8) << ")";
-//       });
-//     std::cerr << " => " << fusedBlock->id << "(" << fusedBlock->nQubits()
-//               << "," << fusedBlock->quantumGate->opCount(1e-8) << "). "
-//               << "Benefit = " << benefit << "; ";
-//   );
+} // anonymous namespace
 
-//   if (benefit < config.benefitMargin) {
-//     // undo this fusion
-//     LLVM_DEBUG(std::cerr << "Rejected\n");
-//     // LLVM_DEBUG(
-//     //   graph.print(std::cerr << "-- Before Rejection --\n", 2) << "\n";
-//     // );
-//     for (const auto& q : fusedBlock->quantumGate->qubits) {
-//       assert((*fusedIt)[q] == fusedBlock);
-//       (*fusedIt)[q] = nullptr;
-//     }
-//     for (const auto& [block, iter] : fusedBlocks) {
-//       for (const auto& q : block->quantumGate->qubits)
-//         (*iter)[q] = block;
-//     }
-//     // LLVM_DEBUG(
-//     //   graph.print(std::cerr << "-- After Rejection --\n", 2) << "\n";
-//     // );
-
-//     graph.releaseGateBlock(fusedBlock);
-//     return 0;
-//   }
-//   // accept this fusion
-//   for (const auto& [block, iter] : fusedBlocks)
-//     graph.releaseGateBlock(block);
-//   LLVM_DEBUG(std::cerr << "Accepted\n";);
-//   return fusedBlocks.size() - 1;
-// }
-
-// } // anonymous namespace
-
-// void cast::applyGateFusion(
-//     const FusionConfig& config, const CostModel* costModel,
-//     ir::CircuitGraphNode& graph, int max_k) {
-//   int curMaxK = 2;
-//   int nFused = 0;
-//   do {
-//     nFused = 0;
-//     auto it = graph.tile_begin();
-//     int q = 0;
-//     while (it != graph.tile_end()) {
-//       for (q = 0; q < graph.nQubits; ++q) {
-//         nFused += startFusion(
-//           graph, config, costModel, curMaxK, it, q);;
-//       }
-//       ++it;
-//     }
-//     graph.squeeze();
-//   } while (nFused > 0 && ++curMaxK <= max_k);
-// }
+void cast::applyGateFusion(
+    const FusionConfig& config, const CostModel* costModel,
+    ir::CircuitGraphNode& graph, int max_k) {
+  int curMaxK = 2;
+  int nFused = 0;
+  do {
+    nFused = 0;
+    auto it = graph.tile_begin();
+    int q = 0;
+    // we need to query graph.tile_end() every time, because startFusion may
+    // change graph tile
+    while (it != graph.tile_end()) {
+      for (q = 0; q < graph.nQubits(); ++q) 
+        nFused += startFusion(graph, config, costModel, curMaxK, it, q);
+      ++it;
+    }
+    graph.squeeze();
+  } while (nFused > 0 && ++curMaxK <= max_k);
+}
