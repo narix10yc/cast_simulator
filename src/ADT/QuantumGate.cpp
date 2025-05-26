@@ -184,58 +184,60 @@ QuantumGatePtr cast::matmul(const QuantumGate& gateA,
   // std::cerr << "contraction width = " << contractionWidth << "\n";
   // std::cerr << RESET;
 
-  // unitary perm gate matrix
-  // {
-  // auto aUpMat = gateMatrix.getUnitaryPermMatrix();
-  // auto bUpMat = other.gateMatrix.getUnitaryPermMatrix();
-  // if (aUpMat.has_value() && bUpMat.has_value())
-  //     return lmatmul_up_up(aUpMat.value(), bUpMat.value(), qubits,
-  //     other.qubits);
-  // }
+
+  const auto matmulComplexSquareMatrix = [&](
+      const ComplexSquareMatrix& matA,
+      const ComplexSquareMatrix& matB,
+      ComplexSquareMatrix& matC) -> void {
+  for (uint64_t cIdx = 0ULL; cIdx < (1ULL << (2 * cnQubits)); ++cIdx) {
+      uint64_t aIdxBegin = utils::pext64(cIdx, aPextMask) & aZeroingMask;
+      uint64_t bIdxBegin = utils::pext64(cIdx, bPextMask) & bZeroingMask;
+
+      // std::cerr << "Ready to update cmat[" << i
+      //           << " (" << utils::as0b(i, 2 * cnQubits) << ")]\n"
+      //           << "  aIdxBegin: " << utils::as0b(i, 2 * cnQubits)
+      //           << " -> " << utils::pext64(i, aPextMask) << " ("
+      //           << utils::as0b(utils::pext64(i, aPextMask), 2 * anQubits)
+      //           << ") -> " << aIdxBegin << " ("
+      //           << utils::as0b(aIdxBegin, 2 * anQubits) << ")\n"
+      //           << "  bIdxBegin: " << utils::as0b(i, 2 * cnQubits)
+      //           << " -> "
+      //           << utils::as0b(utils::pext64(i, bPextMask), 2 * bnQubits)
+      //           << " -> " << utils::as0b(bIdxBegin, 2 * bnQubits)
+      //           << " = " << bIdxBegin << "\n";
+
+      for (uint64_t s = 0; s < (1ULL << contractionWidth); ++s) {
+        uint64_t aIdx = aIdxBegin;
+        uint64_t bIdx = bIdxBegin;
+        for (unsigned bit = 0; bit < contractionWidth; ++bit) {
+          if (s & (1 << bit)) {
+            aIdx += aSharedQubitShifts[bit];
+            bIdx += bSharedQubitShifts[bit];
+          }
+        }
+        // std::cerr << "  aIdx = " << aIdx << ": " << aCMat->data()[aIdx] << ";"
+                  // << "  bIdx = " << bIdx << ": " << bCMat->data()[bIdx] << "\n";
+        matC.reData()[cIdx] += matA.reData()[aIdx] * matB.reData()[bIdx] -
+                               matA.imData()[aIdx] * matB.imData()[bIdx];
+        matC.imData()[cIdx] += matA.reData()[aIdx] * matB.imData()[bIdx] +
+                               matA.imData()[aIdx] * matB.reData()[bIdx];
+      }
+    }
+  };
+
   assert(gateA.gateMatrix() != nullptr && "gateA has no gate matrix");
   assert(gateB.gateMatrix() != nullptr && "gateB has no gate matrix");
-  const auto* aScalarMatPtr = llvm::dyn_cast<ScalarGateMatrix>(gateA.gateMatrix().get());
-  const auto* bScalarMatPtr = llvm::dyn_cast<ScalarGateMatrix>(gateB.gateMatrix().get());
+  const auto* aScalarMatPtr =
+    llvm::dyn_cast<ScalarGateMatrix>(gateA.gateMatrix().get());
+  const auto* bScalarMatPtr =
+    llvm::dyn_cast<ScalarGateMatrix>(gateB.gateMatrix().get());
   assert(aScalarMatPtr != nullptr && bScalarMatPtr != nullptr &&
         "Both gate matrices must be ScalarGateMatrix for now");
   const ComplexSquareMatrix& aCMat = aScalarMatPtr->matrix();
   const ComplexSquareMatrix& bCMat = bScalarMatPtr->matrix();
   ComplexSquareMatrix cCMat(1ULL << cnQubits);
-  // main loop
-  for (uint64_t cIdx = 0ULL; cIdx < (1ULL << (2 * cnQubits)); ++cIdx) {
-    uint64_t aIdxBegin = utils::pext64(cIdx, aPextMask) & aZeroingMask;
-    uint64_t bIdxBegin = utils::pext64(cIdx, bPextMask) & bZeroingMask;
-
-    // std::cerr << "Ready to update cmat[" << i
-    //           << " (" << utils::as0b(i, 2 * cnQubits) << ")]\n"
-    //           << "  aIdxBegin: " << utils::as0b(i, 2 * cnQubits)
-    //           << " -> " << utils::pext64(i, aPextMask) << " ("
-    //           << utils::as0b(utils::pext64(i, aPextMask), 2 * anQubits)
-    //           << ") -> " << aIdxBegin << " ("
-    //           << utils::as0b(aIdxBegin, 2 * anQubits) << ")\n"
-    //           << "  bIdxBegin: " << utils::as0b(i, 2 * cnQubits)
-    //           << " -> "
-    //           << utils::as0b(utils::pext64(i, bPextMask), 2 * bnQubits)
-    //           << " -> " << utils::as0b(bIdxBegin, 2 * bnQubits)
-    //           << " = " << bIdxBegin << "\n";
-
-    for (uint64_t s = 0; s < (1ULL << contractionWidth); ++s) {
-      uint64_t aIdx = aIdxBegin;
-      uint64_t bIdx = bIdxBegin;
-      for (unsigned bit = 0; bit < contractionWidth; ++bit) {
-        if (s & (1 << bit)) {
-          aIdx += aSharedQubitShifts[bit];
-          bIdx += bSharedQubitShifts[bit];
-        }
-      }
-      // std::cerr << "  aIdx = " << aIdx << ": " << aCMat->data()[aIdx] << ";"
-                // << "  bIdx = " << bIdx << ": " << bCMat->data()[bIdx] << "\n";
-      cCMat.reData()[cIdx] += aCMat.reData()[aIdx] * bCMat.reData()[bIdx] -
-                              aCMat.imData()[aIdx] * bCMat.imData()[bIdx];
-      cCMat.imData()[cIdx] += aCMat.reData()[aIdx] * bCMat.imData()[bIdx] +
-                              aCMat.imData()[aIdx] * bCMat.reData()[bIdx];
-    }
-  }
+  matmulComplexSquareMatrix(aCMat, bCMat, cCMat);
+  
   return QuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(std::move(cCMat)),
     NoiseChannelPtr(nullptr), // No noise channel for now
