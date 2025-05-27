@@ -1,3 +1,4 @@
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/IntrinsicsNVPTX.h>
 #include <llvm/IR/Verifier.h>
 #include "cast/QuantumGate.h"
@@ -686,7 +687,9 @@ void genMatrixVectorMultiply_SharedTiled(
     B.SetInsertPoint(loopBodyBB);
     Value *cStartVal = cStartPHI;
 
-    auto barrierFunc = Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0);
+    auto barrierFuncName = Intrinsic::getName(Intrinsic::nvvm_barrier0);
+    auto barrierFuncTy = Intrinsic::getType(M.getContext(), Intrinsic::nvvm_barrier0);
+    auto barrierFunc = M.getOrInsertFunction(barrierFuncName, barrierFuncTy);
 
     Value *threadIdx32 = B.CreateIntrinsic(
         B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_tid_x, {});
@@ -951,9 +954,9 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
   // 4) Load chunk of columns from global memory => shared tile
   // barrier function
   Module *m = B.GetInsertBlock()->getModule();
-  auto barrierFunc = Intrinsic::getOrInsertDeclaration(
-      m, Intrinsic::nvvm_barrier0
-  );
+  auto barrierFuncName = Intrinsic::getName(Intrinsic::nvvm_barrier0);
+  auto barrierFuncTy = Intrinsic::getType(m->getContext(), Intrinsic::nvvm_barrier0);
+  auto barrierFunc = m->getOrInsertFunction(barrierFuncName, barrierFuncTy);
 
   // iVal = threadIdx.x
   Value *threadIdx32 = B.CreateIntrinsic(

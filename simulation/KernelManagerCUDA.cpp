@@ -81,6 +81,16 @@ void CUDAKernelManager::emitPTX(
   cuDeviceGetAttribute(
     &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
 
+  // cap compute capability to 9.0 because official LLVM 19 release only
+  // supports up to 9.0
+  if (10 * major + minor > 90) {
+    std::cerr << BOLDYELLOW("Warning: ")
+              << "Compute capability " << major << "." << minor
+              << " is not supported by official LLVM 19 release. "
+              << "Using sm_90 instead.\n";
+    major = 9;
+    minor = 0;
+  }
   std::ostringstream archOss;
   archOss << "sm_" << major << minor;
   std::string archString = archOss.str();
