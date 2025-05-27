@@ -3,8 +3,8 @@
 // #define LLVM_DEBUG(X) X
 #include <llvm/IR/IntrinsicsX86.h>
 
-#include "cast/QuantumGate.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyQuantumGate.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "simulation/KernelManager.h"
 #include "simulation/KernelGenInternal.h"
 
@@ -59,7 +59,7 @@ struct IRMatDataCUDA {
 };
 
 inline std::vector<IRMatDataCUDA> getMatrixData(
-    IRBuilder<>& B, const GateMatrix& gateMatrix,
+    IRBuilder<>& B, const LegacyGateMatrix& gateMatrix,
     const CPUKernelGenConfig& config) {
   const int k = gateMatrix.nQubits();
   const unsigned K = 1 << k;
@@ -118,7 +118,7 @@ inline std::vector<IRMatDataCUDA> getMatrixData(
 
 CPUKernelManager& CPUKernelManager::genCPUGate(
     const CPUKernelGenConfig& config,
-    std::shared_ptr<QuantumGate> gate, const std::string& funcName) {
+    std::shared_ptr<LegacyQuantumGate> gate, const std::string& funcName) {
   const unsigned s = config.simd_s;
   const unsigned S = 1ULL << s;
   const unsigned k = gate->qubits.size();
@@ -603,8 +603,8 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
   return *this;
 }
 
-CPUKernelManager& CPUKernelManager::genCPUGatesFromCircuitGraph(
-    const CPUKernelGenConfig& config, const CircuitGraph& graph,
+CPUKernelManager& CPUKernelManager::genCPUGatesFromLegacyCircuitGraph(
+    const CPUKernelGenConfig& config, const LegacyCircuitGraph& graph,
     const std::string& graphName) {
   const auto allBlocks = graph.getAllBlocks();
   const auto mangledName = internal::mangleGraphName(graphName);

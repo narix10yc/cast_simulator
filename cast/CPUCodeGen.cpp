@@ -34,7 +34,7 @@
 //   return os;
 // }
 //
-// void CodeGeneratorCPU::generate(const CircuitGraph& graph, int debugLevel,
+// void CodeGeneratorCPU::generate(const LegacyCircuitGraph& graph, int debugLevel,
 //                                 bool forceInOrder) {
 //   bool isSepKernel =
 //       (config.irConfig.ampFormat == IRGeneratorConfig::SepFormat);
@@ -438,7 +438,7 @@
 //
 // } // anonymous namespace
 //
-// void cast::generateCpuIrForRecompilation(const CircuitGraph& graph,
+// void cast::generateCpuIrForRecompilation(const LegacyCircuitGraph& graph,
 //                                          const std::string& dir,
 //                                          const CodeGeneratorCPUConfig& config,
 //                                          int nthreads) {

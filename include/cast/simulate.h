@@ -1,8 +1,8 @@
 #ifndef CAST_SIMULATE_H
 #define CAST_SIMULATE_H
 
-#include "cast/CircuitGraph.h"
-#include "cast/QuantumGate.h"
+#include "cast/LegacyCircuitGraph.h"
+#include "cast/LegacyQuantumGate.h"
 #include <iomanip>
 
 namespace cast::simulate {
@@ -15,7 +15,7 @@ inline size_t insertZeroBit(size_t number, int index) {
 }
 
 template<typename real_t = double>
-static void applyGeneral(std::complex<real_t>* sv, const cast::GateMatrix& gate,
+static void applyGeneral(std::complex<real_t>* sv, const cast::LegacyGateMatrix& gate,
                          const std::vector<int>& qubits, unsigned nQubits) {
   assert(gate.nQubits == qubits.size());
   assert(gate.isConstantMatrix());

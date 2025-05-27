@@ -7,7 +7,7 @@
 
 #include "openqasm/parser.h"
 #include "openqasm/ast.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "simulation/KernelManager.h"
 #include "timeit/timeit.h"
@@ -51,16 +51,16 @@ std::unique_ptr<openqasm::ast::RootNode> parseQasmFileOnce(const std::string& qa
   return root;
 }
 
-std::unique_ptr<cast::CircuitGraph> buildCircuitGraphInPlace(
+std::unique_ptr<cast::LegacyCircuitGraph> buildLegacyCircuitGraphInPlace(
     const openqasm::ast::RootNode& root)
 {
-  auto graphPtr = std::make_unique<cast::CircuitGraph>();
-  root.toCircuitGraph(*graphPtr);
+  auto graphPtr = std::make_unique<cast::LegacyCircuitGraph>();
+  root.toLegacyCircuitGraph(*graphPtr);
   return graphPtr;
 }
 
 void applyFusionStrategy(
-  cast::CircuitGraph& graph,
+  cast::LegacyCircuitGraph& graph,
   FusionStrategy strategy,
   int naiveMaxK,
   const std::string& modelPath,
@@ -107,9 +107,9 @@ void applyFusionStrategy(
 }
 
 
-// Measure how long genCUDAGatesFromCircuitGraph(...) takes
+// Measure how long genCUDAGatesFromLegacyCircuitGraph(...) takes
 double measureKernelGenerationTime(
-  const cast::CircuitGraph& graph,
+  const cast::LegacyCircuitGraph& graph,
   int blockSize,
   PrecisionMode precision,
   cast::CUDAKernelGenConfig::MatrixLoadMode loadMode,
@@ -126,7 +126,7 @@ double measureKernelGenerationTime(
   timeit::Timer timer(/*replication=*/3);
 
   timeit::TimingResult tr = timer.timeit([&]() {
-    kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, graph, "testCircuit");
+    kernelMgr.genCUDAGatesFromLegacyCircuitGraph(genConfig, graph, "testCircuit");
   });
 
   double timeSec = tr.med;
@@ -207,13 +207,13 @@ int main() {
         }
 
         // Build a fresh circuit from the AST
-        auto graphPtr = buildCircuitGraphInPlace(*root);
+        auto graphPtr = buildLegacyCircuitGraphInPlace(*root);
         if (!graphPtr) {
-          std::cerr << "Failed to build CircuitGraph\n";
+          std::cerr << "Failed to build LegacyCircuitGraph\n";
           continue;
         }
 
-        cast::CircuitGraph& graph = *graphPtr;
+        cast::LegacyCircuitGraph& graph = *graphPtr;
         int nQubits = graph.nQubits;
 
         // Apply chosen fusion

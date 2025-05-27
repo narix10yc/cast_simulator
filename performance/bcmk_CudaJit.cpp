@@ -7,7 +7,7 @@
 
 #include "openqasm/parser.h"
 #include "openqasm/ast.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "simulation/KernelManager.h"
 #include "timeit/timeit.h"
@@ -52,17 +52,17 @@ std::unique_ptr<openqasm::ast::RootNode> parseQasmFileOnce(const std::string& qa
 }
 
 
-std::unique_ptr<cast::CircuitGraph> buildCircuitGraphInPlace(
+std::unique_ptr<cast::LegacyCircuitGraph> buildLegacyCircuitGraphInPlace(
     const openqasm::ast::RootNode& root)
 {
-  auto graphPtr = std::make_unique<cast::CircuitGraph>();
-  root.toCircuitGraph(*graphPtr);
+  auto graphPtr = std::make_unique<cast::LegacyCircuitGraph>();
+  root.toLegacyCircuitGraph(*graphPtr);
   return graphPtr;
 }
 
 
 void applyFusionStrategy(
-  cast::CircuitGraph& graph,
+  cast::LegacyCircuitGraph& graph,
   FusionStrategy strategy,
   int naiveMaxK,
   const std::string& modelPath,
@@ -193,12 +193,12 @@ int main() {
           if (strategy != FusionStrategy::Naive) continue;
         }
 
-        auto graphPtr = buildCircuitGraphInPlace(*root);
+        auto graphPtr = buildLegacyCircuitGraphInPlace(*root);
         if (!graphPtr) {
           std::cerr << "Failed to build circuit for " << qasmFile << "\n";
           continue;
         }
-        cast::CircuitGraph& graph = *graphPtr;
+        cast::LegacyCircuitGraph& graph = *graphPtr;
         int nQubits = graph.nQubits;
 
         applyFusionStrategy(graph, strategy, naiveMaxK, adaptiveModelPath, cudaModelPath);
@@ -214,7 +214,7 @@ int main() {
                 genConfig.precision      = bprec;
                 genConfig.matrixLoadMode = loadMode;
 
-                kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, graph, "testCircuit");
+                kernelMgr.genCUDAGatesFromLegacyCircuitGraph(genConfig, graph, "testCircuit");
 
                 auto [ptxMs, jitMs] = measureJITOverhead(kernelMgr, nThreads, optLevel);
 

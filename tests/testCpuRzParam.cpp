@@ -11,8 +11,8 @@ using namespace cast;
 using namespace utils;
 
 namespace {
-  GateMatrix makeRzSymbolicMatrix() {
-    GateMatrix::p_matrix_t pMat(2);
+  LegacyGateMatrix makeRzSymbolicMatrix() {
+    LegacyGateMatrix::p_matrix_t pMat(2);
 
     int var = 0; 
     Polynomial c( Monomial::Cosine(var) );
@@ -28,16 +28,16 @@ namespace {
     pMat(1,0) = minusI_s;
     pMat(1,1) = c;
 
-    // Wrapping in a GateMatrix => isConvertibleToCMat = UnConvertible
+    // Wrapping in a LegacyGateMatrix => isConvertibleToCMat = UnConvertible
     // => getConstantMatrix() = null
-    GateMatrix gmat(pMat);
+    LegacyGateMatrix gmat(pMat);
     return gmat;
   }
 
-  std::shared_ptr<QuantumGate> getRzSymbolicGate(int q) {
-      GateMatrix rzSymbolic = makeRzSymbolicMatrix();
-      QuantumGate gate(rzSymbolic, q);
-      return std::make_shared<QuantumGate>(gate);
+  std::shared_ptr<LegacyQuantumGate> getRzSymbolicGate(int q) {
+      LegacyGateMatrix rzSymbolic = makeRzSymbolicMatrix();
+      LegacyQuantumGate gate(rzSymbolic, q);
+      return std::make_shared<LegacyQuantumGate>(gate);
   }
 
   std::vector<double> buildRzNumericMatrix(double theta) {

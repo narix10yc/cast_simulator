@@ -24,9 +24,9 @@ int main(int argc, char* *argv) {
 
   const int nQubits = 10;
 
-  auto mat = GateMatrix::FromName("u3", {0.92, 0.46, 0.22});
-  // auto mat = GateMatrix::FromName("h");
-  auto gate = QuantumGate(mat, {targetQ});
+  auto mat = LegacyGateMatrix::FromName("u3", {0.92, 0.46, 0.22});
+  // auto mat = LegacyGateMatrix::FromName("h");
+  auto gate = LegacyQuantumGate(mat, {targetQ});
   gate = gate.lmatmul({mat, {targetQ + 1}});
   // gate = gate.lmatmul({ mat , {9}});
 

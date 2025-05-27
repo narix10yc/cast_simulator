@@ -7,7 +7,7 @@
 
 #include "openqasm/parser.h"
 #include "openqasm/ast.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "simulation/KernelManager.h"
 #include "simulation/StatevectorCUDA.h"
@@ -53,19 +53,19 @@ std::unique_ptr<openqasm::ast::RootNode> parseQasmFileOnce(const std::string& qa
   return root;
 }
 
-// Build a CircuitGraph in place (stored in unique_ptr to avoid copies)
-std::unique_ptr<cast::CircuitGraph> buildCircuitGraphInPlace(
+// Build a LegacyCircuitGraph in place (stored in unique_ptr to avoid copies)
+std::unique_ptr<cast::LegacyCircuitGraph> buildLegacyCircuitGraphInPlace(
     const openqasm::ast::RootNode& root)
 {
-  auto graphPtr = std::make_unique<cast::CircuitGraph>();
-  root.toCircuitGraph(*graphPtr);
+  auto graphPtr = std::make_unique<cast::LegacyCircuitGraph>();
+  root.toLegacyCircuitGraph(*graphPtr);
   return graphPtr;
 }
 
 
 // Apply the chosen fusion strategy
 void applyFusionStrategy(
-  cast::CircuitGraph& graph,
+  cast::LegacyCircuitGraph& graph,
   FusionStrategy strategy,
   int naiveMaxK,
   const std::string& modelPath,
@@ -114,7 +114,7 @@ void applyFusionStrategy(
 
 // Measure how long it takes to execute the circuit.
 double measureKernelExecutionTime(
-  const cast::CircuitGraph& graph,
+  const cast::LegacyCircuitGraph& graph,
   int blockSize,
   PrecisionMode precision,
   cast::CUDAKernelGenConfig::MatrixLoadMode loadMode,
@@ -129,12 +129,12 @@ double measureKernelExecutionTime(
   genConfig.precision      = (precision == PrecisionMode::Float32) ? 32 : 64;
   genConfig.matrixLoadMode = loadMode;
 
-  kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, graph, "testCircuit");
+  kernelMgr.genCUDAGatesFromLegacyCircuitGraph(genConfig, graph, "testCircuit");
 
   kernelMgr.emitPTX(/*nThreads=*/1, optLevel, /*verbose=*/0);
   kernelMgr.initCUJIT(/*nThreads=*/1, /*verbose=*/0);
 
-  auto kernels = kernelMgr.collectCUDAKernelsFromCircuitGraph("testCircuit");
+  auto kernels = kernelMgr.collectCUDAKernelsFromLegacyCircuitGraph("testCircuit");
 
   int nQubits = graph.nQubits;
   utils::StatevectorCUDA<double> sv(nQubits);
@@ -237,13 +237,13 @@ int main() {
         }
 
         // Build a fresh circuit
-        auto graphPtr = buildCircuitGraphInPlace(*root);
+        auto graphPtr = buildLegacyCircuitGraphInPlace(*root);
         if (!graphPtr) {
-          std::cerr << "Failed to build CircuitGraph\n";
+          std::cerr << "Failed to build LegacyCircuitGraph\n";
           continue;
         }
 
-        cast::CircuitGraph& graph = *graphPtr;
+        cast::LegacyCircuitGraph& graph = *graphPtr;
         int nQubits = graph.nQubits;
 
         // Apply fusion

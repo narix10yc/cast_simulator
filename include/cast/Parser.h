@@ -12,7 +12,7 @@
 #include "utils/iocolor.h"
 
 namespace cast {
-class CircuitGraph;
+class LegacyCircuitGraph;
 }
 
 namespace cast {

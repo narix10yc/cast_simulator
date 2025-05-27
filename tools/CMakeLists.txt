@@ -10,16 +10,16 @@ if (CAST_USE_CUDA)
 endif()
 
 add_executable(unit_test "test_main.cpp")
-target_link_libraries(unit_test cast simulation utils TestKit)
+target_link_libraries(unit_test cast simulation TestKit adt timeit)
 
 add_executable(qasm_to_cast "qasm_to_cast.cpp")
 target_link_libraries(qasm_to_cast cast qasm simulation)
 
 add_executable(qasm_to_qch "qasm_to_qch.cpp")
-target_link_libraries(qasm_to_qch cast qasm utils)
+target_link_libraries(qasm_to_qch cast qasm)
 
 add_executable(kernel "kernel.cpp")
-target_link_libraries(kernel qasm cast simulation utils timeit)
+target_link_libraries(kernel qasm cast simulation timeit)
 
 if (CAST_USE_CUDA)
   add_executable(cuda_playground "cuda_playground.cu")
@@ -27,7 +27,7 @@ if (CAST_USE_CUDA)
 endif()
 
 add_executable(scratch "scratch.cpp")
-target_link_libraries(scratch utils cast simulation timeit)
+target_link_libraries(scratch utils cast adt simulation timeit)
 
 add_executable(fpga_playground "fpga_playground.cpp")
 target_link_libraries(fpga_playground qasm cast simulation)
@@ -36,11 +36,11 @@ add_executable(fpga_vary_buffer "fpga_vary_buffer.cpp")
 target_link_libraries(fpga_vary_buffer qasm cast simulation)
 
 add_executable(cost_model "cost_model.cpp")
-target_link_libraries(cost_model qasm cast simulation timeit utils)
+target_link_libraries(cost_model qasm cast simulation timeit)
 
 if (CAST_USE_CUDA)
   add_executable(cost_model_cuda "cost_model_cuda.cpp")
-  target_link_libraries(cost_model_cuda qasm cast simulation timeit utils)
+  target_link_libraries(cost_model_cuda qasm cast simulation timeit)
 endif()
 
 add_executable(blank "blank.cpp")

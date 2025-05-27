@@ -7,7 +7,7 @@
 
 #include "openqasm/parser.h"
 #include "openqasm/ast.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "simulation/KernelManager.h"
 #include "simulation/StatevectorCUDA.h"
@@ -101,18 +101,18 @@ int main() {
     return 1;
   }
 
-  // Build Time (ephemeral CircuitGraph)
+  // Build Time (ephemeral LegacyCircuitGraph)
   Timer buildTimer(nReps);
   TimingResult buildTR = buildTimer.timeit([&]() {
-    auto tmp = std::make_unique<cast::CircuitGraph>();
-    root->toCircuitGraph(*tmp);
+    auto tmp = std::make_unique<cast::LegacyCircuitGraph>();
+    root->toLegacyCircuitGraph(*tmp);
   });
 
   printTimingStats("2) Build Time", buildTR);
 
-  // Build the real CircuitGraph we will keep
-  auto graphPtr = std::make_unique<cast::CircuitGraph>();
-  root->toCircuitGraph(*graphPtr);
+  // Build the real LegacyCircuitGraph we will keep
+  auto graphPtr = std::make_unique<cast::LegacyCircuitGraph>();
+  root->toLegacyCircuitGraph(*graphPtr);
 
   // Prepare caches in unique_ptr so they remain alive
   std::unique_ptr<PerformanceCache> adaptiveCachePtr;
@@ -149,8 +149,8 @@ int main() {
   // Fusion Time (ephemeral circuit used only for timing)
   Timer fusionTimer(nReps);
   TimingResult fusionTR = fusionTimer.timeit([&]() {
-    auto tmp = std::make_unique<cast::CircuitGraph>();
-    root->toCircuitGraph(*tmp);
+    auto tmp = std::make_unique<cast::LegacyCircuitGraph>();
+    root->toLegacyCircuitGraph(*tmp);
 
     FusionConfig fusionConfig = FusionConfig::Aggressive;
     fusionConfig.nThreads  = -1;
@@ -218,7 +218,7 @@ int main() {
   Timer kernelGenTimer(nReps);
   TimingResult kernelGenTR = kernelGenTimer.timeit([&]() {
     CUDAKernelManager localKM;
-    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+    localKM.genCUDAGatesFromLegacyCircuitGraph(genConfig, *graphPtr, "testCircuit");
   });
 
   printTimingStats("4) Kernel Gen Time", kernelGenTR);
@@ -231,7 +231,7 @@ int main() {
     // preMethod:
     [&]() {
       localKMptx = std::make_unique<CUDAKernelManager>();
-      localKMptx->genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+      localKMptx->genCUDAGatesFromLegacyCircuitGraph(genConfig, *graphPtr, "testCircuit");
     },
     // timedMethod: measure initCUJIT
     [&]() {
@@ -259,7 +259,7 @@ int main() {
     // preMethod:
     [&]() {
       localKM = std::make_unique<CUDAKernelManager>();
-      localKM->genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+      localKM->genCUDAGatesFromLegacyCircuitGraph(genConfig, *graphPtr, "testCircuit");
       localKM->emitPTX(nThreads, optLevel, 0);
     },
     // timedMethod: measure initCUJIT
@@ -298,7 +298,7 @@ int main() {
 
   // Final kernel manager that we'll actually use for execution
   CUDAKernelManager kernelMgr;
-  kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+  kernelMgr.genCUDAGatesFromLegacyCircuitGraph(genConfig, *graphPtr, "testCircuit");
 
   auto& allKernels = kernelMgr.kernels(); // returns std::vector<CUDAKernelInfo>
   std::cout << "[LOG] Number of generated GPU kernels: " 
@@ -313,7 +313,7 @@ int main() {
   
   kernelMgr.initCUJIT(nThreads, 0);
 
-  auto kernels = kernelMgr.collectCUDAKernelsFromCircuitGraph("testCircuit");
+  auto kernels = kernelMgr.collectCUDAKernelsFromLegacyCircuitGraph("testCircuit");
 
   std::cerr << "Timing execution now!\n";
 

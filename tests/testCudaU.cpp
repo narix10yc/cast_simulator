@@ -26,11 +26,11 @@ static void f() {
   };
 
   // generate random unitary gates
-  std::vector<std::shared_ptr<QuantumGate>> gates;
+  std::vector<std::shared_ptr<LegacyQuantumGate>> gates;
   gates.reserve(nQubits);
   for (int q = 0; q < nQubits; q++) {
     gates.emplace_back(
-      std::make_shared<QuantumGate>(QuantumGate::RandomUnitary(q)));
+      std::make_shared<LegacyQuantumGate>(LegacyQuantumGate::RandomUnitary(q)));
   }
 
   CUDAKernelGenConfig cudaGenConfig;

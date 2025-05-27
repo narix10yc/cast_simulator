@@ -1,4 +1,4 @@
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/FPGAInst.h"
 #include "cast/Fusion.h"
 #include "cast/Parser.h"
@@ -163,7 +163,7 @@ int costKindToNumNormalizedCycle(Instruction::CostKind kind) {
 }
 
 void runExperiment(
-    std::function<void(CircuitGraph&)> f,
+    std::function<void(LegacyCircuitGraph&)> f,
     std::ostream& os, const std::string& circuitName) {
   int nLocalQubits = 14;
   int gridSize = 4;
@@ -226,7 +226,7 @@ void runExperiment(
   };
 
   const auto run = [&](const FPGAInstGenConfig& instGenConfig) {
-    CircuitGraph graph;
+    LegacyCircuitGraph graph;
     f(graph);
     auto tBegin = std::chrono::high_resolution_clock::now();
     auto instructions = fpga::genInstruction(graph, instGenConfig);
@@ -240,7 +240,7 @@ void runExperiment(
     writCSVLine(os, instStats, cycleStats) << "," << std::scientific << tInSec << "\n";
   };
 
-  CircuitGraph tmpGraph;
+  LegacyCircuitGraph tmpGraph;
   f(tmpGraph);
   auto nQubits = tmpGraph.nQubits;
   auto allBlocks = tmpGraph.getAllBlocks();
@@ -291,8 +291,8 @@ void checkOutputFileName() {
 void processQFT(std::ofstream& oFile, int nQubits) {
   std::string circuit = "QFT-" + std::to_string(nQubits);
   std::cerr << "Processing " << circuit << "\n";
-  runExperiment([nQubits](CircuitGraph& graph) {
-    CircuitGraph::QFTCircuit(nQubits, graph);
+  runExperiment([nQubits](LegacyCircuitGraph& graph) {
+    LegacyCircuitGraph::QFTCircuit(nQubits, graph);
   }, oFile, circuit);
 }
 
@@ -305,7 +305,7 @@ void processFile(const std::filesystem::path& path, std::ofstream& oFile) {
     return;
   }
 
-  runExperiment([path](CircuitGraph& graph) {
+  runExperiment([path](LegacyCircuitGraph& graph) {
     openqasm::Parser qasmParser(path.string(), -1);
     qasmParser.parse()->toCircuitGraph(graph);
     // CircuitGraph::QFTCircuit(32, graph);

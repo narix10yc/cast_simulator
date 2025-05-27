@@ -1,4 +1,4 @@
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 #include <cmath>
@@ -7,14 +7,14 @@
 using namespace cast;
 using namespace IOColor;
 
-std::ostream& QuantumGate::displayInfo(std::ostream& os) const {
-  os << CYAN("QuantumGate Info\n") << "- Target Qubits ";
+std::ostream& LegacyQuantumGate::displayInfo(std::ostream& os) const {
+  os << CYAN("LegacyQuantumGate Info\n") << "- Target Qubits ";
   utils::printArray(os, llvm::ArrayRef(qubits.begin(), qubits.size())) << "\n";
   os << "- Matrix:\n";
   return gateMatrix.printCMat(os);
 }
 
-void QuantumGate::sortQubits() {
+void LegacyQuantumGate::sortQubits() {
   const auto nQubits = qubits.size();
   llvm::SmallVector<int> indices(nQubits);
   for (unsigned i = 0; i < nQubits; i++)
@@ -32,11 +32,11 @@ void QuantumGate::sortQubits() {
   gateMatrix.permuteSelf({indices.begin(), indices.end()});
 }
 
-// helper functions in QuantumGate::lmatmul
+// helper functions in LegacyQuantumGate::lmatmul
 namespace {
-// inline QuantumGate lmatmul_up_up(
-//     const GateMatrix::up_matrix_t& aUp,
-//     const GateMatrix::up_matrix_t& bUp,
+// inline LegacyQuantumGate lmatmul_up_up(
+//     const LegacyGateMatrix::up_matrix_t& aUp,
+//     const LegacyGateMatrix::up_matrix_t& bUp,
 //     const llvm::SmallVector<int>& aQubits,
 //     const llvm::SmallVector<int>& bQubits) {
 //   const int anQubits = aQubits.size();
@@ -63,18 +63,18 @@ namespace {
 //     i++;
 //   }
 //
-//   GateMatrix::up_matrix_t cUp(1 << cnQubits);
+//   LegacyGateMatrix::up_matrix_t cUp(1 << cnQubits);
 //   for (uint64_t idx = 0; idx < (1 << cnQubits); idx++) {
 //     auto bIdx = utils::pext64(idx, bMask, cQubits.back());
 //     auto aIdx = utils::pext64(idx, aMask, cQubits.back());
 //     auto phase = bUp[bIdx].phase + aUp[aIdx].phase;
 //     cUp[idx] = {bUp[bIdx].index, phase};
 //   }
-//   return QuantumGate(GateMatrix(cUp), cQubits);
+//   return LegacyQuantumGate(LegacyGateMatrix(cUp), cQubits);
 // }
 } // anonymous namespace
 
-QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
+LegacyQuantumGate LegacyQuantumGate::lmatmul(const LegacyQuantumGate& other) const {
   // C = B.lmatmul(A) returns matrix multiplication C = AB
   // A is other, B is this
   const auto& aQubits = other.qubits;
@@ -173,11 +173,11 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
   // }
 
   // const matrix
-  const GateMatrix::c_matrix_t* aCMat;
-  const GateMatrix::c_matrix_t* bCMat;
+  const LegacyGateMatrix::c_matrix_t* aCMat;
+  const LegacyGateMatrix::c_matrix_t* bCMat;
   if ((aCMat = other.gateMatrix.getConstantMatrix())
       && (bCMat = gateMatrix.getConstantMatrix())) {
-    GateMatrix::c_matrix_t cCMat(1 << cnQubits);
+    LegacyGateMatrix::c_matrix_t cCMat(1 << cnQubits);
     // main loop
     for (uint64_t i = 0ULL; i < (1ULL << (2 * cnQubits)); i++) {
       uint64_t aIdxBegin = utils::pext64(i, aPextMask) & aZeroingMask;
@@ -210,13 +210,13 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
         cCMat[i] += aCMat->data()[aIdx] * bCMat->data()[bIdx];
       }
     }
-    return QuantumGate(GateMatrix(cCMat), cQubits);
+    return LegacyQuantumGate(LegacyGateMatrix(cCMat), cQubits);
   }
 
   // otherwise, parametrised matrix
   auto aPMat = other.gateMatrix.getParametrizedMatrix();
   auto bPMat = gateMatrix.getParametrizedMatrix();
-  GateMatrix::p_matrix_t cPMat(1 << cnQubits);
+  LegacyGateMatrix::p_matrix_t cPMat(1 << cnQubits);
   // main loop
   for (uint64_t i = 0ULL; i < (1ULL << (2 * cnQubits)); i++) {
     uint64_t aIdxBegin = utils::pdep64(i, aPextMask) & aZeroingMask;
@@ -235,11 +235,11 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
     }
   }
 
-  return QuantumGate(GateMatrix(cPMat), cQubits);
+  return LegacyQuantumGate(LegacyGateMatrix(cPMat), cQubits);
 }
 
-namespace { // QuantumGate::opCount helper functions
-inline int opCount_c(const GateMatrix::c_matrix_t& mat, double zeroTol) {
+namespace { // LegacyQuantumGate::opCount helper functions
+inline int opCount_c(const LegacyGateMatrix::c_matrix_t& mat, double zeroTol) {
   int count = 0;
   for (const auto& data : mat) {
     if (std::abs(data.real()) >= zeroTol)
@@ -250,7 +250,7 @@ inline int opCount_c(const GateMatrix::c_matrix_t& mat, double zeroTol) {
   return 2 * count;
 }
 
-inline int opCount_p(const GateMatrix::p_matrix_t& mat, double zeroTol) {
+inline int opCount_p(const LegacyGateMatrix::p_matrix_t& mat, double zeroTol) {
   int count = 0;
   for (const auto& data : mat) {
     auto ev = data.getValue();
@@ -267,7 +267,7 @@ inline int opCount_p(const GateMatrix::p_matrix_t& mat, double zeroTol) {
 
 } // anonymous namespace
 
-double QuantumGate::opCount(double zeroTol) const {
+double LegacyQuantumGate::opCount(double zeroTol) const {
   if (opCountCache >= 0)
     return opCountCache;
 
@@ -280,7 +280,7 @@ double QuantumGate::opCount(double zeroTol) const {
   return -1;
 }
 
-// bool QuantumGate::approximateGateMatrix(double thres) {
+// bool LegacyQuantumGate::approximateLegacyGateMatrix(double thres) {
 //     const auto approxCplx = [thres=thres](std::complex<double>& cplx) -> bool
 //     {
 //         bool flag = false;
@@ -312,7 +312,7 @@ double QuantumGate::opCount(double zeroTol) const {
 //         return flag;
 //     };
 
-//     auto* p = std::get_if<GateMatrix::c_matrix_t>(&gateMatrix._matrix);
+//     auto* p = std::get_if<LegacyGateMatrix::c_matrix_t>(&gateMatrix._matrix);
 //     if (p == nullptr)
 //         return false;
 //     bool flag = false;

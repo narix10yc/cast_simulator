@@ -2,7 +2,7 @@
 #include "timeit/timeit.h"
 
 #include "cast/Parser.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "openqasm/parser.h"
 
@@ -51,11 +51,11 @@ int main(int argc, const char** argv) {
   openqasm::Parser qasmParser(ArgInputFilename, 0);
   auto qasmRoot = qasmParser.parse();
 
-  // This is temporary work-around as CircuitGraph does not allow copy yet
-  CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
-  qasmRoot->toCircuitGraph(graphNoFuse);
-  qasmRoot->toCircuitGraph(graphNaiveFuse);
-  qasmRoot->toCircuitGraph(graphAdaptiveFuse);
+  // This is temporary work-around as LegacyCircuitGraph does not allow copy yet
+  LegacyCircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
+  qasmRoot->toLegacyCircuitGraph(graphNoFuse);
+  qasmRoot->toLegacyCircuitGraph(graphNaiveFuse);
+  qasmRoot->toLegacyCircuitGraph(graphAdaptiveFuse);
 
   FusionConfig fusionConfig = FusionConfig::Aggressive;
   fusionConfig.precision = 64;
@@ -80,19 +80,19 @@ int main(int argc, const char** argv) {
   // Generate kernels
   if (ArgRunNoFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromCircuitGraph(
+      kernelMgr.genCPUGatesFromLegacyCircuitGraph(
         kernelGenConfig, graphNoFuse, "graphNoFuse");
     }, "Generate No-fuse Kernels");
   }
   if (ArgRunNaiveFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromCircuitGraph(
+      kernelMgr.genCPUGatesFromLegacyCircuitGraph(
         kernelGenConfig, graphNaiveFuse, "graphNaiveFuse");
     }, "Generate Naive-fused Kernels");
   }
   if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromCircuitGraph(
+      kernelMgr.genCPUGatesFromLegacyCircuitGraph(
         kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
     }, "Generate Adaptive-fused Kernels");
   }
@@ -112,7 +112,7 @@ int main(int argc, const char** argv) {
     if (ArgRunNoFuse) {
       opCountTotal = 0.0;
       kernelsNoFuse = 
-        kernelMgr.collectCPUKernelsFromCircuitGraph("graphNoFuse");
+        kernelMgr.collectCPUKernelsFromLegacyCircuitGraph("graphNoFuse");
       for (const auto* kernel : kernelsNoFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "No-fuse: nGates = " << kernelsNoFuse.size()
@@ -121,7 +121,7 @@ int main(int argc, const char** argv) {
     if (ArgRunNaiveFuse) {
       opCountTotal = 0.0;
       kernelsNaiveFuse = 
-        kernelMgr.collectCPUKernelsFromCircuitGraph("graphNaiveFuse");
+        kernelMgr.collectCPUKernelsFromLegacyCircuitGraph("graphNaiveFuse");
       for (const auto* kernel : kernelsNaiveFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "Naive-fuse: nGates = " << kernelsNaiveFuse.size()
@@ -134,7 +134,7 @@ int main(int argc, const char** argv) {
       }
       opCountTotal = 0.0;
       kernelAdaptiveFuse = 
-        kernelMgr.collectCPUKernelsFromCircuitGraph("graphAdaptiveFuse");
+        kernelMgr.collectCPUKernelsFromLegacyCircuitGraph("graphAdaptiveFuse");
       for (const auto* kernel : kernelAdaptiveFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "Adaptive-fuse: nGates = " << kernelAdaptiveFuse.size()

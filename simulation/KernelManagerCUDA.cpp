@@ -11,8 +11,8 @@
 #include "llvm/TargetParser/Host.h"
 #include "llvm/IR/Verifier.h"
 
-#include "cast/QuantumGate.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyQuantumGate.h"
+#include "cast/LegacyCircuitGraph.h"
 
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
@@ -140,7 +140,7 @@ void CUDAKernelManager::emitPTX(
 }
 
 std::vector<CUDAKernelInfo*>
-CUDAKernelManager::collectCUDAKernelsFromCircuitGraph(
+CUDAKernelManager::collectCUDAKernelsFromLegacyCircuitGraph(
     const std::string& graphName) {
   std::vector<CUDAKernelInfo*> kernelInfos;
   const auto mangledName = internal::mangleGraphName(graphName);

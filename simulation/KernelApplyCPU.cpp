@@ -1,5 +1,5 @@
 #include "simulation/KernelManager.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 using namespace cast;
 
@@ -102,7 +102,7 @@ void CPUKernelManager::applyCPUKernelMultithread(
 }
 
 std::vector<CPUKernelInfo*>
-CPUKernelManager::collectCPUKernelsFromCircuitGraph(const std::string& graphName) {
+CPUKernelManager::collectCPUKernelsFromLegacyCircuitGraph(const std::string& graphName) {
   assert(isJITed() && "Must initialize JIT session "
                       "before calling KernelManager::collectCPUGraphKernels");
   std::vector<CPUKernelInfo*> kernelInfos;

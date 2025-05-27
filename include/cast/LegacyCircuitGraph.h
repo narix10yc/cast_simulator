@@ -1,7 +1,7 @@
 #ifndef CAST_CIRCUITGRAPH_H
 #define CAST_CIRCUITGRAPH_H
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "cast/CircuitGraphContext.h"
 #include "utils/List.h"
 
@@ -12,11 +12,11 @@
 
 namespace cast {
 
-class CircuitGraph;
+class LegacyCircuitGraph;
 
 class GateNode {
 public:
-  friend class CircuitGraph;
+  friend class LegacyCircuitGraph;
 
   struct ConnectionInfo {
     int qubit;
@@ -25,10 +25,10 @@ public:
   };
 
   int id;
-  std::shared_ptr<QuantumGate> quantumGate;
+  std::shared_ptr<LegacyQuantumGate> quantumGate;
   std::vector<ConnectionInfo> connections;
 
-  GateNode(std::shared_ptr<QuantumGate> quantumGate, const CircuitGraph& graph);
+  GateNode(std::shared_ptr<LegacyQuantumGate> quantumGate, const LegacyCircuitGraph& graph);
 
   GateNode(const GateNode&) = delete;
   GateNode(GateNode&&) = delete;
@@ -63,10 +63,10 @@ public:
 ///
 /// \c GateBlock can be `singleton`: when it contains exactly one \c GateNode .
 /// In such cases, their respective \c quantumGate member will point to the same
-/// \c QuantumGate object.
+/// \c LegacyQuantumGate object.
 class GateBlock {
 public:
-  friend class CircuitGraph;
+  friend class LegacyCircuitGraph;
 
   struct WireInfo {
     int qubit;
@@ -76,7 +76,7 @@ public:
 
   int id;
   std::vector<WireInfo> wires;
-  std::shared_ptr<QuantumGate> quantumGate;
+  std::shared_ptr<LegacyQuantumGate> quantumGate;
 
   GateBlock();
   explicit GateBlock(GateNode* gateNode);
@@ -128,7 +128,7 @@ public:
 };
 
 /// TODO: Refactor to use std::list
-class CircuitGraph {
+class LegacyCircuitGraph {
 private:
   std::unique_ptr<CircuitGraphContext> _context;
 public:
@@ -147,21 +147,21 @@ private:
 public:
   int nQubits;
 
-  CircuitGraph()
+  LegacyCircuitGraph()
   : _context(std::make_unique<CircuitGraphContext>()), _tile(), nQubits(0) {
     _tile.emplace_back();
   }
 
-  CircuitGraph(const CircuitGraph&) = delete;
-  CircuitGraph(CircuitGraph&&) = delete;
-  CircuitGraph& operator=(const CircuitGraph&) = delete;
-  CircuitGraph& operator=(CircuitGraph&&) = delete;
+  LegacyCircuitGraph(const LegacyCircuitGraph&) = delete;
+  LegacyCircuitGraph(LegacyCircuitGraph&&) = delete;
+  LegacyCircuitGraph& operator=(const LegacyCircuitGraph&) = delete;
+  LegacyCircuitGraph& operator=(LegacyCircuitGraph&&) = delete;
 
-  static void QFTCircuit(int nQubits, CircuitGraph& graph);
-  static CircuitGraph ALACircuit(int nQubits, int nrounds);
+  static void QFTCircuit(int nQubits, LegacyCircuitGraph& graph);
+  static LegacyCircuitGraph ALACircuit(int nQubits, int nrounds);
 
-  static CircuitGraph GetTestCircuit(
-    const GateMatrix& gateMatrix, int nQubits, int nrounds);
+  static LegacyCircuitGraph GetTestCircuit(
+    const LegacyGateMatrix& gateMatrix, int nQubits, int nrounds);
 
   tile_t& tile() { return _tile; }
   const tile_t& tile() const { return _tile; }
@@ -200,7 +200,7 @@ public:
 
   /// Append a quantum gate to the tile. Quantum gate must be managed by
   /// \c *this
-  void appendGate(std::shared_ptr<QuantumGate> quantumGate);
+  void appendGate(std::shared_ptr<LegacyQuantumGate> quantumGate);
 
   /// @brief Erase empty rows in the tile
   void eraseEmptyRows();
@@ -275,7 +275,7 @@ public:
   std::ostream& displayInfo(
     std::ostream& os = std::cerr, int verbose = 1) const;
 
-  void deepCopy(CircuitGraph& other) const;
+  void deepCopy(LegacyCircuitGraph& other) const;
 };
 
 }; // namespace cast

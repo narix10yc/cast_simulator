@@ -7,7 +7,7 @@
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/Passes/OptimizationLevel.h>
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include <memory>
 
 #ifdef CAST_USE_CUDA
@@ -26,7 +26,7 @@ namespace cast {
     std::string demangleGraphName(const std::string& mangledName);
   } // namespace internal
 
-class CircuitGraph;
+class LegacyCircuitGraph;
 
 class KernelManagerBase {
 protected:
@@ -56,7 +56,7 @@ struct CPUKernelInfo {
   std::function<CPU_KERNEL_TYPE> executable;
   int precision;
   std::string llvmFuncName;
-  std::shared_ptr<QuantumGate> gate;
+  std::shared_ptr<LegacyQuantumGate> gate;
   // extra information
   int simd_s;
   int opCount;
@@ -124,14 +124,14 @@ public:
   /// taskID begin, taskID end, and pointer to matrix array (could be null).
   CPUKernelManager& genCPUGate(
       const CPUKernelGenConfig& config,
-      std::shared_ptr<QuantumGate> gate, const std::string& funcName);
+      std::shared_ptr<LegacyQuantumGate> gate, const std::string& funcName);
 
-  CPUKernelManager& genCPUGatesFromCircuitGraph(
+  CPUKernelManager& genCPUGatesFromLegacyCircuitGraph(
       const CPUKernelGenConfig& config,
-      const CircuitGraph& graph, const std::string& graphName);
+      const LegacyCircuitGraph& graph, const std::string& graphName);
 
   std::vector<CPUKernelInfo*>
-  collectCPUKernelsFromCircuitGraph(const std::string& graphName);
+  collectCPUKernelsFromLegacyCircuitGraph(const std::string& graphName);
 
   void ensureExecutable(CPUKernelInfo& kernel) {
     // Note: We do not actually need the lock here
@@ -202,16 +202,16 @@ struct CUDAKernelInfo {
   PTXStringType ptxString;
   int precision;
   std::string llvmFuncName;
-  std::shared_ptr<QuantumGate> gate;
+  std::shared_ptr<LegacyQuantumGate> gate;
   CUDATuple cuTuple;
   int opCount;
   unsigned regsPerThread = 32;
   // int blockSize = 256;
   #ifdef CAST_USE_CUDA
-  void setGate(const QuantumGate* g) {
-      gate = std::shared_ptr<QuantumGate>(
-                 const_cast<QuantumGate*>(g),
-                 [](QuantumGate*){});            // empty deleter
+  void setGate(const LegacyQuantumGate* g) {
+      gate = std::shared_ptr<LegacyQuantumGate>(
+                 const_cast<LegacyQuantumGate*>(g),
+                 [](LegacyQuantumGate*){});            // empty deleter
   }
   void setSharedMemUsage(size_t bytes) {
       cuTuple.sharedMemBytes = bytes;
@@ -264,23 +264,23 @@ public:
 
   CUDAKernelManager& genCUDAGate(
       const CUDAKernelGenConfig& config,
-      std::shared_ptr<QuantumGate> gate, const std::string& funcName);
+      std::shared_ptr<LegacyQuantumGate> gate, const std::string& funcName);
   
   CUDAKernelManager& genCUDAGateMulti(
     const CUDAKernelGenConfig& config,
-    const std::vector<std::shared_ptr<QuantumGate>>& gateList,
+    const std::vector<std::shared_ptr<LegacyQuantumGate>>& gateList,
     const std::string& funcName);
 
-  CUDAKernelManager& genCUDAGatesFromCircuitGraph(
+  CUDAKernelManager& genCUDAGatesFromLegacyCircuitGraph(
       const CUDAKernelGenConfig& config,
-      const CircuitGraph& graph, const std::string& graphName);
+      const LegacyCircuitGraph& graph, const std::string& graphName);
 
-  CUDAKernelManager& genCUDAGatesFromCircuitGraphMulti(
+  CUDAKernelManager& genCUDAGatesFromLegacyCircuitGraphMulti(
     const CUDAKernelGenConfig& config,
-    const CircuitGraph& graph, const std::string& graphName);
+    const LegacyCircuitGraph& graph, const std::string& graphName);
 
   std::vector<CUDAKernelInfo*>
-  collectCUDAKernelsFromCircuitGraph(const std::string& graphName);
+  collectCUDAKernelsFromLegacyCircuitGraph(const std::string& graphName);
 
   void emitPTX(
       int nThreads = 1,

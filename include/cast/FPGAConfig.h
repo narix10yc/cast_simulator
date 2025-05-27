@@ -69,7 +69,7 @@ public:
   int gridSize;
 
   // If off, apply sequential instruction generation on the default order of
-  // blocks present in CircuitGraph
+  // blocks present in LegacyCircuitGraph
   bool selectiveGenerationMode;
   int maxUpSize;
 

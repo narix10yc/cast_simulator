@@ -1,8 +1,8 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/IntrinsicsNVPTX.h>
 #include <llvm/IR/Verifier.h>
-#include "cast/QuantumGate.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyQuantumGate.h"
+#include "cast/LegacyCircuitGraph.h"
 
 #include "simulation/KernelManager.h"
 #include "simulation/KernelGenInternal.h"
@@ -57,7 +57,7 @@ struct IRMatDataCUDA {
 };
 
 std::vector<IRMatDataCUDA> getMatDataCUDA(
-    IRBuilder<>& B, const GateMatrix& gateMatrix,
+    IRBuilder<>& B, const LegacyGateMatrix& gateMatrix,
     const CUDAKernelGenConfig& config) {
   const int k = gateMatrix.nQubits();
   const unsigned K = 1 << k;
@@ -275,7 +275,7 @@ static llvm::GlobalVariable* createGlobalMatrixArray_NoUnroll(
 void genMatrixVectorMultiply(
     llvm::IRBuilder<>&            B,
     const CUDAKernelGenConfig&    config,
-    const GateMatrix&             gateMat,
+    const LegacyGateMatrix&             gateMat,
     llvm::ArrayRef<int>           qubits,
     const std::vector<IRMatDataCUDA>& matData,
     llvm::Value*                  svPtrV,
@@ -598,7 +598,7 @@ static GlobalVariable* createGlobalMatrixArray_SharedTiledImm(
 void genMatrixVectorMultiply_SharedTiled(
     IRBuilder<> &B,
     const CUDAKernelGenConfig &config,
-    const GateMatrix &gateMat,
+    const LegacyGateMatrix &gateMat,
     llvm::ArrayRef<int> qubits,
     const std::vector<IRMatDataCUDA> &matData,
     Value *svPtrV,
@@ -847,7 +847,7 @@ void genMatrixVectorMultiply_SharedTiled(
 void genMatrixVectorMultiplyFromPointer_SharedTiled(
     llvm::IRBuilder<>           &B,
     const CUDAKernelGenConfig   &config,
-    const GateMatrix            &gateMat,
+    const LegacyGateMatrix            &gateMat,
     llvm::ArrayRef<int>          qubits,
     llvm::Value                 *matBasePtr,  // pointer to global memory
     llvm::Value                 *svPtrV,      // pointer to statevector
@@ -1152,7 +1152,7 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
 void genMatrixVectorMultiplyFromConst(
     llvm::IRBuilder<>& B,
     const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
+    const LegacyGateMatrix& gateMat,
     const llvm::ArrayRef<int> qubits,
     llvm::GlobalVariable* gConstMat,
     llvm::Value* svPtrV,
@@ -1265,7 +1265,7 @@ static GlobalVariable* getOrCreateConstMatGlobal(
 
 CUDAKernelManager& CUDAKernelManager::genCUDAGate(
     const CUDAKernelGenConfig& config,
-    std::shared_ptr<QuantumGate> gate, const std::string& funcName) {
+    std::shared_ptr<LegacyQuantumGate> gate, const std::string& funcName) {
   const unsigned k = gate->qubits.size();
   const unsigned K = 1ULL << k;
   const unsigned KK = K * K;
@@ -1426,9 +1426,9 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
   return *this;
 }
 
-CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraph(
+CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromLegacyCircuitGraph(
     const CUDAKernelGenConfig& config,
-    const CircuitGraph& graph, const std::string& graphName) {
+    const LegacyCircuitGraph& graph, const std::string& graphName) {
   const auto allBlocks = graph.getAllBlocks();
   const auto mangledName = internal::mangleGraphName(graphName);
   for (const auto& block : allBlocks) {
@@ -1444,7 +1444,7 @@ static constexpr double SIMILARITY_THRESHOLD = 0.85;
 static constexpr unsigned MAX_GATES_PER_KERNEL = 4;
 static constexpr unsigned MAX_QUBITS_PER_GATE = 8;
 
-double qubitSimilarity(const QuantumGate &A, const QuantumGate &B) {
+double qubitSimilarity(const LegacyQuantumGate &A, const LegacyQuantumGate &B) {
     // Convert each qubit list to a std::set.
     std::set<int> setA(A.qubits.begin(), A.qubits.end());
     std::set<int> setB(B.qubits.begin(), B.qubits.end());
@@ -1501,10 +1501,10 @@ static Function* getMultiKernelDeclaration(
 /**
  * Only group gates that pass threshold for qubitSimilarity, MAX_QUBITS_PER_GATE, and cap the group at MAX_GATES_PER_KERNEL.
  */
-std::vector<std::vector<std::shared_ptr<QuantumGate>>>
-groupGatesByOverlapAndSize(const std::vector<std::shared_ptr<QuantumGate>>& allGates)
+std::vector<std::vector<std::shared_ptr<LegacyQuantumGate>>>
+groupGatesByOverlapAndSize(const std::vector<std::shared_ptr<LegacyQuantumGate>>& allGates)
 {
-  std::vector<std::vector<std::shared_ptr<QuantumGate>>> groups;
+  std::vector<std::vector<std::shared_ptr<LegacyQuantumGate>>> groups;
   groups.reserve(allGates.size());
 
   for (auto &g : allGates) {
@@ -1537,7 +1537,7 @@ groupGatesByOverlapAndSize(const std::vector<std::shared_ptr<QuantumGate>>& allG
 
 CUDAKernelManager& CUDAKernelManager::genCUDAGateMulti(
     const CUDAKernelGenConfig& config,
-    const std::vector<std::shared_ptr<QuantumGate>>& gateList,
+    const std::vector<std::shared_ptr<LegacyQuantumGate>>& gateList,
     const std::string& funcName
 )
 {
@@ -1674,13 +1674,13 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGateMulti(
   return *this;
 }
 
-CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraphMulti(
+CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromLegacyCircuitGraphMulti(
     const CUDAKernelGenConfig& config,
-    const CircuitGraph& graph,
+    const LegacyCircuitGraph& graph,
     const std::string& graphName)
 {
   // gather all gates
-  std::vector<std::shared_ptr<QuantumGate>> allGates;
+  std::vector<std::shared_ptr<LegacyQuantumGate>> allGates;
   for (auto& block : graph.getAllBlocks()) {
     allGates.push_back(block->quantumGate);
   }

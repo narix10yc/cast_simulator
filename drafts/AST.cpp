@@ -2,11 +2,11 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 using namespace cast::draft;
 
-void ast::CircuitStmt::toCircuitGraph(cast::CircuitGraph& graph) const {
+void ast::CircuitStmt::toLegacyCircuitGraph(cast::LegacyCircuitGraph& graph) const {
   assert(false && "Not implemented yet");
 }
 

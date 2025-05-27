@@ -2,7 +2,7 @@
 #define CAST_COSTMODEL_H
 
 #include "simulation/KernelManager.h"
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "cast/CircuitGraphContext.h"
 #include <cassert>
 #include <string>
@@ -12,7 +12,7 @@ namespace cast {
 
 struct CostResult {
   double benefit;
-  QuantumGate* fusedGate;
+  LegacyQuantumGate* fusedGate;
 };
 
 class PerformanceCache;
@@ -24,7 +24,7 @@ public:
   /// @brief Compute the expected time it will take to simulate \c gate by 
   /// updating each 1GiB of memory. 
   virtual double computeGiBTime(
-      const QuantumGate& gate, int precision, int nThreads) const = 0;
+      const LegacyQuantumGate& gate, int precision, int nThreads) const = 0;
 };
 
 /// @brief \c NaiveCostModel is based on the size and operation count of fused
@@ -39,7 +39,7 @@ public:
     : maxNQubits(maxNQubits), maxOp(maxOp), zeroTol(zeroTol) {}
 
   double computeGiBTime(
-      const QuantumGate& gate, int precision, int nThreads) const override;
+      const LegacyQuantumGate& gate, int precision, int nThreads) const override;
 };
 
 /// \c StandardCostModel assumes simulation time is proportional to opCount and
@@ -69,13 +69,13 @@ public:
   std::ostream& display(std::ostream& os, int nLines = 0) const;
 
   double computeGiBTime(
-    const QuantumGate& gate, int precision, int nThreads) const override;
+    const LegacyQuantumGate& gate, int precision, int nThreads) const override;
 };
 
 class AdaptiveCostModel : public CostModel {
 public:
   double computeGiBTime(
-      const QuantumGate &gate, int precision, int nThreads) const override {
+      const LegacyQuantumGate &gate, int precision, int nThreads) const override {
     assert(false && "Not Implemented");
     return 0.0;
   }
@@ -140,7 +140,7 @@ public:
   void writeResults(const std::string& filename) const;
   static CUDAPerformanceCache LoadFromCSV(const std::string& filename);
   const Item* findClosestMatch(
-      const QuantumGate& gate, int precision, int blockSize) const;
+      const LegacyQuantumGate& gate, int precision, int blockSize) const;
   
   constexpr static const char* CSV_HEADER = 
       "nQubits,opCount,precision,blockSize,occupancy,coalescing,memSpd";
@@ -156,7 +156,7 @@ public:
     explicit CUDACostModel(const CUDAPerformanceCache* c, double zt = 1e-8)
       : cache(c), zeroTol(zt), currentBlockSize(256), minGibTimeCap(1e-9) {}
     
-    double computeGiBTime(const QuantumGate& gate, int precision, int) const override;
+    double computeGiBTime(const LegacyQuantumGate& gate, int precision, int) const override;
 
     void setBlockSize(int blockSize) { 
       if (blockSize < 32 || blockSize > 1024 || 

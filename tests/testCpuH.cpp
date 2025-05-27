@@ -5,8 +5,8 @@
 using namespace cast;
 using namespace utils;
 
-static inline std::shared_ptr<QuantumGate> getH(int q) {
-  return std::make_shared<QuantumGate>(QuantumGate::H(q));
+static inline std::shared_ptr<LegacyQuantumGate> getH(int q) {
+  return std::make_shared<LegacyQuantumGate>(LegacyQuantumGate::H(q));
 }
 
 template<unsigned simd_s>

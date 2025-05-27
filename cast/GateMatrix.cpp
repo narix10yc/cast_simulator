@@ -1,4 +1,4 @@
-#include "cast/GateMatrix.h"
+#include "cast/LegacyGateMatrix.h"
 #include "utils/iocolor.h"
 #include <cmath>
 #include <iomanip>
@@ -54,76 +54,76 @@ std::string cast::impl::GateKind2String(GateKind t) {
   }
 }
 
-using p_matrix_t = GateMatrix::p_matrix_t;
-using up_matrix_t = GateMatrix::up_matrix_t;
-using c_matrix_t = GateMatrix::c_matrix_t;
-using gate_params_t = GateMatrix::gate_params_t;
+using p_matrix_t = LegacyGateMatrix::p_matrix_t;
+using up_matrix_t = LegacyGateMatrix::up_matrix_t;
+using c_matrix_t = LegacyGateMatrix::c_matrix_t;
+using gate_params_t = LegacyGateMatrix::gate_params_t;
 
 #pragma region Static UP Matrices
-const up_matrix_t GateMatrix::MatrixI1_up {
+const up_matrix_t LegacyGateMatrix::MatrixI1_up {
   {0, 0.0}, {1, 0.0}
 };
 
-const up_matrix_t GateMatrix::MatrixI2_up{
+const up_matrix_t LegacyGateMatrix::MatrixI2_up{
   {0, 0.0}, {1, 0.0}, {2, 0.0}, {3, 0.0}
 };
 
-const up_matrix_t GateMatrix::MatrixX_up {
+const up_matrix_t LegacyGateMatrix::MatrixX_up {
   {1, 0.0}, {0, 0.0}
 };
 
-const up_matrix_t GateMatrix::MatrixY_up {
+const up_matrix_t LegacyGateMatrix::MatrixY_up {
   {1, -M_PI_2}, {0, M_PI}
 };
 
-const up_matrix_t GateMatrix::MatrixZ_up {
+const up_matrix_t LegacyGateMatrix::MatrixZ_up {
   {0, 0.0}, {1, M_PI}
 };
 
-const up_matrix_t GateMatrix::MatrixCX_up {
+const up_matrix_t LegacyGateMatrix::MatrixCX_up {
   {0, 0.0}, {3, 0.0}, {2, 0.0}, {1, 0.0}
 };
 
-const up_matrix_t GateMatrix::MatrixCZ_up {
+const up_matrix_t LegacyGateMatrix::MatrixCZ_up {
   {0, 0.0}, {1, 0.0}, {2, 0.0}, {3, M_PI}
 };
 
 #pragma endregion
 
 #pragma region Static Constant Matrices
-const c_matrix_t GateMatrix::MatrixI1_c = c_matrix_t{
+const c_matrix_t LegacyGateMatrix::MatrixI1_c = c_matrix_t{
     {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}};
 
-const c_matrix_t GateMatrix::MatrixI2_c {
+const c_matrix_t LegacyGateMatrix::MatrixI2_c {
   {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
   {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
   {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0},
   {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}
 };
 
-const c_matrix_t GateMatrix::MatrixX_c {
+const c_matrix_t LegacyGateMatrix::MatrixX_c {
   {0.0, 0.0}, {1.0, 0.0}, {1.0, 0.0}, {0.0, 0.0}
 };
 
-const c_matrix_t GateMatrix::MatrixY_c {
+const c_matrix_t LegacyGateMatrix::MatrixY_c {
   {0.0, 0.0}, {0.0, -1.0}, {0.0, 1.0}, {0.0, 0.0}
 };
 
-const c_matrix_t GateMatrix::MatrixZ_c {
+const c_matrix_t LegacyGateMatrix::MatrixZ_c {
   {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {-1.0, 0.0}
 };
 
-const c_matrix_t GateMatrix::MatrixH_c = c_matrix_t(
+const c_matrix_t LegacyGateMatrix::MatrixH_c = c_matrix_t(
     {{M_SQRT1_2, 0.0}, {M_SQRT1_2, 0.0}, {M_SQRT1_2, 0.0}, {-M_SQRT1_2, 0.0}});
 
-const c_matrix_t GateMatrix::MatrixCX_c {
+const c_matrix_t LegacyGateMatrix::MatrixCX_c {
   {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
   {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0},
   {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0},
   {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
 };
 
-const c_matrix_t GateMatrix::MatrixCZ_c {
+const c_matrix_t LegacyGateMatrix::MatrixCZ_c {
   {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
   {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
   {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0},
@@ -133,33 +133,33 @@ const c_matrix_t GateMatrix::MatrixCZ_c {
 #pragma endregion
 
 #pragma region Static Parametrized Matrices
-const p_matrix_t GateMatrix::MatrixI1_p = {
+const p_matrix_t LegacyGateMatrix::MatrixI1_p = {
     {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}};
 
-const p_matrix_t GateMatrix::MatrixI2_p = {
+const p_matrix_t LegacyGateMatrix::MatrixI2_p = {
     {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0},
     {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0},
     {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}};
 
-const p_matrix_t GateMatrix::MatrixX_p =
+const p_matrix_t LegacyGateMatrix::MatrixX_p =
     p_matrix_t({{0.0, 0.0}, {1.0, 0.0}, {1.0, 0.0}, {0.0, 0.0}});
 
 const p_matrix_t
-    GateMatrix::MatrixY_p({{0.0, 0.0}, {0.0, -1.0}, {0.0, 1.0}, {0.0, 0.0}});
+    LegacyGateMatrix::MatrixY_p({{0.0, 0.0}, {0.0, -1.0}, {0.0, 1.0}, {0.0, 0.0}});
 
-const p_matrix_t GateMatrix::MatrixZ_p =
+const p_matrix_t LegacyGateMatrix::MatrixZ_p =
     p_matrix_t({{1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {-1.0, 0.0}});
 
-const p_matrix_t GateMatrix::MatrixH_p = p_matrix_t(
+const p_matrix_t LegacyGateMatrix::MatrixH_p = p_matrix_t(
     {{M_SQRT1_2, 0.0}, {M_SQRT1_2, 0.0}, {M_SQRT1_2, 0.0}, {-M_SQRT1_2, 0.0}});
 
-const p_matrix_t GateMatrix::MatrixCX_p{
+const p_matrix_t LegacyGateMatrix::MatrixCX_p{
     {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
     {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0},
     {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
 };
 
-const p_matrix_t GateMatrix::MatrixCZ_p = p_matrix_t({
+const p_matrix_t LegacyGateMatrix::MatrixCZ_p = p_matrix_t({
     {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
     {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0}, {0.0, 0.0},
     {0.0, 0.0}, {0.0, 0.0}, {1.0, 0.0}, {0.0, 0.0},
@@ -177,7 +177,7 @@ int getNumActiveParams(const gate_params_t& params) {
   return s;
 }
 
-GateMatrix::GateMatrix(const up_matrix_t& upMat) : cache(), gateParams() {
+LegacyGateMatrix::LegacyGateMatrix(const up_matrix_t& upMat) : cache(), gateParams() {
   auto size = upMat.edgeSize();
   gateKind = static_cast<GateKind>(static_cast<int>(std::log2(size)));
   assert(1 << static_cast<int>(gateKind) == size);
@@ -186,7 +186,7 @@ GateMatrix::GateMatrix(const up_matrix_t& upMat) : cache(), gateParams() {
   cache.isConvertibleToUpMat = Convertible;
 }
 
-GateMatrix::GateMatrix(const c_matrix_t& cMat) : cache(), gateParams() {
+LegacyGateMatrix::LegacyGateMatrix(const c_matrix_t& cMat) : cache(), gateParams() {
   auto size = cMat.edgeSize();
   gateKind = static_cast<GateKind>(static_cast<int>(std::log2(size)));
   assert(1 << static_cast<int>(gateKind) == size);
@@ -195,7 +195,7 @@ GateMatrix::GateMatrix(const c_matrix_t& cMat) : cache(), gateParams() {
   cache.isConvertibleToCMat = Convertible;
 }
 
-GateMatrix::GateMatrix(const p_matrix_t& pMat) : cache(), gateParams() {
+LegacyGateMatrix::LegacyGateMatrix(const p_matrix_t& pMat) : cache(), gateParams() {
   auto size = pMat.edgeSize();
   gateKind = static_cast<GateKind>(static_cast<int>(std::log2(size)));
   assert(1 << static_cast<int>(gateKind) == size);
@@ -204,69 +204,69 @@ GateMatrix::GateMatrix(const p_matrix_t& pMat) : cache(), gateParams() {
   cache.isConvertibleToPMat = Convertible;
 }
 
-GateMatrix GateMatrix::FromName(
+LegacyGateMatrix LegacyGateMatrix::FromName(
     const std::string& name, const gate_params_t& params) {
   if (name == "x") {
     assert(getNumActiveParams(params) == 0 && "X gate has 0 parameter");
-    return GateMatrix(gX);
+    return LegacyGateMatrix(gX);
   }
   if (name == "y") {
     assert(getNumActiveParams(params) == 0 && "Y gate has 0 parameter");
-    return GateMatrix(gY);
+    return LegacyGateMatrix(gY);
   }
   if (name == "z") {
     assert(getNumActiveParams(params) == 0 && "Z gate has 0 parameter");
-    return GateMatrix(gZ);
+    return LegacyGateMatrix(gZ);
   }
   if (name == "h") {
     assert(getNumActiveParams(params) == 0 && "H gate has 0 parameter");
-    return GateMatrix(gH);
+    return LegacyGateMatrix(gH);
   }
   if (name == "p") {
     assert(getNumActiveParams(params) == 1 && "P gate has 1 parameter");
-    return GateMatrix(gP, params);
+    return LegacyGateMatrix(gP, params);
   }
   if (name == "rx") {
     assert(getNumActiveParams(params) == 1 && "RX gate has 1 parameter");
-    return GateMatrix(gRX, params);
+    return LegacyGateMatrix(gRX, params);
   }
   if (name == "ry") {
     assert(getNumActiveParams(params) == 1 && "RY gate has 1 parameter");
-    return GateMatrix(gRY, params);
+    return LegacyGateMatrix(gRY, params);
   }
   if (name == "rz") {
     assert(getNumActiveParams(params) == 1 && "RZ gate has 1 parameter");
-    return GateMatrix(gRZ, params);
+    return LegacyGateMatrix(gRZ, params);
   }
   if (name == "u3" || name == "u1q") {
     assert(getNumActiveParams(params) == 3 && "U3 (U1q) gate has 3 parameters");
-    return GateMatrix(gU, params);
+    return LegacyGateMatrix(gU, params);
   }
 
   if (name == "cx") {
     assert(getNumActiveParams(params) == 0 && "CX gate has 0 parameter");
-    return GateMatrix(gCX);
+    return LegacyGateMatrix(gCX);
   }
   if (name == "cz") {
     assert(getNumActiveParams(params) == 0 && "CZ gate has 0 parameter");
-    return GateMatrix(gCZ);
+    return LegacyGateMatrix(gCZ);
   }
   if (name == "cp") {
     assert(getNumActiveParams(params) == 1 && "CP gate has 1 parameter");
-    return GateMatrix(gCP, params);
+    return LegacyGateMatrix(gCP, params);
   }
 
   assert(false && "Unsupported gate");
-  return GateMatrix(gUndef);
+  return LegacyGateMatrix(gUndef);
 }
 
-std::ostream& GateMatrix::printCMat(std::ostream& os) const {
+std::ostream& LegacyGateMatrix::printCMat(std::ostream& os) const {
   const auto* cMat = getConstantMatrix();
-  assert(cMat != nullptr && "GateMatrix is not convertible to cmatrix_t");
+  assert(cMat != nullptr && "LegacyGateMatrix is not convertible to cmatrix_t");
   return utils::printComplexMatrixF64(os, *cMat);
 }
 
-std::ostream& GateMatrix::printPMat(std::ostream& os) const {
+std::ostream& LegacyGateMatrix::printPMat(std::ostream& os) const {
   const auto& pMat = getParametrizedMatrix();
   auto edgeSize = pMat.edgeSize();
   for (size_t r = 0; r < edgeSize; r++) {
@@ -278,7 +278,7 @@ std::ostream& GateMatrix::printPMat(std::ostream& os) const {
   return os;
 }
 
-void GateMatrix::permuteSelf(const llvm::SmallVector<int>& flags) {
+void LegacyGateMatrix::permuteSelf(const llvm::SmallVector<int>& flags) {
   // single qubit gates
   if (nQubits() == 1) {
     assert(flags.size() == 1);
@@ -313,7 +313,7 @@ void GateMatrix::permuteSelf(const llvm::SmallVector<int>& flags) {
     cache.pMat = cache.pMat.permute(flags);
 }
 
-int GateMatrix::nQubits() const {
+int LegacyGateMatrix::nQubits() const {
   switch (gateKind) {
   case gX: return 1;
   case gY: return 1;
@@ -341,13 +341,13 @@ namespace { // matrix conversion
 inline p_matrix_t matCvt_gp_to_p(GateKind kind, const gate_params_t& params) {
   switch (kind) {
   case gX:
-    return GateMatrix::MatrixX_p;
+    return LegacyGateMatrix::MatrixX_p;
   case gY:
-    return GateMatrix::MatrixY_p;
+    return LegacyGateMatrix::MatrixY_p;
   case gZ:
-    return GateMatrix::MatrixZ_p;
+    return LegacyGateMatrix::MatrixZ_p;
   case gH:
-    return GateMatrix::MatrixH_p;
+    return LegacyGateMatrix::MatrixH_p;
   case gP: {
     assert(params[0].holdingValue());
     if (params[0].is<int>())
@@ -405,9 +405,9 @@ inline p_matrix_t matCvt_gp_to_p(GateKind kind, const gate_params_t& params) {
   }
 
   case gCX:
-    return GateMatrix::MatrixCX_p;
+    return LegacyGateMatrix::MatrixCX_p;
   case gCZ:
-    return GateMatrix::MatrixCZ_p;
+    return LegacyGateMatrix::MatrixCZ_p;
 
   default:
     assert(false && "Unsupported cvtMat_gp_to_p yet");
@@ -427,7 +427,7 @@ inline c_matrix_t matCvt_up_to_c(const up_matrix_t& up) {
 } // namespace
 
 // Two paths lead to upMat: gpMat or cMat
-void GateMatrix::computeAndCacheUpMat(double tolerance) const {
+void LegacyGateMatrix::computeAndCacheUpMat(double tolerance) const {
   assert(cache.isConvertibleToUpMat == Unknown);
   const auto setConvertible = [&](const up_matrix_t& upMat) {
     cache.upMat = upMat;
@@ -507,7 +507,7 @@ void GateMatrix::computeAndCacheUpMat(double tolerance) const {
   return;
 }
 
-void GateMatrix::computeAndCacheCMat() const {
+void LegacyGateMatrix::computeAndCacheCMat() const {
   assert(cache.isConvertibleToUpMat == Unknown);
   // try convert from upMat
   if (cache.isConvertibleToUpMat == Convertible) {
@@ -606,7 +606,7 @@ void GateMatrix::computeAndCacheCMat() const {
   }
 }
 
-void GateMatrix::computeAndCachePMat() const {
+void LegacyGateMatrix::computeAndCachePMat() const {
   if (cache.isConvertibleToCMat == Convertible) {
     const auto edgeSize = cache.cMat.edgeSize();
     cache.pMat = p_matrix_t(edgeSize);
@@ -623,12 +623,12 @@ void GateMatrix::computeAndCachePMat() const {
 namespace {
 
 inline void computeSigMatAfresh(
-    const GateMatrix::c_matrix_t& cMat,
+    const LegacyGateMatrix::c_matrix_t& cMat,
     double zeroTol, double oneTol,
-    GateMatrix::sig_matrix_t& sigMat) {
+    LegacyGateMatrix::sig_matrix_t& sigMat) {
   assert(sigMat.edgeSize() == 0);
   const auto edgeSize = cMat.edgeSize();
-  sigMat = GateMatrix::sig_matrix_t(edgeSize);
+  sigMat = LegacyGateMatrix::sig_matrix_t(edgeSize);
 
   for (size_t i = 0; i < edgeSize * edgeSize; ++i) {
     const auto& cplx = cMat[i];
@@ -652,7 +652,7 @@ inline void computeSigMatAfresh(
 
 /// TODO: when there exists cached sigMat already, we can update sigMat more
 /// efficiently
-void GateMatrix::computeAndCacheSigMat(double zeroTol, double oneTol) const {
+void LegacyGateMatrix::computeAndCacheSigMat(double zeroTol, double oneTol) const {
   const auto* cMat = getConstantMatrix();
   assert(cMat);
   assert(cMat->edgeSize() > 0);

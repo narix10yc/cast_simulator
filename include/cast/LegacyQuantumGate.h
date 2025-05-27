@@ -1,7 +1,7 @@
 #ifndef CAST_QUANTUM_GATE_H
 #define CAST_QUANTUM_GATE_H
 
-#include "cast/GateMatrix.h"
+#include "cast/LegacyGateMatrix.h"
 #include <array>
 
 namespace cast {
@@ -9,46 +9,46 @@ namespace cast {
 /// A gate accepts up to 3 parameters that is either
 /// - int: represents variable in parametrized gates
 /// - double: parameter value
-class QuantumGate {
+class LegacyQuantumGate {
 private:
   mutable double opCountCache = -1.0;
 
 public:
   /// The canonical form of qubits is in ascending order
   llvm::SmallVector<int> qubits;
-  GateMatrix gateMatrix;
+  LegacyGateMatrix gateMatrix;
 
-  QuantumGate() : qubits(), gateMatrix() {}
+  LegacyQuantumGate() : qubits(), gateMatrix() {}
 
-  QuantumGate(const GateMatrix& gateMatrix, int q)
+  LegacyQuantumGate(const LegacyGateMatrix& gateMatrix, int q)
       : qubits({q}), gateMatrix(gateMatrix) {
     assert(gateMatrix.nQubits() == 1);
   }
 
-  QuantumGate(GateMatrix&& gateMatrix, int q)
+  LegacyQuantumGate(LegacyGateMatrix&& gateMatrix, int q)
     : qubits({q}), gateMatrix(gateMatrix) {
     assert(gateMatrix.nQubits() == 1);
   }
 
-  QuantumGate(const GateMatrix& gateMatrix, std::initializer_list<int> qubits)
+  LegacyQuantumGate(const LegacyGateMatrix& gateMatrix, std::initializer_list<int> qubits)
       : qubits(qubits), gateMatrix(gateMatrix) {
     assert(gateMatrix.nQubits() == qubits.size());
     sortQubits();
   }
 
-  QuantumGate(GateMatrix&& gateMatrix, std::initializer_list<int> qubits)
+  LegacyQuantumGate(LegacyGateMatrix&& gateMatrix, std::initializer_list<int> qubits)
     : qubits(qubits), gateMatrix(gateMatrix) {
     assert(gateMatrix.nQubits() == qubits.size());
     sortQubits();
   }
 
-  QuantumGate(const GateMatrix& gateMatrix, const llvm::SmallVector<int>& qubits)
+  LegacyQuantumGate(const LegacyGateMatrix& gateMatrix, const llvm::SmallVector<int>& qubits)
     : qubits(qubits), gateMatrix(gateMatrix) {
     assert(gateMatrix.nQubits() == qubits.size());
     sortQubits();
   }
 
-  QuantumGate(GateMatrix&& gateMatrix, const llvm::SmallVector<int>& qubits)
+  LegacyQuantumGate(LegacyGateMatrix&& gateMatrix, const llvm::SmallVector<int>& qubits)
     : qubits(qubits), gateMatrix(gateMatrix) {
     assert(gateMatrix.nQubits() == qubits.size());
     sortQubits();
@@ -87,7 +87,7 @@ public:
   void sortQubits();
 
   /// @brief B.lmatmul(A) will return AB. That is, gate B will be applied first.
-  QuantumGate lmatmul(const QuantumGate& other) const;
+  LegacyQuantumGate lmatmul(const LegacyQuantumGate& other) const;
 
   double opCount(double zeroTol) const;
 
@@ -99,42 +99,42 @@ public:
     return gateMatrix.isConvertibleToConstantMatrix();
   }
 
-  static QuantumGate I1(int q) {
-    return QuantumGate(GateMatrix(GateMatrix::MatrixI1_c), q);
+  static LegacyQuantumGate I1(int q) {
+    return LegacyQuantumGate(LegacyGateMatrix(LegacyGateMatrix::MatrixI1_c), q);
   }
 
-  static QuantumGate I2(int q0, int q1) {
-    return QuantumGate(GateMatrix(GateMatrix::MatrixI2_c), {q0, q1});
+  static LegacyQuantumGate I2(int q0, int q1) {
+    return LegacyQuantumGate(LegacyGateMatrix(LegacyGateMatrix::MatrixI2_c), {q0, q1});
   }
 
-  static QuantumGate H(int q) {
-    return QuantumGate(GateMatrix(GateMatrix::MatrixH_c), q);
+  static LegacyQuantumGate H(int q) {
+    return LegacyQuantumGate(LegacyGateMatrix(LegacyGateMatrix::MatrixH_c), q);
   }
 
   template<typename... Ints>
-  static QuantumGate RandomUnitary(Ints... qubits) {
+  static LegacyQuantumGate RandomUnitary(Ints... qubits) {
     static_assert((std::is_integral_v<Ints> && ...));
     constexpr auto nQubits = sizeof...(Ints);
     std::array<int, nQubits> qubitsCopy{qubits...};
     std::ranges::sort(qubitsCopy);
-    return QuantumGate(
-      GateMatrix(utils::randomUnitaryMatrix(1U << nQubits)),
+    return LegacyQuantumGate(
+      LegacyGateMatrix(utils::randomUnitaryMatrix(1U << nQubits)),
       llvm::SmallVector<int>(qubitsCopy.begin(), qubitsCopy.end()));
   }
 
   template<std::size_t NQubits>
-  static QuantumGate RandomUnitary(std::array<int, NQubits> qubits) {
+  static LegacyQuantumGate RandomUnitary(std::array<int, NQubits> qubits) {
     std::ranges::sort(qubits);
-    return QuantumGate(
-      GateMatrix(utils::randomUnitaryMatrix(1U << NQubits)),
+    return LegacyQuantumGate(
+      LegacyGateMatrix(utils::randomUnitaryMatrix(1U << NQubits)),
       llvm::SmallVector<int>(qubits.begin(), qubits.end()));
   }
 
-  static QuantumGate RandomUnitary(const std::vector<int>& qubits) {
+  static LegacyQuantumGate RandomUnitary(const std::vector<int>& qubits) {
     llvm::SmallVector<int> sortedQubits(qubits.begin(), qubits.end());
     std::ranges::sort(sortedQubits);
-    return QuantumGate(
-        GateMatrix(utils::randomUnitaryMatrix(1U << qubits.size())),
+    return LegacyQuantumGate(
+        LegacyGateMatrix(utils::randomUnitaryMatrix(1U << qubits.size())),
         sortedQubits);
   }
 

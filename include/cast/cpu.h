@@ -8,7 +8,7 @@ class IRGeneratorConfig;
 }
 
 namespace cast {
-class CircuitGraph;
+class LegacyCircuitGraph;
 }
 namespace cast {
 
@@ -39,13 +39,13 @@ public:
 
   /// @brief Generate IR
   /// @param forceInOrder: force generate IR according to block id
-  void generate(const CircuitGraph& graph, int debugLevel = 0,
+  void generate(const LegacyCircuitGraph& graph, int debugLevel = 0,
                 bool forceInOrder = false);
 
   /// @brief Generate IR
   /// @param forceInOrder: force generate IR according to block id
   // void multiThreadGenerate(
-  //         const CircuitGraph& graph, int nthreads,
+  //         const LegacyCircuitGraph& graph, int nthreads,
   //         int debugLevel = 0, bool forceInOrder = false);
 
   std::ostream& displayConfig(int verbose = 1,
@@ -54,7 +54,7 @@ public:
   }
 };
 
-void generateCpuIrForRecompilation(const CircuitGraph& graph,
+void generateCpuIrForRecompilation(const LegacyCircuitGraph& graph,
                                    const std::string& dir,
                                    const CodeGeneratorCPUConfig& config,
                                    int nthreads = 1);

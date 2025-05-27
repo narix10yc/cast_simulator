@@ -2,7 +2,7 @@
 #include "timeit/timeit.h"
 
 #include "cast/Parser.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "openqasm/parser.h"
 
@@ -61,12 +61,12 @@ int main(int argc, const char** argv) {
   openqasm::Parser qasmParser(ArgInputFilename, 0);
   auto qasmRoot = qasmParser.parse();
 
-  // This is temporary work-around as CircuitGraph does not allow copy yet
-  CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse, graphCudaFuse;
-  qasmRoot->toCircuitGraph(graphNoFuse);
-  qasmRoot->toCircuitGraph(graphNaiveFuse);
-  qasmRoot->toCircuitGraph(graphAdaptiveFuse);
-  qasmRoot->toCircuitGraph(graphCudaFuse);
+  // This is temporary work-around as LegacyCircuitGraph does not allow copy yet
+  LegacyCircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse, graphCudaFuse;
+  qasmRoot->toLegacyCircuitGraph(graphNoFuse);
+  qasmRoot->toLegacyCircuitGraph(graphNaiveFuse);
+  qasmRoot->toLegacyCircuitGraph(graphAdaptiveFuse);
+  qasmRoot->toLegacyCircuitGraph(graphCudaFuse);
 
   FusionConfig fusionConfigAggresive = FusionConfig::Aggressive;
   fusionConfigAggresive.precision = 64;
@@ -100,25 +100,25 @@ int main(int argc, const char** argv) {
   // Generate kernels
   if (ArgRunNoFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCUDAGatesFromCircuitGraph(
+      kernelMgr.genCUDAGatesFromLegacyCircuitGraph(
         kernelGenConfig, graphNoFuse, "graphNoFuse");
     }, "Generate No-fuse Kernels");
   }
   if (ArgRunNaiveFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCUDAGatesFromCircuitGraph(
+      kernelMgr.genCUDAGatesFromLegacyCircuitGraph(
         kernelGenConfig, graphNaiveFuse, "graphNaiveFuse");
     }, "Generate Naive-fused Kernels");
   }
   if (ArgRunAdaptiveFuse && ArgModelPath != "") {
     utils::timedExecute([&]() {
-      kernelMgr.genCUDAGatesFromCircuitGraph(
+      kernelMgr.genCUDAGatesFromLegacyCircuitGraph(
         kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
     }, "Generate Adaptive-fused Kernels");
   }
   if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
     utils::timedExecute([&]() {
-      kernelMgr.genCUDAGatesFromCircuitGraph(
+      kernelMgr.genCUDAGatesFromLegacyCircuitGraph(
         kernelGenConfig, graphCudaFuse, "graphCudaFuse");
     }, "Generate CUDA-optimized Kernels");
   }
@@ -140,7 +140,7 @@ int main(int argc, const char** argv) {
     if (ArgRunNoFuse) {
       opCountTotal = 0.0;
       kernelsNoFuse = 
-        kernelMgr.collectCUDAKernelsFromCircuitGraph("graphNoFuse");
+        kernelMgr.collectCUDAKernelsFromLegacyCircuitGraph("graphNoFuse");
       for (const auto* kernel : kernelsNoFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "No-fuse: nGates = " << kernelsNoFuse.size()
@@ -149,7 +149,7 @@ int main(int argc, const char** argv) {
     if (ArgRunNaiveFuse) {
       opCountTotal = 0.0;
       kernelsNaiveFuse = 
-        kernelMgr.collectCUDAKernelsFromCircuitGraph("graphNaiveFuse");
+        kernelMgr.collectCUDAKernelsFromLegacyCircuitGraph("graphNaiveFuse");
       for (const auto* kernel : kernelsNaiveFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "Naive-fuse: nGates = " << kernelsNaiveFuse.size()
@@ -158,7 +158,7 @@ int main(int argc, const char** argv) {
     if (ArgRunAdaptiveFuse && ArgModelPath != "") {
       opCountTotal = 0.0;
       kernelAdaptiveFuse = 
-        kernelMgr.collectCUDAKernelsFromCircuitGraph("graphAdaptiveFuse");
+        kernelMgr.collectCUDAKernelsFromLegacyCircuitGraph("graphAdaptiveFuse");
       for (const auto* kernel : kernelAdaptiveFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "Adaptive-fuse: nGates = " << kernelAdaptiveFuse.size()
@@ -167,7 +167,7 @@ int main(int argc, const char** argv) {
     if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
       opCountTotal = 0.0;
       kernelCudaFuse = 
-        kernelMgr.collectCUDAKernelsFromCircuitGraph("graphCudaFuse");
+        kernelMgr.collectCUDAKernelsFromLegacyCircuitGraph("graphCudaFuse");
       for (const auto* kernel : kernelCudaFuse)
         opCountTotal += kernel->gate->opCount(1e-8);
       std::cerr << "Cuda-fuse: nGates = " << kernelCudaFuse.size()

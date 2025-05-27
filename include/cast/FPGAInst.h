@@ -9,8 +9,8 @@
 #include "cast/FPGAConfig.h"
 
 namespace cast {
-class CircuitGraph;
-class QuantumGate;
+class LegacyCircuitGraph;
+class LegacyQuantumGate;
 class GateBlock;
 } // namespace cast
 
@@ -21,7 +21,7 @@ namespace cast::fpga {
 // @param reOnlyTol: tolerance of the absolute value of imaginary value of
 // each entry smaller than (or equal to) which can be considered zero;
 FPGAGateCategory
-getFPGAGateCategory(const QuantumGate& gate,
+getFPGAGateCategory(const LegacyQuantumGate& gate,
                     const FPGAGateCategoryTolerance &tolerances);
 
 enum GInstKind : int {
@@ -233,9 +233,9 @@ public:
   CostKind getCostKind(const FPGACostConfig&) const;
 };
 
-// top-level function to generate FPGA instructions from a CircuitGraph
+// top-level function to generate FPGA instructions from a LegacyCircuitGraph
 std::vector<Instruction> genInstruction(
-    const CircuitGraph&, const FPGAInstGenConfig&);
+    const LegacyCircuitGraph&, const FPGAInstGenConfig&);
 
 }; // namespace cast::fpga
 

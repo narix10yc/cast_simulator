@@ -1,4 +1,4 @@
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/FPGAInst.h"
 #include "cast/Fusion.h"
 #include "cast/Parser.h"
@@ -130,8 +130,8 @@ FPGAInstGenConfig getConfig(int nLocalQubits) {
 
 // This will have severe memory leak (as our CircuitGraph does not release
 // memory)
-void runExperiment(std::function<CircuitGraph()> f) {
-  CircuitGraph G;
+void runExperiment(std::function<LegacyCircuitGraph()> f) {
+  LegacyCircuitGraph G;
   std::vector<Instruction> instructions;
 
   using clock = std::chrono::high_resolution_clock;

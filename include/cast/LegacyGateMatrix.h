@@ -47,7 +47,7 @@ namespace cast {
   } // namespace impl
 
 
-class GateMatrix {
+class LegacyGateMatrix {
 public:
   // specify gate matrix with (up to three) parameters
   using gate_params_t = std::array<utils::PODVariant<int, double>, 3>;
@@ -96,21 +96,21 @@ public:
   impl::GateKind gateKind;
   gate_params_t gateParams;
 
-  GateMatrix() : cache(), gateKind(impl::gUndef), gateParams() {}
+  LegacyGateMatrix() : cache(), gateKind(impl::gUndef), gateParams() {}
 
-  GateMatrix(impl::GateKind gateKind, const gate_params_t& params = {})
+  LegacyGateMatrix(impl::GateKind gateKind, const gate_params_t& params = {})
       : cache(), gateKind(gateKind), gateParams(params) {}
 
-  explicit GateMatrix(const up_matrix_t& upMat);
-  explicit GateMatrix(const c_matrix_t& upMat);
-  explicit GateMatrix(const p_matrix_t& upMat);
+  explicit LegacyGateMatrix(const up_matrix_t& upMat);
+  explicit LegacyGateMatrix(const c_matrix_t& upMat);
+  explicit LegacyGateMatrix(const p_matrix_t& upMat);
 
-  static GateMatrix FromName(
+  static LegacyGateMatrix FromName(
       const std::string& name, const gate_params_t& params = {});
 
   void permuteSelf(const llvm::SmallVector<int>& flags);
 
-  // get cached unitary perm matrix object associated with this GateMatrix
+  // get cached unitary perm matrix object associated with this LegacyGateMatrix
   const up_matrix_t* getUnitaryPermMatrix(double tolerance = 0.0) const {
     if (cache.isConvertibleToUpMat == Unknown)
       computeAndCacheUpMat(tolerance);
@@ -127,7 +127,7 @@ public:
     return &cache.upMat;
   }
 
-  // get cached constant matrix object associated with this GateMatrix
+  // get cached constant matrix object associated with this LegacyGateMatrix
   const c_matrix_t* getConstantMatrix() const {
     if (cache.isConvertibleToCMat == Unknown)
       computeAndCacheCMat();
@@ -144,7 +144,7 @@ public:
     return &cache.cMat;
   }
 
-  // get cached parametrized matrix object associated with this GateMatrix
+  // get cached parametrized matrix object associated with this LegacyGateMatrix
   const p_matrix_t& getParametrizedMatrix() const {
     if (cache.isConvertibleToPMat == Unknown)
       computeAndCachePMat();

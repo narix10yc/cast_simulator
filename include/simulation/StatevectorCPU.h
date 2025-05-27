@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cstdlib>
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 #include "utils/TaskDispatcher.h"
@@ -358,7 +358,7 @@ public:
     return os;
   }
 
-  StatevectorCPU& applyGate(const cast::QuantumGate& gate) {
+  StatevectorCPU& applyGate(const cast::LegacyQuantumGate& gate) {
     const auto* cMat = gate.gateMatrix.getConstantMatrix();
     assert(cMat && "Can only apply constant gateMatrix");
 

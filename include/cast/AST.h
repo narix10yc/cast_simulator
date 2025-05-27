@@ -1,10 +1,10 @@
 #ifndef CAST_AST_H
 #define CAST_AST_H
 
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 
 namespace cast {
-class CircuitGraph;
+class LegacyCircuitGraph;
 }
 
 namespace cast::ast {
@@ -49,9 +49,9 @@ public:
 class ParameterDefStmt : public Statement {
 public:
   int refNumber;
-  std::unique_ptr<GateMatrix> gateMatrix;
+  std::unique_ptr<LegacyGateMatrix> gateMatrix;
 
-  ParameterDefStmt(int refNumber, std::unique_ptr<GateMatrix> gateMatrix)
+  ParameterDefStmt(int refNumber, std::unique_ptr<LegacyGateMatrix> gateMatrix)
     : Statement(SK_ParamDef)
     , refNumber(refNumber)
     , gateMatrix(std::move(gateMatrix)) {}
@@ -61,7 +61,7 @@ public:
 
 class GateApplyStmt : public Statement {
 public:
-  using arg_t = utils::PODVariant<int, GateMatrix::gate_params_t>;
+  using arg_t = utils::PODVariant<int, LegacyGateMatrix::gate_params_t>;
   std::string name;
   arg_t argument;
   llvm::SmallVector<int> qubits;
@@ -108,12 +108,12 @@ public:
 
   void addChainStmt(std::unique_ptr<GateChainStmt> chain);
 
-  std::shared_ptr<QuantumGate>
-  gateApplyToQuantumGate(const GateApplyStmt&) const;
+  std::shared_ptr<LegacyQuantumGate>
+  gateApplyToLegacyQuantumGate(const GateApplyStmt&) const;
 
-  // CircuitGraph forbids copy and moves.
-  void toCircuitGraph(CircuitGraph&) const;
-  static QuantumCircuit FromCircuitGraph(const CircuitGraph&);
+  // LegacyCircuitGraph forbids copy and moves.
+  void toLegacyCircuitGraph(LegacyCircuitGraph&) const;
+  static QuantumCircuit FromLegacyCircuitGraph(const LegacyCircuitGraph&);
 };
 
 } // namespace cast::ast

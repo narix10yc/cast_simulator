@@ -1,14 +1,14 @@
 #include "openqasm/ast.h"
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 
 #include "llvm/ADT/SmallVector.h"
 
 using namespace openqasm::ast;
 
-void RootNode::toCircuitGraph(cast::CircuitGraph& graph) const {
+void RootNode::toLegacyCircuitGraph(cast::LegacyCircuitGraph& graph) const {
   llvm::SmallVector<int> qubits;
   for (const auto& s : stmts) {
-    cast::GateMatrix::gate_params_t params;
+    cast::LegacyGateMatrix::gate_params_t params;
     int i = 0;
     auto gateApply = dynamic_cast<GateApplyStmt*>(s.get());
     if (gateApply == nullptr) {
@@ -28,7 +28,7 @@ void RootNode::toCircuitGraph(cast::CircuitGraph& graph) const {
       // Our representation of theta is 0.5 times that in OpenQASM
       params[0].get<double>() *= 0.5;
     }
-    auto matrix = cast::GateMatrix::FromName(gateApply->name, params);
-    graph.appendGate(std::make_shared<cast::QuantumGate>(matrix, qubits));
+    auto matrix = cast::LegacyGateMatrix::FromName(gateApply->name, params);
+    graph.appendGate(std::make_shared<cast::LegacyQuantumGate>(matrix, qubits));
   }
 }

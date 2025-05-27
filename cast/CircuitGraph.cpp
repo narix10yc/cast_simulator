@@ -1,4 +1,4 @@
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
@@ -17,7 +17,7 @@ int CircuitGraphContext::GateNodeCount = 0;
 int CircuitGraphContext::GateBlockCount = 0;
 
 GateNode::GateNode(
-    std::shared_ptr<QuantumGate> gate, const CircuitGraph& graph)
+    std::shared_ptr<LegacyQuantumGate> gate, const LegacyCircuitGraph& graph)
   : id(CircuitGraphContext::GateNodeCount++), quantumGate(gate) {
   connections.reserve(quantumGate->nQubits());
   for (const auto q : quantumGate->qubits) {
@@ -55,38 +55,38 @@ void GateNode::connect(GateNode* rhsGate, int q) {
   rhsIt->lhsGate = this;
 }
 
-void CircuitGraph::clear() {
+void LegacyCircuitGraph::clear() {
   auto allBlocks = getAllBlocks();
   for (auto* block : allBlocks)
     releaseGateBlock(block);
   _tile.clear();
 }
 
-void CircuitGraph::QFTCircuit(int nQubits, CircuitGraph& graph) {
+void LegacyCircuitGraph::QFTCircuit(int nQubits, LegacyCircuitGraph& graph) {
   for (int q = 0; q < nQubits; ++q) {
-    graph.appendGate(std::make_shared<QuantumGate>(QuantumGate::H(q)));
+    graph.appendGate(std::make_shared<LegacyQuantumGate>(LegacyQuantumGate::H(q)));
     for (int l = q + 1; l < nQubits; ++l) {
       double angle = M_PI_2 * std::pow(2.0, q - l);
-      graph.appendGate(std::make_shared<QuantumGate>(QuantumGate(
-        GateMatrix::FromName("cp", {angle}), {q, l})));
+      graph.appendGate(std::make_shared<LegacyQuantumGate>(LegacyQuantumGate(
+        LegacyGateMatrix::FromName("cp", {angle}), {q, l})));
     }
   }
 }
 
-// CircuitGraph CircuitGraph::ALACircuit(int nQubits, int nrounds) {
+// LegacyCircuitGraph LegacyCircuitGraph::ALACircuit(int nQubits, int nrounds) {
 //   assert(0 && "Not Implemented");
-//   CircuitGraph graph;
+//   LegacyCircuitGraph graph;
 //   return graph;
 // }
 
-// CircuitGraph CircuitGraph::GetTestCircuit(
-//     const GateMatrix& gateMatrix, int nQubits, int nrounds) {
-//   CircuitGraph graph;
+// LegacyCircuitGraph LegacyCircuitGraph::GetTestCircuit(
+//     const LegacyGateMatrix& gateMatrix, int nQubits, int nrounds) {
+//   LegacyCircuitGraph graph;
 //   auto nQubitsGate = gateMatrix.nQubits();
 //
 //   for (int r = 0; r < nrounds; r++) {
 //     for (int q = 0; q < nQubits; q++) {
-//       graph.addGate(std::make_unique<QuantumGate>(
+//       graph.addGate(std::make_unique<LegacyQuantumGate>(
 //         gateMatrix,
 //         std::initializer_list<int>{q, (q + 1) % nQubits, (q + 2) % nQubits});
 //     }
@@ -94,9 +94,9 @@ void CircuitGraph::QFTCircuit(int nQubits, CircuitGraph& graph) {
 //   return graph;
 // }
 
-GateBlock* CircuitGraph::acquireGateBlock(
+GateBlock* LegacyCircuitGraph::acquireGateBlock(
     GateBlock* lhsBlock, GateBlock* rhsBlock) {
-  auto quantumGate = std::make_shared<QuantumGate>(
+  auto quantumGate = std::make_shared<LegacyQuantumGate>(
     lhsBlock->quantumGate->lmatmul(*rhsBlock->quantumGate));
 
   auto* gateBlock = _context->gateBlockPool.acquire();
@@ -119,7 +119,7 @@ GateBlock* CircuitGraph::acquireGateBlock(
   return gateBlock;
 }
 
-CircuitGraph::tile_iter_t CircuitGraph::insertBlock(
+LegacyCircuitGraph::tile_iter_t LegacyCircuitGraph::insertBlock(
     tile_iter_t it, GateBlock* block) {
 
   // print(std::cerr << "About to insertBlock " << block->id << "\n", 2) << "\n";
@@ -159,7 +159,7 @@ CircuitGraph::tile_iter_t CircuitGraph::insertBlock(
   return it;
 }
 
-void CircuitGraph::appendGate(std::shared_ptr<QuantumGate> quantumGate) {
+void LegacyCircuitGraph::appendGate(std::shared_ptr<QuantuLegacyQuantumGatetumGate) {
   assert(quantumGate != nullptr);
   // update nQubits
   for (const auto& q : quantumGate->qubits) {
@@ -177,7 +177,7 @@ void CircuitGraph::appendGate(std::shared_ptr<QuantumGate> quantumGate) {
   repositionBlockUpward(it, block->quantumGate->qubits[0]);
 }
 
-std::vector<GateBlock*> CircuitGraph::getAllBlocks() const {
+std::vector<GateBlock*> LegacyCircuitGraph::getAllBlocks() const {
   std::vector<GateBlock*> allBlocks;
   std::vector<GateBlock*> rowBlocks;
   for (const auto& row : _tile) {
@@ -194,8 +194,8 @@ std::vector<GateBlock*> CircuitGraph::getAllBlocks() const {
   return allBlocks;
 }
 
-CircuitGraph::list_node_t*
-CircuitGraph::repositionBlockUpward(list_node_t* ln, int q) {
+LegacyCircuitGraph::list_node_t*
+LegacyCircuitGraph::repositionBlockUpward(list_node_t* ln, int q) {
   assert(ln != nullptr);
   auto* block = ln->data[q];
   assert(block && "Cannot reposition a null block");
@@ -224,8 +224,8 @@ CircuitGraph::repositionBlockUpward(list_node_t* ln, int q) {
   return newln;
 }
 
-CircuitGraph::list_node_t*
-CircuitGraph::repositionBlockDownward(list_node_t* ln, int q) {
+LegacyCircuitGraph::list_node_t*
+LegacyCircuitGraph::repositionBlockDownward(list_node_t* ln, int q) {
   assert(ln != nullptr);
   auto* block = ln->data[q];
   assert(block && "Cannot reposition a null block");
@@ -254,7 +254,7 @@ CircuitGraph::repositionBlockDownward(list_node_t* ln, int q) {
   return newln;
 }
 
-void CircuitGraph::eraseEmptyRows() {
+void LegacyCircuitGraph::eraseEmptyRows() {
   auto it = _tile.cbegin();
   while (it != nullptr) {
     bool empty = true;
@@ -271,7 +271,7 @@ void CircuitGraph::eraseEmptyRows() {
   }
 }
 
-void CircuitGraph::squeeze() {
+void LegacyCircuitGraph::squeeze() {
   eraseEmptyRows();
   auto it = _tile.begin();
   while (it != nullptr) {
@@ -284,7 +284,7 @@ void CircuitGraph::squeeze() {
   eraseEmptyRows();
 }
 
-std::ostream& CircuitGraph::print(std::ostream& os, int verbose) const {
+std::ostream& LegacyCircuitGraph::print(std::ostream& os, int verbose) const {
   if (_tile.empty())
     return os << "<empty tile>\n";
   int width = static_cast<int>(std::log10(_context->GateBlockCount) + 1);
@@ -326,7 +326,7 @@ std::ostream& CircuitGraph::print(std::ostream& os, int verbose) const {
 //   return os << "]\n";
 // }
 //
-// std::vector<int> CircuitGraph::getBlockSizes() const {
+// std::vector<int> LegacyCircuitGraph::getBlockSizes() const {
 //   std::vector<int> sizes(nQubits + 1, 0);
 //   const auto allBlocks = getAllBlocks();
 //   int largestSize = 0;
@@ -340,7 +340,7 @@ std::ostream& CircuitGraph::print(std::ostream& os, int verbose) const {
 //   return sizes;
 // }
 //
-// std::vector<std::vector<int>> CircuitGraph::getBlockOpCountHistogram() const {
+// std::vector<std::vector<int>> LegacyCircuitGraph::getBlockOpCountHistogram() const {
 //   const auto allBlocks = getAllBlocks();
 //   int largestSize = 0;
 //   for (const auto* b : allBlocks) {
@@ -364,8 +364,8 @@ std::ostream& CircuitGraph::print(std::ostream& os, int verbose) const {
 //   return hist;
 // }
 //
-// std::ostream& CircuitGraph::displayInfo(std::ostream& os, int verbose) const {
-//   os << CYAN_FG << "=== CircuitGraph Info (verbose " << verbose << ") ===\n"
+// std::ostream& LegacyCircuitGraph::displayInfo(std::ostream& os, int verbose) const {
+//   os << CYAN_FG << "=== LegacyCircuitGraph Info (verbose " << verbose << ") ===\n"
 //      << RESET;
 //
 //   os << "- Number of Gates:  " << countGates() << "\n";
@@ -465,13 +465,13 @@ bool GateBlock::isSingleton() const {
   return true;
 }
 
-// void CircuitGraph::relabelBlocks() const {
+// void LegacyCircuitGraph::relabelBlocks() const {
 //   int count = 0;
 //   auto allBlocks = getAllBlocks();
 //   for (auto* block : allBlocks)
 //     block->id = (count++);
 // }
 
-void CircuitGraph::deepCopy(CircuitGraph& other) const {
+void LegacyCircuitGraph::deepCopy(LegacyCircuitGraph& other) const {
   assert(false && "Not Implemented");
 }

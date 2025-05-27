@@ -1,14 +1,14 @@
-#include "cast/CircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/FPGAInst.h"
 #include "cast/Fusion.h"
-#include "cast/QuantumGate.h"
+#include "cast/LegacyQuantumGate.h"
 #include "utils/iocolor.h"
 
 using namespace cast;
 using namespace cast::fpga;
 using namespace IOColor;
 
-using tile_iter_t = CircuitGraph::tile_iter_t;
+using tile_iter_t = LegacyCircuitGraph::tile_iter_t;
 
 namespace {
 
@@ -106,14 +106,14 @@ GateBlock* computeCandidate(
   // accept candidate
   // std::cerr << GREEN_FG << "Fusion accepted! " << "\n" << RESET;
 
-  block->quantumGate = std::make_unique<QuantumGate>(
+  block->quantumGate = std::make_unique<LegacyQuantumGate>(
       rhs->quantumGate->lmatmul(*lhs->quantumGate));
 
   return block;
 }
 
 GateBlock* trySameWireFuse(
-    CircuitGraph& graph, tile_iter_t itLHS,
+    LegacyCircuitGraph& graph, tile_iter_t itLHS,
     int qubit, const FPGAFusionConfig& config) {
   assert(itLHS != graph.tile_end());
   const auto itRHS = itLHS.next();
@@ -148,7 +148,7 @@ GateBlock* trySameWireFuse(
   return block;
 }
 
-GateBlock* tryCrossWireFuse(CircuitGraph& graph, const tile_iter_t& tileIt,
+GateBlock* tryCrossWireFuse(LegacyCircuitGraph& graph, const tile_iter_t& tileIt,
                             int q, const FPGAFusionConfig& config) {
   auto block0 = (*tileIt)[q];
   if (block0 == nullptr)
@@ -171,7 +171,7 @@ GateBlock* tryCrossWireFuse(CircuitGraph& graph, const tile_iter_t& tileIt,
 } // anonymous namespace
 
 void cast::applyFPGAGateFusion(
-    CircuitGraph& graph, const FPGAFusionConfig& config) {
+    LegacyCircuitGraph& graph, const FPGAFusionConfig& config) {
   auto& tile = graph.tile();
   if (tile.size() < 2)
     return;
