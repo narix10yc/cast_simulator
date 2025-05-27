@@ -3,6 +3,7 @@
 
 #include "cast/Parser.h"
 #include "cast/LegacyCircuitGraph.h"
+#include "cast/LegacyCircuitGraph.h"
 #include "cast/Fusion.h"
 #include "openqasm/parser.h"
 

@@ -3,9 +3,9 @@
 #include <cassert>
 #include "utils/iocolor.h"
 
-using namespace cast::draft;
+using namespace cast::draft::ast;
 
-std::string cast::draft::internal::getNameOfTokenKind(TokenKind kind) {
+std::string cast::draft::ast::internal::getNameOfTokenKind(TokenKind kind) {
   switch (kind) {
   case tk_Eof:
     return "EoF";
@@ -52,15 +52,13 @@ std::ostream& Token::print(std::ostream& os) const {
   os << "tok(";
 
   if (kind == tk_Numeric) {
-    assert(memRefBegin != memRefEnd);
     os << "Num,";
-    return os.write(memRefBegin, memRefEnd - memRefBegin) << ")";
+    return os.write(loc.begin, length()) << ")";
   }
 
   if (kind == tk_Identifier) {
-    assert(memRefBegin != memRefEnd);
     os << "Identifier,";
-    return os.write(memRefBegin, memRefEnd - memRefBegin) << ")";
+    return os.write(loc.begin, length()) << ")";
   }
 
   os << IOColor::CYAN_FG;
@@ -128,7 +126,7 @@ void Lexer::lexTwoChar(Token& tok, char snd, TokenKind tk1, TokenKind tk2) {
 }
 
 void Lexer::lex(Token& tok) {
-  if (curPtr >= sm.bufferEnd) {
+  if (curPtr >= endPtr) {
     lexOneChar(tok, tk_Eof);
     --curPtr; // keep curPtr to its current position
     return;
@@ -266,8 +264,9 @@ void Lexer::lex(Token& tok) {
     if (!std::isalpha(c)) {
       std::cerr << RED("[Lexer Error]: ") << "Unknown char "
                 << static_cast<int>(c)
-                << ". This is likely not implemented yet.\n";
-      sm.printLineInfo(std::cerr, curPtr, curPtr + 1);
+                << ". This is likely not implemented yet. "
+                << "Current address: " << (void*)curPtr << ", please check "
+                << "line table.\n";
       assert(false);
     }
     c = *(++curPtr);
@@ -285,19 +284,21 @@ void Lexer::lex(Token& tok) {
       tok.kind = tk_Channel;
     else if (tokStr == "If")
       tok.kind = tk_If;
-    else if (tokStr == "All")
-      tok.kind = tk_All;
+    else if (tokStr == "Else")
+      tok.kind = tk_Else;
     else if (tokStr == "Measure")
       tok.kind = tk_Measure;
-    else if (tokStr == "Repeat")
-      tok.kind = tk_Repeat;
+    else if (tokStr == "Out")
+      tok.kind = tk_Out;
+    else if (tokStr == "All")
+      tok.kind = tk_All;
 
     return;
   }
 }
 
 void Lexer::skipLine() {
-  while (curPtr < sm.bufferEnd) {
+  while (curPtr < endPtr) {
     if (*curPtr++ == '\n')
       break;
   }

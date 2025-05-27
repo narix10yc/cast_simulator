@@ -107,9 +107,9 @@ std::ostream& printArray(
 }
 
 // @param f: The printer is expected to take inputs (const T&, std::ostream&)
-template<typename T, typename Printer_T>
+template<typename T, typename Printer>
 std::ostream& printVectorWithPrinter(
-    const std::vector<T>& v, Printer_T f, std::ostream& os = std::cerr) {
+    const std::vector<T>& v, Printer f, std::ostream& os = std::cerr) {
   if (v.empty())
     return os << "[]";
   auto it = v.cbegin();

@@ -159,7 +159,8 @@ LegacyCircuitGraph::tile_iter_t LegacyCircuitGraph::insertBlock(
   return it;
 }
 
-void LegacyCircuitGraph::appendGate(std::shared_ptr<QuantuLegacyQuantumGatetumGate) {
+void LegacyCircuitGraph::appendGate(
+    std::shared_ptr<LegacyQuantumGate> quantumGate) {
   assert(quantumGate != nullptr);
   // update nQubits
   for (const auto& q : quantumGate->qubits) {

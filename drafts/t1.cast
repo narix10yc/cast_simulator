@@ -1,3 +1,9 @@
-Circuit my_circuit_1 {
-  RX 0;
+Channel pauli_x(p) {
+  X p;
+}
+
+Circuit<noise=sdc(0.01)>
+my_noisy_circuit {
+  H 0;
+  CX 0 1;
 }

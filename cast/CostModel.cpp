@@ -21,6 +21,16 @@ double NaiveCostModel::computeGiBTime(
   return 0.0;
 }
 
+double NaiveCostModel::computeGiBTime(
+    const QuantumGate& gate, int precision, int nThreads) const {
+  if (gate.nQubits() > maxNQubits)
+    return 1.0;
+  if (maxOp > 0 && gate.opCount(zeroTol) > maxOp)
+    return 1.0;
+
+  return 0.0;
+}
+
 StandardCostModel::StandardCostModel(PerformanceCache* cache, double zeroTol)
   : cache(cache), zeroTol(zeroTol), items() {
   items.reserve(32);
@@ -58,6 +68,74 @@ StandardCostModel::StandardCostModel(PerformanceCache* cache, double zeroTol)
 
 double StandardCostModel::computeGiBTime(
     const LegacyQuantumGate& gate, int precision, int nThreads) const {
+  assert(!items.empty());
+  const auto gateNQubits = gate.nQubits();
+  auto gateOpCount = gate.opCount(zeroTol);
+
+  // Try to find an exact match
+  for (const auto& item : items) {
+    if (item.nQubits == gateNQubits &&
+        item.precision == precision &&
+        item.nThreads == nThreads) {
+      auto avg = std::max(item.getAvgGibTimePerOpCount(), this->minGibTimeCap);
+      return avg * gateOpCount;
+    }
+  }
+
+  // No exact match. Estimate it
+  auto bestMatchIt = items.begin();
+
+  auto it = items.cbegin();
+  const auto end = items.cend();
+  while (++it != end) {
+    // priority: nThreads > nQubits > precision
+    const int bestNThreadsDiff = std::abs(nThreads - bestMatchIt->nThreads);
+    const int thisNThreadsDiff = std::abs(nThreads - it->nThreads);
+    if (thisNThreadsDiff > bestNThreadsDiff)
+      continue;
+    if (thisNThreadsDiff < bestNThreadsDiff) {
+      bestMatchIt = it;
+      continue;
+    }
+
+    const int bestNQubitsDiff = std::abs(gateNQubits - bestMatchIt->nQubits);
+    const int thisNQubitsDiff = std::abs(gateNQubits - it->nQubits);
+    if (thisNQubitsDiff > bestNQubitsDiff)
+      continue;
+    if (thisNQubitsDiff < bestNQubitsDiff) {
+      bestMatchIt = it;
+      continue;
+    }
+
+    if (precision == bestMatchIt->precision)
+      continue;
+    if (precision == it->precision) {
+      bestMatchIt = it;
+      continue;
+    }
+  }
+
+  // best match avg GiB time per opCount
+  auto bestMatchT0 = bestMatchIt->getAvgGibTimePerOpCount();
+  // estimated avg Gib time per opCount
+  auto estT0 = bestMatchT0 * bestMatchIt->nThreads / nThreads;
+  auto estimateTime = std::max<double>(estT0, this->minGibTimeCap) * gateOpCount;
+
+  std::cerr << YELLOW("Warning: ") << "No exact match to "
+               "[nQubits, precision, nThreads] = ["
+            << gateNQubits << ", " << gateOpCount << ", "
+            << precision << ", " << nThreads
+            << "] found. We estimate it by ["
+            << bestMatchIt->nQubits << ", " << bestMatchIt->precision
+            << ", " << bestMatchIt->nThreads
+            << "] @ " << bestMatchT0 << " s/GiB/op => "
+               "Est. " << estT0 << " s/GiB/op.\n";
+
+  return estimateTime;
+}
+
+double StandardCostModel::computeGiBTime(
+    const QuantumGate& gate, int precision, int nThreads) const {
   assert(!items.empty());
   const auto gateNQubits = gate.nQubits();
   auto gateOpCount = gate.opCount(zeroTol);

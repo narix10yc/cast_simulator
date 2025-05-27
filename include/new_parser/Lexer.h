@@ -1,10 +1,12 @@
 #ifndef NEW_PARSER_LEXER_H
 #define NEW_PARSER_LEXER_H
 
-#include <string>
 #include "new_parser/SourceManager.h"
+#include <string>
+#include <cassert>
 
 namespace cast::draft {
+namespace ast {
 
 enum TokenKind : int {
   tk_Eof = -1,
@@ -17,8 +19,9 @@ enum TokenKind : int {
   tk_Channel = -12,
   tk_Measure = -13,
   tk_If = -14,
-  tk_All = -15,
-  tk_Repeat = -16,
+  tk_Else = -15,
+  tk_Out = -16,
+  tk_All = -17,
 
   // operators
   tk_Add = -30,          // +
@@ -71,14 +74,13 @@ namespace internal {
 class Token {
 public:
   TokenKind kind;
-  const char* memRefBegin;
-  const char* memRefEnd;
+  LocationSpan loc;
 
   Token(TokenKind kind = tk_Unknown)
-      : kind(kind), memRefBegin(nullptr), memRefEnd(nullptr) {}
+      : kind(kind), loc(nullptr, nullptr) {}
 
   Token(TokenKind kind, const char* memRefBegin, const char* memRefEnd)
-      : kind(kind), memRefBegin(memRefBegin), memRefEnd(memRefEnd) {}
+      : kind(kind), loc(memRefBegin, memRefEnd) {}
 
   std::ostream& print(std::ostream& = std::cerr) const;
 
@@ -87,12 +89,11 @@ public:
 
   // is the token the literal 'i'
   bool isI() const {
-    return kind == tk_Identifier && length() == 1 && *memRefBegin == 'i';
+    return kind == tk_Identifier && length() == 1 && *loc.begin == 'i';
   }
 
   bool convertibleToInt() const {
-    assert(memRefBegin < memRefEnd);
-    for (const char* p = memRefBegin; p < memRefEnd; ++p) {
+    for (const char* p = loc.begin; p < loc.end; ++p) {
       if (!std::isdigit(*p))
         return false;
     }
@@ -100,26 +101,23 @@ public:
   }
 
   double toDouble() const {
-    assert(memRefBegin < memRefEnd);
-    return std::stod(std::string(memRefBegin, memRefEnd));
+    return std::stod(std::string(loc.begin, loc.end));
   }
 
   int toInt() const {
     assert(convertibleToInt());
-    return std::stoi(std::string(memRefBegin, memRefEnd));
+    return std::stoi(std::string(loc.begin, loc.end));
   }
 
   std::string_view toStringView() const {
-    assert(memRefBegin < memRefEnd);
-    return std::string_view(memRefBegin, memRefEnd);
+    return std::string_view(loc.begin, loc.end - loc.begin);
   }
 
   std::string toString() const {
-    assert(memRefBegin < memRefEnd);
-    return std::string(memRefBegin, memRefEnd);
+    return std::string(loc.begin, loc.end);
   }
 
-  size_t length() const { return memRefEnd - memRefBegin; }
+  size_t length() const { return loc.end - loc.begin; }
 };
 
 class Lexer {
@@ -143,12 +141,10 @@ private:
   void lexTwoChar(Token& tok, char snd, TokenKind tk1, TokenKind tk2);
 
 public:
-  SourceManager sm;
   const char* curPtr;
+  const char* endPtr;
 
-  explicit Lexer(const char* fileName) : sm(fileName) {
-    curPtr = sm.bufferBegin;
-  }
+  Lexer() : curPtr(nullptr), endPtr(nullptr) {}
 
   /// After this function returns, curPtr always points to the next char after 
   /// \c tok
@@ -157,6 +153,7 @@ public:
   void skipLine();
 };
 
+} // namespace ast
 } // namespace cast::draft
 
 #endif // NEW_PARSER_LEXER_H

@@ -66,6 +66,8 @@ public:
       const std::string& title, const std::string& info, float tol=1e-4);
 };
 
+void test_complexSquareMatrix();
+
 void test_applyGate();
 void test_gateMatMul();
 

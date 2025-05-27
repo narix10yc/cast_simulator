@@ -1,5 +1,5 @@
-#ifndef CAST_CIRCUITGRAPH_H
-#define CAST_CIRCUITGRAPH_H
+#ifndef CAST_LEGACY_CIRCUIT_GRAPH_H
+#define CAST_LEGACY_CIRCUIT_GRAPH_H
 
 #include "cast/LegacyQuantumGate.h"
 #include "cast/CircuitGraphContext.h"
@@ -280,4 +280,4 @@ public:
 
 }; // namespace cast
 
-#endif // CAST_CIRCUITGRAPH_H
+#endif // CAST_LEGACY_CIRCUIT_GRAPH_H

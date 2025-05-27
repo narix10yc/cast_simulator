@@ -1,10 +1,7 @@
 #ifndef UTILS_CUDA_API_CALL_H
 #define UTILS_CUDA_API_CALL_H
 
-#ifndef RED
-#define RED(x) "\033[31m" x "\033[0m"
-#endif
-
+#include "utils/iocolor.h"
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <iostream>

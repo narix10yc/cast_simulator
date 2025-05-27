@@ -8,7 +8,7 @@
 #include <memory>
 
 namespace cast {
-class LegacyCircuitGraph;
+  class LegacyCircuitGraph;
 }
 namespace openqasm::ast {
 
@@ -273,9 +273,8 @@ public:
 };
 
 class RootNode : public Node {
-  std::vector<std::unique_ptr<Statement>> stmts;
-
 public:
+  std::vector<std::unique_ptr<Statement>> stmts;
   std::string toString() const override { return "Root"; }
   void prettyPrint(std::ostream& f, int depth) const override;
   void addStmt(std::unique_ptr<Statement> stmt) {

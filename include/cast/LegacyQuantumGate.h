@@ -1,5 +1,5 @@
-#ifndef CAST_QUANTUM_GATE_H
-#define CAST_QUANTUM_GATE_H
+#ifndef CAST_LEGACY_QUANTUM_GATE_H
+#define CAST_LEGACY_QUANTUM_GATE_H
 
 #include "cast/LegacyGateMatrix.h"
 #include <array>
@@ -142,4 +142,4 @@ public:
 
 } // namespace cast
 
-#endif // CAST_QUANTUM_GATE_H
+#endif // CAST_LEGACY_QUANTUM_GATE_H

@@ -1,5 +1,5 @@
-#ifndef CAST_GATEMATRIX_H
-#define CAST_GATEMATRIX_H
+#ifndef CAST_LEGACY_GATE_MATRIX_H
+#define CAST_LEGACY_GATE_MATRIX_H
 
 #include "cast/UnitaryPermMatrix.h"
 #include "cast/ScalarKind.h"
@@ -179,7 +179,9 @@ public:
   // @brief Get number of qubits
   int nQubits() const;
 
-  // int opCount() const;
+  /// @brief Return other * this. That is, A.lmatmul(B) will return BA.
+  /// Currently only support cMat
+  LegacyGateMatrix lmatmul(const LegacyGateMatrix& other) const;
 
   std::ostream& printCMat(std::ostream& os) const;
 
@@ -219,10 +221,21 @@ public:
 
   static const p_matrix_t MatrixCX_p;
   static const p_matrix_t MatrixCZ_p;
+
+  // preset gate matrices
+  static LegacyGateMatrix H() { return LegacyGateMatrix(MatrixH_c); }
+  static LegacyGateMatrix X() { return LegacyGateMatrix(MatrixX_c); }
+  static LegacyGateMatrix Y() { return LegacyGateMatrix(MatrixY_c); }
+  static LegacyGateMatrix Z() { return LegacyGateMatrix(MatrixZ_c); }
+  static LegacyGateMatrix I1() { return LegacyGateMatrix(MatrixI1_c); }
+  static LegacyGateMatrix I2() { return LegacyGateMatrix(MatrixI2_c); }
+  static LegacyGateMatrix CX() { return LegacyGateMatrix(MatrixCX_c); }
+  static LegacyGateMatrix CZ() { return LegacyGateMatrix(MatrixCZ_c); }
 };
 
-
+// An easy name for gate matrix pointer type
+using gmp_t = std::shared_ptr<LegacyGateMatrix>;
 
 } // namespace cast
 
-#endif // CAST_GATEMATRIX_H
+#endif // CAST_LEGACY_GATE_MATRIX_H

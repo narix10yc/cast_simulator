@@ -10,7 +10,7 @@ All keywords start in captial letter. Keywords include `Circuit`, `Channel`, `Al
 ### Standard Gates
 - All captical letters.
 - Builtin support includes `X`, `Y`, `Z`, `H`, `CX`, `CY`, `CZ`, `RX`, `RY`, `RZ`.
-- Optionally be followed by square brakets `[]` for attributes. For example, `X[phase=pi]` means the $-X$ gate.
+- Parameters should follow round brackets. For example, `RX(-Pi) 0` means applying a RX gate with angle $-\pi$ to qubit 0.
 
 ### Top-level Statements
 ```
@@ -26,19 +26,12 @@ Grammer:
 Example:
 ```
 Circuit my_circuit {
-  X<phase=pi> 0;
-  H 1;
-  RZ(pi) 2;
-}
-```
-This circuit will be compiled to
-```
-Circuit[nqubits=3, nparams=0, phase=pi] my_circuit {
   X 0;
   H 1;
-  RZ(pi) 2;
+  RZ(Pi) 2;
 }
 ```
+defines a circuit with 3 gates.
 
 Gate fusion is denoted by `@`. For example,
 ```
@@ -48,58 +41,82 @@ Circuit my_circuit2 {
   RZ(pi) 2;
 }
 ```
-This circuit is likely compiled to
+Because $YX=-iZ$, this circuit is equivalent to
 ```
-Circuit[nqubits=3, nparams=0, phase=pi/4] {
+Circuit<phase=-Pi/4> {
   Z 0;
   RZ(pi) 2;
 }
 ```
 
-We support parameter by `#n`
+### Attributes
+Attributes are key-value pairs surrounded by angle brackets `<>`. Circuits and gates can have attributes. For example, `Circuit<phase=Pi>` defines a circuit with global phase $e^{i\pi}$.
+
+Here is a list of supported attributes:
+- Circuit supports `nqubits`, `nparams`, `phase`, `noise` attributes.
+- Gate supports `noise` attribute.
+
+## Channel
+Grammer
 ```
-Circuit my_circuit3 {
-  RX(#0) 0;
+channel_stmt ::= "Channel" identifier 
+[ parameter_decl_expr ] 
+"{" 
+{ pauli_component_stmt }
+"}"
+```
+
+We define quantum channels by the `Channel` keyword. For example, to define a symmetric depolarizing channel with strength `p`, we write
+```
+Channel sdc(p) {
+  X p/3;
+  Y p/3;
+  Z p/3;
 }
 ```
-This circuit is likely compiled to
+Similarly, we can define a two-qubit channel
 ```
-Circuit[nqubits=1, nparams=1] {
-  RX(#0) 0;
+Channel two_qubit_noise(pxx, pyy, pzz) {
+  XX pxx;
+  YY pyy;
+  ZZ pzz;
 }
 ```
 
-### Noise Model
-We define noise model by the `Channel` keyword. For example, to define a symmetric depolarizing channel with strength `p`, we write
+The channel body must be a list of `pauli_component_stmt`.
 ```
-Channel symmetric_depolarizing {
-  #0/3 X;
-  #0/3 Y;
-  #0/3 Z;
-}
+pauli_component_stmt ::= pauli_string expr ";" ;
 ```
-Attributes are also supported (auto-deduced in the above example):
+
+`pauli_string` is a string of `X` `Y` `Z` optionally followed by numbers that specify which qubit to act on. For example, `XIIYI` is equivalent to `X4Y1`. To adjust the size of the Pauli string, we could add a dummy `I<n>` term. For example, the 4-qubit `IIXI` could be written as `I3X1`.
+
+To use channels in circuit definition, use `<noise=...>` as an attribute to the gates. For example,
 ```
-Channel[nqubits=1, nparams=1]
-symmetric_depolarizing {
-  #0/3 X;
-  #0/3 Y;
-  #0/3 Z;
+Circuit qc {
+  H<noise=sdc(0.01)> 0;
 }
 ```
 
-### Measurements and conditionals
+We can also impose a global error model by using the `noise=...` attribute after the `Circuit` keyword.
 ```
-Circuit[noise=symmetric_depolarizing(0.1)]
+Circuit<noise=sdc(0.01)>
 my_noisy_circuit {
   H 0;
-  // Reset qubit 0 to 0
-  If (Measure 0)
-    X 0;
-  H 1;
-  Measure 1;
+  CX 0 1;
 }
 ```
+Notice that for multi-qubit gates, `Circuit<noise=...>` will add indepedent noise to every target qubit. For example, the above circuit is equivalent to
+```
+Circuit my_noisy_circuit {
+  H 0;
+  I<noise=sdc(0.01)> 0;
+  CX 0 1;
+  I<noise=sdc(0.01)> 0;
+  I<noise=sdc(0.01)> 1;
+}
+```
+
+### TODO: Measurements and Conditionals
 
 ```
 Gate reset(q) {
@@ -158,5 +175,64 @@ ECC five_qubit_code {
 Circuit[ecc=five_qubit_code] ecc_circuit {
   H 0;
   Measure 0;
+}
+```
+
+## CAST IR
+
+```
+cast.circuit @my_qc(%q : cast.qubits<6>) -> i1
+{
+  cast.circuit_graph;
+  cast.if (cast.measure(0))
+  {
+    cast.circuit_graph;
+  } // else
+  {}
+  cast.circuit_graph;
+  cast.out(0);
+}
+```
+
+```
+cast.circuit @my_qc(%q : cast.qubits<6>) -> cast.dm<6>
+{
+  cast.circuit_graph;
+  cast.if (cast.measure(0))
+  {
+    cast.circuit_graph;
+  } // else
+  {}
+  cast.circuit_graph;
+  cast.out_dm();
+}
+```
+
+```
+Circuit my_circuit {
+  H 0;
+  CX 0 1;
+  If (Measure 0) {
+    X 0;
+  }
+  Else {
+    X 1;
+  }
+  RZ(Pi/4) 0;
+  Out (Measure 0);
+}
+```
+
+```
+cast.circuit @my_circuit(%q : cast.qubits<2>) -> i1
+{
+  cast.circuit_graph;
+  cast.if_measure(0) {
+    cast.circuit_graph;
+  }{
+    cast.circuit_graph;
+  }
+  cast.circuit_graph;
+  return cast.out_measure(0);
 }
 ```

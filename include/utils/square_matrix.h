@@ -1,12 +1,10 @@
 #ifndef UTILS_SQUARE_MATRIX_H
 #define UTILS_SQUARE_MATRIX_H
 
+#include "utils/utils.h"
 #include <cassert>
 #include <complex>
 #include <iostream>
-#include <llvm/Support/FileSystem.h>
-#include <utils/utils.h>
-#include <valarray>
 #include <vector>
 
 namespace utils {
