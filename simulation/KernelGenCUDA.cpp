@@ -690,6 +690,9 @@ void genMatrixVectorMultiply_SharedTiled(
 
     Value *threadIdx32 = B.CreateIntrinsic(
         B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_tid_x, {});
+    Value *blkDim32 = B.CreateIntrinsic(
+        B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_ntid_x, {});
+    Value *blkDim64 = B.CreateZExt(blkDim32, B.getInt64Ty());
 
     // cVal = cStartVal + threadIdx.x
     Value *cVal = B.CreateAdd(cStartVal, B.CreateZExt(threadIdx32, B.getInt64Ty()), "cVal");
@@ -767,7 +770,8 @@ void genMatrixVectorMultiply_SharedTiled(
     PHINode *jPHI = B.CreatePHI(B.getInt64Ty(), 2, "j");
     jPHI->addIncoming(B.getInt64(0), contBB);
 
-    Value *condJ = B.CreateICmpSLT(jPHI, B.getInt64(TILE_SIZE));
+    // Value *condJ = B.CreateICmpSLT(jPHI, B.getInt64(TILE_SIZE));
+    Value *condJ = B.CreateICmpSLT(jPHI, blkDim64);
     B.CreateCondBr(condJ, dotBodyBB, dotExitBB);
 
     // dotBodyBB
@@ -817,7 +821,8 @@ void genMatrixVectorMultiply_SharedTiled(
 
     // loopIncBB => next cStart = cStart + TILE_SIZE
     B.SetInsertPoint(loopIncBB);
-    Value *cNextVal = B.CreateAdd(cStartVal, B.getInt64(TILE_SIZE));
+    // Value *cNextVal = B.CreateAdd(cStartVal, B.getInt64(TILE_SIZE));
+    Value *cNextVal = B.CreateAdd(cStartVal, blkDim64);
     cStartPHI->addIncoming(cNextVal, loopIncBB);
     B.CreateBr(loopCheckBB);
 
@@ -838,6 +843,83 @@ void genMatrixVectorMultiply_SharedTiled(
 
     B.CreateBr(checkEndBB);
     B.SetInsertPoint(checkEndBB);
+}
+
+static void genMatrixVectorMultiplyFromPointer(
+    llvm::IRBuilder<>          &B,
+    const CUDAKernelGenConfig  &config,
+    const GateMatrix          &gateMat,
+    llvm::ArrayRef<int>        qubits,
+    llvm::Value               *matBasePtr,   // global-mem PTR  (addr-space 1)
+    llvm::Value               *svPtrV,       // |ψ⟩  (real/imag interleaved)
+    llvm::Type                *scalarTy)
+{
+    using namespace llvm;
+    unsigned k = gateMat.nQubits();
+    unsigned K = 1u << k;
+
+    /* ----- cache old amplitudes ------------------------------------------------*/
+    std::vector<Value*> reAmpPtrs(K), imAmpPtrs(K);
+    std::vector<Value*> oldRe    (K), oldIm    (K);
+
+    for (unsigned i = 0; i < K; ++i) {
+        /* logical-to-physical permutation for index i */
+        uint64_t delta = 0;
+        for (unsigned b = 0; b < k; ++b)
+            if (i & (1u << b))
+                delta |= (1ull << qubits[b]);
+
+        reAmpPtrs[i] = B.CreateConstGEP1_64(scalarTy, svPtrV, 2*delta,
+                                            "re.ptr."+std::to_string(i));
+        imAmpPtrs[i] = B.CreateConstGEP1_64(scalarTy, svPtrV, 2*delta+1,
+                                            "im.ptr."+std::to_string(i));
+
+        oldRe[i] = B.CreateLoad(scalarTy, reAmpPtrs[i], "oldRe."+std::to_string(i));
+        oldIm[i] = B.CreateLoad(scalarTy, imAmpPtrs[i], "oldIm."+std::to_string(i));
+    }
+
+    /* ----- do the unrolled dot-product row by row ------------------------------*/
+    Constant *zero = ConstantFP::get(scalarTy, 0.0);
+
+    for (unsigned r = 0; r < K; ++r) {
+        Value *accRe = zero;
+        Value *accIm = zero;
+
+        for (unsigned c = 0; c < K; ++c) {
+            uint64_t base = 2ull * (r*K + c);          // linear index *2 (re/​im)
+            Value *idx64 = B.getInt64(base);
+
+            Value *mRe = B.CreateLoad(
+                scalarTy,
+                B.CreateGEP(scalarTy, matBasePtr, idx64), "Mre");
+            Value *mIm = B.CreateLoad(
+                scalarTy,
+                B.CreateGEP(scalarTy, matBasePtr,
+                            B.CreateAdd(idx64, B.getInt64(1))), "Mim");
+
+            /* (Mre+iMim)*(oldRe+iOldIm) */
+            Value *prodRe = B.CreateFSub(
+                B.CreateFMul(mRe, oldRe[c]),
+                B.CreateFMul(mIm, oldIm[c]));
+            Value *prodIm = B.CreateFAdd(
+                B.CreateFMul(mRe, oldIm[c]),
+                B.CreateFMul(mIm, oldRe[c]));
+
+            accRe = B.CreateFAdd(accRe, prodRe);
+            accIm = B.CreateFAdd(accIm, prodIm);
+        }
+
+        /* write back |ψ⟩_new[r] --------------------------------------------------*/
+        uint64_t delta = 0;
+        for (unsigned b = 0; b < k; ++b)
+            if (r & (1u << b))
+                delta |= (1ull << qubits[b]);
+
+        Value *twoD = B.getInt64(2*delta);
+        B.CreateStore(accRe, B.CreateGEP(scalarTy, svPtrV, twoD));
+        B.CreateStore(accIm, B.CreateGEP(scalarTy, svPtrV,
+                                         B.CreateAdd(twoD, B.getInt64(1))));
+    }
 }
 
 
@@ -958,6 +1040,9 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
   // iVal = threadIdx.x
   Value *threadIdx32 = B.CreateIntrinsic(
       B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_tid_x, {});
+  Value *blkDim32 = B.CreateIntrinsic(
+        B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_ntid_x, {});
+  Value *blkDim64 = B.CreateZExt(blkDim32, B.getInt64Ty()); 
   // iVal in [0..(blockDim.x-1)]
   // assume blockDim.x == TILE_SIZE for simplicity
 
@@ -1057,7 +1142,8 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
   sumRePHI->addIncoming(sumRe, contBB);
   sumImPHI->addIncoming(sumIm, contBB);
 
-  Value *condJ = B.CreateICmpSLT(jPHI, B.getInt64(TILE_SIZE), "condJ");
+  // Value *condJ = B.CreateICmpSLT(jPHI, B.getInt64(TILE_SIZE), "condJ");
+  Value *condJ = B.CreateICmpSLT(jPHI, blkDim64);
   B.CreateCondBr(condJ, dotBodyBB, dotExitBB);
 
   B.SetInsertPoint(dotBodyBB);
@@ -1122,7 +1208,8 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
 
   // loopIncBB
   B.SetInsertPoint(loopIncBB);
-  Value *addVal = B.CreateAdd(cStartVal, B.getInt64(TILE_SIZE));
+  // Value *addVal = B.CreateAdd(cStartVal, B.getInt64(TILE_SIZE));
+  Value *addVal = B.CreateAdd(cStartVal, blkDim64);
   cStartPHI->addIncoming(addVal, loopIncBB);
   B.CreateBr(loopCheckBB);
 
@@ -1349,10 +1436,17 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
     case CUDAKernelGenConfig::UseMatImmValues: {
       const auto* gateCMat = gate->gateMatrix.getConstantMatrix();
       assert(gateCMat && "Runtime matrix incompatible with UseMatImmValues load mode");
-      // genMatrixVectorMultiply(
-      //     B, config, gate->gateMatrix, gate->qubits, matData, svPtrV, scalarTy);
-      genMatrixVectorMultiply_SharedTiled(
-          B, config, gate->gateMatrix, gate->qubits, matData, svPtrV, scalarTy);
+      if (K <= 32) {
+          // Small matrices: one thread handles all rows with a plain loop.
+          genMatrixVectorMultiply(
+              B, config, gate->gateMatrix, gate->qubits,
+              matData, svPtrV, scalarTy);
+      } else {
+          // Medium / large matrices: faster blocked implementation.
+          genMatrixVectorMultiply_SharedTiled(
+              B, config, gate->gateMatrix, gate->qubits,
+              matData, svPtrV, scalarTy);
+      }
       break;
     }
     case CUDAKernelGenConfig::LoadInDefaultMemSpace: {
@@ -1361,13 +1455,13 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
       // Cast from address space 0 to 1:
       matBasePtr = B.CreateAddrSpaceCast(args.pMatArg,
             PointerType::get(scalarTy, /*AS=*/1), "matGlobalPtr");
-
-      // Generate the IR that loops over the matrix elements
-      // (K*K complex elements) and loads from matBasePtr + offset
-      // genMatrixVectorMultiplyFromPointer(
-      //     B, config, gate->gateMatrix, gate->qubits, matBasePtr, svPtrV, scalarTy);
-      genMatrixVectorMultiplyFromPointer_SharedTiled(
-          B, config, gate->gateMatrix, gate->qubits, matBasePtr, svPtrV, scalarTy);
+      if (K <= 32) {
+        genMatrixVectorMultiplyFromPointer(
+            B, config, gate->gateMatrix, gate->qubits, matBasePtr, svPtrV, scalarTy);
+      } else {
+        genMatrixVectorMultiplyFromPointer_SharedTiled(
+            B, config, gate->gateMatrix, gate->qubits, matBasePtr, svPtrV, scalarTy);
+      }
       break;
     }
     case CUDAKernelGenConfig::LoadInConstMemSpace: {
