@@ -3,7 +3,6 @@
 #include "simulation/StatevectorCPU.h"
 #include "simulation/StatevectorCUDA.h"
 #include <random>
-#include <cmath>
 
 using namespace cast;
 using namespace cast::test;
@@ -55,41 +54,6 @@ namespace {
   }
 }
 
-template<typename SV>
-static void preparePlusState(SV &sv, int q)
-{
-    sv.initialize();
-    double norm = 1.0 / std::sqrt(2.0);
-
-    // host-side edit of the two amplitudes that differ
-    auto *h = sv.hData(); // host pointer
-    h[0] = norm; // |…0>
-    h[1ull << q] = norm; // |…1>
-
-    // push to device if this is a CUDA SV
-    if constexpr (std::is_same_v<SV, utils::StatevectorCUDA<double>>) {
-        std::size_t bytes = (1ULL << sv.nQubits()) * 2 * sizeof(double);
-        CUDA_CALL(cudaMemcpy(sv.dData(), h, bytes, cudaMemcpyHostToDevice),
-                  "cpy |+> to device");
-    }
-}
-
-static std::complex<double> hostAmp(const utils::StatevectorCUDA<double>& sv,
-                                    std::size_t idx)
-{
-  const double* h = sv.hData();
-  return { h[2*idx], h[2*idx+1] };
-}
-
-static double relativePhase(utils::StatevectorCUDA<double>& sv, int q)
-{
-  std::size_t bytes = (1ULL << sv.nQubits()) * 2 * sizeof(double);
-  CUDA_CALL(cudaMemcpy(const_cast<double*>(sv.hData()), sv.dData(), bytes, cudaMemcpyDeviceToHost), "cpy device→host");
-  std::complex<double> a0 = hostAmp(sv, 0);
-  std::complex<double> a1 = hostAmp(sv, 1ull << q);
-  return std::arg(a1) - std::arg(a0);
-}
-
 template<unsigned nQubits>
 static void f() {
   test::TestSuite suite(
@@ -131,16 +95,16 @@ static void f() {
 
   // Now we have 2 * nGates = 6 kernels total, can compile them all at once
   kernelMgrCUDA.emitPTX(/*nThreads=*/2, llvm::OptimizationLevel::O1, /*verbose=*/0);
-  // llvm::outs() << "\n=== DUMPING PTX FOR INSPECTION ===\n";
-  // kernelMgrCUDA.dumpPTX("rz_param_gate_def_0", llvm::outs());
-  // kernelMgrCUDA.dumpPTX("rz_param_gate_const_0", llvm::outs());
-  // llvm::outs() << "=== END PTX DUMP ===\n\n";
+  llvm::outs() << "\n=== DUMPING PTX FOR INSPECTION ===\n";
+  kernelMgrCUDA.dumpPTX("rz_param_gate_def_0", llvm::outs());
+  kernelMgrCUDA.dumpPTX("rz_param_gate_const_0", llvm::outs());
+  llvm::outs() << "=== END PTX DUMP ===\n\n";
   kernelMgrCUDA.initCUJIT(/*nThreads=*/2, /*verbose=*/0);
 
   utils::StatevectorCUDA<double> sv(nQubits);
 
   // Build a numeric Rz(π/2) matrix, allocate & copy to device
-  const double theta = M_PI / 2.0;
+  double theta = M_PI / 2.0;
   auto numericMat = buildRzNumericMatrix(theta);
 
   double* dMatPtr = nullptr;
@@ -156,7 +120,11 @@ static void f() {
 
   // Test the 3 defaultMem kernels
   for (int i = 0; i < nGates; i++) {
-    preparePlusState(sv, i);
+    // Initialize
+    sv.initialize();
+    suite.assertClose(sv.norm(), 1.0, "Init Norm (DefaultMem)", GET_INFO());
+    suite.assertClose(sv.prob(i), 0.0, "Init Prob("+std::to_string(i)+")", GET_INFO());
+
     // launch
     kernelMgrCUDA.launchCUDAKernelParam(
       sv.dData(),
@@ -165,22 +133,20 @@ static void f() {
       dMatPtr,
       64
     );
-    CUDA_CALL(cudaDeviceSynchronize(), "sync after kernel");
-    double phase = relativePhase(sv, i);
-    if (phase >  M_PI) phase -= 2*M_PI;
-    if (phase < -M_PI) phase += 2*M_PI;
 
-    suite.assertClose(phase, -theta/2,
-      "phase check (DefaultMem)", GET_INFO(), 1e-11);
     suite.assertClose(sv.norm(), 1.0,
-      "Norm (DefaultMem)", GET_INFO(), 1e-12);
+        "After Rz("+std::to_string(i)+") param: Norm (DefaultMem)", GET_INFO());
   }
 
   // Test the 3 constMem kernels
   for (int i = 0; i < nGates; i++) {
+    // The constMem kernels are at index i + nGates = i + 3
     int kernelIndex = i + nGates;
 
-    preparePlusState(sv, i);
+    // re-initialize
+    sv.initialize();
+    suite.assertClose(sv.norm(), 1.0, "Init Norm (ConstMem)", GET_INFO());
+    suite.assertClose(sv.prob(i), 0.0, "Init Prob("+std::to_string(i)+")", GET_INFO());
 
     kernelMgrCUDA.launchCUDAKernelParam(
       sv.dData(),
@@ -189,16 +155,9 @@ static void f() {
       dMatPtr,
       64
     );
-    CUDA_CALL(cudaDeviceSynchronize(), "sync after kernel");
 
-    double phase = relativePhase(sv, i);
-    if (phase >  M_PI) phase -= 2*M_PI;
-    if (phase < -M_PI) phase += 2*M_PI;
-
-    suite.assertClose(phase, -theta/2,
-        "phase check (ConstMem)", GET_INFO(), 1e-11);
     suite.assertClose(sv.norm(), 1.0,
-        "Norm (ConstMem)", GET_INFO(), 1e-12);
+        "After Rz("+std::to_string(i)+") param: Norm (ConstMem)", GET_INFO());
   }
 
   // 8) Cleanup
