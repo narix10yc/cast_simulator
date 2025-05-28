@@ -1,15 +1,16 @@
-#include "cast/LegacyCircuitGraph.h"
-#include "cast/Parser.h"
+#include "cast/Legacy/CircuitGraph.h"
+#include "cast/Legacy/Parser.h"
 #include "cast/Fusion.h"
-#include "simulation/KernelManager.h"
+#include "cast/Core/KernelManager.h"
 #include "tests/TestKit.h"
-#include "simulation/StatevectorCPU.h"
+#include "cast/CPU/StatevectorCPU.h"
 
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
 using namespace cast;
+using namespace cast::legacy;
 using namespace utils;
 
 template<unsigned simd_s>
@@ -22,8 +23,8 @@ static void f() {
   CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.simd_s = simd_s;
 
-  FusionConfig fusionConfig = FusionConfig::Default;
-  NaiveCostModel costModel(4, -1, 0);
+  cast::FusionConfig fusionConfig = FusionConfig::Default;
+  cast::NaiveCostModel costModel(4, -1, 0);
 
   std::cerr << "Test Dir: " << TEST_DIR << "\n";
   fs::path circuitDir = fs::path(TEST_DIR) / "circuits";
@@ -37,7 +38,7 @@ static void f() {
 
     Parser parser(p.path().c_str());
     auto qc = parser.parseQuantumCircuit();
-    LegacyCircuitGraph graph;
+    CircuitGraph graph;
     qc.toLegacyCircuitGraph(graph);
     auto allBlocks = graph.getAllBlocks();
     for (const auto& block : allBlocks) {
@@ -79,7 +80,7 @@ static void f() {
   suite.displayResult();
 }
 
-void test::test_fusionCPU() {
+void cast::test::test_fusionCPU() {
   f<1>();
   f<2>();
 }

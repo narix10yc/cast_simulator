@@ -1,8 +1,8 @@
-#include "simulation/StatevectorCPU.h"
+#include "cast/CPU/StatevectorCPU.h"
 #include "timeit/timeit.h"
 
 #include "cast/Parser.h"
-#include "cast/LegacyCircuitGraph.h"
+#include "cast/Legacy/CircuitGraph.h"
 #include "cast/Fusion.h"
 #include "openqasm/parser.h"
 
@@ -91,8 +91,8 @@ int main(int argc, const char** argv) {
   auto qasmRoot = qasmParser.parse();
 
   // This is temporary work-around as CircuitGraph does not allow copy yet
-  LegacyCircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
-  LegacyCircuitGraph graphNoFuseDense, graphNaiveFuseDense, graphAdaptiveFuseDense;
+  legacy::CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
+  legacy::CircuitGraph graphNoFuseDense, graphNaiveFuseDense, graphAdaptiveFuseDense;
 
   // we always generate the no-fuse graph to get the number of qubits
   qasmRoot->toCircuitGraph(graphNoFuse);
@@ -145,19 +145,19 @@ int main(int argc, const char** argv) {
   // Generate kernels
   if (ArgRunNoFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromLegacyCircuitGraph(
+      kernelMgr.genCPUGatesFromlegacy::CircuitGraph(
         kernelGenConfig, graphNoFuse, "graphNoFuse");
     }, "Generate No-fuse Kernels");
   }
   if (ArgRunNaiveFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromLegacyCircuitGraph(
+      kernelMgr.genCPUGatesFromlegacy::CircuitGraph(
         kernelGenConfig, graphNaiveFuse, "graphNaiveFuse");
     }, "Generate Naive-fused Kernels");
   }
   if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromLegacyCircuitGraph(
+      kernelMgr.genCPUGatesFromlegacy::CircuitGraph(
         kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
     }, "Generate Adaptive-fused Kernels");
   }

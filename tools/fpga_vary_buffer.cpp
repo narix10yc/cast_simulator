@@ -1,8 +1,7 @@
-#include "cast/LegacyCircuitGraph.h"
-#include "cast/FPGAInst.h"
+#include "cast/Legacy/Parser.h"
+#include "cast/Legacy/CircuitGraph.h"
+#include "cast/Legacy/FPGAInst.h"
 #include "cast/Fusion.h"
-#include "cast/Parser.h"
-#include "cast/AST.h"
 
 #include "openqasm/parser.h"
 
@@ -130,8 +129,8 @@ FPGAInstGenConfig getConfig(int nLocalQubits) {
 
 // This will have severe memory leak (as our CircuitGraph does not release
 // memory)
-void runExperiment(std::function<LegacyCircuitGraph()> f) {
-  LegacyCircuitGraph G;
+void runExperiment(std::function<legacy::CircuitGraph()> f) {
+  legacy::CircuitGraph G;
   std::vector<Instruction> instructions;
 
   using clock = std::chrono::high_resolution_clock;

@@ -1,7 +1,7 @@
-#include "simulation/KernelManager.h"
+#include "cast/Core/KernelManager.h"
 #include "tests/TestKit.h"
-#include "simulation/StatevectorCPU.h"
-#include "simulation/StatevectorCUDA.h"
+#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CUDA/StatevectorCUDA.h"
 #include <random>
 
 using namespace cast;
@@ -26,11 +26,11 @@ static void f() {
   };
 
   // generate random unitary gates
-  std::vector<std::shared_ptr<LegacyQuantumGate>> gates;
+  std::vector<std::shared_ptr<legacy::QuantumGate>> gates;
   gates.reserve(nQubits);
   for (int q = 0; q < nQubits; q++) {
     gates.emplace_back(
-      std::make_shared<LegacyQuantumGate>(LegacyQuantumGate::RandomUnitary(q)));
+      std::make_shared<legacy::QuantumGate>(legacy::QuantumGate::RandomUnitary(q)));
   }
 
   CUDAKernelGenConfig cudaGenConfig;

@@ -1,12 +1,12 @@
-#include "simulation/KernelManager.h"
+#include "cast/Core/KernelManager.h"
 #include "tests/TestKit.h"
-#include "simulation/StatevectorCPU.h"
+#include "cast/CPU/StatevectorCPU.h"
 
 using namespace cast;
 using namespace utils;
 
-static inline std::shared_ptr<LegacyQuantumGate> getH(int q) {
-  return std::make_shared<LegacyQuantumGate>(LegacyQuantumGate::H(q));
+static inline std::shared_ptr<legacy::QuantumGate> getH(int q) {
+  return std::make_shared<legacy::QuantumGate>(legacy::QuantumGate::H(q));
 }
 
 template<unsigned simd_s>

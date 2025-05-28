@@ -1,8 +1,8 @@
 #include "openqasm/parser.h"
-#include "cast/LegacyCircuitGraph.h"
+#include "cast/Legacy/CircuitGraph.h"
 #include "cast/Fusion.h"
 #include "cast/cpu.h"
-#include "simulation/ir_generator.h"
+#include "cast/Core/ir_generator.h"
 
 #include "utils/iocolor.h"
 #include "utils/utils.h"
@@ -179,7 +179,7 @@ RemoveFilesInsideOutputDirectory("rm-out-dir",
     cl::init(true));
 
 int main(int argc, const char** argv) {
-  LegacyCircuitGraph graph;
+  legacy::CircuitGraph graph;
   FusionConfig fusionConfig;
   // CodeGeneratorCPU codeGenerator;
   IRGeneratorConfig irConfig;

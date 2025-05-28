@@ -1,6 +1,6 @@
-#include "cast/LegacyQuantumGate.h"
+#include "cast/Legacy/QuantumGate.h"
 #include "tests/TestKit.h"
-#include "simulation/StatevectorCPU.h"
+#include "cast/CPU/StatevectorCPU.h"
 
 using namespace cast;
 using namespace cast::test;
@@ -8,22 +8,22 @@ using namespace utils;
 
 static void basics() {
   TestSuite suite("MatMul between Gates Basics");
-  LegacyQuantumGate gate0, gate1;
+  legacy::QuantumGate gate0, gate1;
   double norm;
-  gate0 = LegacyQuantumGate::I1(1);
-  gate1 = LegacyQuantumGate::I1(1);
+  gate0 = legacy::QuantumGate::I1(1);
+  gate1 = legacy::QuantumGate::I1(1);
   norm = utils::maximum_norm(
     *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
-    LegacyGateMatrix::MatrixI1_c);
+    legacy::GateMatrix::MatrixI1_c);
   suite.assertClose(norm, 0.0, "I multiply by I Same Qubit", GET_INFO());
 
-  gate0 = LegacyQuantumGate::I1(2);
+  gate0 = legacy::QuantumGate::I1(2);
   norm = utils::maximum_norm(
     *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
-    LegacyGateMatrix::MatrixI2_c);
+    legacy::GateMatrix::MatrixI2_c);
   suite.assertClose(norm, 0.0, "I multiply by I Different Qubit", GET_INFO());
 
-  gate1 = LegacyQuantumGate(LegacyGateMatrix(utils::randomUnitaryMatrix(2)), 2);
+  gate1 = legacy::QuantumGate(legacy::GateMatrix(utils::randomUnitaryMatrix(2)), 2);
   norm = utils::maximum_norm(
     *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
     *gate1.gateMatrix.getConstantMatrix());
@@ -45,8 +45,8 @@ static void internal() {
   for (int i = 0; i < 3; ++i) {
     int a = d(gen);
     int b = d(gen);
-    auto gate0 = LegacyQuantumGate::RandomUnitary(a);
-    auto gate1 = LegacyQuantumGate::RandomUnitary(b);
+    auto gate0 = legacy::QuantumGate::RandomUnitary(a);
+    auto gate1 = legacy::QuantumGate::RandomUnitary(b);
     auto gate = gate0.lmatmul(gate1);
 
     utils::StatevectorCPU<double> sv0(nQubits, simd_s), sv1(nQubits, simd_s);

@@ -94,16 +94,14 @@ add_definitions(${LLVM_DEFINITIONS_LIST})
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
+# CMakeLists.txt inside src will create the cast library as an INTERFACE lib
+# that links against all necessary components (including LLVM and CUDA).
 add_subdirectory(src)
-add_subdirectory(utils)
-add_subdirectory(timeit)
-add_subdirectory(openqasm)
-add_subdirectory(cast)
-add_subdirectory(simulation)
+
 add_subdirectory(tests)
 add_subdirectory(demos)
 add_subdirectory(tools)
-add_subdirectory(performance)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/drafts")
   add_subdirectory(drafts)
 endif()

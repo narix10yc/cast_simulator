@@ -2,14 +2,15 @@
 #define CAST_CPUFUSION_H
 
 #include "cast/CostModel.h"
-#include "cast/FPGAConfig.h"
+#include "cast/Legacy/FPGAConfig.h"
 #include "cast/IR/IRNode.h"
 #include <cassert>
 
 namespace cast {
-
-class LegacyCircuitGraph;
-class LegacyQuantumGate;
+  namespace legacy {
+    class CircuitGraph;
+    class QuantumGate;
+  } // namespace legacy
 
 struct FusionConfig {
   int precision;
@@ -44,12 +45,13 @@ struct FusionConfig {
 };
 
 void applyGateFusion(
-    const FusionConfig&, const CostModel*, LegacyCircuitGraph&, int max_k=7);
+    const FusionConfig&, const CostModel*, legacy::CircuitGraph&, int max_k=7);
 
 void applyGateFusion(
     const FusionConfig&, const CostModel*, ir::CircuitGraphNode&, int max_k=7);
 
-void applyFPGAGateFusion(LegacyCircuitGraph&, const FPGAFusionConfig&);
+void applyFPGAGateFusion(legacy::CircuitGraph& graph,
+                         const legacy::fpga::FPGAFusionConfig& config);
 
 } // namespace cast
 

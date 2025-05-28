@@ -1,10 +1,10 @@
 #ifndef CAST_COSTMODEL_H
 #define CAST_COSTMODEL_H
 
-#include "simulation/KernelManager.h"
-#include "cast/LegacyQuantumGate.h"
+#include "cast/Core/KernelManager.h"
+#include "cast/Legacy/QuantumGate.h"
+#include "cast/Legacy/CircuitGraphContext.h"
 #include "cast/QuantumGate.h"
-#include "cast/CircuitGraphContext.h"
 #include <cassert>
 #include <string>
 #include <vector>
@@ -13,7 +13,7 @@ namespace cast {
 
 struct CostResult {
   double benefit;
-  LegacyQuantumGate* fusedGate;
+  legacy::QuantumGate* fusedGate;
 };
 
 class PerformanceCache;
@@ -25,7 +25,7 @@ public:
   /// @brief Compute the expected time it will take to simulate \c gate by 
   /// updating each 1GiB of memory. 
   virtual double computeGiBTime(
-      const LegacyQuantumGate& gate, int precision, int nThreads) const = 0;
+      const legacy::QuantumGate& gate, int precision, int nThreads) const = 0;
 
   virtual double computeGiBTime(
       const QuantumGate& gate, int precision, int nThreads) const = 0;
@@ -43,7 +43,7 @@ public:
     : maxNQubits(maxNQubits), maxOp(maxOp), zeroTol(zeroTol) {}
 
   double computeGiBTime(
-      const LegacyQuantumGate& gate, int precision, int nThreads) const override;
+      const legacy::QuantumGate& gate, int precision, int nThreads) const override;
 
   double computeGiBTime(
       const QuantumGate& gate, int precision, int nThreads) const override;
@@ -76,7 +76,7 @@ public:
   std::ostream& display(std::ostream& os, int nLines = 0) const;
 
   double computeGiBTime(
-    const LegacyQuantumGate& gate, int precision, int nThreads) const override;
+    const legacy::QuantumGate& gate, int precision, int nThreads) const override;
 
   double computeGiBTime(
     const QuantumGate& gate, int precision, int nThreads) const override;
@@ -85,7 +85,7 @@ public:
 class AdaptiveCostModel : public CostModel {
 public:
   double computeGiBTime(
-      const LegacyQuantumGate &gate, int precision, int nThreads) const override {
+      const legacy::QuantumGate &gate, int precision, int nThreads) const override {
     assert(false && "Not Implemented");
     return 0.0;
   }
@@ -156,7 +156,7 @@ public:
   void writeResults(const std::string& filename) const;
   static CUDAPerformanceCache LoadFromCSV(const std::string& filename);
   const Item* findClosestMatch(
-      const LegacyQuantumGate& gate, int precision, int blockSize) const;
+      const legacy::QuantumGate& gate, int precision, int blockSize) const;
   
   constexpr static const char* CSV_HEADER = 
       "nQubits,opCount,precision,blockSize,occupancy,coalescing,memSpd";
@@ -172,7 +172,7 @@ public:
     explicit CUDACostModel(const CUDAPerformanceCache* c, double zt = 1e-8)
       : cache(c), zeroTol(zt), currentBlockSize(256), minGibTimeCap(1e-9) {}
     
-    double computeGiBTime(const LegacyQuantumGate& gate, int precision, int) const override;
+    double computeGiBTime(const legacy::QuantumGate& gate, int precision, int) const override;
 
     void setBlockSize(int blockSize) { 
       if (blockSize < 32 || blockSize > 1024 || 

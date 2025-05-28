@@ -1,5 +1,5 @@
 #include "openqasm/parser.h"
-#include "cast/LegacyCircuitGraph.h"
+#include "cast/Legacy/CircuitGraph.h"
 #include "cast/Parser.h"
 #include "utils/CommandLine.h"
 
@@ -34,7 +34,7 @@ enum ConversionResult {
   }
   openqasm::Parser qasmParser(inName, 0);
   auto qasmRoot = qasmParser.parse();
-  cast::LegacyCircuitGraph graph;
+  cast::legacy::CircuitGraph graph;
   qasmRoot->toCircuitGraph(graph);
   auto qc = cast::ast::QuantumCircuit::FromCircuitGraph(graph);
   inFile.close();

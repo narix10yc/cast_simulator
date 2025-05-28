@@ -1,6 +1,0 @@
-file(GLOB SRC_FILES "*.cpp")
-if (CAST_USE_CUDA)
-  file(GLOB CUDA_SRC_FILES "*.cu")
-  list(APPEND SRC_FILES ${CUDA_SRC_FILES})
-endif()
-add_library(simulation STATIC ${SRC_FILES})

@@ -1,6 +1,6 @@
 #include "tests/TestKit.h"
-#include "simulation/StatevectorCPU.h"
-#include "simulation/StatevectorCUDA.h"
+#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CUDA/StatevectorCUDA.h"
 
 using namespace cast::test;
 

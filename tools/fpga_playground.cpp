@@ -1,8 +1,7 @@
-#include "cast/LegacyCircuitGraph.h"
-#include "cast/FPGAInst.h"
+#include "cast/Legacy/Parser.h"
+#include "cast/Legacy/CircuitGraph.h"
+#include "cast/Legacy/FPGAInst.h"
 #include "cast/Fusion.h"
-#include "cast/Parser.h"
-#include "cast/AST.h"
 
 #include "openqasm/parser.h"
 #include "utils/CommandLine.h"
@@ -163,7 +162,7 @@ int costKindToNumNormalizedCycle(Instruction::CostKind kind) {
 }
 
 void runExperiment(
-    std::function<void(LegacyCircuitGraph&)> f,
+    std::function<void(legacy::CircuitGraph&)> f,
     std::ostream& os, const std::string& circuitName) {
   int nLocalQubits = 14;
   int gridSize = 4;
@@ -226,7 +225,7 @@ void runExperiment(
   };
 
   const auto run = [&](const FPGAInstGenConfig& instGenConfig) {
-    LegacyCircuitGraph graph;
+    legacy::CircuitGraph graph;
     f(graph);
     auto tBegin = std::chrono::high_resolution_clock::now();
     auto instructions = fpga::genInstruction(graph, instGenConfig);
@@ -240,7 +239,7 @@ void runExperiment(
     writCSVLine(os, instStats, cycleStats) << "," << std::scientific << tInSec << "\n";
   };
 
-  LegacyCircuitGraph tmpGraph;
+  legacy::CircuitGraph tmpGraph;
   f(tmpGraph);
   auto nQubits = tmpGraph.nQubits;
   auto allBlocks = tmpGraph.getAllBlocks();
@@ -291,8 +290,8 @@ void checkOutputFileName() {
 void processQFT(std::ofstream& oFile, int nQubits) {
   std::string circuit = "QFT-" + std::to_string(nQubits);
   std::cerr << "Processing " << circuit << "\n";
-  runExperiment([nQubits](LegacyCircuitGraph& graph) {
-    LegacyCircuitGraph::QFTCircuit(nQubits, graph);
+  runExperiment([nQubits](legacy::CircuitGraph& graph) {
+    legacy::CircuitGraph::QFTCircuit(nQubits, graph);
   }, oFile, circuit);
 }
 
@@ -305,7 +304,7 @@ void processFile(const std::filesystem::path& path, std::ofstream& oFile) {
     return;
   }
 
-  runExperiment([path](LegacyCircuitGraph& graph) {
+  runExperiment([path](legacy::CircuitGraph& graph) {
     openqasm::Parser qasmParser(path.string(), -1);
     qasmParser.parse()->toCircuitGraph(graph);
     // CircuitGraph::QFTCircuit(32, graph);

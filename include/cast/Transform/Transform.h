@@ -2,8 +2,8 @@
 #define CAST_TRANSFORM_TRANSFORM_H
 
 #include "cast/IR/IRNode.h"
-#include "new_parser/ASTContext.h"
-#include "new_parser/AST.h"
+#include "cast/Core/AST/ASTContext.h"
+#include "cast/Core/AST/AST.h"
 #include "openqasm/ast.h"
 #include <memory>
 
