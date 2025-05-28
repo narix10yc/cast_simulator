@@ -8,6 +8,7 @@ add_executable(qasm_to_qch "qasm_to_qch.cpp")
 add_executable(kernel "kernel.cpp")
 
 add_executable(scratch "scratch.cpp")
+target_link_libraries(scratch cast)
 
 add_executable(fpga_playground "fpga_playground.cpp")
 

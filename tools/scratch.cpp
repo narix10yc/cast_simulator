@@ -1,4 +1,4 @@
-#include "cast/QuantumGate.h"
+#include "cast/Core/QuantumGate.h"
 
 using namespace cast;
 
@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
   auto xGate = ScalarGateMatrix::X();
   auto pauliError = NoiseChannel::SymmetricPauliChannel(0.1);
 
-  auto quantumGate = QuantumGate::Create(xGate, pauliError, {0});
+  auto quantumGate = StandardQuantumGate::Create(xGate, pauliError, {0});
 
   quantumGate->displayInfo(std::cerr, 3);
 

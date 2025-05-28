@@ -1,7 +1,7 @@
 #ifndef CAST_IR_IRNODE_H
 #define CAST_IR_IRNODE_H
 
-#include "cast/QuantumGate.h"
+#include "cast/Core/QuantumGate.h"
 #include <iostream>
 #include <list>
 #include <unordered_map>

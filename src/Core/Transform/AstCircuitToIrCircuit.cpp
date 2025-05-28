@@ -41,7 +41,7 @@ static int convertSpanOfStmts(
       }
       qubits.push_back(qubitLit->value);
     }
-    auto qGate = QuantumGate::Create(gateMatrix, nullptr, qubits);
+    auto qGate = StandardQuantumGate::Create(gateMatrix, nullptr, qubits);
     irCircuitGraphNode->insertGate(qGate);
   };
 

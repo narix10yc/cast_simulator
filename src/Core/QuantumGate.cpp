@@ -1,105 +1,19 @@
-#include "llvm/Support/Casting.h"
-
-#include "cast/QuantumGate.h"
+#include "cast/Core/QuantumGate.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 #include "utils/PrintSpan.h"
+#include "llvm/Support/Casting.h"
 
 using namespace cast;
 
-QuantumGate::QuantumGate(GateMatrixPtr gateMatrix,
-                         NoiseChannelPtr noiseChannel,
-                         const TargetQubitsType& qubits) {
-  const auto nQubits = qubits.size();
-  std::vector<int> indices(nQubits);
-  for (unsigned i = 0; i < nQubits; i++)
-    indices[i] = i;
-
-  std::ranges::sort(indices,[&qubits](int i, int j) {
-    return qubits[i] < qubits[j];
-  });
-
-  _qubits.resize(nQubits);
-  for (unsigned i = 0; i < nQubits; i++)
-    _qubits[i] = qubits[indices[i]];
-
-  _gateMatrix = cast::permute(gateMatrix, indices);
-  _noiseChannel = cast::permute(noiseChannel, indices);
-}
-
-std::ostream& QuantumGate::displayInfo(std::ostream& os, int verbose) const {
-  os << BOLDCYAN("=== Info of QuantumGate @ " << this << " === ")
-     << "(Verbose " << verbose << ")\n";
-     
-  os << CYAN("- Target Qubits: ");
-  utils::printSpan(os, std::span<const int>(_qubits)) << "\n";
-
-  // gate matrix
-  os << CYAN("- gateMatrix: ");
-  if (_gateMatrix == nullptr)
-    os << "nullptr";
-  else if (auto* sMat = llvm::dyn_cast<ScalarGateMatrix>(_gateMatrix.get()))
-    os << "ScalarGateMatrix @ " << sMat;
-  else if (auto* uMat = llvm::dyn_cast<UnitaryPermGateMatrix>(_gateMatrix.get()))
-    os << "UnitaryPermGateMatrix @ " << uMat;
-  else if (auto* pMat = llvm::dyn_cast<ParametrizedGateMatrix>(_gateMatrix.get()))
-    os << "ParametrizedGateMatrix @ " << pMat;
-  else
-    assert(false && "Unknown GateMatrix type");
-  os << "\n";
-
-  if (verbose > 1 && _gateMatrix != nullptr) {
-    if (auto* sMat = llvm::dyn_cast<ScalarGateMatrix>(_gateMatrix.get()))
-      sMat->matrix().print(os);
-  }
-
-  // noise channel
-  os << CYAN("- noiseChannel: ");
-  if (_noiseChannel == nullptr)
-    os << "nullptr";
-  else
-    os << "NoiseChannel @ " << _noiseChannel.get();
-  os << "\n";
-  if (verbose > 1 && _noiseChannel != nullptr) {
-    _noiseChannel->displayInfo(os, verbose - 1);
-  }
-
-  os << BOLDCYAN("========== End ==========\n");
-  return os;
-}
-
-/**** op count *****/
-namespace {
-  double opCount_scalar(const ScalarGateMatrix& matrix, double zeroTol) {
-    double count = 0.0;
-    size_t len = matrix.matrix().size();
-    const auto* data = matrix.matrix().data();
-    for (size_t i = 0; i < len; ++i) {
-      if (std::abs(data[i]) > zeroTol)
-        count += 1.0;
-    }
-    return count * std::pow<double>(2.0, 1 - matrix.nQubits());
-  }
-} // anonymous namespace
-double QuantumGate::opCount(double zeroTol) const {
-  if (_gateMatrix == nullptr)
-    return 0.0;
-
-  if (auto* sMat = llvm::dyn_cast<ScalarGateMatrix>(_gateMatrix.get())) {
-    return opCount_scalar(*sMat, zeroTol);
-  }
-
-  assert(false && "Not Implemented yet");
-  return 0.0;
-}
-
 /**** Matmul of Quantum Gates ****/
-
-QuantumGatePtr cast::matmul(const QuantumGate& gateA,
-                            const QuantumGate& gateB) {
+QuantumGatePtr cast::matmul(const QuantumGate* gateA,
+                            const QuantumGate* gateB) {
+  assert(gateA != nullptr);
+  assert(gateB != nullptr);
   // C = AB
-  const auto& aQubits = gateA.qubits();
-  const auto& bQubits = gateB.qubits();
+  const auto& aQubits = gateA->qubits();
+  const auto& bQubits = gateB->qubits();
   const int anQubits = aQubits.size();
   const int bnQubits = bQubits.size();
 
@@ -189,7 +103,7 @@ QuantumGatePtr cast::matmul(const QuantumGate& gateA,
       const ComplexSquareMatrix& matA,
       const ComplexSquareMatrix& matB,
       ComplexSquareMatrix& matC) -> void {
-  for (uint64_t cIdx = 0ULL; cIdx < (1ULL << (2 * cnQubits)); ++cIdx) {
+    for (uint64_t cIdx = 0ULL; cIdx < (1ULL << (2 * cnQubits)); ++cIdx) {
       uint64_t aIdxBegin = utils::pext64(cIdx, aPextMask) & aZeroingMask;
       uint64_t bIdxBegin = utils::pext64(cIdx, bPextMask) & bZeroingMask;
 
@@ -225,22 +139,26 @@ QuantumGatePtr cast::matmul(const QuantumGate& gateA,
     }
   };
 
-  assert(gateA.gateMatrix() != nullptr && "gateA has no gate matrix");
-  assert(gateB.gateMatrix() != nullptr && "gateB has no gate matrix");
-  const auto* aScalarMatPtr =
-    llvm::dyn_cast<ScalarGateMatrix>(gateA.gateMatrix().get());
-  const auto* bScalarMatPtr =
-    llvm::dyn_cast<ScalarGateMatrix>(gateB.gateMatrix().get());
-  assert(aScalarMatPtr != nullptr && bScalarMatPtr != nullptr &&
-        "Both gate matrices must be ScalarGateMatrix for now");
-  const ComplexSquareMatrix& aCMat = aScalarMatPtr->matrix();
-  const ComplexSquareMatrix& bCMat = bScalarMatPtr->matrix();
-  ComplexSquareMatrix cCMat(1ULL << cnQubits);
-  matmulComplexSquareMatrix(aCMat, bCMat, cCMat);
-  
-  return QuantumGate::Create(
-    std::make_shared<ScalarGateMatrix>(std::move(cCMat)),
-    NoiseChannelPtr(nullptr), // No noise channel for now
-    cQubits
-  );
+  const auto* standardGateA = llvm::dyn_cast<StandardQuantumGate>(gateA);
+  const auto* standardGateB = llvm::dyn_cast<StandardQuantumGate>(gateB);
+  if (standardGateA && standardGateB) {
+    const auto* aScalarMatPtr =
+      llvm::dyn_cast<ScalarGateMatrix>(standardGateA->gateMatrix().get());
+    const auto* bScalarMatPtr =
+      llvm::dyn_cast<ScalarGateMatrix>(standardGateB->gateMatrix().get());
+    assert(aScalarMatPtr != nullptr && bScalarMatPtr != nullptr &&
+          "Both gate matrices must be ScalarGateMatrix for now");
+    const ComplexSquareMatrix& aCMat = aScalarMatPtr->matrix();
+    const ComplexSquareMatrix& bCMat = bScalarMatPtr->matrix();
+    ComplexSquareMatrix cCMat(1ULL << cnQubits);
+    matmulComplexSquareMatrix(aCMat, bCMat, cCMat);
+    
+    return StandardQuantumGate::Create(
+      std::make_shared<ScalarGateMatrix>(std::move(cCMat)),
+      NoiseChannelPtr(nullptr), // No noise channel for now
+      cQubits
+    );
+  }
+  assert(false && "Only implemented matmul for StandardQuantumGate now");
+  return nullptr;
 }

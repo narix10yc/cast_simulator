@@ -1,10 +1,10 @@
 #ifndef CAST_COSTMODEL_H
 #define CAST_COSTMODEL_H
 
+#include "cast/Core/QuantumGate.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Legacy/QuantumGate.h"
 #include "cast/Legacy/CircuitGraphContext.h"
-#include "cast/QuantumGate.h"
 #include <cassert>
 #include <string>
 #include <vector>
