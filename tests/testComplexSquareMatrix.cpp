@@ -10,16 +10,20 @@ void test::test_complexSquareMatrix() {
   auto matX = ComplexSquareMatrix::X();
   auto matY = ComplexSquareMatrix::Y();
   auto matZ = ComplexSquareMatrix::Z();
+  auto matResult = ComplexSquareMatrix(2);
 
-  suite.assertClose(maximum_norm(matX.matmul(matX), matI), 0.0,
-                    "XX == I", GET_INFO());
-  suite.assertClose(maximum_norm(matY.matmul(matY), matI), 0.0,
-                    "YY == I", GET_INFO());
-  suite.assertClose(maximum_norm(matZ.matmul(matZ), matI), 0.0,
-                    "ZZ == I", GET_INFO());
+  cast::matmul(matX, matX, matResult);
+  suite.assertClose(maximum_norm(matResult, matI), 0.0, "XX == I", GET_INFO());
+
+  cast::matmul(matY, matY, matResult);
+  suite.assertClose(maximum_norm(matResult, matI), 0.0, "YY == I", GET_INFO());
+
+  cast::matmul(matZ, matZ, matResult);
+  suite.assertClose(maximum_norm(matResult, matI), 0.0, "ZZ == I", GET_INFO());
                     
   auto mat_iZ = matZ * std::complex<double>(0, 1);
-  suite.assertClose(maximum_norm(matX.matmul(matY), mat_iZ), 0.0,
+  cast::matmul(matX, matY, matResult);
+  suite.assertClose(maximum_norm(matResult, mat_iZ), 0.0,
                     "XY == iZ", GET_INFO());
 
   suite.displayResult();

@@ -9,21 +9,20 @@
 
 namespace fs = std::filesystem;
 
-using namespace cast;
 using namespace cast::legacy;
 using namespace utils;
 
 template<unsigned simd_s>
 static void f() {
-  test::TestSuite suite("Fusion CPU (s = " + std::to_string(simd_s) + ")");
+  cast::test::TestSuite suite("Fusion CPU (s = " + std::to_string(simd_s) + ")");
 
-  CPUKernelManager kernelMgrBeforeFusion;
-  CPUKernelManager kernelMgrAfterFusion;
+  cast::CPUKernelManager kernelMgrBeforeFusion;
+  cast::CPUKernelManager kernelMgrAfterFusion;
 
-  CPUKernelGenConfig kernelGenConfig;
+  cast::CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.simd_s = simd_s;
 
-  cast::FusionConfig fusionConfig = FusionConfig::Default;
+  auto fusionConfig = cast::FusionConfig::Default;
   cast::NaiveCostModel costModel(4, -1, 0);
 
   std::cerr << "Test Dir: " << TEST_DIR << "\n";
