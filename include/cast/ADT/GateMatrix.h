@@ -85,6 +85,10 @@ public:
     return gm->kind() == GM_Scalar;
   }
 
+  static ScalarGateMatrixPtr I1() {
+    return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::I1());
+  }
+
   static ScalarGateMatrixPtr X() {
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::X());
   }
@@ -143,8 +147,10 @@ public:
   }
 }; // class ParametrizedGateMatrix
 
-/* Permute */
+/* Permute. Implemented in src/Core/Permute.cpp */
 
+/// @brief Permute the gate matrix according to the given flags. Flags are
+/// specified such that newQubits[flags[i]] = oldQubits[i].
 GateMatrixPtr permute(GateMatrixPtr gm, const std::vector<int>& flags);
 
 /* Arithmatic Operator Overloading */

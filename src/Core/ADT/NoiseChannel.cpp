@@ -8,7 +8,7 @@ std::ostream& KrausRep::display(std::ostream& os) const {
      << nKraus() << " Kraus operator(s).\n";
   for (size_t i = 0; i < nKraus(); ++i) {
     os << "Kraus operator " << i << ":\n";
-    _matrices[i].matrix().print(os);
+    _ops[i].matrix().print(os);
   }
   return os;
 }
@@ -86,11 +86,6 @@ int NoiseChannel::nQubits() const {
   return -1;
 }
 
-NoiseChannelPtr cast::permute(NoiseChannelPtr nc, const std::vector<int>& flags) {
-  // TODO: Not Implemented
-  return nullptr;
-}
-
 NoiseChannelPtr NoiseChannel::SymmetricPauliChannel(double p) {
   assert(p >= 0 && p <= 1);
   int nQubits = 1;
@@ -98,11 +93,13 @@ NoiseChannelPtr NoiseChannel::SymmetricPauliChannel(double p) {
   auto xMatrix = ScalarGateMatrix::X();
   auto yMatrix = ScalarGateMatrix::Y();
   auto zMatrix = ScalarGateMatrix::Z();
+  auto iMatrix = ScalarGateMatrix::I1();
   
   // Kraus operators for the symmetric Pauli channel
-  krausRep->addMatrix(*xMatrix * std::sqrt(p));
-  krausRep->addMatrix(*yMatrix * std::sqrt(p));
-  krausRep->addMatrix(*zMatrix * std::sqrt(p));
+  krausRep->addMatrix(*xMatrix * std::sqrt(p / 3));
+  krausRep->addMatrix(*yMatrix * std::sqrt(p / 3));
+  krausRep->addMatrix(*zMatrix * std::sqrt(p / 3));
+  krausRep->addMatrix(*iMatrix * std::sqrt(1 - p));
   
   return std::make_shared<NoiseChannel>(krausRep);
 }

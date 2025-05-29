@@ -162,3 +162,67 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
   assert(false && "Only implemented matmul for StandardQuantumGate now");
   return nullptr;
 }
+
+// Compute the superoperator matrix for a standard quantum gate. We assume
+// noise is applied after the gate operation.
+static ScalarGateMatrixPtr computeSuperopMatrix(StandardQuantumGate* gate) {
+  assert(gate != nullptr);
+  auto gateMatrix = gate->gateMatrix();
+  assert(gateMatrix != nullptr);
+  if (!llvm::isa<ScalarGateMatrix>(gateMatrix.get())) {
+    return nullptr; // Only implemented for ScalarGateMatrix now
+  }
+  auto sGateMatrix = std::static_pointer_cast<ScalarGateMatrix>(gateMatrix);
+  auto noiseChannel = gate->noiseChannel();
+  if (noiseChannel == nullptr)
+    return sGateMatrix;
+
+  assert(noiseChannel->reps.krausRep != nullptr &&
+         "We must have KrausRep to compute superoperator matrix");
+  const auto& krausOps = noiseChannel->reps.krausRep->getOps();
+  const auto nQubits = gate->nQubits();
+  // If the gate matrix and every Kraus operator are N * N, then the 
+  // superoperator matrix is (N ** 2) * (N ** 2).
+  const size_t N = 1ULL << nQubits;
+  auto superOpGateMatrix = std::make_shared<ScalarGateMatrix>(nQubits * 2);
+  auto& superOpM = superOpGateMatrix->matrix();
+  for (const auto& krausOp : krausOps) {
+    // compute the new Kraus operator F_k = E_k U
+    auto newKrausOp = std::make_shared<ScalarGateMatrix>(nQubits);
+    cast::matmul(krausOp.matrix(), sGateMatrix->matrix(), newKrausOp->matrix());
+    const auto& newKrausOpM = newKrausOp->matrix();
+
+    // compute the tensor product F_K.conj() \otimes F_k
+    for (size_t r = 0; r < N; ++r) {
+    for (size_t c = 0; c < N; ++c) {
+    for (size_t rr = 0; rr < N; ++rr) {
+    for (size_t cc = 0; cc < N; ++cc) {
+      size_t row = r * N + rr;
+      size_t col = c * N + cc;
+      // (re(r, c) - i * im(r, c)) * (re(rr, cc) + i * im(rr, cc))
+      // real part is re(r, c) * re(rr, cc) + im(r, c) * im(rr, cc)
+      // imag part is re(r, c) * im(rr, cc) - im(r, c) * re(rr, cc)
+      superOpM.real(row, col) +=
+        newKrausOpM.real(r, c) * newKrausOpM.real(rr, cc) +
+        newKrausOpM.imag(r, c) * newKrausOpM.imag(rr, cc);
+      superOpM.imag(row, col) +=
+        newKrausOpM.real(r, c) * newKrausOpM.imag(rr, cc) -
+        newKrausOpM.imag(r, c) * newKrausOpM.real(rr, cc);
+    } } } }
+  }
+  return superOpGateMatrix;
+}
+
+SuperopQuantumGatePtr cast::getSuperopGate(QuantumGatePtr gate) {
+  if (gate == nullptr)
+    return nullptr;
+  if (auto* standardGate = llvm::dyn_cast<StandardQuantumGate>(gate.get())) {
+    return std::make_shared<SuperopQuantumGate>(
+      computeSuperopMatrix(standardGate), standardGate->qubits());
+  }
+  if (llvm::isa<SuperopQuantumGate>(gate.get())) {
+    return std::static_pointer_cast<SuperopQuantumGate>(gate);
+  }
+  assert(false && "Only implemented for StandardQuantumGate now");
+  return nullptr;
+}

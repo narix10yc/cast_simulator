@@ -17,8 +17,7 @@ using StandardQuantumGatePtr = std::shared_ptr<StandardQuantumGate>;
 class SuperopQuantumGate;
 using SuperopQuantumGatePtr = std::shared_ptr<SuperopQuantumGate>;
 
-/// Recommended to use QuantumGate::Create() to create a QuantumGatePtr (which
-/// is a shared_ptr<QuantumGate>).
+/// Recommended to always use QuantumGatePtr than QuantumGate directly.
 class QuantumGate {
 public:
   enum QuantumGateKind {
@@ -58,7 +57,14 @@ public:
 
 QuantumGatePtr matmul(const QuantumGate* gateA, const QuantumGate* gateB);
 
+SuperopQuantumGatePtr getSuperopGate(QuantumGatePtr gate);
+
 /// @brief StandardQuantumGate consists of a GateMatrix and a NoiseChannel.
+/// GateMatrix could be parametrized.
+/// We take the convention that noise comes `after` the gate operation. For 
+/// example, if the noise channel has Kraus set {E_k}, and the gate is U, then
+/// the composite channel has Kraus set {E_k U}.
+/// TODO: do we want to support parametrized noise channel fusion?
 class StandardQuantumGate : public QuantumGate {
 private:
   GateMatrixPtr _gateMatrix;
@@ -92,7 +98,16 @@ public:
 
 /// @brief SuperopQuantumGate represents a quantum gate in Superoperator form.
 class SuperopQuantumGate : public QuantumGate {
+private:
+  ScalarGateMatrixPtr _superopMatrix;
 public:
+  SuperopQuantumGate(ScalarGateMatrixPtr superopMatrix,
+                     const TargetQubitsType& qubits);
+
+  ScalarGateMatrixPtr getMatrix() { return _superopMatrix; }
+  const ScalarGateMatrixPtr& getMatrix() const { return _superopMatrix; }
+
+  std::ostream& displayInfo(std::ostream& os, int verbose) const override;
 
   static bool classof(const QuantumGate* qg) {
     return qg->kind() == QG_Superop;

@@ -38,8 +38,10 @@ public:
 
 }; // class NoiseChannel
 
-/* Permute target qubits */
+/* Permute. Implemented in src/Core/Permute.cpp */
 
+/// @brief Permute the noise channel according to the given flags.
+/// Flags are specified such that newQubits[flags[i]] = oldQubits[i]. 
 NoiseChannelPtr permute(NoiseChannelPtr nc, const std::vector<int>& flags);
 
 } // namespace cast

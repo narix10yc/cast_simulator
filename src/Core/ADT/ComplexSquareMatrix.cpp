@@ -197,26 +197,6 @@ ComplexSquareMatrix& ComplexSquareMatrix::operator*=(std::complex<double> c) {
   return *this;
 }
 
-ComplexSquareMatrix
-ComplexSquareMatrix::matmul(const ComplexSquareMatrix& other) const {
-  // TODO: This is not optimized
-  assert(_edgeSize == other._edgeSize);
-  ComplexSquareMatrix result(_edgeSize);
-  for (size_t i = 0; i < _edgeSize; ++i) {
-    for (size_t j = 0; j < _edgeSize; ++j) {
-      auto re = 0.0;
-      auto im = 0.0;
-      for (size_t k = 0; k < _edgeSize; ++k) {
-        re += real(i, k) * other.real(k, j) - imag(i, k) * other.imag(k, j);
-        im += real(i, k) * other.imag(k, j) + imag(i, k) * other.real(k, j);
-      }
-      result.real(i, j) = re;
-      result.imag(i, j) = im;
-    }
-  }
-  return result;
-}
-
 std::ostream& ComplexSquareMatrix::print(std::ostream& os) const {
   if (_edgeSize == 0)
     return os << "[]\n";
@@ -249,4 +229,25 @@ double cast::maximum_norm(const ComplexSquareMatrix& A,
       maxNorm = diff;
   }
   return maxNorm;
+}
+
+// TODO: This is a non-optimized implementation of matrix multiplication.
+void cast::matmul(const cast::ComplexSquareMatrix& A,
+                  const cast::ComplexSquareMatrix& B,
+                  cast::ComplexSquareMatrix& C) {
+  assert(A.edgeSize() == B.edgeSize() && "Input size mismatch");
+  assert(A.edgeSize() == C.edgeSize() && "Output size mismatch");
+  const size_t edgeSize = A.edgeSize();
+  for (size_t i = 0; i < edgeSize; ++i) {
+    for (size_t j = 0; j < edgeSize; ++j) {
+      auto re = 0.0;
+      auto im = 0.0;
+      for (size_t k = 0; k < edgeSize; ++k) {
+        re += A.real(i, k) * B.real(k, j) - A.imag(i, k) * B.imag(k, j);
+        im += A.real(i, k) * B.imag(k, j) + A.imag(i, k) * B.real(k, j);
+      }
+      C.real(i, j) = re;
+      C.imag(i, j) = im;
+    }
+  }
 }

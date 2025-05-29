@@ -145,11 +145,6 @@ public:
 
   std::ostream& print(std::ostream& os) const;
 
-  /* Matrix-Matrix Multiplication */
-
-  // A.matmul(B) gives AB.
-  ComplexSquareMatrix matmul(const ComplexSquareMatrix& other) const;
-
   static ComplexSquareMatrix X();
   static ComplexSquareMatrix Y();
   static ComplexSquareMatrix Z();
@@ -166,8 +161,18 @@ public:
 
 }; // class ComplexSquareMatrix
 
+/// @brief The maximum norm of two matrices is defined as the maximum of the
+/// absolute values of the entries in A - B. That is,
+/// maximum_norm(A, B) = max_{i,j} |A_ij - B_ij|. 
 double maximum_norm(const ComplexSquareMatrix& A,
                     const ComplexSquareMatrix& B);
+
+/* Matrix-Matrix Multiplication */
+/// @brief Compute the matrix product C = AB.
+/// A, B, and C must have the same edge size.
+void matmul(const cast::ComplexSquareMatrix& A,
+            const cast::ComplexSquareMatrix& B,
+            cast::ComplexSquareMatrix& C);
 
 }; // namespace cast
 
