@@ -5,7 +5,7 @@
 #include <vector>
 #include <cassert>
 
-namespace cast::draft {
+namespace cast {
 namespace ast {
 
 class PrettyPrinter {
@@ -66,7 +66,7 @@ public:
   
 }; // namespace ast
 
-}; // namespace cast::draft
+}; // namespace cast
 
 
 #endif // CAST_NEW_PARSER_PRETTY_PRINTER_H

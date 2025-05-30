@@ -3,7 +3,7 @@
 
 #include <cassert>
 
-namespace cast::draft {
+namespace cast {
 
 struct LocationSpan {
   const char* begin;
@@ -13,6 +13,6 @@ struct LocationSpan {
     : begin(begin), end(end) { assert(begin <= end); }
 }; // sturct LocationSpan
 
-}; // namespace cast::draft
+}; // namespace cast
 
 #endif // CAST_NEW_PARSER_LOCATION_SPAN_H

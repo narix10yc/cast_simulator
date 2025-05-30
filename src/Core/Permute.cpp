@@ -91,10 +91,10 @@ GateMatrixPtr cast::permute(GateMatrixPtr gm, const std::vector<int>& flags) {
 NoiseChannelPtr cast::permute(
     NoiseChannelPtr nc, const std::vector<int>& flags) {
   assert(isPermutation(flags) && "Flags must be a permutation");
-  assert(nc->nQubits() == flags.size());
-
+  
   if (nc == nullptr)
     return nullptr;
+  assert(nc->nQubits() == flags.size());
   if (isIdentityPermutation(flags))
     return nc;
 

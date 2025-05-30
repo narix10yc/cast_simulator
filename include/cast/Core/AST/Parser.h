@@ -8,7 +8,7 @@
 #include <complex>
 #include <unordered_map>
 
-namespace cast::draft {
+namespace cast {
 namespace ast {
 
 class Scope {
@@ -171,6 +171,6 @@ public:
 };
 
 } // namespace ast
-} // namespace cast::draft
+} // namespace cast
 
 #endif // CAST_DRAFT_PARSER_H

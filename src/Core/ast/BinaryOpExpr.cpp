@@ -1,6 +1,6 @@
 #include "cast/Core/AST/Parser.h"
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 int BinaryOpExpr::getPrecedence(BinaryOpExpr::BinaryOpKind binOp) {
   switch (binOp) {

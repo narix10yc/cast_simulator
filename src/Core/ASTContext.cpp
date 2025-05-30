@@ -1,6 +1,6 @@
 #include "cast/Core/AST/ASTContext.h"
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 std::ostream& ASTContext::displayLineTable(std::ostream& os) const {
   os << "Line table:\n";

@@ -6,7 +6,7 @@
 #include <fstream>
 #include <cstring>
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 bool SourceManager::loadFromFile(const char* fileName) {
   std::ifstream file(fileName, std::ifstream::binary);

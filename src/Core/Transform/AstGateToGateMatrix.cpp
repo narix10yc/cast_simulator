@@ -1,7 +1,7 @@
 #include "cast/Transform/Transform.h"
 
 using namespace cast;
-using namespace cast::draft;
+using namespace cast;
 
 GateMatrixPtr transform::cvtAstGateToGateMatrix(
     ast::GateApplyStmt* astGate, ast::ASTContext& astCtx) {

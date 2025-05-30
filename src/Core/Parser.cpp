@@ -3,7 +3,7 @@
 #include <fstream>
 #include <cassert>
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 void Parser::addSymbol(Identifier name, Node* node) {
   const auto locPrint = [this](Node* node) {

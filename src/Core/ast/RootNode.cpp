@@ -1,6 +1,6 @@
 #include "cast/Core/AST/Parser.h"
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 RootNode* Parser::parse() {
   llvm::SmallVector<Stmt*> stmts;

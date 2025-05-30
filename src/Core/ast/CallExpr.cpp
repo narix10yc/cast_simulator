@@ -1,7 +1,7 @@
 #include "cast/Core/AST/Parser.h"
 #include "utils/PrintSpan.h"
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 std::ostream& CallExpr::print(std::ostream& os) const {
   os << name << "(";

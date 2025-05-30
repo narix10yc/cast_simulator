@@ -6,7 +6,7 @@
 #include "cast/Legacy/CircuitGraph.h"
 #include "llvm/Support/Casting.h"
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 /*
   NK_Stmt,

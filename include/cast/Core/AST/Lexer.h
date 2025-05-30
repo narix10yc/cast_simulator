@@ -5,7 +5,7 @@
 #include <string>
 #include <cassert>
 
-namespace cast::draft {
+namespace cast {
 namespace ast {
 
 enum TokenKind : int {
@@ -154,6 +154,6 @@ public:
 };
 
 } // namespace ast
-} // namespace cast::draft
+} // namespace cast
 
 #endif // NEW_PARSER_LEXER_H

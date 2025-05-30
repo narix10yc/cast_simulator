@@ -2,7 +2,7 @@
 #include "cast/Transform/Transform.h"
 #include "cast/Fusion.h"
 
-using namespace cast::draft;
+using namespace cast;
 using namespace cast;
 
 static const char* Program = R"(

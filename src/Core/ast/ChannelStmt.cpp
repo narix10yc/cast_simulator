@@ -1,6 +1,6 @@
 #include "cast/Core/AST/Parser.h"
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 ChannelStmt* Parser::parseChannelStmt() {
   assert(curToken.is(tk_Channel) && "Expect 'Channel' to start a channel");

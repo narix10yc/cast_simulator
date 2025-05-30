@@ -4,7 +4,6 @@
 #include "cast/Core/AST/LocationSpan.h"
 #include "cast/Core/AST/PrettyPrinter.h"
 #include "llvm/ADT/SmallVector.h"
-#include "utils/PODVariant.h"
 #include <iostream>
 #include <string>
 #include <span>
@@ -15,7 +14,7 @@ namespace cast::legacy {
   class CircuitGraph;
 } // namespace cast
   
-namespace cast::draft {
+namespace cast {
 namespace ast {
 class ASTContext;
 
@@ -606,6 +605,6 @@ public:
 }; // class RootNode
 
 } // namespace ast
-} // namespace cast::draft
+} // namespace cast
 
 #endif // CAST_DRAFT_AST_H

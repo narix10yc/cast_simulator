@@ -3,7 +3,6 @@
 #include "cast/Fusion.h"
 
 using namespace cast;
-using namespace cast::draft;
 
 int main(int argc, char** argv) {
   assert(argc > 1 && "Usage: cpu_bcmk <qasm_file>");

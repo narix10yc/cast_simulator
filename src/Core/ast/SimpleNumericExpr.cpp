@@ -5,7 +5,7 @@
 #include <tuple>
 #include <numeric> // for std::gcd
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 namespace {
   struct Fraction {
@@ -247,7 +247,7 @@ SimpleNumericExpr* SimpleNumericExpr::div(
   return new (ctx) FloatingLiteral(lhs->getValue() / rhs->getValue());
 }
 
-SimpleNumericExpr* cast::draft::ast::reduceExprToSimpleNumeric(
+SimpleNumericExpr* cast::ast::reduceExprToSimpleNumeric(
     ASTContext& ctx, Expr* expr) {
   if (expr == nullptr)
     return nullptr;

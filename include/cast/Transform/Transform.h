@@ -11,16 +11,16 @@ namespace cast {
 
 namespace transform {
 
-draft::ast::CircuitStmt* cvtQasmCircuitToAstCircuit(
-    const openqasm::ast::RootNode& qasmRoot, draft::ast::ASTContext& astCtx);
+ast::CircuitStmt* cvtQasmCircuitToAstCircuit(
+    const openqasm::ast::RootNode& qasmRoot, ast::ASTContext& astCtx);
 
 /// @brief Convert a GateApplyStmt to a GateMatrixPtr.
 GateMatrixPtr cvtAstGateToGateMatrix(
-    cast::draft::ast::GateApplyStmt* astGate,
-    cast::draft::ast::ASTContext& astCtx);
+    cast::ast::GateApplyStmt* astGate,
+    cast::ast::ASTContext& astCtx);
 
 std::unique_ptr<ir::CircuitNode> cvtAstCircuitToIrCircuit(
-    const draft::ast::CircuitStmt& astCircuit, draft::ast::ASTContext& astCtx);
+    const ast::CircuitStmt& astCircuit, ast::ASTContext& astCtx);
 
 } // namespace transform
 

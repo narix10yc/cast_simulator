@@ -3,7 +3,7 @@
 #include "utils/iocolor.h"
 
 using namespace cast;
-using namespace cast::draft;
+using namespace cast;
 
 // forward declaration
 static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
@@ -78,7 +78,7 @@ static int convertSpanOfStmts(
 static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
     ast::IfStmt* astIf, ast::ASTContext& astCtx) {
   auto* astMeasureExpr = 
-    llvm::dyn_cast<draft::ast::MeasureExpr>(astIf->condition);
+    llvm::dyn_cast<ast::MeasureExpr>(astIf->condition);
   if (astMeasureExpr == nullptr) {
     std::cerr << "Error: If condition must be a measure expression\n";
     return nullptr;

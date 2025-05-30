@@ -1,7 +1,7 @@
 #include "cast/Transform/Transform.h"
 
 using namespace cast;
-using namespace cast::draft;
+using namespace cast;
 
 static void capitalize(std::string& str) {
   if (str.empty()) return;

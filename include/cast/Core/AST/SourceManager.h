@@ -6,7 +6,7 @@
 #include <iostream>
 #include <vector>
 
-namespace cast::draft {
+namespace cast {
 namespace ast {
 
 // SourceManager is responsible for managing the source code buffer
@@ -38,6 +38,6 @@ public:
 };
 
 } // namespace ast
-} // namespace cast::draft
+} // namespace cast
 
 #endif // CAST_DRAFT_SOURCE_MANAGER_H

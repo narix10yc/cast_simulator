@@ -1,6 +1,6 @@
 #include "cast/Core/AST/Parser.h"
 
-using namespace cast::draft::ast;
+using namespace cast::ast;
 
 CircuitStmt* Parser::parseCircuitStmt() {
   assert(curToken.is(tk_Circuit) &&
