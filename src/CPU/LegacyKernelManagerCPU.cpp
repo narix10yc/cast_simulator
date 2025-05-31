@@ -1,6 +1,6 @@
-#include <llvm/Support/TargetSelect.h>
+#include "llvm/Support/TargetSelect.h"
 
-#include "cast/Core/KernelManager.h"
+#include "cast/CPU/KernelManagerCPU.h"
 #include "utils/iocolor.h"
 #include "utils/TaskDispatcher.h"
 
@@ -30,11 +30,11 @@ std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
      << "oneTolerance : " << oneTol << "\n"
      << "matrixLoadMode: ";
   switch (this->matrixLoadMode) {
-    case UseMatImmValues:
+    case MatrixLoadMode::UseMatImmValues:
       os << "UseMatImmValues\n"; break;
-    case StackLoadMatElems:
+    case MatrixLoadMode::StackLoadMatElems:
       os << "StackLoadMatElems\n"; break;
-    case StackLoadMatVecs:
+    case MatrixLoadMode::StackLoadMatVecs:
       os << "StackLoadMatVecs\n"; break;
   }
 

@@ -11,12 +11,13 @@ namespace cast {
 /// @brief \c ComplexSquareMatrix implements basic arithmatics to complex square
 /// matrices with double precision. 
 class ComplexSquareMatrix {
+  // constexpr static size_t AlignSize = 64;
 private:
   size_t _edgeSize;
   double* _data;
 public:
   ComplexSquareMatrix(size_t edgeSize) : _edgeSize(edgeSize) {
-    _data = static_cast<double*>(std::aligned_alloc(64, sizeInBytes()));
+    _data = static_cast<double*>(std::malloc(sizeInBytes()));
     assert(_data != nullptr && "Memory allocation failed");
   }
 
@@ -26,7 +27,7 @@ public:
     size_t s = std::sqrt<size_t>(re.size());
     assert(s * s == re.size() && "Size is not a perfect square");
     this->_edgeSize = s;
-    _data = static_cast<double*>(std::aligned_alloc(64, sizeInBytes()));
+    _data = static_cast<double*>(std::malloc(sizeInBytes()));
     assert(_data != nullptr && "Memory allocation failed");
     std::memcpy(reData(), re.begin(), re.size() * sizeof(double));
     std::memcpy(imData(), im.begin(), im.size() * sizeof(double));
@@ -34,7 +35,7 @@ public:
 
   ComplexSquareMatrix(const ComplexSquareMatrix& other)
     : _edgeSize(other._edgeSize) {
-    _data = static_cast<double*>(std::aligned_alloc(64, sizeInBytes()));
+    _data = static_cast<double*>(std::malloc(sizeInBytes()));
     assert(_data != nullptr && "Memory allocation failed");
     std::memcpy(_data, other._data, sizeInBytes());
   }
@@ -78,7 +79,7 @@ public:
   }
 
   size_t sizeInBytes() const {
-    return sizeof(double) * 2 * _edgeSize * _edgeSize;
+    return sizeof(double) * 2ULL * _edgeSize * _edgeSize;
   }
 
   double* data() { return _data; }
@@ -144,6 +145,9 @@ public:
   ComplexSquareMatrix& operator*=(std::complex<double> c);
 
   std::ostream& print(std::ostream& os) const;
+
+  // Generate a random unitary matrix of the given edge size.
+  static ComplexSquareMatrix RandomUnitary(size_t edgeSize);
 
   static ComplexSquareMatrix X();
   static ComplexSquareMatrix Y();

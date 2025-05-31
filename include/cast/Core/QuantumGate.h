@@ -82,6 +82,10 @@ public:
 
   double opCount(double zeroTol) const override;
 
+  // Try to cast the gate matrix to ScalarGateMatrix. Returns nullptr if
+  // the casting is not possible.
+  ScalarGateMatrixPtr getScalarGM() const;
+
   std::ostream& displayInfo(std::ostream& os, int verbose) const override;
 
   static StandardQuantumGatePtr Create(GateMatrixPtr gateMatrix,
@@ -89,6 +93,27 @@ public:
                                        const TargetQubitsType& qubits) {
     return std::make_shared<StandardQuantumGate>(
       gateMatrix, noiseChannel, qubits);
+  }
+
+  template<typename... Ints>
+  static StandardQuantumGatePtr RandomUnitary(Ints... qubits) {
+    static_assert((std::is_integral_v<Ints> && ...));
+    constexpr auto nQubits = sizeof...(Ints);
+    TargetQubitsType qubitsCopy{qubits...};
+    std::ranges::sort(qubitsCopy);
+    return StandardQuantumGate::Create(
+      ScalarGateMatrix::RandomUnitary(nQubits),
+      nullptr, // No noise channel
+      qubitsCopy);
+  }
+
+  static StandardQuantumGatePtr RandomUnitary(const std::vector<int>& qubits) {
+    auto qubitsCopy = qubits;
+    std::ranges::sort(qubitsCopy);
+    return StandardQuantumGate::Create(
+      ScalarGateMatrix::RandomUnitary(qubitsCopy.size()),
+      nullptr, // No noise channel
+      qubitsCopy);
   }
 
   static bool classof(const QuantumGate* qg) {

@@ -20,7 +20,7 @@
 #include "utils/Formats.h"
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
-#include <llvm/Support/Debug.h>
+#include "llvm/Support/Debug.h>
 // #define LLVM_DEBUG(X) X
 
 using namespace cast;

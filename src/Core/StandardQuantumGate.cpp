@@ -27,6 +27,14 @@ StandardQuantumGate::StandardQuantumGate(
   _noiseChannel = cast::permute(noiseChannel, indices);
 }
 
+ScalarGateMatrixPtr StandardQuantumGate::getScalarGM() const {
+  if (_gateMatrix == nullptr)
+    return nullptr;
+  if (llvm::isa<ScalarGateMatrix>(_gateMatrix.get()))
+    return std::static_pointer_cast<ScalarGateMatrix>(_gateMatrix);
+  return nullptr;
+}
+
 std::ostream& StandardQuantumGate::displayInfo(std::ostream& os,
                                                int verbose) const {
   os << BOLDCYAN("=== Info of StandardQuantumGate @ " << this << " === ")

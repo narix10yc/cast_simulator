@@ -1,199 +1,293 @@
-#define DEBUG_TYPE "codegen-cpu"
-#include <llvm/Support/Debug.h>
-// #define LLVM_DEBUG(X) X
-#include <llvm/IR/IntrinsicsX86.h>
+#include "llvm/IR/IntrinsicsX86.h"
 
-#include "cast/Legacy/QuantumGate.h"
-#include "cast/Legacy/CircuitGraph.h"
-#include "cast/Core/KernelManager.h"
 #include "cast/Core/KernelGenInternal.h"
+#include "cast/CPU/KernelManagerCPU.h"
 
 #include "utils/iocolor.h"
 #include "utils/utils.h"
+#include "utils/PrintSpan.h"
 #include "utils/Formats.h"
-#include "utils/PODVector.h"
 
 #include <cmath>
 
-using namespace llvm;
+#define DEBUG_TYPE "codegen-cpu"
+#include "llvm/Support/Debug.h"
+// #define LLVM_DEBUG(X) X
+
 using namespace cast;
 
 namespace {
 
 struct CPUArgs {
-  Argument* pSvArg;       // ptr to statevector
-  Argument* ctrBeginArg;  // counter begin
-  Argument* ctrEndArg;    // counter end
-  Argument* pMatArg;      // ptr to matrix
+  llvm::Value* pSvArg;       // ptr to statevector
+  llvm::Value* ctrBeginArg;  // counter begin
+  llvm::Value* ctrEndArg;    // counter end
+  llvm::Value* pMatArg;      // ptr to matrix
 };
+struct IRMatData {
+  llvm::Value* reElmVal; // element of the real entry
+  llvm::Value* imElmVal; // element of the imag entry
+  llvm::Value* reVecVal; // vector of the real entry
+  llvm::Value* imVecVal; // vector of the imag entry
+  ScalarKind reFlag;     // flag for the real entry
+  ScalarKind imFlag;     // flag for the imag entry
 
-Function* cpuGetFunctionDeclaration(
-    IRBuilder<>& B, Module& M, const std::string& funcName,
-    const CPUKernelGenConfig& config, CPUArgs& args) {
-  SmallVector<Type*> argType {
-    B.getPtrTy(), B.getInt64Ty(), B.getInt64Ty(), B.getPtrTy()
-  };
+  // We have to provide this default constructor to ensure all un-initialized
+  // entries are set to nullptr.
+  IRMatData()
+    : reElmVal(nullptr), imElmVal(nullptr),
+      reVecVal(nullptr), imVecVal(nullptr),
+      reFlag(SK_Unknown), imFlag(SK_Unknown) {}
+}; // IRMatData
 
-  auto* funcTy = FunctionType::get(B.getVoidTy(), argType, false);
-  auto* func = Function::Create(funcTy, Function::ExternalLinkage, funcName, M);
-
-  args.pSvArg = func->getArg(0);
-  args.pSvArg->setName("p.sv.arg");
-  args.ctrBeginArg = func->getArg(1);
-  args.ctrBeginArg->setName("ctr.begin");
-  args.ctrEndArg = func->getArg(2);
-  args.ctrEndArg->setName("ctr.end");
-  args.pMatArg = func->getArg(3);
-  args.pMatArg->setName("pmat");
-
-  return func;
-}
-
-struct IRMatDataCUDA {
-  Value* reElemVal;
-  Value* imElemVal;
-  Value* reVecVal;
-  Value* imVecVal;
-  ScalarKind reKind;
-  ScalarKind imKind;
-};
-
-inline std::vector<IRMatDataCUDA> getMatrixData(
-    IRBuilder<>& B, const cast::legacy::GateMatrix& gateMatrix,
-    const CPUKernelGenConfig& config) {
-  const int k = gateMatrix.nQubits();
-  const unsigned K = 1 << k;
+/// @brief This function must be called after function declaration and that the 
+/// IRBuilder is set to the entry block. 
+std::vector<IRMatData> initMatrixData(
+    llvm::IRBuilder<>& B,
+    const CPUKernelGenConfig& config,
+    const cast::QuantumGate* gate,
+    llvm::Value* pMatArg) {
+  const int k = gate->nQubits();
+  const unsigned K = 1ULL << k;
   const unsigned KK = K * K;
 
-  std::vector<IRMatDataCUDA> data(KK);
+  std::vector<IRMatData> matData(KK);
+  auto* standardQuGate = llvm::dyn_cast<cast::StandardQuantumGate>(gate);
+  assert(standardQuGate != nullptr &&
+         "Only StandardQuantumGate is supported for now");
+  auto* gateMatrix = standardQuGate->gateMatrix().get();
+  assert(gateMatrix != nullptr && "Empty gate matrix");
+  const auto& scalarGM = llvm::dyn_cast<cast::ScalarGateMatrix>(gateMatrix);
+  assert(scalarGM != nullptr && "Only ScalarGateMatrix is supported for now");
 
-  const auto* cMat = gateMatrix.getConstantMatrix();
-  // assert(cMat && "Parametrized matrices codegen not implemented yet");
-
-  // Have compile-time known matrix
-  if (cMat != nullptr && !config.forceDenseKernel) {
-    const double zTol = config.zeroTol / K;
-    const double oTol = config.oneTol / K;
-
-    for (unsigned i = 0; i < KK; i++) {
-			auto real = cMat->data()[i].real();
-			auto imag = cMat->data()[i].imag();
-
-			if (std::abs(real) < zTol)
-				data[i].reKind = SK_Zero;
-			else if (std::abs(real - 1.0) < oTol)
-				data[i].reKind = SK_One;
-			else if (std::abs(real + 1.0) < oTol)
-				data[i].reKind = SK_MinusOne;
-			else if (config.matrixLoadMode == CPUKernelGenConfig::UseMatImmValues) {
-				data[i].reKind = SK_ImmValue;
-				data[i].reElemVal = ConstantFP::get(B.getContext(), APFloat(real));
-			}
-			else
-				data[i].reKind = SK_General;
-
-			if (std::abs(imag) < zTol)
-				data[i].imKind = SK_Zero;
-			else if (std::abs(imag - 1.0) < oTol)
-				data[i].imKind = SK_One;
-			else if (std::abs(imag + 1.0) < oTol)
-				data[i].imKind = SK_MinusOne;
-			else if (config.matrixLoadMode == CPUKernelGenConfig::UseMatImmValues) {
-				data[i].imKind = SK_ImmValue;
-				data[i].imElemVal = ConstantFP::get(B.getContext(), APFloat(imag));
-			}
-			else
-				data[i].imKind = SK_General;
-		}
-  } else { // runtime / param matrix - no compile-time numeric classification possible
-			for (unsigned i = 0; i < KK; i++) {
-				data[i].reKind = SK_General;
-				data[i].imKind = SK_General;
+  const auto& mat = scalarGM->matrix();
+  assert(mat.edgeSize() == K &&
+         "Matrix size does not match the number of qubits");
+  
+  // TODO: decide whether to scale it by gate size
+  double zTol = config.zeroTol;
+  double oTol = config.oneTol;
+  assert(zTol >= 0.0 && oTol >= 0.0 &&
+         "Zero and one tolerances must be non-negative");
+  // Step 1: set the flags
+  if (zTol == 0.0 && oTol == 0.0) {
+    for (unsigned i = 0; i < KK; ++i) {
+      matData[i].reFlag = SK_General;
+      matData[i].imFlag = SK_General;
     }
-	}
-  return data;
+  } else {
+    for (unsigned i = 0; i < KK; ++i) {
+      auto re = mat.reData()[i];
+      auto im = mat.imData()[i];
+      if (std::abs(re) < zTol)
+        matData[i].reFlag = SK_Zero;
+      else if (std::abs(re - 1.0) < oTol)
+        matData[i].reFlag = SK_One;
+      else if (std::abs(re + 1.0) < oTol)
+        matData[i].reFlag = SK_MinusOne;
+      else
+        matData[i].reFlag = SK_General;
+
+      if (std::abs(im) < zTol)
+        matData[i].imFlag = SK_Zero;
+      else if (std::abs(im - 1.0) < oTol)
+        matData[i].imFlag = SK_One;
+      else if (std::abs(im + 1.0) < oTol)
+        matData[i].imFlag = SK_MinusOne;
+      else
+        matData[i].imFlag = SK_General;
+    }
+  }
+
+  // Step 2: set the values, either as imm values (llvm::Constant) or as
+  // run-time loaded values
+  auto* ty = (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
+  auto ec = llvm::ElementCount::getFixed(1 << config.simd_s);
+  switch (config.matrixLoadMode) {
+  case MatrixLoadMode::UseMatImmValues: {
+    for (unsigned i = 0; i < KK; ++i) {
+      // We only initialize the values for general entries. Values in other
+      // cases (SK_Zero, SK_One, SK_MinusOne) are left as null. This is okay as
+      // in the main loop we will only use these imm values if the flag is
+      // SK_General.
+      auto& d = matData[i];
+      if (d.reFlag == SK_General) {
+        auto* reConstantVal = llvm::ConstantFP::get(ty, mat.reData()[i]);
+        d.reElmVal = reConstantVal;
+        d.reVecVal = llvm::ConstantVector::getSplat(ec, reConstantVal);
+      }
+      if (d.imFlag == SK_General) {
+        auto* imConstantVal = llvm::ConstantFP::get(ty, mat.imData()[i]);
+        d.imElmVal = imConstantVal;
+        d.imVecVal = llvm::ConstantVector::getSplat(ec, imConstantVal);
+      }
+    }
+    break;
+  }
+  case MatrixLoadMode::StackLoadMatElems: {
+    // In StackLoadMatElems mode, the matrix elements are assumed to alternate
+    // between one real and one imag value. That is, real[0], imag[0], real[1],
+    // imag[1], ..., real[K*K-1], imag[K*K-1].
+    for (unsigned i = 0; i < KK; ++i) {
+      auto& d = matData[i];
+      if (d.reFlag == SK_General) {
+        auto* ptrV = B.CreateConstGEP1_32(
+          ty, pMatArg, 2 * i, "re.mat.elem." + llvm::Twine(i));
+        d.reElmVal = B.CreateLoad(
+          ty, ptrV, "re.mat.elem." + llvm::Twine(i));
+        d.reVecVal = B.CreateVectorSplat(
+          ec, d.reElmVal, "re.mat.vec." + std::to_string(i));
+      }
+      if (d.imFlag == SK_General) {
+        auto* ptrV = B.CreateConstGEP1_32(
+          ty, pMatArg, 2 * i + 1, "im.mat.elem." + llvm::Twine(i));
+        d.imElmVal = B.CreateLoad(
+          ty, ptrV, "im.mat.elem." + llvm::Twine(i));
+        d.imVecVal = B.CreateVectorSplat(
+          ec, d.imElmVal, "im.mat.vec." + std::to_string(i));
+      }
+    }
+    break;
+  }
+  default: {
+    assert(false && "Unsupported matrix load mode");
+    break;
+  }
+  } // switch (config.matrixLoadMode)
+
+  return matData;
+}
+
+char flagToChar(ScalarKind flag) {
+  switch (flag) {
+    case SK_General:  return 'X';
+    case SK_Zero:     return '0';
+    case SK_One:      return '+';
+    case SK_MinusOne: return '-';
+    default:          return '?';
+  }
+}
+
+void debugPrintMatData(std::ostream& os,
+                       const std::vector<IRMatData>& matData) {
+  unsigned KK = matData.size();
+  unsigned K = std::sqrt(KK);
+  for (unsigned r = 0; r < K; ++r) {
+    if (r != 0) {
+      os << "\n";
+    }
+    for (unsigned c = 0; c < K; ++c) {
+      os.put(flagToChar(matData[r * K + c].reFlag));
+      os.put(':');
+      os.put(flagToChar(matData[r * K + c].imFlag));
+      if (r != K - 1 || c != K - 1) {
+        os << ", ";
+      }
+    }
+  }
 }
 
 } // anonymous namespace
 
+
 CPUKernelManager& CPUKernelManager::genCPUGate(
     const CPUKernelGenConfig& config,
-    std::shared_ptr<legacy::QuantumGate> gate, const std::string& funcName) {
+    std::shared_ptr<cast::QuantumGate> gate,
+    const std::string& funcName) {
   const unsigned s = config.simd_s;
   const unsigned S = 1ULL << s;
-  const unsigned k = gate->qubits.size();
+  const unsigned k = gate->nQubits();
   const unsigned K = 1ULL << k;
   const unsigned KK = K * K;
 
-  LLVM_DEBUG(
-    std::cerr << CYAN("=== DEBUG genCPUKernel funcName " << funcName << " ===\n");
-    utils::printArray(std::cerr << "Matrix on qubits ", gate->qubits) << "\n";
-    gate->gateMatrix.printCMat(std::cerr) << "\n";
-  );
+  auto& llvmContextModulePair =
+    createNewLLVMContextModulePair(funcName + "Module");
+  auto& llvmContext = *llvmContextModulePair.llvmContext;
+  auto& llvmModule = *llvmContextModulePair.llvmModule;
 
-  auto& llvmContextModulePair = createNewLLVMContextModulePair(funcName + "Module");
-
-  IRBuilder<> B(*llvmContextModulePair.llvmContext);
+  llvm::IRBuilder<> B(llvmContext);
   assert(config.precision == 32 || config.precision == 64);
-  Type* scalarTy = (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
-  
-  // init function
+  auto* scalarTy = (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
+
+  // Create function declaration
   CPUArgs args;
-  Function* func = cpuGetFunctionDeclaration(
-    B, *llvmContextModulePair.llvmModule, funcName, config, args);
+  llvm::Function* func;
+  llvm::BasicBlock *entryBB, *loopBB, *loopBodyBB, *retBB;
+  { // start of function declaration
+    auto* funcTy = llvm::FunctionType::get(
+      /* return type */ B.getVoidTy(),
+      /* arg type */ { B.getPtrTy() },
+      /* isVarArg */ false
+    );
+    func = llvm::Function::Create(
+      funcTy, llvm::Function::ExternalLinkage, funcName, llvmModule
+    );
+    entryBB = llvm::BasicBlock::Create(B.getContext(), "entry", func);
+    loopBB = llvm::BasicBlock::Create(B.getContext(), "loop", func);
+    loopBodyBB = llvm::BasicBlock::Create(B.getContext(), "loop.body", func);
+    retBB = llvm::BasicBlock::Create(B.getContext(), "ret", func);
 
-  // init matrix
-  auto matrixData = getMatrixData(B, gate->gateMatrix, config);
+    B.SetInsertPoint(entryBB);
+    // get arguments
+    auto* funcArg = func->getArg(0);
+    funcArg->setName("func.arg");
+    llvm::Value* tmp;
+    tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 0, "p.p.sv.arg");
+    args.pSvArg = B.CreateLoad(B.getPtrTy(), tmp, "p.sv.arg");
+    tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 1, "p.ctr.begin");
+    args.ctrBeginArg = B.CreateLoad(B.getInt64Ty(), tmp, "ctr.begin");
+    tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 2, "p.ctr.end");
+    args.ctrEndArg = B.CreateLoad(B.getInt64Ty(), tmp, "ctr.end");
+    tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 3, "p.p.mat.arg");
+    args.pMatArg = B.CreateLoad(B.getPtrTy(), tmp, "p.mat.arg");
+  } // end of function declaration
 
-	bool haveConstantMatrix = (gate->gateMatrix.getConstantMatrix() != nullptr); // TODO: change this to be less redundant
+  // initialize matrix data
+  B.SetInsertPoint(entryBB);
+  auto matData = initMatrixData(B, config, gate.get(), args.pMatArg);
 
-  // init basic blocks
-  BasicBlock* entryBB = BasicBlock::Create(B.getContext(), "entry", func);
-  BasicBlock* loopBB = BasicBlock::Create(B.getContext(), "loop", func);
-  BasicBlock* loopBodyBB = BasicBlock::Create(B.getContext(), "loop.body", func);
-  BasicBlock* retBB = BasicBlock::Create(B.getContext(), "ret", func);
+  LLVM_DEBUG(debugPrintMatData(std::cerr, matData););
 
   // split qubits
   int sepBit;
-  SmallVector<int, 6U> simdBits, hiBits, loBits;
-  { /* split qubits */
-  unsigned q = 0;
-  auto qubitsIt = gate->qubits.begin();
-  const auto qubitsEnd = gate->qubits.end();
-  while (simdBits.size() != s) {
-    if (qubitsIt != qubitsEnd && *qubitsIt == q) {
-      loBits.push_back(q);
-      ++qubitsIt;
-    } else {
-      simdBits.push_back(q);
+  llvm::SmallVector<int, 6U> simdBits, hiBits, loBits;
+  { // start of qubit splitting
+    unsigned q = 0;
+    auto qubitsIt = gate->qubits().begin();
+    const auto qubitsEnd = gate->qubits().end();
+    while (simdBits.size() != s) {
+      if (qubitsIt != qubitsEnd && *qubitsIt == q) {
+        loBits.push_back(q);
+        ++qubitsIt;
+      } else {
+        simdBits.push_back(q);
+      }
+      ++q;
     }
-    ++q;
-  }
-  while (qubitsIt != qubitsEnd) {
-      hiBits.push_back(*qubitsIt);
-      ++qubitsIt;
-  }
+    while (qubitsIt != qubitsEnd) {
+        hiBits.push_back(*qubitsIt);
+        ++qubitsIt;
+    }
 
-  for (auto& b : loBits) {
-    if (b >= s)
-      ++b;
-  }
-  for (auto& b : simdBits) {
-    if (b >= s)
-      ++b;
-  }
-  for (auto& b : hiBits) {
-    if (b >= s)
-      ++b;
-  }
+    for (auto& b : loBits) {
+      if (b >= s)
+        ++b;
+    }
+    for (auto& b : simdBits) {
+      if (b >= s)
+        ++b;
+    }
+    for (auto& b : hiBits) {
+      if (b >= s)
+        ++b;
+    }
 
-  sepBit = (s == 0) ? 0 : simdBits.back() + 1;
-  if (sepBit == s)
-    ++sepBit;
-  }
-
+    sepBit = (s == 0) ? 0 : simdBits.back() + 1;
+    if (sepBit == s)
+      ++sepBit;
+  } // end of qubit splitting
   const unsigned vecSize = 1U << sepBit;
-  auto* vecType = VectorType::get(scalarTy, vecSize, false);
+  auto* vecType = llvm::VectorType::get(scalarTy, vecSize, false);
 
   const unsigned lk = loBits.size();
   const unsigned LK = 1 << lk;
@@ -202,86 +296,36 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
 
   // debug print qubit splits
   LLVM_DEBUG(
-    dbgs() << CYAN("-- qubit split done\n");
+    std::cerr << CYAN("-- qubit split done\n");
     utils::printArray(std::cerr << "- lower bits:  ", loBits) << "\n";
     utils::printArray(std::cerr << "- higher bits: ", hiBits) << "\n";
     utils::printArray(std::cerr << "- simd bits:   ", simdBits) << "\n";
-    dbgs() << "- reImBit (simd_s): " << s << "\n";
-    dbgs() << "- sepBit:           " << sepBit << "\n";
-    dbgs() << "- vecSize:          " << vecSize << "\n";
+    std::cerr << "- reImBit (simd_s): " << s << "\n";
+    std::cerr << "- sepBit:           " << sepBit << "\n";
+    std::cerr << "- vecSize:          " << vecSize << "\n";
   );
-  
-  B.SetInsertPoint(entryBB);
-  // load matrix (if needed)
-  switch (config.matrixLoadMode) {
-  case CPUKernelGenConfig::UseMatImmValues: {
-    // Imm values are LLVM Constant. They will not appear as instructions in 
-    // the entry block.
-		if (!haveConstantMatrix) {
-      llvm_unreachable("Asked to use immediate values but we have no cMat");
-    }
-    for (unsigned i = 0, n = matrixData.size(); i < n; i++) {
-      if (matrixData[i].reElemVal) {
-        matrixData[i].reVecVal = B.CreateVectorSplat(
-          S, matrixData[i].reElemVal, "mat.re." + std::to_string(i) + ".vec");
-      }
-      if (matrixData[i].imElemVal) {
-        matrixData[i].imVecVal = B.CreateVectorSplat(
-          S, matrixData[i].imElemVal, "mat.im." + std::to_string(i) + ".vec");
-      }
-    }
-    break;
-  }
-  case CPUKernelGenConfig::StackLoadMatElems: {
-    for (unsigned i = 0, n = matrixData.size(); i < n; i++) {
-      if (matrixData[i].reKind == SK_General) {
-        auto* ptrV = B.CreateConstGEP1_32(
-          scalarTy, args.pMatArg, 2 * i, "p.mat.re." + std::to_string(i));
-        matrixData[i].reElemVal = B.CreateLoad(
-          scalarTy, ptrV, "mat.re." + std::to_string(i));
-        matrixData[i].reVecVal = B.CreateVectorSplat(
-          S, matrixData[i].reElemVal, "mat.re." + std::to_string(i) + ".vec");
-      }
-      if (matrixData[i].imKind == SK_General) {
-        auto* ptrV = B.CreateConstGEP1_32(
-          scalarTy, args.pMatArg, 2 * i + 1, "p.mat.im." + std::to_string(i));
-        matrixData[i].imElemVal = B.CreateLoad(
-          scalarTy, ptrV, "mat.im." + std::to_string(i));
-        matrixData[i].imVecVal = B.CreateVectorSplat(
-          S, matrixData[i].imElemVal, "mat.im." + std::to_string(i) + ".vec");
-      }
-    }
-    break;
-  }
-  default: {
-    llvm_unreachable(
-      "Unrecognized matrixLoadMode - Only supporting UseMatImmValues and StackLoadMatElems modes");
-    break;
-  }
-  }
 
-  // entryBB->print(errs());
+  entryBB->print(llvm::errs());
 
+  // set up counter and loop structure
   B.CreateBr(loopBB);
-
-  // loop entry: set up counter
   B.SetInsertPoint(loopBB);
-  PHINode* taskIdV = B.CreatePHI(B.getInt64Ty(), 2, "taskid");
+  auto* taskIdV = B.CreatePHI(B.getInt64Ty(), 2, "taskid");
   taskIdV->addIncoming(args.ctrBeginArg, entryBB);
-  Value* cond = B.CreateICmpSLT(taskIdV, args.ctrEndArg, "cond");
+  auto* cond = B.CreateICmpSLT(taskIdV, args.ctrEndArg, "cond");
   B.CreateCondBr(cond, loopBodyBB, retBB);
 
   // loop body
   B.SetInsertPoint(loopBodyBB);
-  
+
   // the start pointer in the SV based on taskID
-  Value* ptrSvBeginV = nullptr;
+  llvm::Value* ptrSvBeginV = nullptr;
   if (hiBits.empty()) {
     ptrSvBeginV = B.CreateGEP(vecType, args.pSvArg, taskIdV, "ptr.sv.begin");
   } else {
     // the shift from args.pSvArg in the unit of vecTypeX2
-    Value* idxStartV = B.getInt64(0ULL);
-    Value* tmpCounterV;
+    llvm::Value* idxStartV = B.getInt64(0ULL);
+    llvm::Value* tmpCounterV;
     uint64_t mask = 0ULL;
     int highestQ = hiBits.back();
     int qIdx = 0;
@@ -314,7 +358,6 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
     idxStartV = B.CreateAdd(idxStartV, tmpCounterV, "idx.begin");
     ptrSvBeginV = B.CreateGEP(vecType, args.pSvArg, idxStartV, "ptr.sv.begin");
   }
-
   /* load amplitude registers
     There are a total of 2K size-S amplitude registers (K real and K imag).
     In Alt Format, we load HK size-(2*S*LK) LLVM registers. i.e. Loop over
@@ -329,46 +372,46 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
   */
 
   // [re/im]SplitMasks are like flattened LK*S matrices
-  SmallVector<int> reSplitMasks;
-  SmallVector<int> imSplitMasks;
-  {
-  unsigned pdepMaskS = 0U;
-  int pdepNbitsS = simdBits.empty() ? 0 : simdBits.back() + 1;
-  for (const auto& b : simdBits)
-    pdepMaskS |= (1U << b);
-  unsigned pdepMaskL = 0U;
-  int pdepNbitsL = loBits.empty() ? 0 : loBits.back() + 1;
-  for (const auto& b : loBits)
-    pdepMaskL |= (1U << b);
-  reSplitMasks.resize_for_overwrite(LK * S);
-  imSplitMasks.resize_for_overwrite(LK * S);
-  // TODO: Optimize this double-loop
-  for (unsigned li = 0; li < LK; li++) {
-    for (unsigned si = 0; si < S; si++) {
-      reSplitMasks[li * S + si] = utils::pdep32(li, pdepMaskL, pdepNbitsL) |
-                                  utils::pdep32(si, pdepMaskS, pdepNbitsS);
-      imSplitMasks[li * S + si] = reSplitMasks[li * S + si] | (1 << s);
+  llvm::SmallVector<int> reSplitMasks;
+  llvm::SmallVector<int> imSplitMasks;
+  { // begin init [re/im]SplitMasks
+    unsigned pdepMaskS = 0U;
+    int pdepNbitsS = simdBits.empty() ? 0 : simdBits.back() + 1;
+    for (const auto& b : simdBits)
+      pdepMaskS |= (1U << b);
+    unsigned pdepMaskL = 0U;
+    int pdepNbitsL = loBits.empty() ? 0 : loBits.back() + 1;
+    for (const auto& b : loBits)
+      pdepMaskL |= (1U << b);
+    reSplitMasks.resize_for_overwrite(LK * S);
+    imSplitMasks.resize_for_overwrite(LK * S);
+    // TODO: Optimize this double-loop
+    for (unsigned li = 0; li < LK; li++) {
+      for (unsigned si = 0; si < S; si++) {
+        reSplitMasks[li * S + si] = utils::pdep32(li, pdepMaskL, pdepNbitsL) |
+                                    utils::pdep32(si, pdepMaskS, pdepNbitsS);
+        imSplitMasks[li * S + si] = reSplitMasks[li * S + si] | (1 << s);
+      }
     }
-  }
-  LLVM_DEBUG(
-    std::cerr << "- reSplitMasks: [";
-    for (const auto& e : reSplitMasks)
-      std::cerr << utils::fmt_0b(e, sepBit + 1) << ",";
-    std::cerr << "]\n";
-    std::cerr << "- imSplitMasks: [";
-    for (const auto& e : imSplitMasks)
-      std::cerr << utils::fmt_0b(e, sepBit + 1) << ",";
-    std::cerr << "]\n";
-  );
+    LLVM_DEBUG(
+      std::cerr << "- reSplitMasks: [";
+      for (const auto& e : reSplitMasks)
+        std::cerr << utils::fmt_0b(e, sepBit + 1) << ",";
+      std::cerr << "]\n";
+      std::cerr << "- imSplitMasks: [";
+      for (const auto& e : imSplitMasks)
+        std::cerr << utils::fmt_0b(e, sepBit + 1) << ",";
+      std::cerr << "]\n";
+    );
   } // end init [re/im]SplitMasks
 
   // load vectors
-  SmallVector<Value*> reAmps; // real amplitudes
-  SmallVector<Value*> imAmps; // imag amplitudes
+  llvm::SmallVector<llvm::Value*> reAmps; // real amplitudes
+  llvm::SmallVector<llvm::Value*> imAmps; // imag amplitudes
   reAmps.resize_for_overwrite(K);
   imAmps.resize_for_overwrite(K);
 
-  SmallVector<Value*> pSvs;
+  llvm::SmallVector<llvm::Value*> pSvs;
   pSvs.resize_for_overwrite(HK);
   for (unsigned hi = 0; hi < HK; hi++) {
     uint64_t idxShift = 0ULL;
@@ -389,10 +432,10 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
 
     for (unsigned li = 0; li < LK; li++) {
       reAmps[hi * LK + li] = B.CreateShuffleVector(
-        ampFull, ArrayRef<int>(reSplitMasks.data() + li * S, S),
+        ampFull, llvm::ArrayRef<int>(reSplitMasks.data() + li * S, S),
         "re." + std::to_string(hi) + "." + std::to_string(li));
       imAmps[hi * LK + li] = B.CreateShuffleVector(
-        ampFull, ArrayRef<int>(imSplitMasks.data() + li * S, S),
+        ampFull, llvm::ArrayRef<int>(imSplitMasks.data() + li * S, S),
         "im." + std::to_string(hi) + "." + std::to_string(li));
     }
   }
@@ -489,8 +532,8 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
   );
   }
 
-  std::vector<Value*> updatedReAmps(LK);
-  std::vector<Value*> updatedImAmps(LK);
+  std::vector<llvm::Value*> updatedReAmps(LK);
+  std::vector<llvm::Value*> updatedImAmps(LK);
   for (unsigned hi = 0; hi < HK; hi++) {
     // mat-vec mul
     for (auto& v : updatedReAmps)
@@ -501,24 +544,24 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
       unsigned r = hi * LK + li; // row
       for (unsigned c = 0; c < K; c++) { // column
         // updatedReAmps = sum of reAmps * reMats - imAmps * imMats
-        const auto& matrixEntry = matrixData[r * K + c];
+        const auto& matrixEntry = matData[r * K + c];
         updatedReAmps[li] = internal::genMulAdd(B,
           matrixEntry.reVecVal, reAmps[c], updatedReAmps[li],
-          matrixEntry.reKind, 
+          matrixEntry.reFlag, 
           "new.re." + std::to_string(hi) + "." + std::to_string(li) + ".");
         updatedReAmps[li] = internal::genNegMulAdd(B,
           matrixEntry.imVecVal, imAmps[c], updatedReAmps[li],
-          matrixEntry.imKind, 
+          matrixEntry.imFlag, 
           "new.re." + std::to_string(hi) + "." + std::to_string(li) + ".");
 
         // updatedImAmps = sum of reAmps * imMats + imAmps * reMats
         updatedImAmps[li] = internal::genMulAdd(B,
           matrixEntry.reVecVal, imAmps[c], updatedImAmps[li],
-          matrixEntry.reKind, 
+          matrixEntry.reFlag, 
           "new.im." + std::to_string(hi) + "." + std::to_string(li) + ".");
         updatedImAmps[li] = internal::genMulAdd(B,
           matrixEntry.imVecVal, reAmps[c], updatedImAmps[li],
-          matrixEntry.imKind, 
+          matrixEntry.imFlag, 
           "new.im." + std::to_string(hi) + "." + std::to_string(li) + ".");
       }
     }
@@ -531,13 +574,13 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
       bool valid = true;
       for (auto& v : updatedReAmps) {
         if (v == nullptr) {
-          v = ConstantAggregateZero::get(VectorType::get(scalarTy, S, false));
+          v = llvm::ConstantAggregateZero::get(llvm::VectorType::get(scalarTy, S, false));
           valid = false;
         }
       }
       for (auto& v : updatedImAmps) {
         if (v == nullptr) {
-          v = ConstantAggregateZero::get(VectorType::get(scalarTy, S, false));
+          v = llvm::ConstantAggregateZero::get(llvm::VectorType::get(scalarTy, S, false));
           valid = false;
         }
       }
@@ -561,9 +604,10 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
         unsigned idxL = pairIdx << mergeIdx << 1;
         unsigned idxR = idxL | (1 << mergeIdx);
         LLVM_DEBUG(
-          dbgs() << "(mergeIdx, pairIdx) = ("
-                << mergeIdx << ", " << pairIdx << "): (idxL, idxR) = ("
-                << idxL << ", " << idxR << ")\n";
+          std::cerr
+            << "(mergeIdx, pairIdx) = ("
+            << mergeIdx << ", " << pairIdx << "): (idxL, idxR) = ("
+            << idxL << ", " << idxR << ")\n";
         );
         updatedReAmps[idxL] = B.CreateShuffleVector(
           updatedReAmps[idxL], updatedReAmps[idxR], mergeMasks[mergeIdx],
@@ -596,41 +640,11 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
     std::function<CPU_KERNEL_TYPE>(),
     config.precision,
     func->getName().str(),
+    config.matrixLoadMode,
     gate,
     config.simd_s,
     gate->opCount(config.zeroTol), // TODO: zeroTol here is different from zTol used in sigMat
-    lk);
+    lk
+  );
   return *this;
-}
-
-CPUKernelManager& CPUKernelManager::genCPUGatesFromLegacyCircuitGraph(
-    const CPUKernelGenConfig& config, const cast::legacy::CircuitGraph& graph,
-    const std::string& graphName) {
-  const auto allBlocks = graph.getAllBlocks();
-  const auto mangledName = internal::mangleGraphName(graphName);
-  for (const auto& block : allBlocks) {
-    genCPUGate(
-      config, block->quantumGate, mangledName + std::to_string(block->id));
-  }
-  return *this;
-}
-
-// CPUKernelManager& CPUKernelManager::genCPUMeasure(
-//     const CPUKernelGenConfig& config, int q, const std::string& funcName) {
-//   assert(0 && "Not Implemented");
-//   return *this;
-// }
-
-void CPUKernelManager::dumpIR(const std::string &funcName, llvm::raw_ostream &os) {
-  // We haven't called initJIT() yet, so the modules should still be in
-  // llvmContextModulePairs.
-  for (auto &cmp : llvmContextModulePairs) {
-    auto &M = *cmp.llvmModule;
-    if (auto *F = M.getFunction(funcName)) {
-      os << "=== Dumping IR for function '" << funcName << "' ===\n";
-      M.print(os, nullptr);
-      return;
-    }
-  }
-  os << "No module found containing function '" << funcName << "'\n";
 }

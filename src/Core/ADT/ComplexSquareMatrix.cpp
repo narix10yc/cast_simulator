@@ -1,6 +1,8 @@
 #include "cast/ADT/ComplexSquareMatrix.h"
 #include "utils/utils.h"
 
+#include <random>
+
 using namespace cast;
 
 // For code collapse
@@ -251,3 +253,74 @@ void cast::matmul(const cast::ComplexSquareMatrix& A,
     }
   }
 }
+
+// helper function to generate a random unitary matrix
+namespace {
+  // a dagger dotted with b
+  void inner_product(const double* aRe, const double* aIm,
+                     const double* bRe, const double* bIm,
+                     double* resultRe, double* resultIm,
+                     size_t length) {
+    *resultRe = 0.0;
+    *resultIm = 0.0;
+    for (size_t i = 0; i < length; ++i) {
+      //   (aRe - aIm * i) * (bRe + bIm * i)
+      // = (aRe * bRe + aIm * bIm) + (aRe * bIm - aIm * bRe) * i
+      *resultRe += aRe[i] * bRe[i] + aIm[i] * bIm[i];
+      *resultIm += aRe[i] * bIm[i] - aIm[i] * bRe[i];
+    }
+  }
+
+  void normalize(double* re, double* im, size_t length) {
+    double norm = 0.0;
+    for (size_t i = 0; i < length; ++i)
+      norm += re[i] * re[i];
+    for (size_t i = 0; i < length; ++i)
+      norm += im[i] * im[i];
+    norm = std::sqrt(norm);
+    if (norm == 0.0) return; // avoid division by zero
+    double factor = 1.0 / norm;
+    for (size_t i = 0; i < length; ++i)
+      re[i] *= factor;
+    for (size_t i = 0; i < length; i++)
+      im[i] *= factor;
+  }
+
+} // anonymous namespace
+
+ComplexSquareMatrix ComplexSquareMatrix::RandomUnitary(size_t edgeSize) {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::normal_distribution<double> dist(0.0, 1.0);
+  ComplexSquareMatrix m(edgeSize);
+
+  for (unsigned r = 0; r < edgeSize; ++r) {
+    for (unsigned c = 0; c < edgeSize; ++c)
+      m.setRC(r, c, dist(gen), dist(gen));
+
+    // project
+    for (unsigned rr = 0; rr < r; ++rr) {
+      double coefRe, coefIm;
+      inner_product(
+        m.reBegin() +  r * edgeSize, m.imBegin() +  r * edgeSize,
+        m.reBegin() + rr * edgeSize, m.imBegin() + rr * edgeSize,
+        &coefRe, &coefIm, edgeSize);
+      // subtract row r by coef * row rr
+      for (unsigned cc = 0; cc < edgeSize; ++cc) {
+        double newRe = m.real(r, cc) - 
+          (coefRe * m.real(rr, cc) + coefIm * m.imag(rr, cc));
+        double newIm = m.imag(r, cc) - 
+          (coefRe * m.imag(rr, cc) - coefIm * m.real(rr, cc));
+        m.setRC(r, cc, newRe, newIm);
+      }
+    }
+
+    // normalize
+    normalize(m.reBegin() + r * edgeSize, 
+              m.imBegin() + r * edgeSize,
+              edgeSize);
+  }
+
+  return m;
+}
+

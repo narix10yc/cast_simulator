@@ -85,6 +85,11 @@ public:
     return gm->kind() == GM_Scalar;
   }
 
+  static ScalarGateMatrixPtr RandomUnitary(int nQubits) {
+    return std::make_shared<ScalarGateMatrix>(
+      ComplexSquareMatrix::RandomUnitary(1ULL << nQubits));
+  }
+
   static ScalarGateMatrixPtr I1() {
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::I1());
   }

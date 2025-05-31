@@ -1,6 +1,6 @@
-#include <llvm/IR/Intrinsics.h>
-#include <llvm/IR/IntrinsicsNVPTX.h>
-#include <llvm/IR/Verifier.h>
+#include "llvm/IR/Intrinsics.h>
+#include "llvm/IR/IntrinsicsNVPTX.h>
+#include "llvm/IR/Verifier.h>
 #include "cast/Legacy/QuantumGate.h"
 #include "cast/Legacy/CircuitGraph.h"
 
@@ -11,15 +11,15 @@
 #include "utils/iocolor.h"
 #include "utils/Formats.h"
 
-#include <llvm/Support/TargetSelect.h>
-#include <llvm/Target/TargetMachine.h>
-#include <llvm/MC/TargetRegistry.h>
-#include <llvm/IR/LegacyPassManager.h>
-#include <llvm/CodeGen/Passes.h>
-#include <llvm/Support/CodeGen.h>
+#include "llvm/Support/TargetSelect.h>
+#include "llvm/Target/TargetMachine.h>
+#include "llvm/MC/TargetRegistry.h>
+#include "llvm/IR/LegacyPassManager.h>
+#include "llvm/CodeGen/Passes.h>
+#include "llvm/Support/CodeGen.h>
 
 #define DEBUG_TYPE "codegen-cuda"
-#include <llvm/Support/Debug.h>
+#include "llvm/Support/Debug.h>
 // #define LLVM_DEBUG(X) X
 
 using namespace cast;
@@ -53,21 +53,21 @@ struct IRArgsCUDA {
   Argument* pMatArg;      // ptr to matrix
 };
 
-struct IRMatDataCUDA {
+struct IRMatDataCPU {
   Value* reVal;
   Value* imVal;
   ScalarKind reKind;
   ScalarKind imKind;
 };
 
-std::vector<IRMatDataCUDA> getMatDataCUDA(
+std::vector<IRMatDataCPU> getMatDataCUDA(
     IRBuilder<>& B, const LegacyGateMatrix& gateMatrix,
     const CUDAKernelGenConfig& config) {
   const int k = gateMatrix.nQubits();
   const unsigned K = 1 << k;
   const unsigned KK = K * K;
 
-  std::vector<IRMatDataCUDA> data(KK);
+  std::vector<IRMatDataCPU> data(KK);
 
   const double zTol = config.zeroTol / K;
   const double oTol = config.oneTol / K;
@@ -211,7 +211,7 @@ static void attachNoUnrollMetadata(llvm::IRBuilder<>& B, llvm::BasicBlock* latch
 static llvm::GlobalVariable* createGlobalMatrixArray_NoUnroll(
     llvm::Module &M,
     llvm::Type   *scalarTy,
-    const std::vector<IRMatDataCUDA> &matData,
+    const std::vector<IRMatDataCPU> &matData,
     unsigned K,
     const std::string &globalName
 )
@@ -281,7 +281,7 @@ void genMatrixVectorMultiply(
     const CUDAKernelGenConfig&    config,
     const LegacyGateMatrix&             gateMat,
     llvm::ArrayRef<int>           qubits,
-    const std::vector<IRMatDataCUDA>& matData,
+    const std::vector<IRMatDataCPU>& matData,
     llvm::Value*                  svPtrV,
     llvm::Type*                   scalarTy
 )
@@ -530,7 +530,7 @@ static GlobalVariable* createGlobalMatrixArray_SharedTiledImm(
     Module &M,
     Type* scalarTy,
     unsigned N,
-    const std::vector<IRMatDataCUDA> &matData,
+    const std::vector<IRMatDataCPU> &matData,
     const std::string &globalName
 )
 {
@@ -604,7 +604,7 @@ void genMatrixVectorMultiply_SharedTiled(
     const CUDAKernelGenConfig &config,
     const LegacyGateMatrix &gateMat,
     llvm::ArrayRef<int> qubits,
-    const std::vector<IRMatDataCUDA> &matData,
+    const std::vector<IRMatDataCPU> &matData,
     Value *svPtrV,
     Type *scalarTy
 )

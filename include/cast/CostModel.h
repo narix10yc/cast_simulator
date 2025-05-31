@@ -2,9 +2,7 @@
 #define CAST_COSTMODEL_H
 
 #include "cast/Core/QuantumGate.h"
-#include "cast/Core/KernelManager.h"
-#include "cast/Legacy/QuantumGate.h"
-#include "cast/Legacy/CircuitGraphContext.h"
+#include "cast/CPU/KernelManagerCPU.h"
 #include <cassert>
 #include <string>
 #include <vector>
@@ -22,13 +20,9 @@ class CostModel {
 public:
   virtual ~CostModel() = default;
 
-  /// @brief Compute the expected time it will take to simulate \c gate by 
-  /// updating each 1GiB of memory. 
+  // The time it takes to update 1 GiB of memory, in seconds.
   virtual double computeGiBTime(
-      const legacy::QuantumGate& gate, int precision, int nThreads) const = 0;
-
-  virtual double computeGiBTime(
-      const QuantumGate& gate, int precision, int nThreads) const = 0;
+      QuantumGatePtr gate, int precision, int nThreads) const = 0;
 };
 
 /// @brief \c NaiveCostModel is based on the size and operation count of fused
@@ -43,10 +37,7 @@ public:
     : maxNQubits(maxNQubits), maxOp(maxOp), zeroTol(zeroTol) {}
 
   double computeGiBTime(
-      const legacy::QuantumGate& gate, int precision, int nThreads) const override;
-
-  double computeGiBTime(
-      const QuantumGate& gate, int precision, int nThreads) const override;
+      QuantumGatePtr gate, int precision, int nThreads) const override;
 };
 
 /// \c StandardCostModel assumes simulation time is proportional to opCount and
@@ -76,22 +67,13 @@ public:
   std::ostream& display(std::ostream& os, int nLines = 0) const;
 
   double computeGiBTime(
-    const legacy::QuantumGate& gate, int precision, int nThreads) const override;
-
-  double computeGiBTime(
-    const QuantumGate& gate, int precision, int nThreads) const override;
+      QuantumGatePtr gate, int precision, int nThreads) const override;
 };
 
 class AdaptiveCostModel : public CostModel {
 public:
   double computeGiBTime(
-      const legacy::QuantumGate &gate, int precision, int nThreads) const override {
-    assert(false && "Not Implemented");
-    return 0.0;
-  }
-
-  double computeGiBTime(
-      const QuantumGate& gate, int precision, int nThreads) const override {
+      QuantumGatePtr gate, int precision, int nThreads) const override {
     assert(false && "Not Implemented");
     return 0.0;
   }

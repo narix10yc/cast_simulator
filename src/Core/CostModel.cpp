@@ -1,7 +1,7 @@
 #include "cast/CostModel.h"
-#include "cast/Legacy/QuantumGate.h"
 #include "cast/CPU/StatevectorCPU.h"
 #include "utils/Formats.h"
+#include "utils/PrintSpan.h"
 #include "timeit/timeit.h"
 
 #include <fstream>
@@ -11,26 +11,13 @@
 using namespace cast;
 using namespace llvm;
 
-using LegacyQuantumGate = cast::legacy::QuantumGate;
-using LegacyCircuitGraph = cast::legacy::CircuitGraph;
-
 double NaiveCostModel::computeGiBTime(
-    const LegacyQuantumGate& gate, int precision, int nThreads) const {
-  if (gate.nQubits() > maxNQubits)
+    QuantumGatePtr gate, int precision, int nThreads) const {
+  assert(gate != nullptr);
+  if (gate->nQubits() > maxNQubits)
     return 1.0;
-  if (maxOp > 0 && gate.opCount(zeroTol) > maxOp)
+  if (maxOp > 0 && gate->opCount(zeroTol) > maxOp)
     return 1.0;
-
-  return 0.0;
-}
-
-double NaiveCostModel::computeGiBTime(
-    const QuantumGate& gate, int precision, int nThreads) const {
-  if (gate.nQubits() > maxNQubits)
-    return 1.0;
-  if (maxOp > 0 && gate.opCount(zeroTol) > maxOp)
-    return 1.0;
-
   return 0.0;
 }
 
@@ -70,78 +57,11 @@ StandardCostModel::StandardCostModel(PerformanceCache* cache, double zeroTol)
 }
 
 double StandardCostModel::computeGiBTime(
-    const legacy::QuantumGate& gate, int precision, int nThreads) const {
+    QuantumGatePtr gate, int precision, int nThreads) const {
+  assert(gate != nullptr);
   assert(!items.empty());
-  const auto gateNQubits = gate.nQubits();
-  auto gateOpCount = gate.opCount(zeroTol);
-
-  // Try to find an exact match
-  for (const auto& item : items) {
-    if (item.nQubits == gateNQubits &&
-        item.precision == precision &&
-        item.nThreads == nThreads) {
-      auto avg = std::max(item.getAvgGibTimePerOpCount(), this->minGibTimeCap);
-      return avg * gateOpCount;
-    }
-  }
-
-  // No exact match. Estimate it
-  auto bestMatchIt = items.begin();
-
-  auto it = items.cbegin();
-  const auto end = items.cend();
-  while (++it != end) {
-    // priority: nThreads > nQubits > precision
-    const int bestNThreadsDiff = std::abs(nThreads - bestMatchIt->nThreads);
-    const int thisNThreadsDiff = std::abs(nThreads - it->nThreads);
-    if (thisNThreadsDiff > bestNThreadsDiff)
-      continue;
-    if (thisNThreadsDiff < bestNThreadsDiff) {
-      bestMatchIt = it;
-      continue;
-    }
-
-    const int bestNQubitsDiff = std::abs(gateNQubits - bestMatchIt->nQubits);
-    const int thisNQubitsDiff = std::abs(gateNQubits - it->nQubits);
-    if (thisNQubitsDiff > bestNQubitsDiff)
-      continue;
-    if (thisNQubitsDiff < bestNQubitsDiff) {
-      bestMatchIt = it;
-      continue;
-    }
-
-    if (precision == bestMatchIt->precision)
-      continue;
-    if (precision == it->precision) {
-      bestMatchIt = it;
-      continue;
-    }
-  }
-
-  // best match avg GiB time per opCount
-  auto bestMatchT0 = bestMatchIt->getAvgGibTimePerOpCount();
-  // estimated avg Gib time per opCount
-  auto estT0 = bestMatchT0 * bestMatchIt->nThreads / nThreads;
-  auto estimateTime = std::max<double>(estT0, this->minGibTimeCap) * gateOpCount;
-
-  std::cerr << YELLOW("Warning: ") << "No exact match to "
-               "[nQubits, precision, nThreads] = ["
-            << gateNQubits << ", " << gateOpCount << ", "
-            << precision << ", " << nThreads
-            << "] found. We estimate it by ["
-            << bestMatchIt->nQubits << ", " << bestMatchIt->precision
-            << ", " << bestMatchIt->nThreads
-            << "] @ " << bestMatchT0 << " s/GiB/op => "
-               "Est. " << estT0 << " s/GiB/op.\n";
-
-  return estimateTime;
-}
-
-double StandardCostModel::computeGiBTime(
-    const QuantumGate& gate, int precision, int nThreads) const {
-  assert(!items.empty());
-  const auto gateNQubits = gate.nQubits();
-  auto gateOpCount = gate.opCount(zeroTol);
+  const auto gateNQubits = gate->nQubits();
+  auto gateOpCount = gate->opCount(zeroTol);
 
   // Try to find an exact match
   for (const auto& item : items) {
@@ -238,15 +158,112 @@ void PerformanceCache::writeResults(std::ostream& os) const {
 }
 
 namespace {
-/// @return Speed in gigabytes per second (GiBps)
-double calculateMemUpdateSpeed(int nQubits, int precision, double t) {
-  assert(nQubits >= 0);
-  assert(precision == 32 || precision == 64);
-  assert(t >= 0.0);
+  /// @return Speed in gigabytes per second (GiBps)
+  double calculateMemUpdateSpeed(int nQubits, int precision, double t) {
+    assert(nQubits >= 0);
+    assert(precision == 32 || precision == 64);
+    assert(t >= 0.0);
 
-  return static_cast<double>(
-    (precision == 32 ? 8ULL : 16ULL) << nQubits) * 1e-9 / t;
-}
+    return static_cast<double>(
+      (precision == 32 ? 8ULL : 16ULL) << nQubits) * 1e-9 / t;
+  }
+
+  // Take the scalar gate matrix representation of the gate and randomly zero
+  // out some of the elements with probability p. This methods is not versatile
+  // and should only be used for testing purposes.
+  // For \c StandardQuantumGate, it only applies to the gate matrix.
+  // For \c SuperopQuantumGate, it applies to the superoperator matrix (not implemented yet).
+  // This method does not apply direct removal. It keeps the matrix to be valid,
+  // meaning non of the rows or columns will be completely zeroed out.
+  void randRemoveQuantumGate(QuantumGatePtr quGate, float p) {
+    assert(0.0f <= p && p <= 1.0f);
+    if (p == 0.0f)
+      return; // nothing to do
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> distF(0.0f, 1.0f);
+
+    auto* stdQuGate = llvm::dyn_cast<StandardQuantumGate>(quGate.get());
+    if (stdQuGate != nullptr) {
+      auto scalarGM = stdQuGate->getScalarGM();
+      assert(scalarGM != nullptr);
+      auto& mat = scalarGM->matrix();
+      auto edgeSize = mat.edgeSize();
+
+      // randomly zero out some elements
+      for (unsigned r = 0; r < edgeSize; ++r) {
+        for (unsigned c = 0; c < edgeSize; ++c) {
+          if (distF(gen) < p) {
+            // zero out the element
+            mat.reData()[r * edgeSize + c] = 0.0;
+            mat.imData()[r * edgeSize + c] = 0.0;
+          }
+        }
+      }
+
+      std::uniform_int_distribution<size_t> distI(0, edgeSize - 1);
+      // check if some row is completely zeroed out
+      for (unsigned r = 0; r < edgeSize; ++r) {
+        bool isRowZeroed = true;
+        for (unsigned c = 0; c < edgeSize; ++c) {
+          if (mat.reData()[r * edgeSize + c] != 0.0 ||
+              mat.imData()[r * edgeSize + c] != 0.0) {
+            isRowZeroed = false;
+            break;
+          }
+        }
+        if (isRowZeroed) {
+          // randomly choose a non-zero element to keep
+          auto keepCol = distI(gen);
+          mat.reData()[r * edgeSize + keepCol] = 0.5;
+          mat.imData()[r * edgeSize + keepCol] = 0.5;
+        }
+      }
+      
+      // check if some column is completely zeroed out
+      for (unsigned c = 0; c < edgeSize; ++c) {
+        bool isColZeroed = true;
+        for (unsigned r = 0; r < edgeSize; ++r) {
+          if (mat.reData()[r * edgeSize + c] != 0.0 ||
+              mat.imData()[r * edgeSize + c] != 0.0) {
+            isColZeroed = false;
+            break;
+          }
+        }
+        if (isColZeroed) {
+          // randomly choose a non-zero element to keep
+          auto keepRow = distI(gen);
+          mat.reData()[keepRow * edgeSize + c] = 0.5;
+          mat.imData()[keepRow * edgeSize + c] = 0.5;
+        }
+      }
+    }
+  }
+
+  /// @brief Sample K unique integers from [0, N-1] without replacement.
+  /// @param holder: will be cleared and filled with K unique integers.
+  void sampleNoReplacement(unsigned N, unsigned K, std::vector<int>& holder) {
+    assert(K <= N);
+    holder.clear();
+    holder.reserve(K);
+
+    // Create a pool of elements [0, 1, ..., N-1]
+    std::vector<int> pool(N);
+    for (unsigned i = 0; i < N; ++i)
+      pool[i] = i;
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    // Perform a partial shuffle (Fisher-Yates)
+    for (unsigned i = 0; i < K; ++i) {
+      std::uniform_int_distribution<unsigned> dist(i, N - 1);
+      unsigned j = dist(gen);
+      std::swap(pool[i], pool[j]);
+      holder.push_back(pool[i]);
+    }
+  }
 
 } // anonymous namespace
 
@@ -297,7 +314,6 @@ PerformanceCache::Item parseLine(const char*& curPtr, const char* bufferEnd) {
 
 } // anonymous namespace
 
-
 PerformanceCache PerformanceCache::LoadFromCSV(const std::string& fileName) {
   PerformanceCache cache;
 
@@ -330,11 +346,6 @@ PerformanceCache PerformanceCache::LoadFromCSV(const std::string& fileName) {
   return cache;
 }
 
-static inline void randomRemove(cast::legacy::QuantumGate& gate, float p) {
-  auto* cMat = gate.gateMatrix.getConstantMatrix();
-  assert(cMat != nullptr);
-}
-
 template<std::size_t K>
 static inline void sampleNoReplacement(int n, std::vector<int>& holder) {
   assert(n > 0);
@@ -358,158 +369,54 @@ static inline void sampleNoReplacement(int n, std::vector<int>& holder) {
 void PerformanceCache::runExperiments(
     const CPUKernelGenConfig& cpuConfig,
     int nQubits, int nThreads, int nRuns) {
-  std::vector<std::shared_ptr<legacy::QuantumGate>> gates;
+  std::vector<StandardQuantumGatePtr> gates;
   gates.reserve(nRuns);
-//  constexpr int maxAllowedK = 7;
-//  std::vector<int> holder(maxAllowedK);
 
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> disFloat(0.0, 1.0);
-  std::uniform_int_distribution<int> disInt(0, nQubits - 1);
-  float prob = 1.0f;
-
-  const auto randFloat = [&]() { return disFloat(gen); };
-  const auto randRemove = [&](legacy::QuantumGate& gate) {
-    if (prob >= 1.0)
-      return;
-    auto* cMat = gate.gateMatrix.getConstantMatrix();
-    assert(cMat != nullptr);
-    for (size_t i = 0; i < cMat->size(); ++i) {
-      if (randFloat() > prob)
-        cMat->data()[i].real(0.0);
-      if (randFloat() > prob)
-        cMat->data()[i].imag(0.0);
-    }
-  };
-
-  // nQubitsWeights[q] denotes the weight for n-qubit gates
-  // so length-8 array means we allow up to 7-qubit gates
-  std::array<int, 8> nQubitsWeights;
-
-  const auto addRandU1q = [&]() {
-    auto a = disInt(gen);
-    gates.emplace_back(std::make_shared<legacy::QuantumGate>(
-      legacy::QuantumGate::RandomUnitary(a)));
-    randRemove(*gates.back());
-  };
-
-  const auto addRandU2q = [&]() {
-    int a,b;
-    a = disInt(gen);
-    do { b = disInt(gen); } while (b == a);
-    gates.emplace_back(std::make_shared<legacy::QuantumGate>(
-      legacy::QuantumGate::RandomUnitary(a, b)));
-    randRemove(*gates.back());
-  };
-
-  const auto addRandU3q = [&]() {
-    int a,b,c;
-    a = disInt(gen);
-    do { b = disInt(gen); } while (b == a);
-    do { c = disInt(gen); } while (c == a || c == b);
-    gates.emplace_back(std::make_shared<legacy::QuantumGate>(
-      legacy::QuantumGate::RandomUnitary(a, b, c)));
-    randRemove(*gates.back());
-  };
-
-
-  const auto addRandU4q = [&]() {
-    int a,b,c,d;
-    a = disInt(gen);
-    do { b = disInt(gen); } while (b == a);
-    do { c = disInt(gen); } while (c == a || c == b);
-    do { d = disInt(gen); } while (d == a || d == b || d == c);
-    gates.emplace_back(std::make_shared<legacy::QuantumGate>(
-      legacy::QuantumGate::RandomUnitary(a, b, c, d)));
-    randRemove(*gates.back());
-  };
-
-  const auto addRandU5q = [&]() {
-    int a,b,c,d,e;
-    a = disInt(gen);
-    do { b = disInt(gen); } while (b == a);
-    do { c = disInt(gen); } while (c == a || c == b);
-    do { d = disInt(gen); } while (d == a || d == b || d == c);
-    do { e = disInt(gen); } while (e == a || e == b || e == c || e == d);
-    gates.emplace_back(std::make_shared<legacy::QuantumGate>(
-      legacy::QuantumGate::RandomUnitary(a, b, c, d, e)));
-    randRemove(*gates.back());
-  };
-
-  const auto addRandU6q = [&]() {
-    int a,b,c,d,e,f;
-    a = disInt(gen);
-    do { b = disInt(gen); } while (b == a);
-    do { c = disInt(gen); } while (c == a || c == b);
-    do { d = disInt(gen); } while (d == a || d == b || d == c);
-    do { e = disInt(gen); } while (e == a || e == b || e == c || e == d);
-    do { f = disInt(gen); }
-    while (f == a || f == b || f == c || f == d || f == e);
-
-    gates.emplace_back(std::make_shared<legacy::QuantumGate>(
-      legacy::QuantumGate::RandomUnitary(a, b, c, d, e, f)));
-    randRemove(*gates.back());
-  };
-
-  const auto addRandU7q = [&]() {
-    int a,b,c,d,e,f,g;
-    a = disInt(gen);
-    do { b = disInt(gen); } while (b == a);
-    do { c = disInt(gen); } while (c == a || c == b);
-    do { d = disInt(gen); } while (d == a || d == b || d == c);
-    do { e = disInt(gen); } while (e == a || e == b || e == c || e == d);
-    do { f = disInt(gen); }
-    while (f == a || f == b || f == c || f == d || f == e);
-    do { g = disInt(gen); }
-    while (g == a || g == b || g == c || g == d || g == e || g == f);
-
-    gates.emplace_back(std::make_shared<legacy::QuantumGate>(
-      legacy::QuantumGate::RandomUnitary(a, b, c, d, e, f, g)));
-    randRemove(*gates.back());
-  };
-
-  const auto addRandU = [&](int nQubits) {
-    assert(nQubits != 0);
-    switch (nQubits) {
-      case 1: addRandU1q(); break;
-      case 2: addRandU2q(); break;
-      case 3: addRandU3q(); break;
-      case 4: addRandU4q(); break;
-      case 5: addRandU5q(); break;
-      case 6: addRandU6q(); break;
-      case 7: addRandU7q(); break;
-      default: assert(false && "Unknown nQubits");
-    }
-  };
-
-  const auto randAdd = [&]() {
+  // nQubitsWeights[k-1] denotes the weight for k-qubit gates
+  std::array<int, 7> nQubitsWeights;
+  
+  // Add a random quantum gate whose size follows distribution of nQubitsWeights
+  const auto addRandomQuGate = [&](float erasureProb) {
     int sum = 0;
     for (auto weight : nQubitsWeights)
       sum += weight;
     assert(sum > 0 && "nQubitsWeight is empty");
+    std::random_device rd;
+    std::mt19937 gen(rd());
     std::uniform_int_distribution<int> dist(0, sum - 1);
     int r = dist(gen);
     int acc = 0;
-    for (int i = 1; i < nQubitsWeights.size(); ++i) {
+    for (int i = 0; i < nQubitsWeights.size(); ++i) {
       acc += nQubitsWeights[i];
-      if (r <= acc)
-        return addRandU(i);
+      if (r <= acc) {
+        std::vector<int> targetQubits;
+        sampleNoReplacement(nQubits, i + 1, targetQubits);
+        gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
+        randRemoveQuantumGate(gates.back(), erasureProb);
+        return;
+      }
     }
+    assert(false && "Unreachable: randAdd failed to add a gate");
   };
 
-  prob = 1.0f;
-  for (int n = 1; n <= 5; ++n) {
-    addRandU(n);
-    addRandU(n);
+  // For the initial run, we add some random 1 to 4-qubit gates
+  for (int q = 1; q <= 4; ++q) {
+    std::vector<int> targetQubits;
+    sampleNoReplacement(nQubits, q, targetQubits);
+    gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
+    randRemoveQuantumGate(gates.back(), 0.0f);
+
+    sampleNoReplacement(nQubits, q, targetQubits);
+    gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
+    randRemoveQuantumGate(gates.back(), 0.0f);
   }
 
-  nQubitsWeights = {0, 1, 2, 3, 5, 5, 3, 2};
+  nQubitsWeights = { 3, 5, 5, 3, 2, 2, 1 };
   int initialRuns = gates.size();
   for (int run = 0; run < nRuns - initialRuns; ++run) {
     float ratio = static_cast<float>(run) / (nRuns - initialRuns);
-    prob = ratio * 1.0f + (1.0f - ratio) * 0.25f;
-    randAdd();
+    float prob = ratio * 1.0f + (1.0f - ratio) * 0.25f;
+    addRandomQuGate(prob);
   }
 
   CPUKernelManager kernelMgr;
@@ -547,8 +454,7 @@ void PerformanceCache::runExperiments(
       kernel.gate->nQubits(), kernel.opCount, 64,
       kernel.nLoBits, nThreads, memSpd);
     std::cerr << "Gate @ ";
-    utils::printArray(
-      std::cerr, ArrayRef(kernel.gate->qubits.begin(), kernel.gate->qubits.size()));
+    utils::printSpan(std::cerr, std::span(kernel.gate->qubits()));
     std::cerr << ": " << memSpd << " GiBps\n";
   }
 }

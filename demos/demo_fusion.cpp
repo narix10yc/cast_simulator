@@ -6,7 +6,7 @@
 #include "cast/Fusion.h"
 #include "openqasm/parser.h"
 
-#include <llvm/Support/CommandLine.h>
+#include "llvm/Support/CommandLine.h>
 
 namespace cl = llvm::cl;
 
