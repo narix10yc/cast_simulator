@@ -1,6 +1,6 @@
-#include "cast/Core/KernelManager.h"
-#include "tests/TestKit.h"
+#include "cast/CPU/KernelManagerCPU.h"
 #include "cast/CPU/StatevectorCPU.h"
+#include "tests/TestKit.h"
 #include <random>
 
 using namespace cast;
@@ -22,21 +22,20 @@ static void internal_U1q() {
   CPUKernelManager kernelMgr;
 
   // generate random unitary gates
-  std::vector<std::shared_ptr<legacy::QuantumGate>> gates;
+  std::vector<StandardQuantumGatePtr> gates;
   gates.reserve(nQubits);
   for (int q = 0; q < nQubits; q++) {
-    gates.emplace_back(
-      std::make_shared<legacy::QuantumGate>(legacy::QuantumGate::RandomUnitary(q)));
+    gates.emplace_back(StandardQuantumGate::RandomUnitary({q}));
   }
 
   CPUKernelGenConfig cpuConfig;
   cpuConfig.simd_s = simd_s;
-  cpuConfig.matrixLoadMode = CPUKernelGenConfig::UseMatImmValues;
+  cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++)
     kernelMgr.genCPUGate(cpuConfig, gates[q], "gateImm_" + std::to_string(q));
 
   cpuConfig.forceDenseKernel = true;
-  cpuConfig.matrixLoadMode = CPUKernelGenConfig::StackLoadMatElems;
+  cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++)
     kernelMgr.genCPUGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q));
 
@@ -44,7 +43,7 @@ static void internal_U1q() {
   for (unsigned i = 0; i < nQubits; i++) {
     randomizeSV();
     std::stringstream ss;
-    ss << "Apply U1q at " << gates[i]->qubits[0];
+    ss << "Apply U1q at " << gates[i]->qubits()[0];
     auto immFuncName = "gateImm_" + std::to_string(i);
     auto loadFuncName = "gateLoad_" + std::to_string(i);
     kernelMgr.applyCPUKernel(sv0.data(), sv0.nQubits(), immFuncName);
@@ -75,9 +74,8 @@ static void internal_U2q() {
   };
 
   CPUKernelManager kernelMgr;
-
   // generate random gates, set up kernel names
-  std::vector<std::shared_ptr<legacy::QuantumGate>> gates;
+  std::vector<StandardQuantumGatePtr> gates;
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<> d(0, nQubits - 1);
@@ -85,25 +83,24 @@ static void internal_U2q() {
     int a, b;
     a = d(gen);
     do { b = d(gen); } while (b == a);
-    gates.emplace_back(
-      std::make_shared<legacy::QuantumGate>(legacy::QuantumGate::RandomUnitary(a, b)));
+    gates.emplace_back(StandardQuantumGate::RandomUnitary({a, b}));
   }
 
   CPUKernelGenConfig cpuConfig;
   cpuConfig.simd_s = simd_s;
-  cpuConfig.matrixLoadMode = CPUKernelGenConfig::UseMatImmValues;
+  cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++)
     kernelMgr.genCPUGate(cpuConfig, gates[q], "gateImm_" + std::to_string(q));
   cpuConfig.forceDenseKernel = true;
-  cpuConfig.matrixLoadMode = CPUKernelGenConfig::StackLoadMatElems;
+  cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++)
     kernelMgr.genCPUGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q));
 
   kernelMgr.initJIT();
   for (unsigned i = 0; i < nQubits; i++) {
     randomizeSV();
-    int a = gates[i]->qubits[0];
-    int b = gates[i]->qubits[1];
+    int a = gates[i]->qubits()[0];
+    int b = gates[i]->qubits()[1];
     std::stringstream ss;
     ss << "Apply U2q at " << a << " and " << b;
     auto immFuncName = "gateImm_" + std::to_string(i);

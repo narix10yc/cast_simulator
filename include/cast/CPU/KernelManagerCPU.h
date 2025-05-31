@@ -4,7 +4,7 @@
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 
-#define CPU_KERNEL_TYPE void(void**)
+#define CPU_KERNEL_TYPE void(void*)
 namespace cast {
 
 enum class MatrixLoadMode { 
@@ -102,7 +102,7 @@ public:
   // collectCPUKernelsFromLegacyCircuitGraph(const std::string& graphName);
 
   CPUKernelManager& genCPUGate(const CPUKernelGenConfig& config,
-                               std::shared_ptr<cast::QuantumGate> gate,
+                               QuantumGatePtr gate,
                                const std::string& funcName);
 
   void ensureExecutable(CPUKernelInfo& kernel) {

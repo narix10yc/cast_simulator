@@ -63,7 +63,7 @@ void CPUKernelManager::applyCPUKernel(
                       "before calling KernelManager::applyCPUKernel");
   ensureExecutable(kernel);
   int tmp = nQubits - kernel.gate->nQubits() - kernel.simd_s;
-  assert(tmp > 0);
+  assert(tmp >= 0);
   uint64_t idxEnd = 1ULL << tmp;
   void* pMat = nullptr;
   if (kernel.matrixLoadMode == MatrixLoadMode::StackLoadMatElems)
@@ -77,13 +77,13 @@ void CPUKernelManager::applyCPUKernel(
   args[2] = &taskIDEnd; // taskID end
   args[3] = pMat; // matrix pointer
   kernel.executable(args);
-  std::cerr << "Single-thread: passes in argument "
-            << (void*)(args) << " with "
-            << "sv = " << (void*)sv << ", "
-            << "arg[0] = " << *args << ", "
-            << "arg[1] = " << *(uint64_t*)args[1] << ", "
-            << "arg[2] = " << *(uint64_t*)args[2] << ", "
-            << "arg[3] = " << args[3] << "\n";
+  // std::cerr << "Single-thread: passes in argument "
+  //           << (void*)(args) << " with "
+  //           << "sv = " << (void*)sv << ", "
+  //           << "arg[0] = " << *args << ", "
+  //           << "arg[1] = " << *(uint64_t*)args[1] << ", "
+  //           << "arg[2] = " << *(uint64_t*)args[2] << ", "
+  //           << "arg[3] = " << args[3] << "\n";
   std::free(pMat);
 }
 
@@ -108,8 +108,7 @@ void CPUKernelManager::applyCPUKernel(
     void* sv, 
     int nQubits,
     CPUKernelInfo& kernel,
-    const void* pMatArg
-) {
+    const void* pMatArg) {
   assert(isJITed() && "Must initialize JIT session before calling applyCPUKernel");
   ensureExecutable(kernel);
   int tmp = nQubits - kernel.gate->nQubits() - kernel.simd_s;
@@ -117,9 +116,9 @@ void CPUKernelManager::applyCPUKernel(
   uint64_t idxBegin = 0ULL;
   uint64_t idxEnd = 1ULL << tmp;
   void* argv[4];
-  argv[0] = sv; // state vector
-  argv[1] = &idxBegin; // taskID begin
-  argv[2] = &idxEnd; // taskID end
+  argv[0] = sv; // state vector pointer
+  argv[1] = static_cast<void*>(&idxBegin); // taskID begin
+  argv[2] = static_cast<void*>(&idxEnd); // taskID end
   argv[3] = const_cast<void*>(pMatArg); // matrix pointer
   kernel.executable(argv);
 }
@@ -130,7 +129,7 @@ void CPUKernelManager::applyCPUKernelMultithread(
                       "before calling KernelManager::applyCPUKernel");
   ensureExecutable(kernel);
   int tmp = nQubits - kernel.gate->nQubits() - kernel.simd_s;
-  assert(tmp > 0);
+  assert(tmp >= 0);
   uint64_t nTasks = 1ULL << tmp;
   void* pMat = nullptr;
   if (kernel.matrixLoadMode == MatrixLoadMode::StackLoadMatElems)
@@ -154,14 +153,14 @@ void CPUKernelManager::applyCPUKernelMultithread(
     argvs[tIdx][2] = &(taskIds[tIdx + 1]); // taskID end
     argvs[tIdx][3] = pMat; // matrix pointer
 
-    void** arg = argvs[tIdx];
-    std::cerr << "Thread " << tIdx << " passes in argument "
-              << (void*)(arg) << " with "
-              << "sv = " << (void*)sv << ", "
-              << "arg[0] = " << *arg << ", "
-              << "arg[1] = " << *(uint64_t*)arg[1] << ", "
-              << "arg[2] = " << *(uint64_t*)arg[2] << ", "
-              << "arg[3] = " << arg[3] << "\n";
+    // void** arg = argvs[tIdx];
+    // std::cerr << "Thread " << tIdx << " passes in argument "
+    //           << (void*)(arg) << " with "
+    //           << "sv = " << (void*)sv << ", "
+    //           << "arg[0] = " << *arg << ", "
+    //           << "arg[1] = " << *(uint64_t*)arg[1] << ", "
+    //           << "arg[2] = " << *(uint64_t*)arg[2] << ", "
+    //           << "arg[3] = " << arg[3] << "\n";
   }
 
   for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)

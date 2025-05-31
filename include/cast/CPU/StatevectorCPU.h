@@ -1,17 +1,19 @@
 #ifndef UTILS_STATEVECTOR_CPU_H
 #define UTILS_STATEVECTOR_CPU_H
 
+
+#include "cast/Legacy/QuantumGate.h"
+#include "cast/Core/QuantumGate.h"
+#include "utils/iocolor.h"
+#include "utils/utils.h"
+#include "utils/TaskDispatcher.h"
+
 #include <complex>
 #include <iostream>
 #include <random>
 #include <thread>
 #include <algorithm>
 #include <cstdlib>
-
-#include "cast/Legacy/QuantumGate.h"
-#include "utils/iocolor.h"
-#include "utils/utils.h"
-#include "utils/TaskDispatcher.h"
 
 namespace utils {
 
@@ -400,6 +402,51 @@ public:
       }
     }
     return *this;
+  }
+
+  StatevectorCPU& applyGate(const cast::StandardQuantumGate& stdQuGate) {
+    const auto scalarGM = stdQuGate.getScalarGM();
+    assert(scalarGM && "Can only apply constant gateMatrix");
+    const auto& mat = scalarGM->matrix();
+
+    const unsigned k = stdQuGate.nQubits();
+    const unsigned K = 1 << k;
+    assert(mat.edgeSize() == K);
+    std::vector<size_t> ampIndices(K);
+    std::vector<std::complex<ScalarType>> ampUpdated(K);
+
+    size_t pdepMaskTask = ~static_cast<size_t>(0);
+    size_t pdepMaskAmp = 0;
+    for (const auto q : stdQuGate.qubits()) {
+      pdepMaskTask ^= (1ULL << q);
+      pdepMaskAmp |= (1ULL << q);
+    }
+
+    for (size_t taskId = 0; taskId < (getN() >> k); taskId++) {
+      auto pdepTaskId = utils::pdep64(taskId, pdepMaskTask);
+      for (size_t ampId = 0; ampId < K; ampId++) {
+        ampIndices[ampId] = pdepTaskId + utils::pdep64(ampId, pdepMaskAmp);
+      }
+
+      // std::cerr << "taskId = " << taskId
+      //           << " (" << utils::as0b(taskId, nQubits - k) << "):\n";
+      // utils::printVectorWithPrinter(ampIndices,
+      //   [&](size_t n, std::ostream& os) {
+      //     os << n << " (" << utils::as0b(n, nQubits) << ")";
+      //   }, std::cerr << " ampIndices: ") << "\n";
+
+      for (unsigned r = 0; r < K; r++) {
+        ampUpdated[r] = 0.0;
+        for (unsigned c = 0; c < K; c++) {
+          ampUpdated[r] += mat.rc(r, c) * this->amp(ampIndices[c]);
+        }
+      }
+      for (unsigned r = 0; r < K; r++) {
+        this->real(ampIndices[r]) = ampUpdated[r].real();
+        this->imag(ampIndices[r]) = ampUpdated[r].imag();
+      }
+    }
+    return *this; 
   }
 
 }; // class StatevectorAlt

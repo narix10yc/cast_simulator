@@ -86,7 +86,7 @@ static bool checkConsistency_gateMemory(const CircuitGraphNode& graph) {
         gatesInRow.insert(gate);
     }
     for (const auto& gate : gatesInRow)
-      gatesInTile.insert(graph.gateId(*gate));
+      gatesInTile.insert(graph.gateId(gate));
 
     // check for gate ID
     for (const auto& gate : gatesInRow) {
@@ -237,9 +237,9 @@ CircuitGraphNode::fuseAndInsertDiffRow(row_iterator rowItL, int qubit) {
   return rowItInserted;
 }
 
-int CircuitGraphNode::gateId(const QuantumGate& gate) const {
+int CircuitGraphNode::gateId(const QuantumGate* gate) const {
   for (const auto& [itGate, id] : _gateMap) {
-    if (itGate.get() == &gate)
+    if (itGate.get() == gate)
       return id;
   }
   return -1; // gate not found
@@ -303,6 +303,52 @@ void CircuitGraphNode::squeeze() {
   }
 }
 
+static void push_back_if_not_in(
+    std::vector<QuantumGate*>& gates, QuantumGate* gate) {
+  if (gate != nullptr &&
+      std::find(gates.begin(), gates.end(), gate) == gates.end()) {
+    gates.push_back(gate);
+  }
+}
+
+std::vector<QuantumGate*> CircuitGraphNode::getAllGates() const {
+  std::vector<QuantumGate*> gates;
+  auto rowEnd = tile_end();
+  std::vector<QuantumGate*> rowGates;
+  rowGates.reserve(_nQubits);
+  for (auto rowIt = tile_begin(); rowIt != rowEnd; ++rowIt) {
+    rowGates.clear();
+    for (int q = 0; q < _nQubits; ++q)
+      push_back_if_not_in(rowGates, (*rowIt)[q]);
+    for (auto* gate : rowGates)
+      gates.push_back(gate);
+  }
+  return gates;
+}
+
+static void push_back_if_not_in(
+    std::vector<QuantumGatePtr>& gates, QuantumGatePtr gate) {
+  if (gate != nullptr &&
+      std::find(gates.begin(), gates.end(), gate) == gates.end()) {
+    gates.push_back(gate);
+  }
+}
+
+std::vector<QuantumGatePtr> CircuitGraphNode::getAllGatesShared() const {
+  std::vector<QuantumGatePtr> gates;
+  auto rowEnd = tile_end();
+  std::vector<QuantumGatePtr> rowGates;
+  rowGates.reserve(_nQubits);
+  for (auto rowIt = tile_begin(); rowIt != rowEnd; ++rowIt) {
+    rowGates.clear();
+    for (int q = 0; q < _nQubits; ++q)
+      push_back_if_not_in(rowGates, lookup((*rowIt)[q]));
+    for (auto& gate : rowGates)
+      gates.push_back(gate);
+  }
+  return gates;
+}
+
 std::ostream& CircuitGraphNode::print(std::ostream& os, int indent) const {
   return writeIndent(os, indent)
     << "cast.circuit_graph [@" << this
@@ -337,7 +383,7 @@ std::ostream& CircuitGraphNode::visualize(std::ostream& os, int verbose) const {
       os << &row << ": ";
     for (unsigned q = 0; q < nQubits(); q++) {
       if (const auto* gate = row[q]; gate != nullptr)
-        os << std::setw(width) << std::setfill('0') << gateId(*gate) << " ";
+        os << std::setw(width) << std::setfill('0') << gateId(gate) << " ";
       else
         os << vbar;
     }

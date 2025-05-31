@@ -11,19 +11,31 @@ int main(int argc, char** argv) {
   std::cerr << "sizeof(KrausRep) = " << sizeof(KrausRep) << "\n";
   std::cerr << "sizeof(ChoiRep) = " << sizeof(ChoiRep) << "\n";
 
-  auto quantumGate = StandardQuantumGate::RandomUnitary({0, 3});
+  int simd_s = 1;
+  // auto quantumGate = StandardQuantumGate::RandomUnitary({1});
+  auto quantumGate = StandardQuantumGate::Create(
+    ScalarGateMatrix::H(), nullptr, {1});
 
-  utils::StatevectorCPU<double> sv(20, 2);
+  utils::StatevectorCPU<double> sv(3, simd_s);
+  sv.randomize();
+  sv.print();
   CPUKernelManager kernelMgr;
 
   CPUKernelGenConfig kernelGenConfig;
-  kernelGenConfig.simd_s = 1;
+  kernelGenConfig.simd_s = simd_s;
+  kernelGenConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
+  kernelGenConfig.precision = 64;
 
   kernelMgr.genCPUGate(kernelGenConfig, quantumGate, "test_gate");
   kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false, 0);
-  kernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "test_gate");
-  // kernelMgr.applyCPUKernelMultithread(sv.data(), sv.nQubits(), "test_gate", 2);
+  kernelMgr.applyCPUKernel(sv.data(), sv.nQubits() - 1, "test_gate");
 
+  std::cerr << CYAN("Single-thread successfully returned") << "\n";
+  sv.print(std::cerr);
+
+  // kernelMgr.applyCPUKernelMultithread(sv.data(), sv.nQubits() - 1, "test_gate", 2);
+
+  // std::cerr << CYAN("Multi-thread successfully returned") << "\n";
 
   return 0;
 }

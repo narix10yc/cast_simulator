@@ -181,11 +181,11 @@ int startFusion(ir::CircuitGraphNode& graph,
     utils::printSpanWithPrinter(std::cerr,
       std::span(fusedGates.data(), fusedGates.size()),
       [&graph](std::ostream& os, const TentativeFusedItem& item) {
-        os << graph.gateId(*item.gate)
+        os << graph.gateId(item.gate)
            << "(nQubits=" << item.gate->nQubits()
            << ", opCount=" << item.gate->opCount(1e-8) << ")";
       });
-    std::cerr << " => " << graph.gateId(*productGate)
+    std::cerr << " => " << graph.gateId(productGate)
               << "(nQubits=" << productGate->nQubits()
               << ", opCount=" << productGate->opCount(1e-8) << "). "
               << "Benefit = " << benefit << "; ";

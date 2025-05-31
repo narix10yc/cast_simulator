@@ -175,7 +175,14 @@ public:
 
   // Return the id of the gate in the circuit graph. Return -1 if gate is not
   // in this circuit graph.
-  int gateId(const QuantumGate& gate) const;
+  int gateId(const QuantumGate* gate) const;
+
+  int gateId(QuantumGatePtr gate) const {
+    auto it = _gateMap.find(gate);
+    if (it != _gateMap.end())
+      return it->second;
+    return -1; // gate not found
+  }
 
   // Look up a gate in the graph. Return nullptr if not found.
   QuantumGatePtr lookup(QuantumGate* gate) const;
@@ -192,6 +199,14 @@ public:
   int nQubits() const { return _nQubits; }
 
   size_t nGates() const { return _gateMap.size(); }
+
+  // Collect gates in the circuit graph in order. This methods returns a vector
+  // of raw pointers. These pointers could be invalidated when the circuit graph
+  // goes out of scope. Use \c getAllGatesShared() to retain gate memories. 
+  std::vector<QuantumGate*> getAllGates() const;
+
+  // Collect gates in the circuit graph in order. 
+  std::vector<QuantumGatePtr> getAllGatesShared() const;
 
   std::ostream& print(std::ostream& os, int indent) const override;
 

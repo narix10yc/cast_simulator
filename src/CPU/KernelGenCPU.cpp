@@ -234,9 +234,11 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
     llvm::Value* tmp;
     tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 0, "p.p.sv.arg");
     args.pSvArg = B.CreateLoad(B.getPtrTy(), tmp, "p.sv.arg");
-    tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 1, "p.ctr.begin");
+    tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 1, "p.p.ctr.begin");
+    tmp = B.CreateLoad(B.getPtrTy(), tmp, "p.ctr.begin");
     args.ctrBeginArg = B.CreateLoad(B.getInt64Ty(), tmp, "ctr.begin");
-    tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 2, "p.ctr.end");
+    tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 2, "p.p.ctr.end");
+    tmp = B.CreateLoad(B.getPtrTy(), tmp, "p.ctr.end");
     args.ctrEndArg = B.CreateLoad(B.getInt64Ty(), tmp, "ctr.end");
     tmp = B.CreateConstGEP1_32(B.getPtrTy(), funcArg, 3, "p.p.mat.arg");
     args.pMatArg = B.CreateLoad(B.getPtrTy(), tmp, "p.mat.arg");
@@ -305,7 +307,7 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
     std::cerr << "- vecSize:          " << vecSize << "\n";
   );
 
-  entryBB->print(llvm::errs());
+  // entryBB->print(llvm::errs());
 
   // set up counter and loop structure
   B.CreateBr(loopBB);
@@ -646,5 +648,6 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
     gate->opCount(config.zeroTol), // TODO: zeroTol here is different from zTol used in sigMat
     lk
   );
+  // func->print(llvm::errs());
   return *this;
 }

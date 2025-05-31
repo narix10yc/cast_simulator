@@ -74,7 +74,7 @@ void test_gateMatMul();
 void test_cpuH();
 void test_cpuU();
 
-void test_cpuRz_param();
+// void test_cpuRz_param();
 
 void test_fusionCPU();
 

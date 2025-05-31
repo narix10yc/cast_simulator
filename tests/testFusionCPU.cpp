@@ -1,16 +1,15 @@
-#include "cast/Legacy/CircuitGraph.h"
-#include "cast/Legacy/Parser.h"
+#include "cast/Core/AST/Parser.h"
+#include "cast/Transform/Transform.h"
 #include "cast/Fusion.h"
-#include "cast/Core/KernelManager.h"
-#include "tests/TestKit.h"
+#include "cast/CPU/KernelManagerCPU.h"
 #include "cast/CPU/StatevectorCPU.h"
+#include "tests/TestKit.h"
 
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
-using namespace cast::legacy;
-using namespace utils;
+using namespace cast;
 
 template<unsigned simd_s>
 static void f() {
@@ -33,32 +32,38 @@ static void f() {
   }
   for (const auto& p : fs::directory_iterator(circuitDir)) {
     if (!p.is_regular_file())
-      continue;
+    continue;
+    
+    ast::ASTContext astCtx;
+    astCtx.loadFromFile(p.path().string().c_str());
+    ast::Parser parser(astCtx);
+    auto* astRoot = parser.parse();
+    auto* astCircuit = astRoot->lookupCircuit();
+    auto circuitNode = transform::cvtAstCircuitToIrCircuit(*astCircuit, astCtx);
+    auto circuitGraphs = circuitNode->getAllCircuitGraphs();
+    assert(circuitGraphs.size() == 1 && "Expected exactly one circuit graph");
+    auto& graph = *circuitGraphs[0];
 
-    Parser parser(p.path().c_str());
-    auto qc = parser.parseQuantumCircuit();
-    CircuitGraph graph;
-    qc.toLegacyCircuitGraph(graph);
-    auto allBlocks = graph.getAllBlocks();
-    for (const auto& block : allBlocks) {
+    auto allGates = graph.getAllGatesShared();
+    for (const auto& gate : allGates) {
       kernelMgrBeforeFusion.genCPUGate(
-        kernelGenConfig, block->quantumGate,
-        "beforeFusion" + std::to_string(block->id));
+        kernelGenConfig, gate,
+        "beforeFusion" + std::to_string(graph.gateId(gate)));
     }
 
-    applyGateFusion(fusionConfig, &costModel, graph);
-    allBlocks = graph.getAllBlocks();
-    for (const auto& block : allBlocks) {
+    cast::applyGateFusion(fusionConfig, &costModel, graph);
+    allGates = graph.getAllGatesShared();
+    for (const auto& gate : allGates) {
       kernelMgrAfterFusion.genCPUGate(
-        kernelGenConfig, block->quantumGate,
-        "afterFusion" + std::to_string(block->id));
+        kernelGenConfig, gate,
+        "afterFusion" + std::to_string(graph.gateId(gate)));
     }
 
     kernelMgrBeforeFusion.initJIT();
     kernelMgrAfterFusion.initJIT();
 
-    utils::StatevectorCPU<double> sv0(graph.nQubits, simd_s);
-    utils::StatevectorCPU<double> sv1(graph.nQubits, simd_s);
+    utils::StatevectorCPU<double> sv0(graph.nQubits(), simd_s);
+    utils::StatevectorCPU<double> sv1(graph.nQubits(), simd_s);
     sv0.randomize();
     sv1 = sv0;
 
