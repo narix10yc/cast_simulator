@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <span>
+#include <functional>
 
 namespace utils {
 

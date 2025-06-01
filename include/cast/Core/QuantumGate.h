@@ -5,6 +5,7 @@
 #include "cast/ADT/NoiseChannel.h"
 #include <vector>
 #include <cassert>
+#include <algorithm>
 
 namespace cast {
 
