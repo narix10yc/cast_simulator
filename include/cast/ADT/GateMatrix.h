@@ -94,6 +94,10 @@ public:
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::I1());
   }
 
+  static ScalarGateMatrixPtr I2() {
+    return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::I2());
+  }
+
   static ScalarGateMatrixPtr X() {
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::X());
   }

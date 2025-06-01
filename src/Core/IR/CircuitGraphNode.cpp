@@ -219,7 +219,7 @@ CircuitGraphNode::fuseAndInsertDiffRow(row_iterator rowItL, int qubit) {
   auto* gateR = (*rowItR)[qubit];
   assert(gateR != nullptr);
 
-  auto gateFused = cast::matmul(gateL, gateR);
+  auto gateFused = cast::matmul(gateR, gateL);
   removeGate(rowItL, gateL->qubits()[0]);
   removeGate(rowItR, gateR->qubits()[0]);
 

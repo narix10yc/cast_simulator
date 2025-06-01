@@ -70,6 +70,7 @@ void test_complexSquareMatrix();
 
 void test_applyGate();
 void test_gateMatMul();
+void test_quantumGate();
 
 void test_cpuH();
 void test_cpuU();

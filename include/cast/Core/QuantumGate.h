@@ -55,6 +55,8 @@ public:
 
 }; // class QuantumGate
 
+// Return gateA @ gateB. In the context of quantum gates, gateB is applied
+// first.
 QuantumGatePtr matmul(const QuantumGate* gateA, const QuantumGate* gateB);
 
 SuperopQuantumGatePtr getSuperopGate(QuantumGatePtr gate);
@@ -107,6 +109,8 @@ public:
       qubitsCopy);
   }
 
+  // @brief RandomUnitary generates a random unitary gate on the specified 
+  // qubits. Only gate matrix is set, and no noise channel is applied.
   static StandardQuantumGatePtr RandomUnitary(const std::vector<int>& qubits) {
     auto qubitsCopy = qubits;
     std::ranges::sort(qubitsCopy);
