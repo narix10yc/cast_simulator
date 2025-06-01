@@ -2,7 +2,7 @@
 #define CAST_COSTMODEL_H
 
 #include "cast/Core/QuantumGate.h"
-#include "cast/CPU/KernelManagerCPU.h"
+#include "cast/CPU/CPUKernelManager.h"
 #include <cassert>
 #include <string>
 #include <vector>
@@ -68,15 +68,6 @@ public:
 
   double computeGiBTime(
       QuantumGatePtr gate, int precision, int nThreads) const override;
-};
-
-class AdaptiveCostModel : public CostModel {
-public:
-  double computeGiBTime(
-      QuantumGatePtr gate, int precision, int nThreads) const override {
-    assert(false && "Not Implemented");
-    return 0.0;
-  }
 };
 
 class PerformanceCache {

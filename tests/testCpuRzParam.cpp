@@ -1,5 +1,5 @@
-// #include "cast/CPU/KernelManagerCPU.h"
-// #include "cast/CPU/StatevectorCPU.h"
+// #include "cast/CPU/CPUKernelManager.h"
+// #include "cast/CPU/CPUStatevector.h"
 // #include "tests/TestKit.h"
 
 // #include <cmath>
@@ -81,7 +81,7 @@
 
 //     cpuKernelMgr.initJIT();
 
-//     utils::StatevectorCPU<double> sv(6, simd_s);
+//     cast::CPUStatevector<double> sv(6, simd_s);
 
 //     double theta = M_PI / 2.0;
 //     auto numericMat = buildRzNumericMatrix(theta);

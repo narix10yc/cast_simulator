@@ -1,4 +1,4 @@
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUStatevector.h"
 #include "timeit/timeit.h"
 
 #include "cast/Parser.h"
@@ -240,7 +240,7 @@ int main(int argc, const char** argv) {
   }
 
   // Run kernels
-  utils::StatevectorCPU<double> sv(graphNoFuse.nQubits, kernelGenConfig.simd_s);
+  cast::CPUStatevector<double> sv(graphNoFuse.nQubits, kernelGenConfig.simd_s);
   // sv.randomize();
   timeit::Timer timer(ArgReplication);
   timeit::TimingResult tr;

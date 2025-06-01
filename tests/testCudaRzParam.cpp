@@ -1,6 +1,6 @@
 #include "cast/Core/KernelManager.h"
 #include "tests/TestKit.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUStatevector.h"
 #include "cast/CUDA/StatevectorCUDA.h"
 #include <random>
 

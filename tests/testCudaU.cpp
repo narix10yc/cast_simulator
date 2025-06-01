@@ -1,6 +1,6 @@
 #include "cast/Core/KernelManager.h"
 #include "tests/TestKit.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUStatevector.h"
 #include "cast/CUDA/StatevectorCUDA.h"
 #include <random>
 
@@ -15,7 +15,7 @@ static void f() {
   // kernel manager must be declared before statevector due to the order they
   // are destructed.
   CUDAKernelManager kernelMgrCUDA;
-  utils::StatevectorCPU<double> svCPU(nQubits, /* simd_s */ 0);
+  cast::CPUStatevector<double> svCPU(nQubits, /* simd_s */ 0);
   utils::StatevectorCUDA<double> svCUDA0(nQubits), svCUDA1(nQubits);
 
   const auto randomizeSV = [&]() {
@@ -65,9 +65,9 @@ static void f() {
     suite.assertClose(svCUDA0.prob(qubit), svCPU.prob(qubit),
       ss.str() + "CUDA and CPU SV prob match", GET_INFO());
     // suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
-    // suite.assertClose(utils::fidelity(sv0, sv2), 1.0,
+    // suite.assertClose(cast::fidelity(sv0, sv2), 1.0,
     //   ss.str() + ": Imm Fidelity", GET_INFO());
-    // suite.assertClose(utils::fidelity(sv1, sv2), 1.0,
+    // suite.assertClose(cast::fidelity(sv1, sv2), 1.0,
     //   ss.str() + ": Load Fidelity", GET_INFO());
   }
   suite.displayResult();

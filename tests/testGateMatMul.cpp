@@ -1,6 +1,6 @@
 #include "cast/Legacy/QuantumGate.h"
 #include "tests/TestKit.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUStatevector.h"
 
 using namespace cast;
 using namespace cast::test;
@@ -49,7 +49,7 @@ static void internal() {
     auto gate1 = legacy::QuantumGate::RandomUnitary(b);
     auto gate = gate0.lmatmul(gate1);
 
-    utils::StatevectorCPU<double> sv0(nQubits, simd_s), sv1(nQubits, simd_s);
+    cast::CPUStatevector<double> sv0(nQubits, simd_s), sv1(nQubits, simd_s);
     sv0.randomize();
     sv1 = sv0;
 

@@ -3,7 +3,7 @@
 // #include "cast/Legacy/QuantumGate.h"
 // #include "cast/Legacy/CircuitGraph.h"
 // #include "cast/Core/KernelGenInternal.h"
-// #include "cast/CPU/KernelManagerCPU.h"
+// #include "cast/CPU/CPUKernelManager.h"
 
 // #include "utils/iocolor.h"
 // #include "utils/utils.h"

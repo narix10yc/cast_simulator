@@ -1,6 +1,6 @@
 #include "cast/Legacy/QuantumGate.h"
 #include "tests/TestKit.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUStatevector.h"
 
 using namespace cast;
 using namespace utils;
@@ -11,7 +11,7 @@ static void internal_U1q() {
   ss << "applyGate U1q (s=" << simd_s << ", nQubits=" << nQubits << ")";
   test::TestSuite suite(ss.str());
 
-  StatevectorCPU<double> sv(nQubits, simd_s);
+  CPUStatevector<double> sv(nQubits, simd_s);
   sv.initialize();
   for (int q = 0; q < nQubits; q++)
     sv.applyGate(legacy::QuantumGate::H(q));

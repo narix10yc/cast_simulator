@@ -1,5 +1,5 @@
 #include "cast/CostModel.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUStatevector.h"
 #include "utils/Formats.h"
 #include "utils/PrintSpan.h"
 #include "timeit/timeit.h"
@@ -434,7 +434,7 @@ void PerformanceCache::runExperiments(
   timeit::Timer timer(3, /* verbose */ 0);
   timeit::TimingResult tr;
 
-  utils::StatevectorCPU<double> sv(nQubits, cpuConfig.simd_s);
+  cast::CPUStatevector<double> sv(nQubits, cpuConfig.simd_s);
   utils::timedExecute([&]() {
     sv.randomize(nThreads);
   }, "Initialize statevector");

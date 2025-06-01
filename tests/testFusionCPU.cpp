@@ -1,8 +1,8 @@
 #include "cast/Core/AST/Parser.h"
 #include "cast/Transform/Transform.h"
 #include "cast/Fusion.h"
-#include "cast/CPU/KernelManagerCPU.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUKernelManager.h"
+#include "cast/CPU/CPUStatevector.h"
 #include "tests/TestKit.h"
 
 #include <filesystem>
@@ -67,8 +67,8 @@ static void f() {
     kernelMgrBeforeFusion.initJIT();
     kernelMgrAfterFusion.initJIT();
 
-    utils::StatevectorCPU<double> sv0(graph.nQubits(), simd_s);
-    utils::StatevectorCPU<double> sv1(graph.nQubits(), simd_s);
+    cast::CPUStatevector<double> sv0(graph.nQubits(), simd_s);
+    cast::CPUStatevector<double> sv1(graph.nQubits(), simd_s);
     sv0.randomize();
     sv1 = sv0;
     
@@ -87,7 +87,7 @@ static void f() {
     suite.assertClose(sv1.norm(), 1.0,
       p.path().filename().string() + " fuse norm", GET_INFO());
 
-    suite.assertClose(utils::fidelity(sv0, sv1), 1.0,
+    suite.assertClose(cast::fidelity(sv0, sv1), 1.0,
       p.path().filename().string() + " fidelity", GET_INFO());
   }
 

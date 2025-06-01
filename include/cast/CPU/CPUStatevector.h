@@ -1,6 +1,5 @@
-#ifndef UTILS_STATEVECTOR_CPU_H
-#define UTILS_STATEVECTOR_CPU_H
-
+#ifndef CAST_CPU_CPU_STATEVECTOR_H
+#define CAST_CPU_CPU_STATEVECTOR_H
 
 #include "cast/Legacy/QuantumGate.h"
 #include "cast/Core/QuantumGate.h"
@@ -15,13 +14,13 @@
 #include <algorithm>
 #include <cstdlib>
 
-namespace utils {
+namespace cast {
 
 template<typename ScalarType>
 class StatevectorSep;
 
 template<typename ScalarType>
-class StatevectorCPU;
+class CPUStatevector;
 
 template<typename ScalarType>
 class StatevectorSep {
@@ -205,7 +204,7 @@ public:
 };
 
 
-/// @brief StatevectorCPU stores statevector in a single array with alternating
+/// @brief CPUStatevector stores statevector in a single array with alternating
 /// real and imaginary parts. The alternating pattern is controlled by
 /// \p simd_s. More precisely, the memory is stored as an iteration of $2^s$
 /// real parts followed by $2^s$ imaginary parts.
@@ -213,37 +212,37 @@ public:
 /// memory index: 000 001 010 011 100 101 110 111
 /// amplitudes:   r00 r01 i00 i01 r10 r11 i10 i11
 template<typename ScalarType>
-class StatevectorCPU {
+class CPUStatevector {
 private:
   int simd_s;
   int _nQubits;
   ScalarType* _data;
 public:
 
-  StatevectorCPU(int nQubits, int simd_s, bool init = false)
+  CPUStatevector(int nQubits, int simd_s, bool init = false)
     : simd_s(simd_s)
     , _nQubits(nQubits)
-    , _data(static_cast<ScalarType*>(::operator new(
-        (2ULL << nQubits) * sizeof(ScalarType),
-        static_cast<std::align_val_t>(64)))) {
+    , _data(static_cast<ScalarType*>(
+      ::operator new((2ULL << nQubits) * sizeof(ScalarType),
+      static_cast<std::align_val_t>(64)))) {
     if (init)
       initialize();
   }
 
-  StatevectorCPU(const StatevectorCPU&) = delete;
+  CPUStatevector(const CPUStatevector&) = delete;
 
-  StatevectorCPU(StatevectorCPU&&) = delete;
+  CPUStatevector(CPUStatevector&&) = delete;
 
-  ~StatevectorCPU() { ::operator delete(_data); }
+  ~CPUStatevector() { ::operator delete(_data); }
 
-  StatevectorCPU& operator=(const StatevectorCPU& that) {
+  CPUStatevector& operator=(const CPUStatevector& that) {
     if (this == &that)
       return *this;
     std::memcpy(_data, that._data, sizeInBytes());
     return *this;
   }
 
-  StatevectorCPU& operator=(StatevectorCPU&&) = delete;
+  CPUStatevector& operator=(CPUStatevector&&) = delete;
 
   ScalarType* data() { return _data; }
   const ScalarType* data() const { return _data; }
@@ -360,7 +359,7 @@ public:
     return os;
   }
 
-  StatevectorCPU& applyGate(const cast::legacy::QuantumGate& gate) {
+  CPUStatevector& applyGate(const cast::legacy::QuantumGate& gate) {
     const auto* cMat = gate.gateMatrix.getConstantMatrix();
     assert(cMat && "Can only apply constant gateMatrix");
 
@@ -404,7 +403,7 @@ public:
     return *this;
   }
 
-  StatevectorCPU& applyGate(const cast::StandardQuantumGate& stdQuGate) {
+  CPUStatevector& applyGate(const cast::StandardQuantumGate& stdQuGate) {
     const auto scalarGM = stdQuGate.getScalarGM();
     assert(scalarGM && "Can only apply constant gateMatrix");
     const auto& mat = scalarGM->matrix();
@@ -451,22 +450,22 @@ public:
 
 }; // class StatevectorAlt
 
+// template<typename ScalarType>
+// ScalarType fidelity(
+//     const StatevectorSep<ScalarType>& sv1, const StatevectorSep<ScalarType>& sv2) {
+//   assert(sv1.nQubits == sv2.nQubits);
+
+//   ScalarType re = 0.0, im = 0.0;
+//   for (size_t i = 0; i < sv1.N; i++) {
+//     re += (sv1.real[i] * sv2.real[i] + sv1.imag[i] * sv2.imag[i]);
+//     im += (-sv1.real[i] * sv2.imag[i] + sv1.imag[i] * sv2.real[i]);
+//   }
+//   return re * re + im * im;
+// }
+
 template<typename ScalarType>
 ScalarType fidelity(
-    const StatevectorSep<ScalarType>& sv1, const StatevectorSep<ScalarType>& sv2) {
-  assert(sv1.nQubits == sv2.nQubits);
-
-  ScalarType re = 0.0, im = 0.0;
-  for (size_t i = 0; i < sv1.N; i++) {
-    re += (sv1.real[i] * sv2.real[i] + sv1.imag[i] * sv2.imag[i]);
-    im += (-sv1.real[i] * sv2.imag[i] + sv1.imag[i] * sv2.real[i]);
-  }
-  return re * re + im * im;
-}
-
-template<typename ScalarType>
-ScalarType fidelity(
-    const StatevectorCPU<ScalarType>& sv0, const StatevectorCPU<ScalarType>& sv1) {
+    const CPUStatevector<ScalarType>& sv0, const CPUStatevector<ScalarType>& sv1) {
   assert(sv0.nQubits() == sv1.nQubits());
   ScalarType re = 0.0, im = 0.0;
   for (size_t i = 0; i < sv0.getN(); i++) {
@@ -521,4 +520,4 @@ ScalarType fidelity(
 
 } // namespace utils
 
-#endif // UTILS_STATEVECTOR_CPU_H
+#endif // CAST_CPU_CPU_STATEVECTOR_H

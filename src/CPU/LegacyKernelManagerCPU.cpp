@@ -1,6 +1,6 @@
 #include "llvm/Support/TargetSelect.h"
 
-#include "cast/CPU/KernelManagerCPU.h"
+#include "cast/CPU/CPUKernelManager.h"
 #include "utils/iocolor.h"
 #include "utils/TaskDispatcher.h"
 

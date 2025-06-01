@@ -1,5 +1,5 @@
 #include "tests/TestKit.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUStatevector.h"
 #include "cast/CUDA/StatevectorCUDA.h"
 
 using namespace cast::test;
@@ -10,8 +10,8 @@ static void f() {
     "StatevectorCUDA with " + std::to_string(nQubits) + " qubits");
   utils::StatevectorCUDA<float> svCudaF32(nQubits);
   utils::StatevectorCUDA<double> svCudaF64(nQubits);
-  utils::StatevectorCPU<float> svCpuF32(nQubits, /* simd_s */ 0);
-  utils::StatevectorCPU<double> svCpuF64(nQubits, /* simd_s */ 0);
+  cast::CPUStatevector<float> svCpuF32(nQubits, /* simd_s */ 0);
+  cast::CPUStatevector<double> svCpuF64(nQubits, /* simd_s */ 0);
 
   svCudaF32.initialize();
   svCudaF64.initialize();

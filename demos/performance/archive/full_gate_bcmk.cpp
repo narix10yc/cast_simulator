@@ -1,6 +1,6 @@
 #include "gen_file.h"
 #include "timeit/timeit.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUStatevector.h"
 #include <iomanip>
 #include <iostream>
 #include <string>

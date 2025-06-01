@@ -1,5 +1,5 @@
-#include "cast/CPU/KernelManagerCPU.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUKernelManager.h"
+#include "cast/CPU/CPUStatevector.h"
 #include "tests/TestKit.h"
 #include <random>
 
@@ -10,7 +10,7 @@ static void internal_U1q() {
   test::TestSuite suite(
     "Gate U1q (s=" + std::to_string(simd_s) +
     ", n=" + std::to_string(nQubits) + ")");
-  utils::StatevectorCPU<double>
+  cast::CPUStatevector<double>
     sv0(nQubits, simd_s), sv1(nQubits, simd_s), sv2(nQubits, simd_s);
 
   const auto randomizeSV = [&sv0, &sv1, &sv2]() {
@@ -51,9 +51,9 @@ static void internal_U1q() {
     sv2.applyGate(*gates[i]);
     suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
     suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
-    suite.assertClose(utils::fidelity(sv0, sv2), 1.0,
+    suite.assertClose(cast::fidelity(sv0, sv2), 1.0,
       ss.str() + ": Imm Fidelity", GET_INFO());
-    suite.assertClose(utils::fidelity(sv1, sv2), 1.0,
+    suite.assertClose(cast::fidelity(sv1, sv2), 1.0,
       ss.str() + ": Load Fidelity", GET_INFO());
   }
   suite.displayResult();
@@ -64,7 +64,7 @@ static void internal_U2q() {
   test::TestSuite suite(
     "Gate U2q (s=" + std::to_string(simd_s) +
     ", n=" + std::to_string(nQubits) + ")");
-  utils::StatevectorCPU<double>
+  cast::CPUStatevector<double>
     sv0(nQubits, simd_s), sv1(nQubits, simd_s), sv2(nQubits, simd_s);
 
   const auto randomizeSV = [&sv0, &sv1, &sv2]() {
@@ -110,9 +110,9 @@ static void internal_U2q() {
     sv2.applyGate(*gates[i]);
     suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
     suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
-    suite.assertClose(utils::fidelity(sv0, sv2), 1.0,
+    suite.assertClose(cast::fidelity(sv0, sv2), 1.0,
       ss.str() + ": Imm Fidelity", GET_INFO());
-    suite.assertClose(utils::fidelity(sv1, sv2), 1.0,
+    suite.assertClose(cast::fidelity(sv1, sv2), 1.0,
       ss.str() + ": Load Fidelity", GET_INFO());
   }
 

@@ -1,6 +1,6 @@
 #include "cast/Core/QuantumGate.h"
-#include "cast/CPU/StatevectorCPU.h"
-#include "cast/CPU/KernelManagerCPU.h"
+#include "cast/CPU/CPUStatevector.h"
+#include "cast/CPU/CPUKernelManager.h"
 #include "cast/IR/IRNode.h"
 #include "cast/CostModel.h"
 #include "cast/Fusion.h"
@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
   // auto quantumGate = StandardQuantumGate::Create(
   //   ScalarGateMatrix::H(), nullptr, {1});
 
-  // utils::StatevectorCPU<double> sv(3, simd_s);
+  // cast::CPUStatevector<double> sv(3, simd_s);
   // sv.randomize();
   // sv.print();
   // CPUKernelManager kernelMgr;
@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
   
   kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false, 0);
   
-  utils::StatevectorCPU<double> sv0(4, 1), sv1(4, 1);
+  cast::CPUStatevector<double> sv0(4, 1), sv1(4, 1);
   sv0.randomize();
   sv1 = sv0;
   sv0.print(std::cerr) << "\n";
@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
   sv1.print(std::cerr) << "\n";
 
   std::cerr << "Fidelity = "
-            << utils::fidelity(sv0, sv1) << "\n";
+            << cast::fidelity(sv0, sv1) << "\n";
 
   // ComplexSquareMatrix mat0 {
   // // real

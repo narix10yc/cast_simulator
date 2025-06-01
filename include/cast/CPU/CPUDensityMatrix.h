@@ -1,18 +1,18 @@
-#ifndef SIMULATION_DENSITYMATRIXCPU_H
-#define SIMULATION_DENSITYMATRIXCPU_H
+#ifndef CAST_CPU_CPU_DENSITY_MATRIX_H
+#define CAST_CPU_CPU_DENSITY_MATRIX_H
 
 #include <cstring>
 
 namespace utils {
 
 template<typename ScalarType>
-class DensityMatrixCPU {
+class CPUDensityMatrix {
   int _nQubits;
   int _nActiveBranches;
   double* _weights;
   ScalarType* _data;
 public:
-  DensityMatrixCPU(int nQubits) : _nQubits(nQubits) , _nActiveBranches(0) {
+  CPUDensityMatrix(int nQubits) : _nQubits(nQubits) , _nActiveBranches(0) {
     _weights = static_cast<double*>(
       std::aligned_alloc(64, sizeof(double) * (1ULL << nQubits)));
     _data = static_cast<ScalarType*>(
@@ -21,15 +21,15 @@ public:
     assert(_data != nullptr);
   }
 
-  ~DensityMatrixCPU() {
+  ~CPUDensityMatrix() {
     std::free(_weights);
     std::free(_data);
   }
 
-  DensityMatrixCPU(const DensityMatrixCPU&) = delete;
-  DensityMatrixCPU(DensityMatrixCPU&&) = delete;
-  DensityMatrixCPU& operator=(const DensityMatrixCPU&) = delete;
-  DensityMatrixCPU& operator=(DensityMatrixCPU&&) = delete;
+  CPUDensityMatrix(const CPUDensityMatrix&) = delete;
+  CPUDensityMatrix(CPUDensityMatrix&&) = delete;
+  CPUDensityMatrix& operator=(const CPUDensityMatrix&) = delete;
+  CPUDensityMatrix& operator=(CPUDensityMatrix&&) = delete;
 
   int nQubits() const { return _nQubits; }
   int nActiveBranches() const { return _nActiveBranches; }
@@ -60,11 +60,11 @@ public:
   }
 
 
-}; // class DensityMatrixCPU
+}; // class CPUDensityMatrix
 
-extern template class DensityMatrixCPU<float>;
-extern template class DensityMatrixCPU<double>;
+extern template class CPUDensityMatrix<float>;
+extern template class CPUDensityMatrix<double>;
 
 } // namespace utils
 
-#endif // SIMULATION_DENSITYMATRIXCPU_H
+#endif // CAST_CPU_CPU_DENSITY_MATRIX_H

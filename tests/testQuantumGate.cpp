@@ -9,7 +9,7 @@ void cast::test::test_quantumGate() {
   TestSuite suite("QuantumGate Test Suite");
 
   StandardQuantumGatePtr gate0, gate1, gate;
-  const auto check = [&](const std::string& title) {
+  const auto check = [&](const std::string& title, const std::string& info) {
     auto prod = cast::matmul(gate0.get(), gate1.get());
     auto* stdQuGate = llvm::dyn_cast<StandardQuantumGate>(prod.get());
     assert(stdQuGate != nullptr);
@@ -24,14 +24,14 @@ void cast::test::test_quantumGate() {
       ),
       0.0,
       title,
-      GET_INFO()
+      info
     );
   };
 
   gate0 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {0});
   gate1 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {1});
   gate = StandardQuantumGate::Create(ScalarGateMatrix::I2(), nullptr, {0, 1});
-  check("I1 * I1 = I2");
+  check("I1 * I1 = I2", GET_INFO());
 
   gate0 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {0});
   gate1 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {1});
@@ -47,18 +47,7 @@ void cast::test::test_quantumGate() {
      0.0, 0.0, 0.0, 0.0,
      0.0, 0.0, 0.0, 0.0}
   };
-  gate = StandardQuantumGate::Create(
-    std::make_shared<ScalarGateMatrix>(matHI),
-    nullptr,
-    {0, 1});
-  check("H(1) otimes I1(1) = H(1)I1(0)");
-
-  gate0 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {2});
-  gate1 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {3});
-  check("H(3) otimes I1(2) = H(3)I1(2)");
-
-  gate0 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {0});
-  gate1 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {1});
+  
   ComplexSquareMatrix matIH{
     // real
     {M_SQRT1_2,  M_SQRT1_2, 0.0, 0.0,
@@ -72,11 +61,24 @@ void cast::test::test_quantumGate() {
      0.0, 0.0, 0.0, 0.0}
   };
   gate = StandardQuantumGate::Create(
+    std::make_shared<ScalarGateMatrix>(matHI),
+    nullptr,
+    {0, 1});
+  check("H(1) otimes I1(1) = H(1)I1(0)", GET_INFO());
+
+  gate0 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {2});
+  gate1 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {3});
+  check("H(3) otimes I1(2) = H(3)I1(2)", GET_INFO());
+
+  gate0 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {0});
+  gate1 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {1});
+
+  gate = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(matIH),
     nullptr,
     {0, 1});
 
-  check("I1 otimes H = IH");
+  check("I1 otimes H = IH", GET_INFO());
 
   ComplexSquareMatrix mat0 {
     // real
@@ -96,7 +98,7 @@ void cast::test::test_quantumGate() {
   };
   gate = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(mat00), nullptr, {0});
-  check("Arbitrary matrix example");
+  check("Arbitrary matrix example", GET_INFO());
 
   ComplexSquareMatrix mat0_otimes_0 {
     // real
@@ -114,7 +116,7 @@ void cast::test::test_quantumGate() {
     std::make_shared<ScalarGateMatrix>(mat0), nullptr, {1});
   gate = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(mat0_otimes_0), nullptr, {0, 1});
-  check("Arbitrary matrix example with 2 qubits");
+  check("Arbitrary matrix example with 2 qubits", GET_INFO());
 
   ComplexSquareMatrix mat1 {
     // real
@@ -134,13 +136,13 @@ void cast::test::test_quantumGate() {
   gate1 = gate0;
   gate = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(mat11), nullptr, {0});
-  check("Arbitrary matrix example 2");
+  check("Arbitrary matrix example 2", GET_INFO());
 
   gate1 = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(mat1), nullptr, {1});
   gate = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(mat1_otimes_1), nullptr, {0, 1});
-  check("Arbitrary matrix example 2 with 2 qubits");
+  check("Arbitrary matrix example 2 with 2 qubits", GET_INFO());
 
   ComplexSquareMatrix mat2 {
     // real
@@ -174,12 +176,12 @@ void cast::test::test_quantumGate() {
   gate1 = gate0;
   gate = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(mat22), nullptr, {0});
-  check("Arbitrary matrix example 3");
+  check("Arbitrary matrix example 3", GET_INFO());
   gate1 = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(mat2), nullptr, {1});
   gate = StandardQuantumGate::Create(
     std::make_shared<ScalarGateMatrix>(mat2_otimes_2), nullptr, {0, 1});
-  check("Arbitrary matrix example 3 with 2 qubits");
+  check("Arbitrary matrix example 3 with 2 qubits", GET_INFO());
 
   suite.displayResult();
 }

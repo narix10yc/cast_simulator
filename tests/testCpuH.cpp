@@ -1,5 +1,5 @@
-#include "cast/CPU/KernelManagerCPU.h"
-#include "cast/CPU/StatevectorCPU.h"
+#include "cast/CPU/CPUKernelManager.h"
+#include "cast/CPU/CPUStatevector.h"
 #include "tests/TestKit.h"
 
 using namespace cast;
@@ -25,7 +25,7 @@ static void f() {
 
   cpuKernelMgr.initJIT();
 
-  StatevectorCPU<double> sv(6, simd_s);
+  CPUStatevector<double> sv(6, simd_s);
   sv.initialize();
   suite.assertClose(sv.norm(), 1.0, "SV Initialization: Norm", GET_INFO());
   suite.assertClose(sv.prob(0), 0.0, "SV Initialization: Prob", GET_INFO());
