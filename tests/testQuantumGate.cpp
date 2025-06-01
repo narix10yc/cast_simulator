@@ -9,7 +9,8 @@ void cast::test::test_quantumGate() {
   TestSuite suite("QuantumGate Test Suite");
 
   StandardQuantumGatePtr gate0, gate1, gate;
-  const auto check = [&](const std::string& title, const std::string& info) {
+  const auto check = [&gate0, &gate1, &gate, &suite](
+      const std::string& title, const std::string& info) {
     auto prod = cast::matmul(gate0.get(), gate1.get());
     auto* stdQuGate = llvm::dyn_cast<StandardQuantumGate>(prod.get());
     assert(stdQuGate != nullptr);
@@ -47,7 +48,7 @@ void cast::test::test_quantumGate() {
      0.0, 0.0, 0.0, 0.0,
      0.0, 0.0, 0.0, 0.0}
   };
-  
+
   ComplexSquareMatrix matIH{
     // real
     {M_SQRT1_2,  M_SQRT1_2, 0.0, 0.0,

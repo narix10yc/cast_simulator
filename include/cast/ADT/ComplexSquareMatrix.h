@@ -21,10 +21,10 @@ public:
     assert(_data != nullptr && "Memory allocation failed");
   }
 
-  ComplexSquareMatrix(std::initializer_list<double> re,
-                      std::initializer_list<double> im) {
+  explicit ComplexSquareMatrix(
+      std::initializer_list<double> re, std::initializer_list<double> im) {
     assert(re.size() == im.size());
-    size_t s = std::sqrt<size_t>(re.size());
+    size_t s = static_cast<size_t>(std::sqrt(re.size()));
     assert(s * s == re.size() && "Size is not a perfect square");
     this->_edgeSize = s;
     _data = static_cast<double*>(std::malloc(sizeInBytes()));
@@ -62,6 +62,10 @@ public:
     _data = other._data;
     other._data = nullptr;
     return *this;
+  }
+
+  ~ComplexSquareMatrix() {
+    std::free(_data);
   }
 
   size_t edgeSize() const { return _edgeSize; }

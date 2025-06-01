@@ -54,6 +54,10 @@ public:
     return os << "QuantumGate::displayInfo() not implemented";
   }
 
+  virtual void dumpInfo() const {
+    displayInfo(std::cerr, 3);
+  }
+
 }; // class QuantumGate
 
 // Return gateA @ gateB. In the context of quantum gates, gateB is applied

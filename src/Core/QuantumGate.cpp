@@ -103,7 +103,7 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
       const ComplexSquareMatrix& matA,
       const ComplexSquareMatrix& matB,
       ComplexSquareMatrix& matC) -> void {
-    for (uint64_t cIdx = 0ULL; cIdx < (1ULL << (2 * cnQubits)); ++cIdx) {
+    for (uint64_t cIdx = 0ULL; cIdx < matC.halfSize(); ++cIdx) {
       uint64_t aIdxBegin = utils::pext64(cIdx, aPextMask) & aZeroingMask;
       uint64_t bIdxBegin = utils::pext64(cIdx, bPextMask) & bZeroingMask;
 
@@ -119,7 +119,8 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
       //           << utils::as0b(utils::pext64(i, bPextMask), 2 * bnQubits)
       //           << " -> " << utils::as0b(bIdxBegin, 2 * bnQubits)
       //           << " = " << bIdxBegin << "\n";
-
+      matC.reData()[cIdx] = 0.0;
+      matC.imData()[cIdx] = 0.0;
       for (uint64_t s = 0; s < (1ULL << contractionWidth); ++s) {
         uint64_t aIdx = aIdxBegin;
         uint64_t bIdx = bIdxBegin;
@@ -139,17 +140,15 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
     }
   };
 
-  const auto* standardGateA = llvm::dyn_cast<StandardQuantumGate>(gateA);
-  const auto* standardGateB = llvm::dyn_cast<StandardQuantumGate>(gateB);
-  if (standardGateA && standardGateB) {
-    const auto* aScalarMatPtr =
-      llvm::dyn_cast<ScalarGateMatrix>(standardGateA->gateMatrix().get());
-    const auto* bScalarMatPtr =
-      llvm::dyn_cast<ScalarGateMatrix>(standardGateB->gateMatrix().get());
-    assert(aScalarMatPtr != nullptr && bScalarMatPtr != nullptr &&
-          "Both gate matrices must be ScalarGateMatrix for now");
-    const ComplexSquareMatrix& aCMat = aScalarMatPtr->matrix();
-    const ComplexSquareMatrix& bCMat = bScalarMatPtr->matrix();
+  const auto* aStdQuGate = llvm::dyn_cast<StandardQuantumGate>(gateA);
+  const auto* bStdQuGate = llvm::dyn_cast<StandardQuantumGate>(gateB);
+  if (aStdQuGate && bStdQuGate) {
+    const auto aScalarGM = aStdQuGate->getScalarGM();
+    const auto bScalarGM = bStdQuGate->getScalarGM();
+    assert(aScalarGM != nullptr && bScalarGM != nullptr &&
+           "Both gate matrices must be ScalarGateMatrix for now");
+    const ComplexSquareMatrix& aCMat = aScalarGM->matrix();
+    const ComplexSquareMatrix& bCMat = bScalarGM->matrix();
     ComplexSquareMatrix cCMat(1ULL << cnQubits);
     matmulComplexSquareMatrix(aCMat, bCMat, cCMat);
     

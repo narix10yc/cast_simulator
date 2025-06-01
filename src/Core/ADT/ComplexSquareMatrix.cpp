@@ -107,7 +107,7 @@ ComplexSquareMatrix ComplexSquareMatrix::SWAP() {
 
 ComplexSquareMatrix ComplexSquareMatrix::eye(size_t edgeSize) {
   ComplexSquareMatrix m(edgeSize);
-  std::memset(m.imData(), 0, m.halfSize() * sizeof(double));
+  std::memset(m.data(), 0, m.sizeInBytes());
   for (size_t i = 0; i < edgeSize; ++i)
     m.reBegin()[i * edgeSize + i] = 1.0;
   return m;
@@ -126,7 +126,7 @@ ComplexSquareMatrix::operator+(const ComplexSquareMatrix& other) const {
 
 ComplexSquareMatrix ComplexSquareMatrix::operator+(double c) const {
   ComplexSquareMatrix result(_edgeSize);
-  std::memset(result.imData(), 0, halfSize() * sizeof(double));
+  std::memcpy(result.imData(), imData(), halfSize() * sizeof(double));
   for (size_t i = 0; i < halfSize(); ++i)
     result.reBegin()[i] = reBegin()[i] + c;
   return result;
