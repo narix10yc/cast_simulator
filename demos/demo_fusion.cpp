@@ -86,6 +86,7 @@ int main(int argc, const char** argv) {
     return 1;
   }
 
+  // parse source QASM file
   openqasm::Parser qasmParser(ArgInputFilename, 0);
   auto qasmRoot = qasmParser.parse();
   ast::ASTContext astCtx;
@@ -93,6 +94,9 @@ int main(int argc, const char** argv) {
   assert(circuitStmt != nullptr);
   auto irCircuit = transform::cvtAstCircuitToIrCircuit(*circuitStmt, astCtx);
   assert(irCircuit != nullptr);
+
+  std::cerr << "AST Context: Allocated "
+            << astCtx.bytesAllocated() << " bytes.\n";
 
   auto allGraphs = irCircuit->getAllCircuitGraphs();
   assert(allGraphs.size() == 1 && "There should be exactly one circuit graph.");
