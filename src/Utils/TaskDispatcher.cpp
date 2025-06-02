@@ -4,6 +4,7 @@
 #include <mutex>
 #include <condition_variable>
 #include "utils/utils.h"
+#include "utils/iocolor.h"
 
 using namespace utils;
 
@@ -11,6 +12,11 @@ void TaskDispatcher::enqueue(const std::function<void()>& task) {
   ++nTotalTasks;
   {
     std::lock_guard lock(mtx);
+    if (stopFlag) {
+      std::cerr << BOLDRED("[Err: ]")
+                << "TaskDispatcher is stopped, cannot enqueue new tasks.\n";
+      return;
+    }
     tasks.push(std::move(task));
   }
   cv.notify_one();
@@ -25,13 +31,16 @@ void TaskDispatcher::workerThread() {
         return stopFlag || !tasks.empty();
       });
 
-      if (stopFlag) {
-        assert(tasks.empty() && "Must call sync() before join()");
+      if (stopFlag && tasks.empty()) {
         return;
       }
 
-      task = std::move(tasks.front());
-      tasks.pop();
+      if (!tasks.empty()) {
+        task = std::move(tasks.front());
+        tasks.pop();
+      } else {
+        continue;
+      }
     }
     ++nActiveWorkers;
     task();
@@ -82,4 +91,8 @@ void TaskDispatcher::join() {
     if (thread.joinable())
       thread.join();
   }
+  // reset for reuse
+  stopFlag = false;
+  nTotalTasks = 0;
+  nActiveWorkers = 0;
 }
