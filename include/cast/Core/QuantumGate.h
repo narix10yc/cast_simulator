@@ -125,6 +125,11 @@ public:
       qubitsCopy);
   }
 
+  // Get a single-qubit Hadamard gate on qubit q.
+  static StandardQuantumGatePtr H(int q) {
+    return StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {q});
+  }
+
   static bool classof(const QuantumGate* qg) {
     return qg->kind() == QG_Standard;
   }

@@ -241,30 +241,6 @@ namespace {
     }
   }
 
-  /// @brief Sample K unique integers from [0, N-1] without replacement.
-  /// @param holder: will be cleared and filled with K unique integers.
-  void sampleNoReplacement(unsigned N, unsigned K, std::vector<int>& holder) {
-    assert(K <= N);
-    holder.clear();
-    holder.reserve(K);
-
-    // Create a pool of elements [0, 1, ..., N-1]
-    std::vector<int> pool(N);
-    for (unsigned i = 0; i < N; ++i)
-      pool[i] = i;
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
-    // Perform a partial shuffle (Fisher-Yates)
-    for (unsigned i = 0; i < K; ++i) {
-      std::uniform_int_distribution<unsigned> dist(i, N - 1);
-      unsigned j = dist(gen);
-      std::swap(pool[i], pool[j]);
-      holder.push_back(pool[i]);
-    }
-  }
-
 } // anonymous namespace
 
 
@@ -390,7 +366,7 @@ void PerformanceCache::runExperiments(
       acc += nQubitsWeights[i];
       if (r <= acc) {
         std::vector<int> targetQubits;
-        sampleNoReplacement(nQubits, i + 1, targetQubits);
+        utils::sampleNoReplacement(nQubits, i + 1, targetQubits);
         gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
         randRemoveQuantumGate(gates.back(), erasureProb);
         return;
@@ -402,11 +378,11 @@ void PerformanceCache::runExperiments(
   // For the initial run, we add some random 1 to 4-qubit gates
   for (int q = 1; q <= 4; ++q) {
     std::vector<int> targetQubits;
-    sampleNoReplacement(nQubits, q, targetQubits);
+    utils::sampleNoReplacement(nQubits, q, targetQubits);
     gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
     randRemoveQuantumGate(gates.back(), 0.0f);
 
-    sampleNoReplacement(nQubits, q, targetQubits);
+    utils::sampleNoReplacement(nQubits, q, targetQubits);
     gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
     randRemoveQuantumGate(gates.back(), 0.0f);
   }

@@ -16,6 +16,10 @@
 
 namespace utils {
 
+/// @brief Sample K unique integers from [0, N-1] without replacement.
+/// @param holder: will be cleared and filled with K unique integers.
+void sampleNoReplacement(unsigned N, unsigned K, std::vector<int>& holder);
+
 bool isPermutation(llvm::ArrayRef<int> arr);
 
 template<typename T>

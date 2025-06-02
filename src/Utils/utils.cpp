@@ -1,6 +1,30 @@
 #include "utils/utils.h"
 #include "utils/Formats.h"
 
+#include <random>
+
+void utils::sampleNoReplacement(unsigned N, unsigned K, std::vector<int>& holder) {
+  assert(K <= N);
+  holder.clear();
+  holder.reserve(K);
+
+  // Pool of elements [0, 1, ..., N-1]
+  std::vector<int> pool(N);
+  for (unsigned i = 0; i < N; ++i)
+    pool[i] = i;
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+
+  // Fisher-Yates
+  for (unsigned i = 0; i < K; ++i) {
+    std::uniform_int_distribution<unsigned> dist(i, N - 1);
+    unsigned j = dist(gen);
+    std::swap(pool[i], pool[j]);
+    holder.push_back(pool[i]);
+  }
+}
+
 bool utils::isPermutation(llvm::ArrayRef<int> arr) {
   std::vector<int> copy(arr.begin(), arr.end());
   std::ranges::sort(copy);
