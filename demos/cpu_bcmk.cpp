@@ -57,6 +57,12 @@ constexpr int GetSimdS_F64() {
 constexpr int SIMD_S_F32 = GetSimdS_F32();
 constexpr int SIMD_S_F64 = GetSimdS_F64();
 
+static double calculateGiBPerSecond(
+    std::size_t memoryInBytes, double timeInSeconds) {
+  return static_cast<double>(memoryInBytes) /
+         (timeInSeconds * 1024 * 1024 * 1024);
+}
+
 template<typename ScalarType>
 static void benchmark() {
   static_assert(std::is_same_v<ScalarType, float> ||
@@ -85,6 +91,7 @@ static void benchmark() {
       hadamardGate = cast::matmul(
         hadamardGate.get(), StandardQuantumGate::H(qubits[q]).get());
     }
+    assert(hadamardGate->nQubits() == k);
 
     // While extremely unlikely, a randomly generated unitary gate could have 
     // some entries whose absolute value is less than our zero-tolerance (which
@@ -112,14 +119,14 @@ static void benchmark() {
   // Create a statevector with NUM_QUBITS qubits
   cast::CPUStatevector<ScalarType> statevector(NUM_QUBITS, SIMD_S);
   utils::timedExecute([&]() {
-    statevector.randomize(1); // Randomize the statevector with 1 thread
+    statevector.randomize(NUM_THREADS); 
   }, "Initialize statevector");
 
   // Benchmark the kernels
-  timeit::Timer timer(/* replication */ 3, /* verbose */ 0);
+  timeit::Timer timer(/* replication */ 7, /* verbose */ 0);
   timeit::TimingResult timingResult;
   for (int k = 1; k < 5; ++k) {
-    std::cerr << "Benchmarking " << k << "-qubit unitary gate:\n";
+    std::cerr << "Benchmarking " << k << "-qubit unitary gate:  ";
     timingResult = timer.timeit([&]() {
       kernelMgr.applyCPUKernelMultithread(
         statevector.data(),
@@ -128,18 +135,22 @@ static void benchmark() {
         NUM_THREADS
       );
     });
-    timingResult.display(/* num significant digits */ 4, std::cerr) << "\n";
+    std::cerr << timingResult.med * 1000 << " ms @ " << 
+      calculateGiBPerSecond(statevector.sizeInBytes(), timingResult.med)
+      << " GiB/s\n";
 
-    std::cerr << "Benchmarking " << k << "-qubit Hadamard gate:\n";
+    std::cerr << "Benchmarking " << k << "-qubit Hadamard gate: ";
     timingResult = timer.timeit([&]() {
       kernelMgr.applyCPUKernelMultithread(
         statevector.data(),
         statevector.nQubits(), 
-        "hadamard_gate" + std::to_string(k),
+        "hadamard_gate_" + std::to_string(k),
         NUM_THREADS
       );
     });
-    timingResult.display(/* num significant digits */ 4, std::cerr) << "\n";
+    std::cerr << timingResult.med * 1000 << " ms @ " << 
+      calculateGiBPerSecond(statevector.sizeInBytes(), timingResult.med)
+      << " GiB/s\n";
   }
 }
 
