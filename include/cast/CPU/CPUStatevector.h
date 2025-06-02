@@ -47,8 +47,8 @@ public:
 
   StatevectorSep(const StatevectorSep& that)
       : nQubits(that.nQubits), N(that.N) {
-    real = (ScalarType*)aligned_alloc(64, N * sizeof(ScalarType));
-    imag = (ScalarType*)aligned_alloc(64, N * sizeof(ScalarType));
+    real = (ScalarType*)std::aligned_alloc(64, N * sizeof(ScalarType));
+    imag = (ScalarType*)std::aligned_alloc(64, N * sizeof(ScalarType));
     for (size_t i = 0; i < that.N; i++) {
       real[i] = that.real[i];
       imag[i] = that.imag[i];
@@ -328,7 +328,7 @@ public:
   std::ostream& print(std::ostream& os = std::cerr) const {
     auto N = getN();
     if (N > 32) {
-      os << BOLDCYAN("Warning: ")
+      os << BOLDCYAN("Info: ")
          << "statevector has more than 5 qubits, "
             "only the first 32 entries are shown.\n";
     }
@@ -448,7 +448,10 @@ public:
     return *this; 
   }
 
-}; // class StatevectorAlt
+}; // class CPUStatevector
+
+// extern template class CPUStatevector<float>;
+// extern template class CPUStatevector<double>;
 
 // template<typename ScalarType>
 // ScalarType fidelity(

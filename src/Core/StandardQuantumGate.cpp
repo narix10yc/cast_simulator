@@ -76,29 +76,3 @@ std::ostream& StandardQuantumGate::displayInfo(std::ostream& os,
   os << BOLDCYAN("========== End ==========\n");
   return os;
 }
-
-/**** op count *****/
-namespace {
-  double opCount_scalar(const ScalarGateMatrix& matrix, double zeroTol) {
-    double count = 0.0;
-    size_t len = matrix.matrix().size();
-    const auto* data = matrix.matrix().data();
-    for (size_t i = 0; i < len; ++i) {
-      if (std::abs(data[i]) > zeroTol)
-        count += 1.0;
-    }
-    return count * std::pow<double>(2.0, 1 - matrix.nQubits());
-  }
-} // anonymous namespace
-
-double StandardQuantumGate::opCount(double zeroTol) const {
-  if (_gateMatrix == nullptr)
-    return 0.0;
-
-  if (auto* sMat = llvm::dyn_cast<ScalarGateMatrix>(_gateMatrix.get())) {
-    return opCount_scalar(*sMat, zeroTol);
-  }
-
-  assert(false && "Not Implemented yet");
-  return 0.0;
-}

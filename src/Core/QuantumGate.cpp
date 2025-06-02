@@ -164,7 +164,8 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
 
 // Compute the superoperator matrix for a standard quantum gate. We assume
 // noise is applied after the gate operation.
-static ScalarGateMatrixPtr computeSuperopMatrix(StandardQuantumGate* gate) {
+static ScalarGateMatrixPtr
+computeSuperopMatrix(const StandardQuantumGate* gate) {
   assert(gate != nullptr);
   auto gateMatrix = gate->gateMatrix();
   assert(gateMatrix != nullptr);
@@ -224,4 +225,40 @@ SuperopQuantumGatePtr cast::getSuperopGate(QuantumGatePtr gate) {
   }
   assert(false && "Only implemented for StandardQuantumGate now");
   return nullptr;
+}
+
+/**** op count *****/
+namespace {
+  size_t countNonZeroElems(const ScalarGateMatrix& matrix, double zeroTol) {
+    size_t count = 0;
+    size_t len = matrix.matrix().size();
+    const auto* data = matrix.matrix().data();
+    for (size_t i = 0; i < len; ++i) {
+      if (std::abs(data[i]) > zeroTol)
+        ++count;
+    }
+    return count;
+  }
+} // anonymous namespace
+
+double StandardQuantumGate::opCount(double zeroTol) const {
+  auto scalarGM = getScalarGM();
+  assert(scalarGM != nullptr && "Only supporting scalar gate matrix for now");
+
+  if (_noiseChannel == nullptr) {
+    double count = static_cast<double>(countNonZeroElems(*scalarGM, zeroTol));
+    return count * std::pow<double>(2.0, 1 - nQubits());
+  }
+  
+  double count = static_cast<double>(
+    countNonZeroElems(*computeSuperopMatrix(this), zeroTol));
+  
+  // superop matrices are treated as 2n-qubit gates
+  return count * std::pow<double>(2.0, 1 - 2 * nQubits());
+}
+
+
+double SuperopQuantumGate::opCount(double zeroTol) const {
+  assert(_superopMatrix != nullptr && "Superop matrix is null");
+  return countNonZeroElems(*_superopMatrix, zeroTol);
 }

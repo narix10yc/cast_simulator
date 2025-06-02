@@ -156,6 +156,8 @@ public:
   ScalarGateMatrixPtr getMatrix() { return _superopMatrix; }
   const ScalarGateMatrixPtr& getMatrix() const { return _superopMatrix; }
 
+  double opCount(double zeroTol) const override;
+
   static SuperopQuantumGatePtr Create(ScalarGateMatrixPtr superopMatrix,
                                       const TargetQubitsType& qubits) {
     return std::make_shared<SuperopQuantumGate>(superopMatrix, qubits);

@@ -2,68 +2,45 @@
 #define CAST_CPU_CPU_DENSITY_MATRIX_H
 
 #include <cstring>
+#include "cast/CPU/CPUStatevector.h"
 
-namespace utils {
+namespace cast {
 
+// This is almost the same as CPUStatevector with twice the number of qubits
 template<typename ScalarType>
 class CPUDensityMatrix {
-  int _nQubits;
-  int _nActiveBranches;
-  double* _weights;
-  ScalarType* _data;
+  CPUStatevector<ScalarType> sv;
 public:
-  CPUDensityMatrix(int nQubits) : _nQubits(nQubits) , _nActiveBranches(0) {
-    _weights = static_cast<double*>(
-      std::aligned_alloc(64, sizeof(double) * (1ULL << nQubits)));
-    _data = static_cast<ScalarType*>(
-      std::aligned_alloc(64, sizeInBytesActiveBranches()));
-    assert(_weights != nullptr);
-    assert(_data != nullptr);
+  CPUDensityMatrix(int nQubits, int simd_s) : sv(2 * nQubits, simd_s) {}
+
+  int nQubits() const { return sv.nQubits() / 2; }
+
+  void initialize() { sv.initialize(); }
+
+  void randomize(int nThreads=1) { sv.randomize(nThreads); }
+
+  void* data() { return sv.data(); }
+
+  std::ostream& print(std::ostream& os) const {
+    if (nQubits() > 3) {
+      os << "Density matrix has more than 2 qubits, "
+            "resort to printing statevector.\n";
+      return sv.print(os);
+    }
+    unsigned edgeSize = 1 << nQubits();
+    for (unsigned r = 0; r < edgeSize; ++r) {
+      for (unsigned c = 0; c < edgeSize; ++c) {
+        utils::print_complex(os, sv.amp(c * edgeSize + r));
+        os << ", ";
+      }
+      os << "\n";
+    }
+    return os;
   }
-
-  ~CPUDensityMatrix() {
-    std::free(_weights);
-    std::free(_data);
-  }
-
-  CPUDensityMatrix(const CPUDensityMatrix&) = delete;
-  CPUDensityMatrix(CPUDensityMatrix&&) = delete;
-  CPUDensityMatrix& operator=(const CPUDensityMatrix&) = delete;
-  CPUDensityMatrix& operator=(CPUDensityMatrix&&) = delete;
-
-  int nQubits() const { return _nQubits; }
-  int nActiveBranches() const { return _nActiveBranches; }
-
-  size_t sizePerBranch() const { return 2ULL << _nQubits; }
-  size_t sizeInBytesPerBranch() const {
-    return sizePerBranch() * sizeof(ScalarType);
-  }
-
-  size_t sizeActiveBranches() const {
-    return _nActiveBranches * sizePerBranch();
-  }
-  size_t sizeInBytesActiveBranches() const {
-    return sizeActiveBranches() * sizeof(ScalarType);
-  }
-
-  size_t size() const { return 2ULL << (2 * _nQubits); }
-  size_t sizeInBytes() const { return size() * sizeof(ScalarType); }
-
-  double weight(int branchIdx) const {
-    assert(branchIdx >= 0 && branchIdx < _nActiveBranches);
-    return _weights[branchIdx];
-  }
-
-  ScalarType* data(int branchIdx) {
-    assert(branchIdx >= 0 && branchIdx < _nActiveBranches);
-    return _data + branchIdx * sizePerBranch();
-  }
-
-
 }; // class CPUDensityMatrix
 
-extern template class CPUDensityMatrix<float>;
-extern template class CPUDensityMatrix<double>;
+// extern template class CPUDensityMatrix<float>;
+// extern template class CPUDensityMatrix<double>;
 
 } // namespace utils
 

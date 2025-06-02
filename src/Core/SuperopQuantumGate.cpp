@@ -30,7 +30,8 @@ std::ostream& SuperopQuantumGate::displayInfo(std::ostream& os,
   
   os << CYAN("- Target Qubits: ");
   utils::printSpan(os, std::span<const int>(_qubits)) << "\n";
-
+  os << CYAN("- opCount:       ") << opCount(1e-8) << "\n";
+                                                
   os << CYAN("- superopMatrix: ") << _superopMatrix.get() << "\n";
   if (verbose > 1) {
     _superopMatrix->matrix().print(os);
