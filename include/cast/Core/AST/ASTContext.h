@@ -25,7 +25,7 @@ class Parser;
 class ASTContext {
 private:
   struct MemoryNode {
-    static constexpr size_t Size = 4096; // 4KB
+    static constexpr size_t Size = 64 * 1024; // 64KB
     std::byte* begin;
     std::byte* end;
     std::byte* current;
@@ -74,7 +74,6 @@ private:
       // overflows are allocated via std::aligned_alloc
       for (const auto& overflow : overflows)
         std::free(overflow.data);
-      overflows.~vector();
     }
 
     bool isManaging(void* ptr) const {

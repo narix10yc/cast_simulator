@@ -93,7 +93,7 @@ public:
   static PerformanceCache LoadFromCSV(const std::string& fileName);
   
   constexpr static const char*
-  CSV_Title = "nQubits,opCount,precision,nThreads,memSpd\n";
+  CSV_Title = "nQubits,opCount,precision,nThreads,memSpd";
 };
 
 #ifdef CAST_USE_CUDA

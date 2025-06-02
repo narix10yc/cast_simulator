@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
   }
 
   if (inFile.peek() == std::ifstream::traits_type::eof())
-    outFile << "nQubits,opCount,precision,irregularity,nThreads,memSpd\n";
+    outFile << PerformanceCache::CSV_Title;
   inFile.close();
 
   PerformanceCache cache;

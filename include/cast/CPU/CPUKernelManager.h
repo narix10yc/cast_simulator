@@ -3,6 +3,7 @@
 
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
+#include "cast/IR/IRNode.h"
 
 #define CPU_KERNEL_TYPE void(void*)
 namespace cast {
@@ -99,6 +100,17 @@ public:
                                QuantumGatePtr gate,
                                const std::string& funcName);
 
+  /// Generate kernels for all gates in the given circuit graph. The generated
+  /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
+  /// order of the gate in the circuit graph. <order> will be retrieved in
+  /// \c collectKernelsFromGraphName 
+  CPUKernelManager& genCPUGatesFromGraph(const CPUKernelGenConfig& config,
+                                         const ir::CircuitGraphNode& graph,
+                                         const std::string& graphName);
+
+  std::vector<CPUKernelInfo*>
+  collectKernelsFromGraphName(const std::string& graphName);
+
   void ensureExecutable(CPUKernelInfo& kernel) {
     // Note: We do not actually need the lock here
     // as it is expected (at least now) each KernelInfo is accesses by a unique
@@ -118,18 +130,17 @@ public:
     }
   }
 
-	void dumpIR(const std::string &funcName, llvm::raw_ostream &os);
+	void dumpIR(const std::string& funcName, llvm::raw_ostream& os);
 
   void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
 
-  void applyCPUKernel(
-      void* sv, int nQubits, CPUKernelInfo& kernelInfo);
+  void applyCPUKernel(void* sv, int nQubits, CPUKernelInfo& kernelInfo);
 
   void applyCPUKernel(void* sv, int nQubits, const std::string& funcName);
 
-	void applyCPUKernel(void* sv, int nQubits, const std::string& funcName, const void* pMatArg);
+	// void applyCPUKernel(void* sv, int nQubits, const std::string& funcName, const void* pMatArg);
 
-	void applyCPUKernel(void* sv, int nQubits, CPUKernelInfo& kernel, const void* pMatArg);
+	// void applyCPUKernel(void* sv, int nQubits, CPUKernelInfo& kernel, const void* pMatArg);
 
   void applyCPUKernelMultithread(
       void* sv, int nQubits, CPUKernelInfo& kernelInfo, int nThreads);

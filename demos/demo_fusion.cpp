@@ -1,12 +1,11 @@
 #include "cast/CPU/CPUStatevector.h"
-#include "timeit/timeit.h"
 
-#include "cast/Parser.h"
-#include "cast/Legacy/CircuitGraph.h"
 #include "cast/Fusion.h"
+#include "cast/Transform/Transform.h"
+#include "timeit/timeit.h"
 #include "openqasm/parser.h"
 
-#include "llvm/Support/CommandLine.h>
+#include "llvm/Support/CommandLine.h"
 
 namespace cl = llvm::cl;
 
@@ -31,11 +30,11 @@ ArgRunNoFuse("run-no-fuse", cl::desc("Run no-fuse circuit"), cl::init(false));
 
 cl::opt<bool>
 ArgRunNaiveFuse("run-naive-fuse",
-  cl::desc("Run naive-fuse circuit"), cl::init(false));
+  cl::desc("Run naive-fuse circuit"), cl::init(true));
 
 cl::opt<bool>
 ArgRunAdaptiveFuse("run-adaptive-fuse",
-  cl::desc("Run adaptive-fuse circuit"), cl::init(true));
+  cl::desc("Run adaptive-fuse circuit"), cl::init(false));
 
 cl::opt<int>
 ArgNaiveMaxK("naive-max-k",
@@ -54,7 +53,7 @@ static double collectKernelsAndGetTotalOpCount(
     const std::string& graphName,
     std::vector<CPUKernelInfo*>& kernels) {
   double opCountTotal = 0.0;
-  kernels = kernelMgr.collectCPUKernelsFromCircuitGraph(graphName);
+  kernels = kernelMgr.collectKernelsFromGraphName(graphName);
   for (const auto* kernel : kernels)
     opCountTotal += kernel->gate->opCount(1e-8);
   return opCountTotal;
@@ -65,7 +64,7 @@ static double collectDenseKernelsAndGetTotalOpCount(
     const std::string& graphName,
     std::vector<CPUKernelInfo*>& kernels) {
   double opCountTotal = 0.0;
-  kernels = kernelMgr.collectCPUKernelsFromCircuitGraph(graphName);
+  kernels = kernelMgr.collectKernelsFromGraphName(graphName);
   for (const auto* kernel : kernels)
     opCountTotal += std::pow(2.0, kernel->gate->nQubits() + 2);
   return opCountTotal;
@@ -89,28 +88,35 @@ int main(int argc, const char** argv) {
 
   openqasm::Parser qasmParser(ArgInputFilename, 0);
   auto qasmRoot = qasmParser.parse();
+  ast::ASTContext astCtx;
+  auto* circuitStmt = transform::cvtQasmCircuitToAstCircuit(*qasmRoot, astCtx);
+  assert(circuitStmt != nullptr);
+  auto irCircuit = transform::cvtAstCircuitToIrCircuit(*circuitStmt, astCtx);
+  assert(irCircuit != nullptr);
 
-  // This is temporary work-around as CircuitGraph does not allow copy yet
-  legacy::CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
-  legacy::CircuitGraph graphNoFuseDense, graphNaiveFuseDense, graphAdaptiveFuseDense;
+  auto allGraphs = irCircuit->getAllCircuitGraphs();
+  assert(allGraphs.size() == 1 && "There should be exactly one circuit graph.");
 
-  // we always generate the no-fuse graph to get the number of qubits
-  qasmRoot->toCircuitGraph(graphNoFuse);
+  const ir::CircuitGraphNode& graphOrginal = *allGraphs[0];
+  ir::CircuitGraphNode graphNoFuse, graphNaiveFuse, graphAdaptiveFuse;
+  ir::CircuitGraphNode graphNoFuseDense, graphNaiveFuseDense, graphAdaptiveFuseDense;
+
   if (ArgRunNoFuse) {
+    graphNoFuse = graphOrginal;
     if (ArgRunDenseKernel) {
-      qasmRoot->toCircuitGraph(graphNoFuseDense);
+      graphNoFuseDense = graphOrginal;
     }
   }
   if (ArgRunNaiveFuse) {
-    qasmRoot->toCircuitGraph(graphNaiveFuse);
+    graphNaiveFuse = graphOrginal;
     if (ArgRunDenseKernel) {
-      qasmRoot->toCircuitGraph(graphNaiveFuseDense);
+      graphNaiveFuseDense = graphOrginal;
     }
   }
   if (ArgRunAdaptiveFuse) {
-    qasmRoot->toCircuitGraph(graphAdaptiveFuse);
+    graphAdaptiveFuse = graphOrginal;
     if (ArgRunDenseKernel) {
-      qasmRoot->toCircuitGraph(graphAdaptiveFuseDense);
+      graphAdaptiveFuseDense = graphOrginal;
     }
   }
 
@@ -140,53 +146,52 @@ int main(int argc, const char** argv) {
   kernelGenConfig.displayInfo(std::cerr) << "\n";
   auto denseKernelGenConfig = kernelGenConfig;
   denseKernelGenConfig.forceDenseKernel = true;
-  denseKernelGenConfig.matrixLoadMode = CPUKernelGenConfig::StackLoadMatElems;
+  denseKernelGenConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
 
   // Generate kernels
   if (ArgRunNoFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromlegacy::CircuitGraph(
+      kernelMgr.genCPUGatesFromGraph(
         kernelGenConfig, graphNoFuse, "graphNoFuse");
     }, "Generate No-fuse Kernels");
   }
   if (ArgRunNaiveFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromlegacy::CircuitGraph(
+      kernelMgr.genCPUGatesFromGraph(
         kernelGenConfig, graphNaiveFuse, "graphNaiveFuse");
     }, "Generate Naive-fused Kernels");
   }
   if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromlegacy::CircuitGraph(
+      kernelMgr.genCPUGatesFromGraph(
         kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
     }, "Generate Adaptive-fused Kernels");
   }
   if (ArgRunNoFuse && ArgRunDenseKernel) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromCircuitGraph(
+      kernelMgr.genCPUGatesFromGraph(
         denseKernelGenConfig, graphNoFuseDense, "graphNoFuseDense");
     }, "Generate No-fuse Dense Kernels");
   }
   if (ArgRunNaiveFuse && ArgRunDenseKernel) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromCircuitGraph(
+      kernelMgr.genCPUGatesFromGraph(
         denseKernelGenConfig, graphNaiveFuseDense, "graphNaiveFuseDense");
     }, "Generate Naive-fused Dense Kernels");
   }
   if (ArgModelPath != "" && ArgRunAdaptiveFuse && ArgRunDenseKernel) {
     utils::timedExecute([&]() {
-      kernelMgr.genCPUGatesFromCircuitGraph(
+      kernelMgr.genCPUGatesFromGraph(
         denseKernelGenConfig, graphAdaptiveFuseDense, "graphAdaptiveFuseDense");
     }, "Generate Adaptive-fused Dense Kernels");
   }
 
   // JIT compile kernels
-  std::vector<CPUKernelInfo*> kernelsNoFuse;
-  std::vector<CPUKernelInfo*> kernelsNaiveFuse;
-  std::vector<CPUKernelInfo*> kernelAdaptiveFuse;
-  std::vector<CPUKernelInfo*> denseKernelsNoFuse;
-  std::vector<CPUKernelInfo*> denseKernelsNaiveFuse;
-  std::vector<CPUKernelInfo*> denseKernelAdaptiveFuse;
+  std::vector<CPUKernelInfo*>
+  kernelsNoFuse, kernelsNaiveFuse, kernelAdaptiveFuse;
+
+  std::vector<CPUKernelInfo*>
+  denseKernelsNoFuse, denseKernelsNaiveFuse, denseKernelAdaptiveFuse;
 
   utils::timedExecute([&]() {
     kernelMgr.initJIT(
@@ -240,7 +245,7 @@ int main(int argc, const char** argv) {
   }
 
   // Run kernels
-  cast::CPUStatevector<double> sv(graphNoFuse.nQubits, kernelGenConfig.simd_s);
+  cast::CPUStatevector<double> sv(graphOrginal.nQubits(), kernelGenConfig.simd_s);
   // sv.randomize();
   timeit::Timer timer(ArgReplication);
   timeit::TimingResult tr;
