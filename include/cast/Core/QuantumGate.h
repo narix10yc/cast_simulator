@@ -87,6 +87,11 @@ public:
   NoiseChannelPtr noiseChannel() { return _noiseChannel; }
   const NoiseChannelPtr& noiseChannel() const { return _noiseChannel; }
 
+  // Set the noise channel to a symmetric Pauli channel with probability p.
+  void setNoiseSPC(double p) {
+    _noiseChannel = NoiseChannel::SymmetricPauliChannel(p);
+  }
+
   double opCount(double zeroTol) const override;
 
   // Try to cast the gate matrix to ScalarGateMatrix. Returns nullptr if
@@ -116,13 +121,18 @@ public:
 
   // @brief RandomUnitary generates a random unitary gate on the specified 
   // qubits. Only gate matrix is set, and no noise channel is applied.
-  static StandardQuantumGatePtr RandomUnitary(const std::vector<int>& qubits) {
+  static StandardQuantumGatePtr RandomUnitary(const TargetQubitsType& qubits) {
     auto qubitsCopy = qubits;
     std::ranges::sort(qubitsCopy);
     return StandardQuantumGate::Create(
       ScalarGateMatrix::RandomUnitary(qubitsCopy.size()),
       nullptr, // No noise channel
       qubitsCopy);
+  }
+
+  // Get a single-qubit identity gate on qubit q.
+  static StandardQuantumGatePtr I1(int q) {
+    return StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {q});
   }
 
   // Get a single-qubit Hadamard gate on qubit q.
@@ -145,6 +155,11 @@ public:
 
   ScalarGateMatrixPtr getMatrix() { return _superopMatrix; }
   const ScalarGateMatrixPtr& getMatrix() const { return _superopMatrix; }
+
+  static SuperopQuantumGatePtr Create(ScalarGateMatrixPtr superopMatrix,
+                                      const TargetQubitsType& qubits) {
+    return std::make_shared<SuperopQuantumGate>(superopMatrix, qubits);
+  }
 
   std::ostream& displayInfo(std::ostream& os, int verbose) const override;
 

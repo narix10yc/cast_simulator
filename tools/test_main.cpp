@@ -23,6 +23,10 @@ int main() {
   }, "Quantum Gate Test Finished!");
 
   utils::timedExecute([] {
+    test_quantumChannel();
+  }, "Quantum Channel Test Finished!");
+
+  utils::timedExecute([] {
     test_fusionCPU();
   }, "CPU Fusion Test Finished!");
 
