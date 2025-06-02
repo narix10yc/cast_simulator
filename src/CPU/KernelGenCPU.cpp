@@ -16,6 +16,67 @@
 
 using namespace cast;
 
+// Top-level entry
+CPUKernelManager& CPUKernelManager::genCPUGate(
+    const CPUKernelGenConfig& config,
+    QuantumGatePtr gate,
+    const std::string& funcName) {
+
+  auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
+  if (stdQuGate != nullptr && stdQuGate->noiseChannel() == nullptr) {
+    // a normal gate, no noise channel
+    const auto scalarGM = stdQuGate->getScalarGM();
+    assert(scalarGM != nullptr && "Only supporting scalar GM for now");
+    auto* func = _gen(
+      config,
+      // temporarily const_cast to add constness
+      const_cast<const ComplexSquareMatrix&>(scalarGM->matrix()),
+      stdQuGate->qubits(),
+      funcName
+    );
+    // append the newly generated kernel
+    this->_kernels.emplace_back(
+      std::function<CPU_KERNEL_TYPE>(),
+      config.precision,
+      func->getName().str(),
+      config.matrixLoadMode,
+      gate,
+      config.simd_s,
+      gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol used in sigMat
+    );
+    return *this;
+  }
+
+  // super op gates are treated as normal gates with twice the number of qubits
+  auto superopGate = cast::getSuperopGate(gate);
+  assert(superopGate != nullptr && "Superop gate should not be null");
+  const auto scalarGM = superopGate->getMatrix();
+  assert(scalarGM != nullptr && "superop gate matrix should not be null");
+  auto qubits = superopGate->qubits();
+  auto nQubits = superopGate->nQubits();
+  for (const auto& q : qubits)
+    qubits.push_back(q + nQubits);
+  auto* func = _gen(
+    config,
+    // temporarily const_cast to add constness
+    const_cast<const ComplexSquareMatrix&>(scalarGM->matrix()),
+    qubits,
+    funcName
+  );
+
+  // append the newly generated kernel
+  this->_kernels.emplace_back(
+    std::function<CPU_KERNEL_TYPE>(),
+    config.precision,
+    func->getName().str(),
+    config.matrixLoadMode,
+    gate,
+    config.simd_s,
+    gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol used in sigMat
+  );
+  return *this;
+}
+
 namespace {
 
 struct CPUArgs {
@@ -45,25 +106,13 @@ struct IRMatData {
 std::vector<IRMatData> initMatrixData(
     llvm::IRBuilder<>& B,
     const CPUKernelGenConfig& config,
-    const cast::QuantumGate* gate,
+    const ComplexSquareMatrix& mat,
     llvm::Value* pMatArg) {
-  const int k = gate->nQubits();
-  const unsigned K = 1ULL << k;
+  const unsigned K = mat.edgeSize();
   const unsigned KK = K * K;
 
   std::vector<IRMatData> matData(KK);
-  auto* standardQuGate = llvm::dyn_cast<cast::StandardQuantumGate>(gate);
-  assert(standardQuGate != nullptr &&
-         "Only StandardQuantumGate is supported for now");
-  auto* gateMatrix = standardQuGate->gateMatrix().get();
-  assert(gateMatrix != nullptr && "Empty gate matrix");
-  const auto& scalarGM = llvm::dyn_cast<cast::ScalarGateMatrix>(gateMatrix);
-  assert(scalarGM != nullptr && "Only ScalarGateMatrix is supported for now");
 
-  const auto& mat = scalarGM->matrix();
-  assert(mat.edgeSize() == K &&
-         "Matrix size does not match the number of qubits");
-  
   // TODO: decide whether to scale it by gate size
   double zTol = config.zeroTol;
   double oTol = config.oneTol;
@@ -190,15 +239,17 @@ void debugPrintMatData(std::ostream& os,
 } // anonymous namespace
 
 
-CPUKernelManager& CPUKernelManager::genCPUGate(
+llvm::Function* CPUKernelManager::_gen(
     const CPUKernelGenConfig& config,
-    std::shared_ptr<cast::QuantumGate> gate,
+    const ComplexSquareMatrix& mat,
+    const QuantumGate::TargetQubitsType& qubits,
     const std::string& funcName) {
   const unsigned s = config.simd_s;
   const unsigned S = 1ULL << s;
-  const unsigned k = gate->nQubits();
+  const unsigned k = qubits.size();
   const unsigned K = 1ULL << k;
   const unsigned KK = K * K;
+  assert(K == mat.edgeSize() && "matrix size mismatch");
 
   auto& llvmContextModulePair =
     createNewLLVMContextModulePair(funcName + "Module");
@@ -246,7 +297,7 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
 
   // initialize matrix data
   B.SetInsertPoint(entryBB);
-  auto matData = initMatrixData(B, config, gate.get(), args.pMatArg);
+  auto matData = initMatrixData(B, config, mat, args.pMatArg);
 
   LLVM_DEBUG(debugPrintMatData(std::cerr, matData););
 
@@ -255,8 +306,8 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
   llvm::SmallVector<int, 6U> simdBits, hiBits, loBits;
   { // start of qubit splitting
     unsigned q = 0;
-    auto qubitsIt = gate->qubits().begin();
-    const auto qubitsEnd = gate->qubits().end();
+    auto qubitsIt = qubits.begin();
+    const auto qubitsEnd = qubits.end();
     while (simdBits.size() != s) {
       if (qubitsIt != qubitsEnd && *qubitsIt == q) {
         loBits.push_back(q);
@@ -636,18 +687,7 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
 
   B.SetInsertPoint(retBB);
   B.CreateRetVoid();
-
-  // append the newly generated kernel
-  this->_kernels.emplace_back(
-    std::function<CPU_KERNEL_TYPE>(),
-    config.precision,
-    func->getName().str(),
-    config.matrixLoadMode,
-    gate,
-    config.simd_s,
-    gate->opCount(config.zeroTol), // TODO: zeroTol here is different from zTol used in sigMat
-    lk
-  );
+  
   // func->print(llvm::errs());
-  return *this;
+  return func;
 }

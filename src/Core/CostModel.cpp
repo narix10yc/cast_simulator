@@ -148,11 +148,9 @@ std::ostream& StandardCostModel::display(std::ostream& os, int nLines) const {
 
 void PerformanceCache::writeResults(std::ostream& os) const {
   for (const auto&
-      [nQubits, opCount, precision,
-       irregularity, nThreads, memUpdateSpeed] : items) {
+      [nQubits, opCount, precision, nThreads, memUpdateSpeed] : items) {
     os << nQubits << "," << opCount << ","
-       << precision << "," << irregularity << ","
-       << nThreads << ","
+       << precision << "," << nThreads << ","
        << std::scientific << std::setw(6) << memUpdateSpeed << "\n";
   }
 }
@@ -277,9 +275,6 @@ PerformanceCache::Item parseLine(const char*& curPtr, const char* bufferEnd) {
   item.precision = parseInt(curPtr, bufferEnd);
   assert(*curPtr == ',');
   ++curPtr;
-  item.irregularity = parseInt(curPtr, bufferEnd);
-  assert(*curPtr == ',');
-  ++curPtr;
   item.nThreads = parseInt(curPtr, bufferEnd);
   assert(*curPtr == ',');
   ++curPtr;
@@ -308,7 +303,7 @@ PerformanceCache PerformanceCache::LoadFromCSV(const std::string& fileName) {
   while (*curPtr != '\n')
     ++curPtr;
   assert(std::string(bufferBegin, curPtr - bufferBegin) ==
-        "nQubits,opCount,precision,irregularity,nThreads,memSpd");
+         PerformanceCache::CSV_Title && "Tile does not match");
   ++curPtr;
 
   while (curPtr < bufferEnd) {
@@ -427,8 +422,7 @@ void PerformanceCache::runExperiments(
       });
     auto memSpd = calculateMemUpdateSpeed(nQubits, kernel.precision, tr.min);
     items.emplace_back(
-      kernel.gate->nQubits(), kernel.opCount, 64,
-      kernel.nLoBits, nThreads, memSpd);
+      kernel.gate->nQubits(), kernel.opCount, 64, nThreads, memSpd);
     std::cerr << "Gate @ ";
     utils::printSpan(std::cerr, std::span(kernel.gate->qubits()));
     std::cerr << ": " << memSpd << " GiBps\n";

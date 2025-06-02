@@ -17,6 +17,7 @@ enum class MatrixLoadMode {
   StackLoadMatElems,
   // StackLoadMatVecs: Load the matrix elements into the stack at the very
   // beginning of the kernel, but load them as vectors.
+  // Notice: This is not in use yet.
   StackLoadMatVecs
 };
 
@@ -29,7 +30,6 @@ struct CPUKernelInfo {
   // extra information
   int simd_s;
   int opCount;
-  int nLoBits;
 };
 
 struct CPUKernelGenConfig {
@@ -57,6 +57,13 @@ struct CPUKernelGenConfig {
 class CPUKernelManager : public KernelManagerBase {
   std::vector<CPUKernelInfo> _kernels;
   std::unique_ptr<llvm::orc::LLJIT> llvmJIT;
+
+  // Both gate-sv and superop-dm simulation will boil down to a matrix with
+  // target qubits. This function contains the core logics to emit LLVM IR.
+  llvm::Function* _gen(const CPUKernelGenConfig& config,
+                       const ComplexSquareMatrix& matrix,
+                       const QuantumGate::TargetQubitsType& qubits,
+                       const std::string& funcName);
 public:
   CPUKernelManager()
     : KernelManagerBase()
@@ -87,20 +94,7 @@ public:
     return llvmJIT != nullptr;
   }
 
-  /// A function that takes in 4 arguments (void*, uint64_t, uint64_t,
-  /// void*) and returns void. Arguments are: pointer to statevector array,
-  /// taskID begin, taskID end, and pointer to matrix array (could be null).
-  // CPUKernelManager& genCPUGate(
-  //     const CPUKernelGenConfig& config,
-  //     std::shared_ptr<legacy::QuantumGate> gate, const std::string& funcName);
-
-  // CPUKernelManager& genCPUGatesFromLegacyCircuitGraph(
-  //     const CPUKernelGenConfig& config,
-  //     const LegacyCircuitGraph& graph, const std::string& graphName);
-
-  // std::vector<CPUKernelInfo*>
-  // collectCPUKernelsFromLegacyCircuitGraph(const std::string& graphName);
-
+  // This is the main entry point to generate a CPU kernel.
   CPUKernelManager& genCPUGate(const CPUKernelGenConfig& config,
                                QuantumGatePtr gate,
                                const std::string& funcName);

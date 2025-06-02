@@ -76,10 +76,6 @@ public:
     int nQubits;
     int opCount;
     int precision;
-    /// This is approximately how many shuffling operations are needed in each
-    /// amplitude loading process, calculated by 1 << (number of loBits)
-    /// TODO: Not in use yet
-    int irregularity;
     int nThreads;
     /// memory update speed in Gigabytes per second (GiBps)
     double memUpdateSpeed;
@@ -97,7 +93,7 @@ public:
   static PerformanceCache LoadFromCSV(const std::string& fileName);
   
   constexpr static const char*
-  CSV_Title = "nQubits,opCount,precision,irregularity,nThreads,memSpd\n";
+  CSV_Title = "nQubits,opCount,precision,nThreads,memSpd\n";
 };
 
 #ifdef CAST_USE_CUDA
