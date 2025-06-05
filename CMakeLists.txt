@@ -21,21 +21,49 @@ message(STATUS "CAST_LLVM_ROOT: ${CAST_LLVM_ROOT}")
 set(LLVM_RELEASE_INSTALL_ROOT "${CAST_LLVM_ROOT}/release-install")
 set(LLVM_DEBUG_INSTALL_ROOT "${CAST_LLVM_ROOT}/debug-install")
 
-set(CMAKE_C_COMPILER "${LLVM_RELEASE_INSTALL_ROOT}/bin/clang")
-set(CMAKE_CXX_COMPILER "${LLVM_RELEASE_INSTALL_ROOT}/bin/clang++")
+# check if clang is installed along with LLVM
+if(EXISTS "${LLVM_RELEASE_INSTALL_ROOT}/bin/clang" AND
+   EXISTS "${LLVM_RELEASE_INSTALL_ROOT}/bin/clang++")
+  message(STATUS "Using compilers under LLVM release-install at: "
+                 "${LLVM_RELEASE_INSTALL_ROOT}")
+  set(CMAKE_C_COMPILER "${LLVM_RELEASE_INSTALL_ROOT}/bin/clang")
+  set(CMAKE_CXX_COMPILER "${LLVM_RELEASE_INSTALL_ROOT}/bin/clang++")
+else()
+  message(STATUS "No clang install found along with LLVM release-install. "
+                 "Using system compilers.")
+endif()
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
+
+# check if libc++ is installed along with LLVM
+set(LIBCXX_INCLUDE_DIR "${LLVM_RELEASE_INSTALL_ROOT}/include/c++/v1")
+set(LIBCXX_LIB_DIR "${LLVM_RELEASE_INSTALL_ROOT}/lib")
+if(EXISTS "${LIBCXX_INCLUDE_DIR}/vector" AND
+   EXISTS "${LIBCXX_LIB_DIR}/libc++.a")
+  message(STATUS "Found libc++ at ${LLVM_RELEASE_INSTALL_ROOT}")
+  add_compile_options(-stdlib=libc++ -I"${LIBCXX_INCLUDE_DIR}")
+  if (NOT APPLE)
+    # On macOS, -stdlib=libc++ automatically links libc++, libc++abi, and
+    # unwind. Specifying them will cause annoying warnings.
+    link_libraries(c++ c++abi unwind)
+  endif()
+  link_directories("${LIBCXX_LIB_DIR}")
+else()
+  message(STATUS "No libc++ found along with LLVM release-install, "
+                 "using system defaults.")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
-add_link_options("-fuse-ld=lld")
 
 # Find LLVM
 string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
 if(CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
-    set(LLVM_DIR "${LLVM_DEBUG_INSTALL_ROOT}/lib/cmake/llvm")
+  set(LLVM_DIR "${LLVM_DEBUG_INSTALL_ROOT}/lib/cmake/llvm")
 else()
-    set(LLVM_DIR "${LLVM_RELEASE_INSTALL_ROOT}/lib/cmake/llvm")
+  set(LLVM_DIR "${LLVM_RELEASE_INSTALL_ROOT}/lib/cmake/llvm")
 endif()
+
+message("############ End Custom Setups ############")
 
 find_package(LLVM CONFIG)
 if(NOT LLVM_FOUND)
@@ -86,7 +114,7 @@ if(CAST_USE_CUDA)
   # Sometimes clang version is too high and nvcc does not support it
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --allow-unsupported-compiler")
   enable_language(CUDA)
-endif()
+endif() # if(CAST_USE_CUDA)
 
 include_directories(${LLVM_INCLUDE_DIRS} include)
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
@@ -94,10 +122,7 @@ add_definitions(${LLVM_DEFINITIONS_LIST})
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
-# CMakeLists.txt inside src will create the cast library as an INTERFACE lib
-# that links against all necessary components (including LLVM and CUDA).
 add_subdirectory(src)
-
 add_subdirectory(tests)
 add_subdirectory(demos)
 add_subdirectory(tools)
