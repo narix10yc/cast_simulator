@@ -79,6 +79,7 @@ if(EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang" AND
                  "${CAST_LLVM_RELEASE_ROOT}")
   set(CMAKE_C_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang")
   set(CMAKE_CXX_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
+  add_link_options("-fuse-ld=${CAST_LLVM_RELEASE_ROOT}/bin/ld.lld")
 else()
   message(STATUS "No clang install found along with LLVM release-install. "
                  "Using system compilers.")
@@ -86,11 +87,22 @@ endif()
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 
 # check if libc++ is installed along with LLVM
+# include path is almost always
+# ${CAST_LLVM_RELEASE_ROOT}/include/c++/v1
 set(LIBCXX_INCLUDE_DIR "${CAST_LLVM_RELEASE_ROOT}/include/c++/v1")
-set(LIBCXX_LIB_DIR "${CAST_LLVM_RELEASE_ROOT}/lib")
+
+# but the library path may vary. For example,
+# ${CAST_LLVM_RELEASE_ROOT}/lib
+# ${CAST_LLVM_RELEASE_ROOT}/lib/x86_64-unknown-linux-gnu
+file(GLOB_RECURSE LIBCXX_LIB_PATHS "${CAST_LLVM_RELEASE_ROOT}/lib/*/libc++.*")
+if(LIBCXX_LIB_PATHS)
+  list(GET LIBCXX_LIB_PATHS 0 LIBCXX_LIB_PATH)
+  get_filename_component(LIBCXX_LIB_DIR "${LIBCXX_LIB_PATH}" DIRECTORY)
+endif()
+
 if(EXISTS "${LIBCXX_INCLUDE_DIR}/vector" AND
-   EXISTS "${LIBCXX_LIB_DIR}/libc++.a")
-  message(STATUS "Found libc++ at ${CAST_LLVM_RELEASE_ROOT}")
+   DEFINED LIBCXX_LIB_DIR)
+  message(STATUS "Found libc++ at ${LIBCXX_LIB_DIR}")
   add_compile_options(-stdlib=libc++ -I"${LIBCXX_INCLUDE_DIR}")
   if (NOT APPLE)
     # On macOS, -stdlib=libc++ automatically links libc++, libc++abi, and
@@ -166,6 +178,8 @@ if(CAST_USE_CUDA)
 endif() # if(CAST_USE_CUDA)
 
 include_directories(${LLVM_INCLUDE_DIRS} include)
+message(STATUS "LLVM_LIBRARY_DIRS: ${LLVM_LIBRARY_DIRS}")
+link_directories(${LLVM_LIBRARY_DIRS})
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LLVM_DEFINITIONS_LIST})
 

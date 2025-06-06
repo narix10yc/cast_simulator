@@ -59,7 +59,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-
 # Check of argument conflicts
 if [[ $ARG_MINIMAL -eq 1 ]]; then
   if [[ $ARG_BUILD_CLANG -eq 1 ]] || [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
@@ -69,7 +68,6 @@ if [[ $ARG_MINIMAL -eq 1 ]]; then
   echo -e "${INFO} Minimal build selected. " \
           "Only building a release-version of LLVM with Native target."
   ARG_RELEASE_ONLY=1
-  ARG_NATIVE_ONLY=1
   ARG_BUILD_CLANG=0
   ARG_BUILD_LIBCXX=0
 fi

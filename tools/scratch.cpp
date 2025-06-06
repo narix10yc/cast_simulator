@@ -1,32 +1,54 @@
-#include "cast/Core/QuantumGate.h"
-#include "cast/CPU/CPUDensityMatrix.h"
-#include "cast/CPU/CPUKernelManager.h"
-#include "cast/IR/IRNode.h"
-#include "cast/CostModel.h"
-#include "cast/Fusion.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+#include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Support/raw_ostream.h"
 
-using namespace cast;
+using namespace llvm;
 
-int main(int argc, char** argv) {
+int main() {
+  // Initialize LLVM native targets (for JIT)
+  InitializeNativeTarget();
+  InitializeNativeTargetAsmPrinter();
 
-  // a SPC(0.1) noise channel
-  auto gate = StandardQuantumGate::I1(0);
-  gate->setNoiseSPC(0.1);
+  // Create LLVM context and module
+  auto Context = std::make_unique<LLVMContext>();
+  auto M = std::make_unique<Module>("my_module", *Context);
+  IRBuilder<> Builder(*Context);
 
-  cast::getSuperopGate(gate)->displayInfo(std::cerr, 3);
+  // Define: int add(int a, int b)
+  FunctionType *FT = FunctionType::get(Builder.getInt32Ty(),
+                                       {Builder.getInt32Ty(), Builder.getInt32Ty()},
+                                       false);
+  Function *AddFn = Function::Create(FT, Function::ExternalLinkage, "add", M.get());
 
-  CPUKernelManager kernelMgr;
-  CPUKernelGenConfig kernelGenConfig;
-  kernelGenConfig.simd_s = 1;
+  // Build function body: return a + b;
+  BasicBlock *BB = BasicBlock::Create(*Context, "entry", AddFn);
+  Builder.SetInsertPoint(BB);
+  auto Args = AddFn->args().begin();
+  Value *A = Args++;
+  Value *B = Args;
+  Value *Sum = Builder.CreateAdd(A, B, "sum");
+  Builder.CreateRet(Sum);
 
-  kernelMgr.genCPUGate(kernelGenConfig, gate, "I1_0");
-  kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false);
+  // Create the JIT
+  auto JIT = cantFail(orc::LLJITBuilder().create());
 
-  CPUDensityMatrix<double> dm(3, 1);
-  dm.initialize();
-  kernelMgr.applyCPUKernel(dm.data(), dm.nQubits(), "I1_0");
+  // Add the module to the JIT
+  cantFail(JIT->addIRModule(orc::ThreadSafeModule(std::move(M), std::move(Context))));
 
-  dm.print(std::cerr);
+  // Look up the symbol "add"
+  auto Sym = cantFail(JIT->lookup("add"));
+
+  auto Add = Sym.toPtr<int(int, int)>();
+
+  int result = Add(40, 2);
+  outs() << "add(40, 2) = " << result << "\n";
 
   return 0;
 }
