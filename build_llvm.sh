@@ -59,8 +59,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-USAGE="Usage: $0 <llvm-src-dir> [-build-libc++] [-build-clang] "\
-      "[-release-only] [-native-only]"
 
 # Check of argument conflicts
 if [[ $ARG_MINIMAL -eq 1 ]]; then
@@ -68,7 +66,7 @@ if [[ $ARG_MINIMAL -eq 1 ]]; then
   echo -e "${ERR} Cannot build both Clang and libc++ with minimal build."
   exit 1
   fi
-  echo -e "${INFO} Minimal build selected. "\
+  echo -e "${INFO} Minimal build selected. " \
           "Only building a release-version of LLVM with Native target."
   ARG_RELEASE_ONLY=1
   ARG_NATIVE_ONLY=1
@@ -77,7 +75,8 @@ if [[ $ARG_MINIMAL -eq 1 ]]; then
 fi
 
 if [[ -z "$ARC_LLVM_SRC_DIR" ]]; then
-  echo ${USAGE}
+  echo "Usage: $0 <llvm-src-dir> [-build-libc++] [-build-clang] " \
+       "[-release-only] [-native-only]"
   exit 1
 fi
 

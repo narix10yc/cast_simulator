@@ -1,5 +1,0 @@
-file(GLOB SRCS "ast/*.cpp")
-add_library(cast/Core/AST STATIC AST.cpp ASTContext.cpp Lexer.cpp Parser.cpp SourceManager.cpp ${SRCS})
-llvm_map_components_to_libnames(LLVM_LIBS support)
-add_executable(draft_parser draft_parser.cpp)
-target_link_libraries(draft_parser PRIVATE cast/Core/AST qasm utils adt ${LLVM_LIBS})
