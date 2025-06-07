@@ -130,7 +130,10 @@ public:
     }
   }
 
-	void dumpIR(const std::string& funcName, llvm::raw_ostream& os);
+	void dumpIR(const std::string& funcName,
+              llvm::raw_ostream& os = llvm::errs());
+
+  void dumpAsm(const std::string& funcName, llvm::raw_ostream& os);
 
   void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
 

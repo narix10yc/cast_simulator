@@ -94,7 +94,7 @@ set(LIBCXX_INCLUDE_DIR "${CAST_LLVM_RELEASE_ROOT}/include/c++/v1")
 # but the library path may vary. For example,
 # ${CAST_LLVM_RELEASE_ROOT}/lib
 # ${CAST_LLVM_RELEASE_ROOT}/lib/x86_64-unknown-linux-gnu
-file(GLOB_RECURSE LIBCXX_LIB_PATHS "${CAST_LLVM_RELEASE_ROOT}/lib/*/libc++.*")
+file(GLOB_RECURSE LIBCXX_LIB_PATHS "${CAST_LLVM_RELEASE_ROOT}/lib/*libc++.*")
 if(LIBCXX_LIB_PATHS)
   list(GET LIBCXX_LIB_PATHS 0 LIBCXX_LIB_PATH)
   get_filename_component(LIBCXX_LIB_DIR "${LIBCXX_LIB_PATH}" DIRECTORY)
