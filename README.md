@@ -1,6 +1,15 @@
 ## Update 9th June, 2025
 Code refactoring in process. Check the merge-dev and yl5619-dev branch.
 
+For the main branch, CPU part does work. To test out, disable `CAST_USE_CUDA` and run
+```
+ninja unit_test && ./unit_test
+```
+Some demos also run
+```
+ninja cpu_bcmk && ./cpu_bcmk
+```
+
 ## Environment Setup
 CAST is built with cmake and depends on the [LLVM project](https://github.com/llvm/llvm-project).
 
