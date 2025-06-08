@@ -34,7 +34,8 @@ static void internal_U1q() {
   for (int q = 0; q < nQubits; q++)
     kernelMgr.genCPUGate(cpuConfig, gates[q], "gateImm_" + std::to_string(q));
 
-  cpuConfig.forceDenseKernel = true;
+  cpuConfig.zeroTol = 0.0;
+  cpuConfig.oneTol = 0.0;
   cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++)
     kernelMgr.genCPUGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q));
@@ -91,7 +92,8 @@ static void internal_U2q() {
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++)
     kernelMgr.genCPUGate(cpuConfig, gates[q], "gateImm_" + std::to_string(q));
-  cpuConfig.forceDenseKernel = true;
+  cpuConfig.zeroTol = 0.0;
+  cpuConfig.oneTol = 0.0;
   cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++)
     kernelMgr.genCPUGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q));

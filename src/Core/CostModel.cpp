@@ -112,15 +112,15 @@ double StandardCostModel::computeGiBTime(
   auto estT0 = bestMatchT0 * bestMatchIt->nThreads / nThreads;
   auto estimateTime = std::max<double>(estT0, this->minGibTimeCap) * gateOpCount;
 
-  std::cerr << YELLOW("Warning: ") << "No exact match to "
-               "[nQubits, precision, nThreads] = ["
-            << gateNQubits << ", " << gateOpCount << ", "
-            << precision << ", " << nThreads
-            << "] found. We estimate it by ["
-            << bestMatchIt->nQubits << ", " << bestMatchIt->precision
-            << ", " << bestMatchIt->nThreads
-            << "] @ " << bestMatchT0 << " s/GiB/op => "
-               "Est. " << estT0 << " s/GiB/op.\n";
+  // std::cerr << YELLOW("Warning: ") << "No exact match to "
+  //              "[nQubits, precision, nThreads] = ["
+  //           << gateNQubits << ", " << gateOpCount << ", "
+  //           << precision << ", " << nThreads
+  //           << "] found. We estimate it by ["
+  //           << bestMatchIt->nQubits << ", " << bestMatchIt->precision
+  //           << ", " << bestMatchIt->nThreads
+  //           << "] @ " << bestMatchT0 << " s/GiB/op => "
+  //              "Est. " << estT0 << " s/GiB/op.\n";
 
   return estimateTime;
 }
@@ -269,7 +269,7 @@ PerformanceCache::Item parseLine(const char*& curPtr, const char* bufferEnd) {
   item.nQubits = parseInt(curPtr, bufferEnd);
   assert(*curPtr == ',');
   ++curPtr;
-  item.opCount = parseInt(curPtr, bufferEnd);
+  item.opCount = parseDouble(curPtr, bufferEnd);
   assert(*curPtr == ',');
   ++curPtr;
   item.precision = parseInt(curPtr, bufferEnd);

@@ -82,10 +82,11 @@ CPUKernelManager& CPUKernelManager::genCPUGatesFromGraph(
     const ir::CircuitGraphNode& graph,
     const std::string& graphName) {
   assert(graph.checkConsistency());
+  auto mangledGraphName = internal::mangleGraphName(graphName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
   for (const auto& gate : allGates) {
-    auto name = graphName + "_" + std::to_string(order++) + "_" +
+    auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
       std::to_string(graph.gateId(gate));
     genCPUGate(config, gate, name);
   }
@@ -96,13 +97,14 @@ std::vector<CPUKernelInfo*>
 CPUKernelManager::collectKernelsFromGraphName(
     const std::string& graphName) {
   std::vector<std::pair<int, CPUKernelInfo*>> orderKernelPairs;
+  auto mangledGraphName = internal::mangleGraphName(graphName);
   for (auto& kernel : _kernels) {
     const auto& name = kernel.llvmFuncName;
-    if (!name.starts_with(graphName))
+    if (!name.starts_with(mangledGraphName))
       continue; // not a kernel from the given graph
     // extract the order from the name
-    assert(name[graphName.size()] == '_');
-    auto subName = name.substr(graphName.size() + 1); // "<order>_<gateId>"
+    assert(name[mangledGraphName.size()] == '_');
+    auto subName = name.substr(mangledGraphName.size() + 1); // "<order>_<gateId>"
     auto pos = subName.find('_');
     assert(pos != std::string::npos && "Invalid kernel name format");
     int order = std::stoi(subName.substr(0, pos));
@@ -277,8 +279,7 @@ void debugPrintMatData(std::ostream& os,
   }
 }
 
-} // anonymous namespace
-
+} // end of anonymous namespace
 
 llvm::Function* CPUKernelManager::_gen(
     const CPUKernelGenConfig& config,

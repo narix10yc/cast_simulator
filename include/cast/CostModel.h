@@ -74,7 +74,7 @@ class PerformanceCache {
 public:
   struct Item {
     int nQubits;
-    int opCount;
+    double opCount;
     int precision;
     int nThreads;
     /// memory update speed in Gigabytes per second (GiBps)

@@ -39,7 +39,6 @@ std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
   os << "useFMA     : " << useFMA << "\n"
      << "useFMS     : " << useFMS << "\n"
      << "usePDEP     : " << usePDEP << "\n"
-     << "forceDenseKernel : " << forceDenseKernel << "\n"
      << "zeroTolerance : " << zeroTol << "\n"
      << "oneTolerance : " << oneTol << "\n"
      << "matrixLoadMode: ";

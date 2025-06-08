@@ -43,7 +43,6 @@ struct CPUKernelGenConfig {
   bool useFMS = true;
   // parallel bits deposit from BMI2
   bool usePDEP = false;
-  bool forceDenseKernel = false;
   double zeroTol = 1e-8;
   double oneTol = 1e-8;
   MatrixLoadMode matrixLoadMode = MatrixLoadMode::UseMatImmValues;
