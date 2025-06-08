@@ -1,18 +1,64 @@
-## Environment Setup
+## Update 9th June, 2025
+Code refactoring in process. Check the merge-dev and yl5619-dev branch.
 
+## Environment Setup
 CAST is built with cmake and depends on the [LLVM project](https://github.com/llvm/llvm-project).
 
-CAST is under active developments. The development enviromnent of CAST requires a specific structure of LLVM installation, and we recommand compiling and installing the LLVM project afresh.
+CAST is under active developments. We provide two presets to compile CAST, controlled by enviroment variable.
 
-### Setup LLVM
-Go to the [LLVM release](https://releases.llvm.org/) page and find a happy version (We mostly developed on 17.0.6 and 19.1.0. Newer versions should be backward compatible). Download the file `llvm-project-${version}.src.tar.xz`, which should be around 100 - 150 MiB.
+- Either set enviroment variable `CAST_LLVM_RELEASE_ROOT` to the LLVM installation directory. This is the quickest method.
+- Or set enviroment variable `CAST_LLVM_ROOT` to a specific structure (detailed below). This will create a development enviroment for CAST.
+- If both are set, `CAST_LLVM_RELEASE_ROOT` will be prioritized. 
 
+The development enviromnent of CAST requires a specific structure of LLVM installation, and we recommand compiling and installing the LLVM project afresh.
+
+## Setup LLVM Afresh
+Go to the [LLVM release](https://releases.llvm.org/) page and find a happy version (We mostly developed on 19.1.0. Newer versions should be backward compatible). Download the file `llvm-project-${version}.src.tar.xz`, which should be around 100 - 150 MiB.
+
+### Fastest Setup
 After unzipping we should get a folder `llvm-project-${version}.src`. Find a happy place to store it and run our provided shell script `build_llvm.sh` with 
 
 ```
-source build_llvm.sh <dir> <version>
+./build_llvm.sh <dir> -minimal
+
+# For CPU-only
+./build_llvm.sh <dir> -minimal -native-only
 ```
-where `<dir>` is the directory in which `llvm-project-${version}.src` is put and `<version>` is the version of the LLVM version.
+where `<dir>` is the pull path to `llvm-project-${version}.src`.
+
+Then call
+```
+export CAST_LLVM_RELEASE_ROOT=<dir>/release-install
+```
+
+Build CAST
+```
+mkdir build-debug
+cd build-debug
+cmake ..
+```
+Pass in `-DCAST_USE_CUDA=True` if intending to use CUDA backend.
+
+You may adjust the cmake command according to needs. For example,
+```
+cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
+```
+
+### Setup for Developing CAST
+The shell script will attempt to do the following things:
+
+1. Use `cmake`, `ninja`, and the system compiler to build a release version of LLVM. Optionally build `clang`, `lld,` and `lldb` when specifying argument `-build-clang`. Optionally build `libc++`, `libc++abi`, and `libunwind`, (the LLVM standard library and runtime) when specifying argument `-build-libc++`.  
+2. Build a debug version of LLVM. If `clang` and/or `libc++` is built in the first step, use them to compile this debug version. Otherwise, use the system compiler and runtime. 
+
+Known issue: On certain platforms, `-build-libc++` will contract system library. LLVM will be built and installed successfully, but we have encountered several issues when building CAST. Building clang only is often okay.
+
+Arguments supported:
+- `-release-only` Only build and install the release version of LLVM. Default to be false. If false, build a release version and a debug version of LLVM.
+- `-build-clang` Enables LLVM projects `clang`, `lld`, and `lldb` (all in release version).
+- `-build-libc++` Enables LLVM runtimes `libc++`, `libc++abi`, `libunwind` (all in release version).
+- `-minimal` Set `-release-only=True -build-clang=False -build-libc++=False`.
+- `-native-only` Default to false. If true, build LLVM with target `native` only. Otherwise, build LLVM with target `native` and `NVPTX`. To use CAST with CUDA backend, `-native-only` must be set to false.
+
 
 As a specific example, say we downloaded the LLVM project version 19.1.0 and unzip it into `$HOME/llvm/19.1.0`, with file structure
 ```
@@ -21,11 +67,9 @@ $HOME/llvm/19.1.0
 ```
 Then running
 ```
-source build_llvm.sh $HOME/llvm/19.1.0 19.1.0
+source build_llvm.sh $HOME/llvm/19.1.0
 ```
 will use `cmake`, `ninja`, and the native compiler (in system path) to build two version of LLVM: (1) release build, with build directory `release-build` and install directory `release-install`, and (2). debug build, with build directory `debug-build` and install directory `debug-install`.
-
-During the process, we will first build a release version of LLVM, including the `clang` compiler, the `lld` linker, the `lldb` debugger, and the LLVM standard library and runtime. Then we use the freshly built `clang` compiler to build a debug version. Both builds target towards native and NVPTX (for Nvidia GPU) backends.
 
 After the script finishes, the file structure should look like
 ```
@@ -43,11 +87,10 @@ Now `CAST_LLVM_ROOT` should be set to `$HOME/llvm/19.1.0` in this example.
 ### CMake Commands
 CAST uses CMake to configure build. Supported commands include
 - `-DCAST_USE_CUDA=<bool>` Enable CUDA support in CAST. This commands requires LLVM to be built with NVPTX backend.
-- `-DCAST_LLVM_ROOT=<path>` Specify the installation directory of the LLVM project. Alternatively you can cache it as an environment variable `cast_llvm_root` or `CAST_LLVM_ROOT`, and our top-level `CMakeLists.txt` will handle it.
 
 Some useful tips:
 - We suggest using the Ninja builder by adding `-GNinja` option.
-- When setting `-DCAST_USE_CUDA=True`, CAST needs to find a CUDA installation for the `<cuda.h>` and `<cuda_runtime.h>` headers. You can specify where to find CUDA by `-DCUDAToolkit_ROOT=<path>`. It is often found somewhere in `/usr/local/cuda-<version>`. 
+- When setting `-DCAST_USE_CUDA=True`, cmake needs to find a CUDA installation. You can specify where to find CUDA by `-DCUDAToolkit_ROOT=<path>` (this is not controlled by CAST). It is often found somewhere in `/usr/local/cuda-<version>`. 
 
 ### Example
 Say we installed LLVM version 19.1.0 in `$HOME/llvm/19.1.0` with file structure
@@ -63,7 +106,7 @@ cd build-debug && \
 cmake -GNinja \
 -DCMAKE_BUILD_TYPE=Debug \
 -DCAST_USE_CUDA=True \
--DCAST_LLVM_ROOT=$HOME/llvm/19.1.0 ..
+-DCUDAToolkit_ROOT=/use/local/cuda-12.3
 ```
 
 Then run `ninja unit_test && ./unit_test` to run some unit tests, and confirm it compiles and runs correctly.
