@@ -78,6 +78,9 @@ public:
   }
 }; // class IfMeasureNode
 
+/// We use an unordered_map \c _gateMap memory management and index tracking.
+/// When inserting gates, always use \c insertGate .
+/// Correspondingly, when removing gates, always use \c removeGate .
 class CircuitGraphNode : public IRNode {
 private:
   // _nQubits always equal to the size of each row
@@ -118,7 +121,7 @@ public:
   // std::unordered_map<QuantumGatePtr, int, TransparentHash, TransparentEqual> _gateMap;
 
   /* TODO
-   * We prefer to look up gates using raw pointers. Current approach is O(n)
+   * We sometimes look up gates using raw pointers. Current approach is O(n)
    */
 
 private:
@@ -156,13 +159,13 @@ public:
   // Recommend to use assert(checkConsistency()) 
   bool checkConsistency() const;
 
-  /// Use this method to add gates into the circuit graph. It will be stored in
-  /// an unordered_map \c _gateMap for memory management and index tracking.
-  /// Correspondingly, when removing gates, use \c removeGate and pass in which
-  /// row and qubit index.
+  /// @brief Insert a gate into the end of the circuit graph.
   void insertGate(QuantumGatePtr gate);
+
+  /// @brief Insert a gate into the circuit graph at a specific row.
   void insertGate(QuantumGatePtr gate, row_iterator rowIt);
 
+  /// @brief Remove a gate from the circuit graph at a specific row and qubit.
   void removeGate(row_iterator rowIt, int qubit);
 
   bool isRowVacant(row_iterator rowIt, const QuantumGate& gate) const;

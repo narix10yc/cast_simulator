@@ -124,7 +124,7 @@ std::ostream& printVectorWithPrinter(
 }
 
 template<typename T>
-void pushBackIfNotInVector(std::vector<T>& vec, T elem) {
+void push_back_if_not_present(std::vector<T>& vec, const T& elem) {
   for (const auto& e : vec) {
     if (e == elem)
       return;

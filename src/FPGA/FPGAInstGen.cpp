@@ -1,7 +1,7 @@
-#include "cast/Legacy/CircuitGraph.h"
-#include "cast/Legacy/FPGAInst.h"
+#include "cast/IR/IRNode.h"
+#include "cast/FPGA/FPGAInst.h"
 
-using namespace cast::legacy;
+using namespace cast;
 using namespace cast::fpga;
 
 std::ostream& MInstEXT::print(std::ostream& os) const {
@@ -26,23 +26,23 @@ std::ostream& GInstUP::print(std::ostream& os) const {
 
 Instruction::CostKind
 Instruction::getCostKind(const FPGACostConfig& config) const {
-  if (mInst->getKind() == MOp_EXT) {
-    auto extInst = dynamic_cast<const MInstEXT &>(*mInst);
+  if (_mInst->getKind() == MOp_EXT) {
+    auto extInst = dynamic_cast<const MInstEXT &>(*_mInst);
     if (extInst.flags[0] < config.lowestQIdxForTwiceExtTime)
       return CK_TwiceExtMemTime;
     return CK_ExtMemTime;
   }
 
-  if (gInst->isNull()) {
-    assert(!mInst->isNull());
+  if (_gInst->isNull()) {
+    assert(!_mInst->isNull());
     return CK_NonExtMemTime;
   }
 
-  if (gInst->getKind() == GOp_UP)
+  if (_gInst->getKind() == GOp_UP)
     return CK_UPGate;
-  assert(gInst->getKind() == GOp_SQ);
+  assert(_gInst->getKind() == GOp_SQ);
 
-  if (gInst->blockKind.is(FPGAGateCategory::fpgaRealOnly))
+  if (_gInst->blockKind.is(FPGAGateCategory::fpgaRealOnly))
     return CK_RealOnlySQGate;
   return CK_GeneralSQGate;
 }
@@ -364,8 +364,8 @@ public:
       GateBlock* lastUpBlock = nullptr;
       assert(vacantGateIdx >= 0);
       if (config.maxUpSize > 0 && !instructions.empty() &&
-          instructions[vacantGateIdx - 1].gInst->getKind() == GOp_UP) {
-        lastUpBlock = instructions[vacantGateIdx - 1].gInst->block;
+          instructions[vacantGateIdx - 1]._gInst->getKind() == GOp_UP) {
+        lastUpBlock = instructions[vacantGateIdx - 1]._gInst->block;
         // check fusion condition
         auto candidateQubits = lastUpBlock->quantumGate->qubits;
         for (const auto& q : b->quantumGate->qubits)
@@ -395,7 +395,7 @@ public:
             nullptr, std::make_unique<GInstUP>(b, getBlockKind(b)));
       } else {
         auto& inst = instructions[vacantGateIdx];
-        assert(inst.gInst->isNull());
+        assert(inst._gInst->isNull());
         inst.setGInst(std::make_unique<GInstUP>(b, getBlockKind(b)));
       }
       ++vacantGateIdx;

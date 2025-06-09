@@ -1,59 +1,30 @@
-#include "cast/Core/QuantumGate.h"
-#include "cast/FPGA/FPGAInst.h"
 #include "cast/FPGA/FPGAFusion.h"
+#include "utils/utils.h"
 #include "utils/iocolor.h"
 
 using namespace cast;
+using namespace cast::fpga;
 
 namespace {
 
-GateBlock* computeCandidate(
+
+// Compute a candidate gate for fusion.
+// @return nullptr if fusion is not possible.
+QuantumGatePtr computeCandidate(
     const FPGAFusionConfig& config,
-    const GateBlock* lhs, const GateBlock* rhs) {
+    const QuantumGate* lhs, const QuantumGate* rhs) {
   if (lhs == nullptr || rhs == nullptr)
     return nullptr;
   if (lhs == rhs)
     return nullptr;
 
-  assert(lhs->quantumGate != nullptr);
-  assert(rhs->quantumGate != nullptr);
-
-  // candidate block
-  auto block = new GateBlock();
-
-  // std::cerr << "Trying to fuse "
-  //   << "lhs " << lhs->id << " and rhs " << rhs->id
-  //   << " => candidate block " << block->id << "\n";
-
   // set up qubits of candidate block
-  std::vector<int> blockQubits;
-  for (const auto& lData : lhs->wires) {
-    const auto& q = lData.qubit;
+  auto rstQubits = lhs->qubits();
+  for (const auto& q : rhs->qubits())
+    utils::push_back_if_not_present(rstQubits, q);
 
-    GateNode* lhsEntry = lData.lhsEntry;
-    GateNode* rhsEntry;
-    auto it = rhs->findWire(q);
-    if (it == nullptr)
-      rhsEntry = lData.rhsEntry;
-    else
-      rhsEntry = it->rhsEntry;
-
-    assert(lhsEntry);
-    assert(rhsEntry);
-
-    block->wires.push_back({q, lhsEntry, rhsEntry});
-    blockQubits.push_back(q);
-  }
-  for (const auto& rData : rhs->wires) {
-    const auto& q = rData.qubit;
-    if (lhs->findWire(q) == nullptr) {
-      block->wires.push_back(rData);
-      blockQubits.push_back(q);
-    }
-  }
-
-  auto lhsCate = getFPGAGateCategory(*lhs->quantumGate, config.tolerances);
-  auto rhsCate = getFPGAGateCategory(*rhs->quantumGate, config.tolerances);
+  auto lhsCate = getFPGAGateCategory(lhs, config.tolerances);
+  auto rhsCate = getFPGAGateCategory(rhs, config.tolerances);
 
   // check fusion condition
   // 1. ignore non-comp gates
@@ -73,22 +44,25 @@ GateBlock* computeCandidate(
   }
 
   // 2. multi-qubit gates: only fuse when unitary perm
+  // We do not have kernels for multi-qubit non-unitary-perm gates.
   if (lhsCate.isNot(FPGAGateCategory::fpgaSingleQubit)) {
     assert(lhsCate.is(FPGAGateCategory::fpgaUnitaryPerm) &&
-           "We do not have kernel for multi-qubit non-unitary-perm gates");
+           "LHS gate is multi-qubit non-unitary-perm.");
   }
   if (rhsCate.isNot(FPGAGateCategory::fpgaSingleQubit)) {
     assert(rhsCate.is(FPGAGateCategory::fpgaUnitaryPerm) &&
-           "We do not have kernel for multi-qubit non-unitary-perm gates");
+           "RHS gate is multi-qubit non-unitary-perm.");
   }
 
-  if (blockQubits.size() > config.maxUnitaryPermutationSize) {
+  // 3. check resulting size
+  // 3.1 resulting gate size is larger than max size, reject
+  if (rstQubits.size() > config.maxUnitaryPermutationSize) {
     // std::cerr << YELLOW_FG << "Rejected because the candidate block size is
     // too large\n" << RESET;
     return nullptr;
   }
-
-  if (blockQubits.size() > 1) {
+  // 3.2 resulting gate size is okay, accept if it is unitary perm
+  if (rstQubits.size() > 1) {
     if (lhsCate.isNot(FPGAGateCategory::fpgaUnitaryPerm) ||
         rhsCate.isNot(FPGAGateCategory::fpgaUnitaryPerm)) {
       // std::cerr << YELLOW_FG
@@ -100,47 +74,35 @@ GateBlock* computeCandidate(
 
   // accept candidate
   // std::cerr << GREEN_FG << "Fusion accepted! " << "\n" << RESET;
-
-  block->quantumGate = std::make_unique<QuantumGate>(
-      rhs->quantumGate->lmatmul(*lhs->quantumGate));
-
-  return block;
+  auto rstGate = cast::matmul(rhs, lhs);
+  return rstGate;
 }
 
-GateBlock* trySameWireFuse(
-    cast::legacy::CircuitGraph& graph, tile_iter_t itLHS,
-    int qubit, const FPGAFusionConfig& config) {
+using row_iterator = ir::CircuitGraphNode::row_iterator;
+
+ConstQuantumGatePtr trySameWireFuse(
+    ir::CircuitGraphNode& graph, row_iterator itLHS,
+    int q, const FPGAFusionConfig& config) {
   assert(itLHS != graph.tile_end());
-  const auto itRHS = itLHS.next();
+  const auto itRHS = std::next(itLHS);
   if (itRHS == graph.tile_end())
     return nullptr;
 
-  GateBlock* lhs = (*itLHS)[qubit];
-  GateBlock* rhs = (*itRHS)[qubit];
+  auto lhs = (*itLHS)[q];
+  auto rhs = (*itRHS)[q];
 
   if (!lhs || !rhs)
     return nullptr;
 
-  GateBlock* block = computeCandidate(config, lhs, rhs);
-  if (block == nullptr)
+  // candidate gate
+  auto cddGate = computeCandidate(config, lhs, rhs);
+  if (cddGate == nullptr)
     return nullptr;
 
-  // std::cerr << BLUE_FG;
-  // lhs->displayInfo(std::cerr);
-  // rhs->displayInfo(std::cerr);
-  // block->displayInfo(std::cerr) << RESET;
-
-  for (const auto& q : lhs->quantumGate->qubits)
-    (*itLHS)[q] = nullptr;
-  for (const auto& q : rhs->quantumGate->qubits)
-    (*itRHS)[q] = nullptr;
-
-  delete (lhs);
-  delete (rhs);
-
-  // insert block to tile
-  graph.insertBlock(itLHS, block);
-  return block;
+  graph.removeGate(itLHS, q);
+  graph.removeGate(itRHS, q);
+  graph.insertGate(cddGate, itLHS);
+  return cddGate;
 }
 
 GateBlock* tryCrossWireFuse(cast::legacy::CircuitGraph& graph,

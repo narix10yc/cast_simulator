@@ -1,25 +1,10 @@
 #ifndef CAST_FPGA_FPGAINST_H
 #define CAST_FPGA_FPGAINST_H
 
-#include "cast/FPGA/FPGAConfig.h"
-
-#include <cassert>
-#include <iostream>
-#include <memory>
-#include <vector>
-
-namespace cast {
-  class QuantumGate;
-} // namespace cast
+#include "cast/IR/IRNode.h"
+#include "cast/FPGA/FPGAGateCategory.h"
 
 namespace cast::fpga {
-
-// @param upTol: tolerance of the absolute values of complex entries in the
-// matrix smaller than (or equal to) which can be considered zero;
-// @param reOnlyTol: tolerance of the absolute value of imaginary value of
-// each entry smaller than (or equal to) which can be considered zero;
-FPGAGateCategory getFPGAGateCategory(
-    const cast::QuantumGate* gate, const FPGAGateCategoryTolerance& tolerances);
 
 // Gate Instruction Kind
 enum GInstKind : int {
@@ -124,8 +109,10 @@ public:
   std::vector<int> flags;
 
   MInstEXT(std::initializer_list<int> flags)
-      : MemoryInst(MOp_EXT), flags(flags) {}
-  MInstEXT(const std::vector<int>& flags) : MemoryInst(MOp_EXT), flags(flags) {}
+    : MemoryInst(MOp_EXT), flags(flags) {}
+
+  MInstEXT(const std::vector<int>& flags)
+    : MemoryInst(MOp_EXT), flags(flags) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
@@ -133,16 +120,15 @@ public:
 class GateInst {
 private:
   GInstKind gKind;
-
 public:
-  GateBlock* block;
+  ConstQuantumGatePtr gate;
   FPGAGateCategory blockKind;
 
   GateInst(GInstKind gKind)
-      : gKind(gKind), block(nullptr), blockKind(FPGAGateCategory::General) {}
+      : gKind(gKind), gate(nullptr), blockKind(FPGAGateCategory::General) {}
 
-  GateInst(GInstKind gKind, GateBlock* block, FPGAGateCategory blockKind)
-      : gKind(gKind), block(block), blockKind(blockKind) {}
+  GateInst(GInstKind gKind, ConstQuantumGatePtr gate, FPGAGateCategory blockKind)
+      : gKind(gKind), gate(gate), blockKind(blockKind) {}
 
   virtual ~GateInst() = default;
 
@@ -165,8 +151,8 @@ public:
 // Single Qubit Gate (SQ)
 class GInstSQ : public GateInst {
 public:
-  GInstSQ(GateBlock* block, FPGAGateCategory blockKind)
-      : GateInst(GOp_SQ, block, blockKind) {}
+  GInstSQ(ConstQuantumGatePtr gate, FPGAGateCategory blockKind)
+    : GateInst(GOp_SQ, gate, blockKind) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
@@ -174,16 +160,16 @@ public:
 // Unitary Permutation Gate (UP)
 class GInstUP : public GateInst {
 public:
-  GInstUP(GateBlock* block, FPGAGateCategory blockKind)
-      : GateInst(GOp_UP, block, blockKind) {}
+  GInstUP(ConstQuantumGatePtr gate, FPGAGateCategory blockKind)
+    : GateInst(GOp_UP, gate, blockKind) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
 
 struct FPGACostConfig {
-  // If the lowest-significant loaded-in qubit has qubit index less than this
+  // If the least-significant loaded-in qubit has qubit index less than this
   // value, external memory access takes twice the time (default to 7)
-  int lowestQIdxForTwiceExtTime;
+  int lowestQIdxForTwiceExtTime = 7;
 };
 
 class Instruction {
@@ -197,44 +183,52 @@ public:
     CK_TwiceExtMemTime // twice EXT mem inst
   };
 
+private:
+  std::unique_ptr<MemoryInst> _mInst;
+  std::unique_ptr<GateInst> _gInst;
 public:
-  std::unique_ptr<MemoryInst> mInst;
-  std::unique_ptr<GateInst> gInst;
-
-  Instruction(
-      std::unique_ptr<MemoryInst> _mInst, std::unique_ptr<GateInst> _gInst) {
+  Instruction(std::unique_ptr<MemoryInst> _mInst,
+              std::unique_ptr<GateInst> _gInst) {
     setMInst(std::move(_mInst));
     setGInst(std::move(_gInst));
   }
 
   std::ostream& print(std::ostream& os) const {
-    mInst->print(os) << " : ";
-    gInst->print(os) << "\n";
+    _mInst->print(os) << " : ";
+    _gInst->print(os) << "\n";
     return os;
   }
 
+  /// Get the memory instruction.
+  const MemoryInst* getMInst() const { return _mInst.get(); }
+
+  /// Get the gate instruction.
+  const GateInst* getGInst() const { return _gInst.get(); }
+
+  /// Set the memory instruction.
+  /// @param inst Mem instruction. Could be nullptr, in which case it will be
+  /// set to an MInstNul
   void setMInst(std::unique_ptr<MemoryInst> inst) {
     if (inst) {
-      mInst = std::move(inst);
+      _mInst = std::move(inst);
       return;
     }
-    mInst = std::make_unique<MInstNUL>();
+    _mInst = std::make_unique<MInstNUL>();
   }
 
+  /// @brief Set the gate instruction.
+  /// @param inst Gate instruction. Could be nullptr, in which case it will be 
+  /// set to a GInstNUL.
   void setGInst(std::unique_ptr<GateInst> inst) {
     if (inst) {
-      gInst = std::move(inst);
+      _gInst = std::move(inst);
       return;
     }
-    gInst = std::make_unique<GInstNUL>();
+    _gInst = std::make_unique<GInstNUL>();
   }
 
   CostKind getCostKind(const FPGACostConfig&) const;
 };
-
-// top-level function to generate FPGA instructions from a legacy::CircuitGraph
-std::vector<Instruction> genInstruction(
-    const legacy::CircuitGraph&, const FPGAInstGenConfig&);
 
 }; // namespace cast::fpga
 

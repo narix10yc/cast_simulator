@@ -1,5 +1,9 @@
-#ifndef CAST_FPGA_FPGACONFIG_H
-#define CAST_FPGA_FPGACONFIG_H
+#ifndef CAST_FPGA_FPGAGATECATEGORY_H
+#define CAST_FPGA_FPGAGATECATEGORY_H
+
+namespace cast {
+  class QuantumGate;
+} // namespace cast
 
 namespace cast::fpga {
 
@@ -63,30 +67,14 @@ struct FPGAGateCategoryTolerance {
   static const FPGAGateCategoryTolerance Zero;
 };
 
-struct FPGAInstGenConfig {
-public:
-  int nLocalQubits;
-  int gridSize;
-
-  // If off, apply sequential instruction generation on the default order of
-  // blocks present in legacy::CircuitGraph
-  bool selectiveGenerationMode;
-  int maxUpSize;
-
-  FPGAGateCategoryTolerance tolerances;
-
-  int getNOnChipQubits() const { return nLocalQubits + 2 * gridSize; }
-};
-
-struct FPGAFusionConfig {
-  int maxUnitaryPermutationSize;
-  bool ignoreSingleQubitNonCompGates;
-  bool multiTraverse;
-  FPGAGateCategoryTolerance tolerances;
-
-  static const FPGAFusionConfig Default;
-};
+/// @brief Get the FPGA gate category for a given quantum gate
+/// @param upTol: tolerance of the absolute values of complex entries in the
+/// matrix smaller than (or equal to) which can be considered zero;
+/// @param reOnlyTol: tolerance of the absolute value of imaginary value of
+/// each entry smaller than (or equal to) which can be considered zero;
+FPGAGateCategory getFPGAGateCategory(
+    const cast::QuantumGate* gate, const FPGAGateCategoryTolerance& tolerances);
 
 } // namespace cast::fpga
 
-#endif // CAST_FPGA_FPGACONFIG_H
+#endif // CAST_FPGA_FPGAGATECATEGORY_H

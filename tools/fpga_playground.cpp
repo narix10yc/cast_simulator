@@ -1,7 +1,5 @@
-#include "cast/Legacy/Parser.h"
-#include "cast/Legacy/CircuitGraph.h"
-#include "cast/Legacy/FPGAInst.h"
-#include "cast/Fusion.h"
+#include "cast/FPGA/FPGAInst.h"
+#include "cast/FPGA/FPGAFusion.h"
 
 #include "openqasm/parser.h"
 #include "utils/CommandLine.h"
@@ -11,7 +9,6 @@
 
 namespace cl = utils::cl;
 using namespace cast;
-using namespace cast::fpga;
 
 static auto&
 ArgInputFileName = cl::registerArgument<std::string>("i")
@@ -86,12 +83,12 @@ std::ostream& writCSVLine(std::ostream& os,
 InstStatistics getInstStatistics(const std::vector<fpga::Instruction>& insts) {
   InstStatistics stats;
   for (const auto& inst : insts) {
-    if (inst.gInst->getKind() == GOp_SQ)
+    if (inst._gInst->getKind() == GOp_SQ)
       stats.nSqGateInst++;
-    else if (inst.gInst->getKind() == GOp_UP)
+    else if (inst._gInst->getKind() == GOp_UP)
     stats.nUpGateInst++;
-    if (!inst.mInst->isNull()) {
-      if (inst.mInst->getKind() == MOp_EXT)
+    if (!inst._mInst->isNull()) {
+      if (inst._mInst->getKind() == MOp_EXT)
         stats.nExtMemInst++;
       else
         stats.nNonExtMemInst++;
@@ -107,7 +104,7 @@ InstCycleStatistics getCycleStatistics(
   InstCycleStatistics stats;
   for (const auto& inst : insts) {
     // inst.print(std::cerr);
-    if (!inst.mInst->isNull() && !inst.gInst->isNull())
+    if (!inst._mInst->isNull() && !inst._gInst->isNull())
       stats.nOverlappingInst++;
     auto costKind = inst.getCostKind(costConfig);
     switch (costKind) {
