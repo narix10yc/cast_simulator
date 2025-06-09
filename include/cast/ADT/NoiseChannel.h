@@ -8,6 +8,7 @@ namespace cast {
 
 class NoiseChannel;
 using NoiseChannelPtr = std::shared_ptr<NoiseChannel>;
+using ConstNoiseChannelPtr = std::shared_ptr<const NoiseChannel>;
 
 /// It is suggested to not copy \c NoiseChannel s directly. Use 
 /// \c std::shared_ptr instead.

@@ -165,12 +165,13 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
 // Compute the superoperator matrix for a standard quantum gate. We assume
 // noise is applied after the gate operation.
 static ScalarGateMatrixPtr
-computeSuperopMatrix(const StandardQuantumGate* gate) {
+computeSuperopMatrix(StandardQuantumGate* gate) {
   assert(gate != nullptr);
   auto gateMatrix = gate->gateMatrix();
   assert(gateMatrix != nullptr);
   if (!llvm::isa<ScalarGateMatrix>(gateMatrix.get())) {
-    return nullptr; // Only implemented for ScalarGateMatrix now
+    assert(false && "Only implemented for ScalarGateMatrix now");
+    return nullptr;
   }
   auto sGateMatrix = std::static_pointer_cast<ScalarGateMatrix>(gateMatrix);
   auto noiseChannel = gate->noiseChannel();
@@ -213,12 +214,17 @@ computeSuperopMatrix(const StandardQuantumGate* gate) {
   return superOpGateMatrix;
 }
 
+static ConstScalarGateMatrixPtr
+computeSuperopMatrix(const StandardQuantumGate* gate) {
+  return computeSuperopMatrix(const_cast<StandardQuantumGate*>(gate));
+}
+
 SuperopQuantumGatePtr cast::getSuperopGate(QuantumGatePtr gate) {
   if (gate == nullptr)
     return nullptr;
-  if (auto* standardGate = llvm::dyn_cast<StandardQuantumGate>(gate.get())) {
+  if (auto* stdQuGate = llvm::dyn_cast<StandardQuantumGate>(gate.get())) {
     return std::make_shared<SuperopQuantumGate>(
-      computeSuperopMatrix(standardGate), standardGate->qubits());
+      computeSuperopMatrix(stdQuGate), stdQuGate->qubits());
   }
   if (llvm::isa<SuperopQuantumGate>(gate.get())) {
     return std::static_pointer_cast<SuperopQuantumGate>(gate);

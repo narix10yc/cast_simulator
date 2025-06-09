@@ -9,15 +9,21 @@ namespace cast {
 
 class GateMatrix;
 using GateMatrixPtr = std::shared_ptr<GateMatrix>;
+using ConstGateMatrixPtr = std::shared_ptr<const GateMatrix>;
 
 class ScalarGateMatrix;
 using ScalarGateMatrixPtr = std::shared_ptr<ScalarGateMatrix>;
+using ConstScalarGateMatrixPtr = std::shared_ptr<const ScalarGateMatrix>;
 
 class UnitaryPermGateMatrix;
 using UnitaryPermGateMatrixPtr = std::shared_ptr<UnitaryPermGateMatrix>;
+using ConstUnitaryPermGateMatrixPtr = 
+  std::shared_ptr<const UnitaryPermGateMatrix>;
 
 class ParametrizedGateMatrix;
 using ParametrizedGateMatrixPtr = std::shared_ptr<ParametrizedGateMatrix>;
+using ConstParametrizedGateMatrixPtr = 
+  std::shared_ptr<const ParametrizedGateMatrix>;
 
 /// @brief \c GateMatrix is a base class for all gate matrices.
 /// It knows the number of qubits, but not which qubits.

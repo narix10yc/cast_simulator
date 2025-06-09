@@ -1,6 +1,6 @@
-#include "cast/Legacy/FPGAConfig.h"
+#include "cast/FPGA/FPGAConfig.h"
 
-using namespace cast::legacy::fpga;
+using namespace cast::fpga;
 
 const FPGAGateCategory FPGAGateCategory::General(
     static_cast<unsigned>(FPGAGateCategory::fpgaGeneral));

@@ -1,29 +1,27 @@
-#ifndef CAST_FPGAINST_H
-#define CAST_FPGAINST_H
+#ifndef CAST_FPGA_FPGAINST_H
+#define CAST_FPGA_FPGAINST_H
+
+#include "cast/FPGA/FPGAConfig.h"
 
 #include <cassert>
 #include <iostream>
 #include <memory>
 #include <vector>
 
-#include "cast/Legacy/FPGAConfig.h"
-
-namespace cast::legacy {
-  class CircuitGraph;
+namespace cast {
   class QuantumGate;
-  class GateBlock;
-} // namespace cast::legacy
+} // namespace cast
 
-namespace cast::legacy::fpga {
+namespace cast::fpga {
 
 // @param upTol: tolerance of the absolute values of complex entries in the
 // matrix smaller than (or equal to) which can be considered zero;
 // @param reOnlyTol: tolerance of the absolute value of imaginary value of
 // each entry smaller than (or equal to) which can be considered zero;
-FPGAGateCategory
-getFPGAGateCategory(const QuantumGate& gate,
-                    const FPGAGateCategoryTolerance& tolerances);
+FPGAGateCategory getFPGAGateCategory(
+    const cast::QuantumGate* gate, const FPGAGateCategoryTolerance& tolerances);
 
+// Gate Instruction Kind
 enum GInstKind : int {
   GOp_NUL = 0,
 
@@ -31,6 +29,7 @@ enum GInstKind : int {
   GOp_UP = 2, // Unitary Permutation
 };
 
+// Memory Instruction Kind
 enum MInstKind : int {
   MOp_NUL = 0,
 
@@ -239,4 +238,4 @@ std::vector<Instruction> genInstruction(
 
 }; // namespace cast::fpga
 
-#endif // CAST_FPGAINST_H
+#endif // CAST_FPGA_FPGAINST_H

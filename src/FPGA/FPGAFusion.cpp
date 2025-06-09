@@ -1,14 +1,9 @@
-#include "cast/Legacy/CircuitGraph.h"
-#include "cast/Legacy/QuantumGate.h"
-#include "cast/Legacy/FPGAInst.h"
-#include "cast/Fusion.h"
+#include "cast/Core/QuantumGate.h"
+#include "cast/FPGA/FPGAInst.h"
+#include "cast/FPGA/FPGAFusion.h"
 #include "utils/iocolor.h"
 
-using namespace cast::legacy;
-using namespace cast::legacy::fpga;
-using namespace IOColor;
-
-using tile_iter_t = cast::legacy::CircuitGraph::tile_iter_t;
+using namespace cast;
 
 namespace {
 

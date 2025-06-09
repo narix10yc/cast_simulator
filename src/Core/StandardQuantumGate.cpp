@@ -27,11 +27,19 @@ StandardQuantumGate::StandardQuantumGate(
   _noiseChannel = cast::permute(noiseChannel, indices);
 }
 
-ScalarGateMatrixPtr StandardQuantumGate::getScalarGM() const {
+ScalarGateMatrixPtr StandardQuantumGate::getScalarGM() {
   if (_gateMatrix == nullptr)
     return nullptr;
   if (llvm::isa<ScalarGateMatrix>(_gateMatrix.get()))
     return std::static_pointer_cast<ScalarGateMatrix>(_gateMatrix);
+  return nullptr;
+}
+
+ConstScalarGateMatrixPtr StandardQuantumGate::getScalarGM() const {
+  if (_gateMatrix == nullptr)
+    return nullptr;
+  if (llvm::isa<ScalarGateMatrix>(_gateMatrix.get()))
+    return std::static_pointer_cast<const ScalarGateMatrix>(_gateMatrix);
   return nullptr;
 }
 

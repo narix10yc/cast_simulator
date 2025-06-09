@@ -1,11 +1,12 @@
-#include "cast/Legacy/FPGAInst.h"
-#include "cast/Legacy/QuantumGate.h"
+#include "cast/FPGA/FPGAInst.h"
+#include "cast/Core/QuantumGate.h"
 
-using namespace cast::legacy;
-using namespace cast::legacy::fpga;
+#include "llvm/Support/Casting.h"
+
+using namespace cast;
 
 namespace {
-inline bool isRealOnlyGate(const QuantumGate& gate, double reTol) {
+inline bool isRealOnlyGate(const QuantumGate* gate, double reTol) {
   const auto* cMat = gate.gateMatrix.getConstantMatrix();
   assert(cMat);
   for (const auto& cplx : *cMat) {
@@ -16,31 +17,10 @@ inline bool isRealOnlyGate(const QuantumGate& gate, double reTol) {
 }
 } // namespace
 
-FPGAGateCategory
-cast::legacy::fpga::getFPGAGateCategory(
-    const QuantumGate& gate, const FPGAGateCategoryTolerance &tolerances) {
-  switch (gate.gateMatrix.gateKind) {
-  case gX:
-    return FPGAGateCategory::SingleQubit | FPGAGateCategory::NonComp |
-           FPGAGateCategory::RealOnly;
-  case gY:
-    return FPGAGateCategory::SingleQubit | FPGAGateCategory::NonComp;
-  case gZ:
-    return FPGAGateCategory::SingleQubit | FPGAGateCategory::NonComp;
-  case gP:
-    return FPGAGateCategory::SingleQubit | FPGAGateCategory::UnitaryPerm;
-  case gH:
-    return FPGAGateCategory::SingleQubit;
-  case gCX:
-    return FPGAGateCategory::NonComp;
-  case gCZ:
-    return FPGAGateCategory::NonComp;
-  case gCP:
-    return FPGAGateCategory::UnitaryPerm;
-  default:
-    break;
-  }
-
+fpga::FPGAGateCategory cast::fpga::getFPGAGateCategory(
+    const cast::QuantumGate* gate,
+    const fpga::FPGAGateCategoryTolerance& tolerances) {
+      
   FPGAGateCategory cate = FPGAGateCategory::General;
 
   if (gate.qubits.size() == 1)

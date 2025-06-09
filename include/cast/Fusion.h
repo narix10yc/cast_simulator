@@ -2,7 +2,6 @@
 #define CAST_CPUFUSION_H
 
 #include "cast/CostModel.h"
-#include "cast/Legacy/FPGAConfig.h"
 #include "cast/IR/IRNode.h"
 #include <cassert>
 
@@ -49,9 +48,6 @@ void applyGateFusion(
 
 void applyGateFusion(
     const FusionConfig&, const CostModel*, ir::CircuitGraphNode&, int max_k=7);
-
-void applyFPGAGateFusion(legacy::CircuitGraph& graph,
-                         const legacy::fpga::FPGAFusionConfig& config);
 
 } // namespace cast
 

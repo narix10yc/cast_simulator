@@ -1,7 +1,7 @@
-#ifndef CAST_FPGACONFIG_H
-#define CAST_FPGACONFIG_H
+#ifndef CAST_FPGA_FPGACONFIG_H
+#define CAST_FPGA_FPGACONFIG_H
 
-namespace cast::legacy::fpga {
+namespace cast::fpga {
 
 class FPGAGateCategory {
 public:
@@ -87,6 +87,6 @@ struct FPGAFusionConfig {
   static const FPGAFusionConfig Default;
 };
 
-} // namespace cast::legacy::fpga
+} // namespace cast::fpga
 
-#endif // CAST_FPGACONFIG_H
+#endif // CAST_FPGA_FPGACONFIG_H

@@ -2,7 +2,7 @@
 #include "cast/Legacy/FPGAInst.h"
 
 using namespace cast::legacy;
-using namespace cast::legacy::fpga;
+using namespace cast::fpga;
 
 std::ostream& MInstEXT::print(std::ostream& os) const {
   os << "EXT ";
@@ -567,7 +567,7 @@ public:
 
 } // anonymous namespace
 
-std::vector<Instruction> cast::legacy::fpga::genInstruction(
+std::vector<Instruction> cast::fpga::genInstruction(
     const CircuitGraph& graph, const FPGAInstGenConfig& config) {
   InstGenState state(graph, config);
 

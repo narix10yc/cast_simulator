@@ -11,6 +11,9 @@ add_library(cast_core STATIC ${SRC_FILES})
 FILE(GLOB_RECURSE SRC_FILES "CPU/*.cpp")
 add_library(cast_cpu STATIC ${SRC_FILES})
 
+FILE(GLOB_RECURSE SRC_FILES "FPGA/*.cpp")
+add_library(cast_fpga STATIC ${SRC_FILES})
+
 FILE(GLOB_RECURSE SRC_FILES "Legacy/*.cpp")
 add_library(cast_legacy STATIC ${SRC_FILES})
 

@@ -11,12 +11,15 @@ namespace cast {
 
 class QuantumGate;
 using QuantumGatePtr = std::shared_ptr<QuantumGate>;
+using ConstQuantumGatePtr = std::shared_ptr<const QuantumGate>;
 
 class StandardQuantumGate;
 using StandardQuantumGatePtr = std::shared_ptr<StandardQuantumGate>;
+using ConstStandardQuantumGatePtr = std::shared_ptr<const StandardQuantumGate>;
 
 class SuperopQuantumGate;
 using SuperopQuantumGatePtr = std::shared_ptr<SuperopQuantumGate>;
+using ConstSuperopQuantumGatePtr = std::shared_ptr<const SuperopQuantumGate>;
 
 /// Recommended to always use QuantumGatePtr than QuantumGate directly.
 class QuantumGate {
@@ -66,6 +69,11 @@ QuantumGatePtr matmul(const QuantumGate* gateA, const QuantumGate* gateB);
 
 SuperopQuantumGatePtr getSuperopGate(QuantumGatePtr gate);
 
+// ConstSuperopQuantumGatePtr getSuperopGate(ConstQuantumGatePtr gate) {
+//   return getSuperopGate(std::const_pointer_cast<QuantumGate>(gate));
+// }
+
+
 /// @brief StandardQuantumGate consists of a GateMatrix and a NoiseChannel.
 /// GateMatrix could be parametrized.
 /// We take the convention that noise comes `after` the gate operation. For 
@@ -82,10 +90,10 @@ public:
                       const TargetQubitsType& qubits);
 
   GateMatrixPtr gateMatrix() { return _gateMatrix; }
-  const GateMatrixPtr& gateMatrix() const { return _gateMatrix; }
+  ConstGateMatrixPtr gateMatrix() const { return _gateMatrix; }
 
   NoiseChannelPtr noiseChannel() { return _noiseChannel; }
-  const NoiseChannelPtr& noiseChannel() const { return _noiseChannel; }
+  ConstNoiseChannelPtr noiseChannel() const { return _noiseChannel; }
 
   // Set the noise channel to a symmetric Pauli channel with probability p.
   void setNoiseSPC(double p) {
@@ -96,7 +104,11 @@ public:
 
   // Try to cast the gate matrix to ScalarGateMatrix. Returns nullptr if
   // the casting is not possible.
-  ScalarGateMatrixPtr getScalarGM() const;
+  ScalarGateMatrixPtr getScalarGM();
+
+  // Try to cast the gate matrix to ScalarGateMatrix. Returns nullptr if
+  // the casting is not possible.
+  ConstScalarGateMatrixPtr getScalarGM() const;
 
   std::ostream& displayInfo(std::ostream& os, int verbose) const override;
 
@@ -154,7 +166,7 @@ public:
                      const TargetQubitsType& qubits);
 
   ScalarGateMatrixPtr getMatrix() { return _superopMatrix; }
-  const ScalarGateMatrixPtr& getMatrix() const { return _superopMatrix; }
+  ConstScalarGateMatrixPtr getMatrix() const { return _superopMatrix; }
 
   double opCount(double zeroTol) const override;
 
