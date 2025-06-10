@@ -80,16 +80,17 @@ QuantumGatePtr computeCandidate(
 
 using row_iterator = ir::CircuitGraphNode::row_iterator;
 
-ConstQuantumGatePtr trySameWireFuse(
-    ir::CircuitGraphNode& graph, row_iterator itLHS,
-    int q, const FPGAFusionConfig& config) {
-  assert(itLHS != graph.tile_end());
-  const auto itRHS = std::next(itLHS);
-  if (itRHS == graph.tile_end())
+QuantumGatePtr tryCrossWireFuse(
+    ir::CircuitGraphNode& graph,
+    row_iterator rowItL, int q,
+    const FPGAFusionConfig& config) {
+  assert(rowItL != graph.tile_end());
+  const auto rowItR = std::next(rowItL);
+  if (rowItR == graph.tile_end())
     return nullptr;
 
-  auto lhs = (*itLHS)[q];
-  auto rhs = (*itRHS)[q];
+  auto lhs = (*rowItL)[q];
+  auto rhs = (*rowItR)[q];
 
   if (!lhs || !rhs)
     return nullptr;
@@ -99,64 +100,56 @@ ConstQuantumGatePtr trySameWireFuse(
   if (cddGate == nullptr)
     return nullptr;
 
-  graph.removeGate(itLHS, q);
-  graph.removeGate(itRHS, q);
-  graph.insertGate(cddGate, itLHS);
+  // accept candidate gate
+  graph.replaceGatesOnConsecutiveRowsWith(cddGate, rowItL, q);
   return cddGate;
 }
 
-GateBlock* tryCrossWireFuse(cast::legacy::CircuitGraph& graph,
-                            const tile_iter_t& tileIt,
-                            int q, const FPGAFusionConfig& config) {
-  auto block0 = (*tileIt)[q];
-  if (block0 == nullptr)
+QuantumGatePtr trySameWireFuse(
+    ir::CircuitGraphNode& graph,
+    row_iterator rowIt, int q,
+    const FPGAFusionConfig& config) {
+  auto* gate0 = (*rowIt)[q];
+  if (gate0 == nullptr)
     return nullptr;
 
-  for (unsigned q1 = 0; q1 < graph.nQubits; q1++) {
-    auto* block1 = (*tileIt)[q1];
-    auto* fusedBlock = computeCandidate(config, block0, block1);
-    if (fusedBlock == nullptr)
+  for (unsigned q1 = 0; q1 < graph.nQubits(); q1++) {
+    auto* gate1 = (*rowIt)[q1];
+    auto cddGate = computeCandidate(config, gate0, gate1);
+    if (cddGate == nullptr)
       continue;
-    for (const auto q : fusedBlock->quantumGate->qubits) {
-      (*tileIt)[q] = fusedBlock;
-    }
-    delete (block0);
-    delete (block1);
-    return fusedBlock;
+    // accept candidate gate
+    graph.removeGate(rowIt, q);
+    graph.removeGate(rowIt, q1);
+    graph.insertGate(cddGate, rowIt);
+    return cddGate;
   }
   return nullptr;
 }
 } // anonymous namespace
 
-void cast::applyFPGAGateFusion(
-    legacy::CircuitGraph& graph, const FPGAFusionConfig& config) {
-  auto& tile = graph.tile();
-  if (tile.size() < 2)
-    return;
+void cast::fpga::applyFPGAGateFusion(
+    ir::CircuitGraphNode& graph, const FPGAFusionConfig& config) {
+  // if (graph.tile().size() < 2)
+    // return;
 
-  GateBlock* lhsBlock;
-  GateBlock* rhsBlock;
-
+  const auto nQubits = graph.nQubits();
   bool hasChange = true;
-  tile_iter_t tileIt;
+  row_iterator rowIt;
   unsigned q = 0;
   // multi-traversal
   while (hasChange) {
-    tileIt = tile.begin();
+    rowIt = graph.tile_begin();
     hasChange = false;
-    while (tileIt.next() != tile.end()) {
+    while (std::next(rowIt) != graph.tile_end()) {
       // same wire (connected consecutive) fuse
       q = 0;
-      while (q < graph.nQubits) {
-        if ((*tileIt)[q] == nullptr) {
+      while (q < nQubits) {
+        if ((*rowIt)[q] == nullptr) {
           q++;
           continue;
         }
-        if ((*tileIt.next())[q] == nullptr) {
-          graph.repositionBlockDownward(tileIt, q++);
-          continue;
-        }
-        auto* fusedBlock = trySameWireFuse(graph, tileIt, q, config);
+        auto fusedBlock = trySameWireFuse(graph, rowIt, q, config);
         if (fusedBlock == nullptr)
           q++;
         else
@@ -164,17 +157,16 @@ void cast::applyFPGAGateFusion(
       }
       // cross wire (same row) fuse
       q = 0;
-      while (q < graph.nQubits) {
-        auto* fusedBlock = tryCrossWireFuse(graph, tileIt, q, config);
+      while (q < nQubits) {
+        auto fusedBlock = tryCrossWireFuse(graph, rowIt, q, config);
         if (fusedBlock == nullptr)
           q++;
         else
           hasChange = true;
       }
-      tileIt++;
+      rowIt++;
     }
-    graph.eraseEmptyRows();
-    // graph.updateTileUpward();
+    graph.squeeze();
     if (!config.multiTraverse)
       break;
   }

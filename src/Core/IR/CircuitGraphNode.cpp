@@ -138,7 +138,7 @@ void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
   assert(inserted && "Gate already exists");
   
   auto rowIt = --_tile.end();
-  if (rowIt == _tile.end() || !isRowVacant(rowIt, *gate)) {
+  if (rowIt == _tile.end() || !isRowVacant(rowIt, gate->qubits())) {
     // insert a new row if either tile is empty or the last row is not vacant
     rowIt = insertNewRow(tile_end());
   }
@@ -181,10 +181,10 @@ void CircuitGraphNode::removeGate(row_iterator rowIt, int qubit) {
   }
 }
 
-bool CircuitGraphNode::isRowVacant(row_iterator rowIt,
-                                   const QuantumGate& gate) const {
+bool CircuitGraphNode::isRowVacant(
+    row_iterator rowIt, const QuantumGate::TargetQubitsType& qubits) const {
   assert(rowIt != _tile.end());
-  for (auto q : gate.qubits()) {
+  for (const auto& q : qubits) {
     assert(q >= 0);
     if (q >= _nQubits)
       continue;
@@ -211,31 +211,36 @@ void CircuitGraphNode::fuseAndInsertSameRow(
 
 CircuitGraphNode::row_iterator
 CircuitGraphNode::fuseAndInsertDiffRow(row_iterator rowItL, int qubit) {
-  assert(rowItL != tile_end());
-  auto* gateL = (*rowItL)[qubit];
-  assert(gateL != nullptr);
   auto rowItR = std::next(rowItL);
-  assert(rowItR != tile_end());
+  assert(rowItL != tile_end() && rowItR != tile_end());
+  auto* gateL = (*rowItL)[qubit];
   auto* gateR = (*rowItR)[qubit];
-  assert(gateR != nullptr);
 
   auto gateFused = cast::matmul(gateR, gateL);
-  removeGate(rowItL, gateL->qubits()[0]);
-  removeGate(rowItR, gateR->qubits()[0]);
+  return replaceGatesOnConsecutiveRowsWith(gateFused, rowItL, qubit);
+}
 
-  // prioritize iterR > iterL > between iterL and iterR
-  if (isRowVacant(rowItR, *gateFused)) {
-    insertGate(gateFused, rowItR);
+CircuitGraphNode::row_iterator
+CircuitGraphNode::replaceGatesOnConsecutiveRowsWith(
+    QuantumGatePtr gate, row_iterator rowItL, int qubit) {
+  auto rowItR = std::next(rowItL);
+  assert(rowItL != tile_end() && rowItR != tile_end());
+  removeGate(rowItL, qubit);
+  removeGate(rowItR, qubit);
+
+  if (isRowVacant(rowItR, gate->qubits())) {
+    insertGate(gate, rowItR);
     return rowItR;
   }
-  if (isRowVacant(rowItL, *gateFused)) {
-    insertGate(gateFused, rowItL);
+  if (isRowVacant(rowItL, gate->qubits())) {
+    insertGate(gate, rowItL);
     return rowItL;
   }
   auto rowItInserted = insertNewRow(rowItR);
-  insertGate(gateFused, rowItInserted);
+  insertGate(gate, rowItInserted);
   return rowItInserted;
 }
+
 
 int CircuitGraphNode::gateId(const QuantumGate* gate) const {
   for (const auto& [itGate, id] : _gateMap) {
@@ -266,7 +271,7 @@ void CircuitGraphNode::squeeze() {
         continue;
       // find the top-most vacant row
       auto rowVacant = std::prev(rowIt);
-      while (rowVacant != tile_end() && isRowVacant(rowVacant, *gate)) {
+      while (rowVacant != tile_end() && isRowVacant(rowVacant, gate->qubits())) {
         --rowVacant;
       }
       ++rowVacant; // move to the next row, which is vacant

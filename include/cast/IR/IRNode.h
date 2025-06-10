@@ -163,12 +163,26 @@ public:
   void insertGate(QuantumGatePtr gate);
 
   /// @brief Insert a gate into the circuit graph at a specific row.
+  /// This function assumes \c rowIt is a vacant row to fit the gate.
   void insertGate(QuantumGatePtr gate, row_iterator rowIt);
 
   /// @brief Remove a gate from the circuit graph at a specific row and qubit.
   void removeGate(row_iterator rowIt, int qubit);
 
-  bool isRowVacant(row_iterator rowIt, const QuantumGate& gate) const;
+  bool isRowVacant(row_iterator rowIt,
+                   const QuantumGate::TargetQubitsType& qubits) const;
+  
+  /// @brief Remove the two gates \c (*rowItL)[qubit] and
+  /// \c (*std::next(rowItL))[qubit], and insert gate \c gate into the tile.
+  /// Often this function is called when \c gate is the fused gate of the 
+  /// two removed gates.
+  /// The row that \c gate is inserted into takes the following priority:
+  /// 1. Put \c gate in row \c std::next(rowItL) if is vacant; If not,
+  /// 2. Put \c gate in row \c rowItL if is vacant. If not,
+  /// 3. Insert a new row immediately after \c rowItL and put \c gate there.
+  /// @return row of the inserted gate
+  row_iterator replaceGatesOnConsecutiveRowsWith(
+      QuantumGatePtr gate, row_iterator rowItL, int qubit);
 
   void squeeze();
 

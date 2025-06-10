@@ -42,7 +42,7 @@ namespace {
 // Get the number of qubits after fusion of two quantum gates.
 // We want this function because computing the matrix could be much more
 // expensive.
-int getKAfterFusion(QuantumGate* gateA, QuantumGate* gateB) {
+int getKAfterFusion(const QuantumGate* gateA, const QuantumGate* gateB) {
   if (gateA == nullptr || gateB == nullptr)
     return 0; // no qubits
   int count = 0;
