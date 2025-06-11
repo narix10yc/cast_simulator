@@ -7,7 +7,6 @@ using namespace cast::fpga;
 
 namespace {
 
-
 // Compute a candidate gate for fusion.
 // @return nullptr if fusion is not possible.
 QuantumGatePtr computeCandidate(

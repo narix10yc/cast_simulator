@@ -18,9 +18,8 @@ private:
   std::vector<ScalarGateMatrix> _ops;
 public:
 
-  KrausRep(int nQubits) : _nQubits(nQubits) {
+  KrausRep(int nQubits) : _nQubits(nQubits), _ops() {
     assert(nQubits > 0);
-    _ops.reserve(1ULL << (2 * nQubits));
   }
 
   const ScalarGateMatrix& operator[](size_t idx) const {

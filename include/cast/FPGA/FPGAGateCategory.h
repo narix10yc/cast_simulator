@@ -58,22 +58,17 @@ public:
   static const FPGAGateCategory RealOnly;
 };
 
-struct FPGAGateCategoryTolerance {
-  double upTol;     // unitary perm gate tolerance
-  double ncTol;     // non-computational gate tolerance
-  double reOnlyTol; // real only gate tolerance
-
-  static const FPGAGateCategoryTolerance Default;
-  static const FPGAGateCategoryTolerance Zero;
-};
-
 /// @brief Get the FPGA gate category for a given quantum gate
-/// @param upTol: tolerance of the absolute values of complex entries in the
-/// matrix smaller than (or equal to) which can be considered zero;
-/// @param reOnlyTol: tolerance of the absolute value of imaginary value of
-/// each entry smaller than (or equal to) which can be considered zero;
-FPGAGateCategory getFPGAGateCategory(
-    const cast::QuantumGate* gate, const FPGAGateCategoryTolerance& tolerances);
+/// @param tol: the tolerance value. Will be used to check 3 things:
+///   1. If the gate is real only, i.e., all imaginary parts are within tol.
+///   2. If the gate is unitary permutation, i.e., all phases are close to
+///      0, pi, -pi, pi/2, -pi/2.
+///   3. If the gate is a non-computational, i.e., all non-zero elements are 
+///      close to 1, -1, i or -i.
+/// The exact tolerance varies a little. In particular, for unitary permutation,
+/// the tolerance is used to check the phases, not the magnitudes.
+FPGAGateCategory getFPGAGateCategory(const cast::QuantumGate* gate,
+                                     double tol = 1e-8);
 
 } // namespace cast::fpga
 

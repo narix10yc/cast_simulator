@@ -82,6 +82,31 @@ public:
            "Matrix size must be a power of 2");
   }
 
+  ScalarGateMatrix(const ScalarGateMatrix& other)
+    : GateMatrix(GM_Scalar, other._nQubits), _matrix(other._matrix) {}
+
+  ScalarGateMatrix(ScalarGateMatrix&& other) noexcept
+    : GateMatrix(GM_Scalar, other._nQubits)
+    , _matrix(std::move(other._matrix)) {
+    other._nQubits = 0; 
+  }
+
+  ScalarGateMatrix& operator=(const ScalarGateMatrix& other) {
+    if (this == &other)
+      return *this;
+    _nQubits = other._nQubits;
+    _matrix = other._matrix;
+    return *this;
+  }
+
+  ScalarGateMatrix& operator=(ScalarGateMatrix&& other) noexcept {
+    if (this == &other)
+      return *this;
+    _nQubits = other._nQubits;
+    _matrix = std::move(other._matrix);
+    return *this;
+  }
+
   ComplexSquareMatrix& matrix() { return _matrix; }
   const ComplexSquareMatrix& matrix() const { return _matrix; }
 
@@ -143,9 +168,59 @@ public:
 }; // class ScalarGateMatrix
 
 class UnitaryPermGateMatrix : public GateMatrix {
+private:
+  struct IndexPhasePair {
+    size_t index;
+    double phase;
+  };
+
+  // array of index-phase pairs. For unitary permutation matrices, there is only
+  // one non-zero entry in each row and column. Each non-zero entry is in the 
+  // complex unit circle, i.e., has a normed phase in [-pi, pi). \c _data
+  // stores where the non-zero entries are, and their phases. For example,
+  // Matrix[r, c] = 
+  //  exp(i * _data[r].phase) if _data[r].index == c;
+  //                        0 if _data[r].index != c.
+  // The phase is a output of std::atan2(im, re), with range (-pi, pi].
+  IndexPhasePair* _data;
 public:
-  UnitaryPermGateMatrix(int nQubits)
+  explicit UnitaryPermGateMatrix(int nQubits)
     : GateMatrix(GM_UnitaryPerm, nQubits) {}
+
+  UnitaryPermGateMatrix(const UnitaryPermGateMatrix& other)
+    : GateMatrix(GM_UnitaryPerm, other._nQubits) {
+    _data = new IndexPhasePair[1ULL << _nQubits];
+    std::memcpy(_data, other._data, sizeof(IndexPhasePair) * (1ULL << _nQubits));
+  }
+
+  UnitaryPermGateMatrix(UnitaryPermGateMatrix&& other) noexcept
+    : GateMatrix(GM_UnitaryPerm, other._nQubits), _data(other._data) {
+    other._data = nullptr;
+  }
+
+  ~UnitaryPermGateMatrix() { delete[] _data; }
+
+  UnitaryPermGateMatrix& operator=(const UnitaryPermGateMatrix& other) {
+    if (this == &other)
+      return *this;
+    this->~UnitaryPermGateMatrix();
+    new (this) UnitaryPermGateMatrix(other);
+    return *this;
+  }
+
+  UnitaryPermGateMatrix& operator=(UnitaryPermGateMatrix&& other) noexcept {
+    if (this == &other)
+      return *this;
+    this->~UnitaryPermGateMatrix();
+    new (this) UnitaryPermGateMatrix(std::move(other));
+    return *this;
+  }
+
+  IndexPhasePair* data() { return _data; }
+  const IndexPhasePair* data() const { return _data; }
+
+  static UnitaryPermGateMatrixPtr FromGateMatrix(const GateMatrix* gm,
+                                                 double zeroTol);
 
   static bool classof(const GateMatrix* gm) {
     return gm->kind() == GM_UnitaryPerm;

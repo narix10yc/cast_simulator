@@ -3,6 +3,8 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
+#include "llvm/Support/Casting.h"
+
 using namespace cast;
 
 std::ostream& ScalarGateMatrix::displayInfo(std::ostream& os, int verbose) const {
@@ -58,4 +60,49 @@ ScalarGateMatrixPtr ScalarGateMatrix::RZ(double theta) {
   matrix.setRC(1, 0, 0.0, 0.0);
   matrix.setRC(1, 1, std::cos(theta * 0.5), std::sin(theta * 0.5));
   return matrixPtr;
+}
+
+UnitaryPermGateMatrixPtr UnitaryPermGateMatrix::FromGateMatrix(
+    const GateMatrix* gm, double zeroTol) {
+  if (gm == nullptr)
+    return nullptr;
+  if (const auto* upGM = llvm::dyn_cast<UnitaryPermGateMatrix>(gm)) {
+    // Create a copy of the UnitaryPermGateMatrix.
+    return std::make_shared<UnitaryPermGateMatrix>(*upGM);
+  }
+  if (const auto* scalarGM = llvm::dyn_cast<ScalarGateMatrix>(gm)) {
+    // Convert ScalarGateMatrix to UnitaryPermGateMatrix.
+    auto upGM = std::make_shared<UnitaryPermGateMatrix>(scalarGM->nQubits());
+    const auto& matrix = scalarGM->matrix();
+    for (unsigned r = 0; r < matrix.edgeSize(); ++r) {
+      bool hasNonZero = false;
+      for (unsigned c = 0; c < matrix.edgeSize(); ++c) {
+        const auto re = matrix.real(r, c);
+        const auto im = matrix.imag(r, c);
+        bool isZero = re * re + im * im < zeroTol * zeroTol;
+        if (isZero) {
+          // skip zero entries
+          continue;
+        }
+        if (hasNonZero) { // !isZero && hasNonZero
+          // More than one non-zero entries in this row,
+          // not a unitary permutation.
+          return nullptr;
+        } 
+        // !isZero && !hasNonZero
+        hasNonZero = true;
+        upGM->data()[r].index = c;
+        upGM->data()[r].phase = std::atan2(im, re);
+        continue;
+      }
+      if (!hasNonZero) {
+        // This row is full of zeros. Cannot be a unitary permutation.
+        return nullptr;
+      }
+    }
+    return upGM;
+  }
+  assert(false &&
+    "Unsupported GateMatrix type for conversion to UnitaryPermGateMatrix");
+  return nullptr;
 }

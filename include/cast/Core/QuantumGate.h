@@ -175,6 +175,12 @@ public:
     return std::make_shared<SuperopQuantumGate>(superopMatrix, qubits);
   }
 
+  // A factory method to create a SuperopQuantumGate from a QuantumGate.
+  // It is suggested to check the kind of \c gate before calling this method.
+  // If \c gate is already a SuperopQuantumGate, it will return a shared pointer
+  // by copying the SuperopQuantumGate.
+  static SuperopQuantumGatePtr FromQuGate(const QuantumGate* gate);
+
   std::ostream& displayInfo(std::ostream& os, int verbose) const override;
 
   static bool classof(const QuantumGate* qg) {
