@@ -11,7 +11,7 @@ int main() {
   utils::timedExecute([] {
     test_applyGate();
     test_gateMatMul();
-  }, "Gate Multiplication Test Finished!");
+  }, "Gate Matrix Test Finished!");
 
   utils::timedExecute([] {
     test_cpuH();
@@ -29,6 +29,10 @@ int main() {
   utils::timedExecute([] {
     test_fusionCPU();
   }, "CPU Fusion Test Finished!");
+
+  utils::timedExecute([] {
+    test_fpgaGateCategory();
+  }, "FPGA Gate Category Test Finished!");
 
   // utils::timedExecute([] {
   //   test_cpuRz_param();

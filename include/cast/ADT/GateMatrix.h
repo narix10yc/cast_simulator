@@ -185,7 +185,8 @@ private:
   IndexPhasePair* _data;
 public:
   explicit UnitaryPermGateMatrix(int nQubits)
-    : GateMatrix(GM_UnitaryPerm, nQubits) {}
+    : GateMatrix(GM_UnitaryPerm, nQubits)
+    , _data(new IndexPhasePair[1ULL << nQubits]) {}
 
   UnitaryPermGateMatrix(const UnitaryPermGateMatrix& other)
     : GateMatrix(GM_UnitaryPerm, other._nQubits) {

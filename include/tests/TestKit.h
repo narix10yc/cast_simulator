@@ -76,6 +76,8 @@ void test_quantumChannel();
 void test_cpuH();
 void test_cpuU();
 
+void test_fpgaGateCategory();
+
 // void test_cpuRz_param();
 
 void test_fusionCPU();

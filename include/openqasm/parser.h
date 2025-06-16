@@ -16,7 +16,7 @@ class Parser {
   Token curToken;
 
 public:
-  Parser(const std::string& fileName, int debugLevel = 1)
+  Parser(const std::string& fileName, int debugLevel = 0)
       : debugLevel(debugLevel), lexer(std::make_unique<Lexer>(fileName)),
         curToken(TokenTy::Unknown) {}
 

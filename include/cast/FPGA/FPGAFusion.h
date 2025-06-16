@@ -10,7 +10,7 @@ struct FPGAFusionConfig {
   int maxUnitaryPermutationSize;
   bool ignoreSingleQubitNonCompGates;
   bool multiTraverse;
-  FPGAGateCategoryTolerance tolerances;
+  double tolerance;
 
   static const FPGAFusionConfig Default;
 };

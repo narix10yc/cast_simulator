@@ -34,30 +34,37 @@ fpga::FPGAGateCategory cast::fpga::getFPGAGateCategory(
   // handle unitary permutation gates
   if (auto upGM = UnitaryPermGateMatrix::FromGateMatrix(gm.get(), tol)) {
     cate |= FPGAGateCategory::UnitaryPerm;
+    
     // Check for non-computational-ness
     bool isNonComp = true;
-    bool isReal = true;
     for (unsigned i = 0; i < (1U << gate->nQubits()); ++i) {
       const auto phase = upGM->data()[i].phase;
-      if (std::abs(phase) > tol || 
-          std::abs(phase - M_PI) > tol ||
-          std::abs(phase + M_PI) > tol) {
-        isReal = false;
+      if (!(std::abs(phase) < tol || 
+            std::abs(phase - M_PI) < tol ||
+            std::abs(phase + M_PI) < tol ||
+            std::abs(phase - M_PI_2) < tol ||
+            std::abs(phase + M_PI_2) < tol)) {
         isNonComp = false;
         break;
       }
-      if (std::abs(phase - M_PI_2) > tol ||
-          std::abs(phase + M_PI_2) > tol) {
-        isNonComp = false;
-        if (!isReal)  // If already not real, no need to check further
-          break;
-        continue;
-      }
     }
-    if (isReal)
-      cate |= FPGAGateCategory::RealOnly;
     if (isNonComp)
       cate |= FPGAGateCategory::NonComp;
+
+    // Check if the gate is real only
+    bool isReal = true;
+    for (unsigned i = 0; i < (1U << gate->nQubits()); ++i) {
+      const auto phase = upGM->data()[i].phase;
+      if (!(std::abs(phase) < tol || 
+            std::abs(phase - M_PI) < tol ||
+            std::abs(phase + M_PI) < tol)) {
+        isReal = false;
+        break;
+      }
+    }
+    if (isReal) {
+      cate |= FPGAGateCategory::RealOnly;
+    }
     return cate;
   }
 

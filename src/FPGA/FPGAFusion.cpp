@@ -22,19 +22,19 @@ QuantumGatePtr computeCandidate(
   for (const auto& q : rhs->qubits())
     utils::push_back_if_not_present(rstQubits, q);
 
-  auto lhsCate = getFPGAGateCategory(lhs, config.tolerances);
-  auto rhsCate = getFPGAGateCategory(rhs, config.tolerances);
+  auto lhsCate = getFPGAGateCategory(lhs, config.tolerance);
+  auto rhsCate = getFPGAGateCategory(rhs, config.tolerance);
 
   // check fusion condition
   // 1. ignore non-comp gates
   if (config.ignoreSingleQubitNonCompGates) {
-    if (lhsCate.is(FPGAGateCategory::fpgaNonComp)) {
+    if (lhsCate.is(FPGAGateCategory::NonComp)) {
       // std::cerr << CYAN_FG << "Omitted because LHS block "
       //   << lhs->id << " is a non-comp gate\n" << RESET;
       // lhs->quantumGate->gateMatrix.printCMat(std::cerr) << "\n";
       return nullptr;
     }
-    if (rhsCate.is(FPGAGateCategory::fpgaNonComp)) {
+    if (rhsCate.is(FPGAGateCategory::NonComp)) {
       // std::cerr << CYAN_FG << "Omitted because RHS block "
       //   << rhs->id << " is a non-comp gate\n" << RESET;
       // rhs->quantumGate->gateMatrix.printCMat(std::cerr) << "\n";
@@ -44,12 +44,12 @@ QuantumGatePtr computeCandidate(
 
   // 2. multi-qubit gates: only fuse when unitary perm
   // We do not have kernels for multi-qubit non-unitary-perm gates.
-  if (lhsCate.isNot(FPGAGateCategory::fpgaSingleQubit)) {
-    assert(lhsCate.is(FPGAGateCategory::fpgaUnitaryPerm) &&
+  if (lhsCate.isNot(FPGAGateCategory::SingleQubit)) {
+    assert(lhsCate.is(FPGAGateCategory::UnitaryPerm) &&
            "LHS gate is multi-qubit non-unitary-perm.");
   }
-  if (rhsCate.isNot(FPGAGateCategory::fpgaSingleQubit)) {
-    assert(rhsCate.is(FPGAGateCategory::fpgaUnitaryPerm) &&
+  if (rhsCate.isNot(FPGAGateCategory::SingleQubit)) {
+    assert(rhsCate.is(FPGAGateCategory::UnitaryPerm) &&
            "RHS gate is multi-qubit non-unitary-perm.");
   }
 
@@ -62,8 +62,8 @@ QuantumGatePtr computeCandidate(
   }
   // 3.2 resulting gate size is okay, accept if it is unitary perm
   if (rstQubits.size() > 1) {
-    if (lhsCate.isNot(FPGAGateCategory::fpgaUnitaryPerm) ||
-        rhsCate.isNot(FPGAGateCategory::fpgaUnitaryPerm)) {
+    if (lhsCate.isNot(FPGAGateCategory::UnitaryPerm) ||
+        rhsCate.isNot(FPGAGateCategory::UnitaryPerm)) {
       // std::cerr << YELLOW_FG
       //   << "Rejected because the resulting gate "
       //  "is multi-qubit but not unitary perm\n" << RESET;

@@ -8,39 +8,30 @@ namespace cast {
 namespace cast::fpga {
 
 class FPGAGateCategory {
-public:
   enum Kind : unsigned {
     fpgaGeneral = 0,
     fpgaSingleQubit = 0b0001,
-
+    
     // unitary permutation
     fpgaUnitaryPerm = 0b0010,
-
+    
     // Non-computational is a special subclass of unitary permutation where all
     // non-zero entries are +1, -1, +i, -i.
     fpgaNonComp = 0b0110,
     fpgaRealOnly = 0b1000,
   };
-
   unsigned category;
+public:
+  FPGAGateCategory(unsigned kind) : category(kind) {}
 
-  explicit FPGAGateCategory(unsigned category) : category(category) {}
+  operator unsigned() const { return category; }
 
-  bool is(Kind kind) const {
-    return (category & static_cast<unsigned>(kind)) ==
-           static_cast<unsigned>(kind);
+  bool is(FPGAGateCategory cate) const {
+    return (category & static_cast<unsigned>(cate)) ==
+           static_cast<unsigned>(cate);
   }
 
-  bool isNot(Kind kind) const { return !is(kind); }
-
-  FPGAGateCategory& operator|=(const Kind& kind) {
-    category |= static_cast<unsigned>(kind);
-    return *this;
-  }
-
-  FPGAGateCategory operator|(const Kind& kind) const {
-    return FPGAGateCategory(category | static_cast<unsigned>(kind));
-  }
+  bool isNot(FPGAGateCategory cate) const { return !is(cate); }
 
   FPGAGateCategory& operator|=(const FPGAGateCategory& other) {
     category |= static_cast<unsigned>(other.category);

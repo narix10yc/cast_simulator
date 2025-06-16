@@ -30,6 +30,7 @@ target_link_libraries(cast INTERFACE
   openqasm
   cast_core
   cast_cpu
+  cast_fpga
   cast_utils
   cast_legacy
   ${LLVM_LIBS}
