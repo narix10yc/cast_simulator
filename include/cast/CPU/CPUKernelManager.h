@@ -27,7 +27,7 @@ struct CPUKernelInfo {
   int precision;
   std::string llvmFuncName;
   MatrixLoadMode matrixLoadMode;
-  std::shared_ptr<cast::QuantumGate> gate;
+  ConstQuantumGatePtr gate;
   // extra information
   int simd_s;
   int opCount;
@@ -96,7 +96,7 @@ public:
 
   // This is the main entry point to generate a CPU kernel.
   CPUKernelManager& genCPUGate(const CPUKernelGenConfig& config,
-                               QuantumGatePtr gate,
+                               ConstQuantumGatePtr gate,
                                const std::string& funcName);
 
   /// Generate kernels for all gates in the given circuit graph. The generated

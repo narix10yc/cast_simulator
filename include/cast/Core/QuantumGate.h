@@ -39,10 +39,13 @@ protected:
   // qubits are sorted in ascending order
   TargetQubitsType _qubits;
 public:
-  QuantumGate(QuantumGateKind kind) : _kind(kind) {}
+  explicit QuantumGate(QuantumGateKind kind) : _kind(kind) {}
   virtual ~QuantumGate() = default;
 
   int nQubits() const { return _qubits.size(); }
+
+  TargetQubitsType& qubits() { return _qubits; }
+  const TargetQubitsType& qubits() const { return _qubits; }
 
   /// @brief The operation count.
   virtual double opCount(double zeroTol) const {
@@ -50,8 +53,10 @@ public:
     return 0.0;
   }
 
-  TargetQubitsType& qubits() { return _qubits; }
-  const TargetQubitsType& qubits() const { return _qubits; }
+  virtual SuperopQuantumGatePtr getSuperopGate() const {
+    assert(false && "QuantumGate::getSuperopGate called from base class");
+    return nullptr;
+  }
 
   virtual std::ostream& displayInfo(std::ostream& os, int verbose) const {
     return os << "QuantumGate::displayInfo() not implemented";
@@ -66,13 +71,6 @@ public:
 // Return gateA @ gateB. In the context of quantum gates, gateB is applied
 // first.
 QuantumGatePtr matmul(const QuantumGate* gateA, const QuantumGate* gateB);
-
-SuperopQuantumGatePtr getSuperopGate(QuantumGatePtr gate);
-
-// ConstSuperopQuantumGatePtr getSuperopGate(ConstQuantumGatePtr gate) {
-//   return getSuperopGate(std::const_pointer_cast<QuantumGate>(gate));
-// }
-
 
 /// @brief StandardQuantumGate consists of a GateMatrix and a NoiseChannel.
 /// GateMatrix could be parametrized.
@@ -109,6 +107,8 @@ public:
   // Try to cast the gate matrix to ScalarGateMatrix. Returns nullptr if
   // the casting is not possible.
   ConstScalarGateMatrixPtr getScalarGM() const;
+
+  SuperopQuantumGatePtr getSuperopGate() const override;
 
   std::ostream& displayInfo(std::ostream& os, int verbose) const override;
 
@@ -175,11 +175,10 @@ public:
     return std::make_shared<SuperopQuantumGate>(superopMatrix, qubits);
   }
 
-  // A factory method to create a SuperopQuantumGate from a QuantumGate.
-  // It is suggested to check the kind of \c gate before calling this method.
-  // If \c gate is already a SuperopQuantumGate, it will return a shared pointer
-  // by copying the SuperopQuantumGate.
-  static SuperopQuantumGatePtr FromQuGate(const QuantumGate* gate);
+  // This method returns a copy of this superop gate
+  SuperopQuantumGatePtr getSuperopGate() const override {
+    return SuperopQuantumGate::Create(_superopMatrix, _qubits);
+  }
 
   std::ostream& displayInfo(std::ostream& os, int verbose) const override;
 

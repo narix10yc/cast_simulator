@@ -19,7 +19,7 @@ using namespace cast;
 // Top-level entry
 CPUKernelManager& CPUKernelManager::genCPUGate(
     const CPUKernelGenConfig& config,
-    QuantumGatePtr gate,
+    ConstQuantumGatePtr gate,
     const std::string& funcName) {
 
   auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
@@ -48,7 +48,7 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
   }
 
   // super op gates are treated as normal gates with twice the number of qubits
-  auto superopGate = cast::getSuperopGate(gate);
+  auto superopGate = gate->getSuperopGate();
   assert(superopGate != nullptr && "Superop gate should not be null");
   const auto scalarGM = superopGate->getMatrix();
   assert(scalarGM != nullptr && "superop gate matrix should not be null");

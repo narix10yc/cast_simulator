@@ -33,7 +33,7 @@ void cast::test::test_quantumChannel() {
   auto gate = StandardQuantumGate::I1(0);
   gate->setNoiseSPC(0.1);
 
-  auto soGate = cast::getSuperopGate(gate);
+  auto soGate = gate->getSuperopGate();
 
   auto targetSOGate = getSOGateForSPC(0.1, 0);
   suite.assertClose(

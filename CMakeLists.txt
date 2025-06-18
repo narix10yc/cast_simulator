@@ -5,6 +5,7 @@ option(CAST_USE_CUDA "Use LLVM NVPTX Backend for CUDA Support" OFF)
 if(CAST_USE_CUDA)
   add_compile_definitions(CAST_USE_CUDA)
 endif()
+option(CAST_PYTHON_BIND "Bind Python" OFF)
 
 message("############ Custom Setups ############")
 # There are two modes: 
@@ -192,4 +193,9 @@ add_subdirectory(tools)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/drafts")
   add_subdirectory(drafts)
+endif()
+
+if (CAST_PYTHON_BIND)
+  message(STATUS "Building Python bindings...")
+  add_subdirectory(python)
 endif()

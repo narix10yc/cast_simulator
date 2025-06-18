@@ -276,27 +276,19 @@ public:
 
   /// @brief Uniform randomize statevector (by the Haar-measure on sphere).
   void randomize(int nThreads = 1) {
-    auto N = getN();
-    std::random_device rd;
-    std::mt19937 gen{rd()};
-    std::normal_distribution<ScalarType> d(0.0, 1.0);
-
-    if (nThreads == 1) {
-      for (size_t i = 0; i < 2 * N; ++i)
-        _data[i] = d(gen);
-      normalize();
-      return;
-    }
-    // multi-thread
     std::vector<std::thread> threads;
     threads.reserve(nThreads);
+    auto N = getN();
     size_t nTasksPerThread = 2ULL * N / nThreads;
     for (int t = 0; t < nThreads; ++t) {
       size_t t0 = nTasksPerThread * t;
       size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
-      threads.emplace_back([&, t0=t0, t1=t1]() {
-        for (size_t i = t0; i < t0; ++i)
-          _data[i] = d(gen);
+      threads.emplace_back([this, t0, t1]() {
+        std::random_device rd;
+        std::mt19937 gen{rd()};
+        std::normal_distribution<ScalarType> d(0.0, 1.0);
+        for (size_t i = t0; i < t1; ++i)
+          this->_data[i] = d(gen);
       });
     }
     for (auto& t : threads) {

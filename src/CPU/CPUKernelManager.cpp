@@ -24,7 +24,7 @@ using namespace llvm;
 std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
   os << std::scientific;
   os << CYAN("=== CPU Kernel Gen Config ===\n")
-     << "simd_s:    " << simd_s << "\n"
+     << "simd_s:     " << simd_s << "\n"
      << "precision:  " << precision << "\n"
      << "amp format: ";
   switch (this->ampFormat) {
@@ -36,11 +36,11 @@ std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
       assert(0 && "Unreachable");
   }
 
-  os << "useFMA     : " << useFMA << "\n"
-     << "useFMS     : " << useFMS << "\n"
-     << "usePDEP     : " << usePDEP << "\n"
-     << "zeroTolerance : " << zeroTol << "\n"
-     << "oneTolerance : " << oneTol << "\n"
+  os << "useFMA:         " << useFMA << "\n"
+     << "useFMS:         " << useFMS << "\n"
+     << "usePDEP:        " << usePDEP << "\n"
+     << "zeroTolerance:  " << zeroTol << "\n"
+     << "oneTolerance:   " << oneTol << "\n"
      << "matrixLoadMode: ";
   switch (this->matrixLoadMode) {
     case MatrixLoadMode::UseMatImmValues:

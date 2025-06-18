@@ -15,3 +15,7 @@ release-build/*
 tmp/*
 analysis/*
 *.csv
+
+# python-related
+python_envs/*
+*.ipynb

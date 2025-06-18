@@ -5,7 +5,7 @@ using namespace cast;
 
 // Allocates memory for the gate matrix to be used in invoking CPU kernels
 // @return a pointer to the allocated memory. Remember to free it after use.
-static void* mallocGatePointer(cast::QuantumGate* gate, int precision) {
+static void* mallocGatePointer(const cast::QuantumGate* gate, int precision) {
   void* p = nullptr;
   auto* standardQuGate = llvm::dyn_cast<cast::StandardQuantumGate>(gate);
   if (standardQuGate != nullptr) {
