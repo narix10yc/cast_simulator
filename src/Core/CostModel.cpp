@@ -402,7 +402,8 @@ void PerformanceCache::runExperiments(
 
   utils::timedExecute([&]() {
     kernelMgr.initJIT(nThreads, OptimizationLevel::O1,
-      /* useLazyJIT */ false, /* verbose */ 1);
+      /* useLazyJIT */ false, /* verbose */ 1
+    ).consumeError(); // ignore possible errors
   }, "Initialize JIT Engine");
 
   timeit::Timer timer(3, /* verbose */ 0);

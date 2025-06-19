@@ -23,7 +23,7 @@ static void f() {
   cpuKernelMgr.genCPUGate(cpuConfig, getH(2), "gate_h_2").consumeError();
   cpuKernelMgr.genCPUGate(cpuConfig, getH(3), "gate_h_3").consumeError();
 
-  cpuKernelMgr.initJIT();
+  cpuKernelMgr.initJIT().consumeError(); // ignore possible errors
 
   CPUStatevector<double> sv(6, simd_s);
   sv.initialize();

@@ -83,7 +83,7 @@ public:
   /// ORC JIT engine. This means all kernels only get compiled just before being
   /// called. If set to false, all kernels are ready to be executed when this
   /// function returns (good for benchmarks).
-  void initJIT(
+  MaybeError<void> initJIT(
       int nThreads = 1,
       llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
       bool useLazyJIT = false,
@@ -105,9 +105,10 @@ public:
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
   /// order of the gate in the circuit graph. <order> will be retrieved in
   /// \c collectKernelsFromGraphName 
-  void genCPUGatesFromGraph(const CPUKernelGenConfig& config,
-                            const ir::CircuitGraphNode& graph,
-                            const std::string& graphName);
+  MaybeError<void> genCPUGatesFromGraph(
+      const CPUKernelGenConfig& config,
+      const ir::CircuitGraphNode& graph,
+      const std::string& graphName);
 
   std::vector<CPUKernelInfo*>
   collectKernelsFromGraphName(const std::string& graphName);

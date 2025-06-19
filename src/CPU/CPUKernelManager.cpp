@@ -75,10 +75,15 @@ void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   dispatcher.sync(progressBar);
 }
 
-void CPUKernelManager::initJIT(
+MaybeError<void> CPUKernelManager::initJIT(
     int nThreads, OptimizationLevel optLevel, bool useLazyJIT, int verbose) {
-  assert(nThreads > 0);
-  assert(!isJITed() && "Already initialized");
+  if (nThreads <= 0) {
+    return cast::makeError<void>(
+      "Invalid number of threads: " + std::to_string(nThreads));
+  }
+  if (isJITed()) {
+    return cast::makeError<void>("JIT has already been initialized.");
+  }
 
   InitializeAllTargets();
   InitializeAllTargetMCs();
@@ -96,8 +101,12 @@ void CPUKernelManager::initJIT(
     jitBuilder.setNumCompileThreads(nThreads);
     auto lazyJIT = cantFail(jitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
-      cantFail(lazyJIT->addLazyIRModule(
-        orc::ThreadSafeModule(std::move(mod), std::move(ctx))));
+      auto err = lazyJIT->addLazyIRModule(
+        orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
+      if (err) {
+        return cast::makeError<void>(
+            "Failed to add lazy IR module: " + llvm::toString(std::move(err)));
+      }
     }
     this->llvmJIT = std::move(lazyJIT);
     ensureAllExecutable(nThreads, /* progressBar */ verbose > 0);
@@ -107,14 +116,19 @@ void CPUKernelManager::initJIT(
     eagerJitBuilder.setNumCompileThreads(nThreads);
     auto eagerJIT = cantFail(eagerJitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
-      cantFail(eagerJIT->addIRModule(
-        orc::ThreadSafeModule(std::move(mod), std::move(ctx))));
+      auto err = eagerJIT->addIRModule(
+        orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
+      if (err) {
+        return cast::makeError<void>(
+            "Failed to add IR module: " + llvm::toString(std::move(err)));
+      }
     }
     this->llvmJIT = std::move(eagerJIT);
     // eager compile all kernels
     ensureAllExecutable(nThreads, /* progressBar */ verbose > 0);
   }
   this->llvmContextModulePairs.clear();
+  return {}; // success
 }
 
 void CPUKernelManager::dumpIR(const std::string& funcName,

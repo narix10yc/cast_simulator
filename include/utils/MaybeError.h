@@ -1,9 +1,8 @@
 #ifndef UTILS_MAYBE_ERROR_H
 #define UTILS_MAYBE_ERROR_H
 
-#include <optional>
 #include <string>
-#include <iostream>
+#include "llvm/Support/ErrorOr.h"
 
 namespace cast {
 
@@ -35,12 +34,18 @@ namespace cast {
 
 template<typename T>
 class [[nodiscard]] MaybeError {
+  static constexpr bool NotVoid = !std::is_void_v<T>;
+  struct Dummy {};
   // In debug mode, MaybeError<T> is allowed to be destroyed only when
   // _errorMsg is a std::nullopt.
   using value_type = std::conditional_t<
-    std::is_reference_v<T>,
-    std::reference_wrapper<std::remove_reference_t<T>>,
-    T
+    NotVoid,
+    std::conditional_t<
+      std::is_reference_v<T>,
+      std::reference_wrapper<std::remove_reference_t<T>>,
+      T
+    >,
+    Dummy
   >;
   using error_msg_type = std::string;
   union {
@@ -49,16 +54,22 @@ class [[nodiscard]] MaybeError {
   };
   mutable impl::MaybeErrorStatus status;
 public:
+  MaybeError() requires(!NotVoid) : status(impl::ErrorAbsentNotChecked) {
+    // No value to initialize, so we don't need to do anything.
+  }
+
   MaybeError(const impl::MaybeErrorInitializer<T>& i)
     : status(impl::ErrorPresentNotChecked) {
     new (&_errorMsg) error_msg_type(std::move(i.errorMsg));
   }
 
-  MaybeError(const T& value) : status(impl::ErrorAbsentNotChecked) {
+  MaybeError(const value_type& value) requires(NotVoid)
+    : status(impl::ErrorAbsentNotChecked) {
     new (&_value) value_type(value);
   }
 
-  MaybeError(T&& value) : status(impl::ErrorAbsentNotChecked) {
+  MaybeError(value_type&& value) noexcept requires(NotVoid)
+    : status(impl::ErrorAbsentNotChecked) {
     new (&_value) value_type(std::move(value));
   }
 
@@ -67,7 +78,7 @@ public:
            "MaybeError must be checked before destruction");
     if (status.isErrorPresent())
       _errorMsg.~error_msg_type();
-    else
+    else if constexpr (NotVoid)
       _value.~value_type();
   }
   
@@ -81,7 +92,7 @@ public:
       return;
     if (other.status.isErrorPresent())
       new (&_errorMsg) error_msg_type(std::move(other._errorMsg));
-    else
+    else if constexpr (NotVoid)
       new (&_value) value_type(std::move(other._value)); 
     // set check the other status to indicate it has been moved.
     other.status.setErrorChecked();
@@ -95,7 +106,7 @@ public:
       // If both are in the same state, we can just move the value.
       if (status.isErrorPresent())
         _errorMsg = std::move(other._errorMsg);
-      else
+      else if constexpr (NotVoid)
         _value = std::move(other._value);
       status.setErrorChecked();
       return *this;
@@ -120,7 +131,7 @@ public:
 
   bool hasValue() const { return !hasError(); }
 
-  const T& getValue() const {
+  const value_type& getValue() const requires(NotVoid){
     assert(hasValue() && "No value present in MaybeError");
     return _value;
   }
@@ -131,7 +142,7 @@ public:
     return std::move(_errorMsg);
   }
 
-  const T& operator*() const { return getValue(); }
+  const value_type& operator*() const requires(NotVoid) { return getValue(); }
 
   operator bool() const { return hasValue(); }
 }; // class MaybeError

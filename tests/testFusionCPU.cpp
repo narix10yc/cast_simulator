@@ -66,8 +66,8 @@ static void f() {
       ).consumeError(); // ignore possible error
     }
 
-    kernelMgrBeforeFusion.initJIT();
-    kernelMgrAfterFusion.initJIT();
+    kernelMgrBeforeFusion.initJIT().consumeError(); // ignore possible error
+    kernelMgrAfterFusion.initJIT().consumeError(); // ignore possible error
 
     cast::CPUStatevector<double> sv0(graph.nQubits(), simd_s);
     cast::CPUStatevector<double> sv1(graph.nQubits(), simd_s);

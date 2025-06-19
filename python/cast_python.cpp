@@ -9,13 +9,6 @@
 
 namespace py = pybind11;
 
-static std::string forwardLLVMError(llvm::Error e, const llvm::Twine& banner) {
-  std::string str;
-  llvm::raw_string_ostream os(str);
-  llvm::logAllUnhandledErrors(std::move(e), os, banner);
-  return os.str();
-}
-
 namespace {
 
 void bind_QuantumGate(py::module_& m) {
@@ -160,8 +153,18 @@ void bind_CPUKernelManager(py::module_& m) {
       },
       py::arg("config"), py::arg("gate"), py::arg("func_name")
     )
-    .def("gen_cpu_gates_from_graph",
-      &cast::CPUKernelManager::genCPUGatesFromGraph,
+    .def("gen_cpu_gates_from_graph", [](cast::CPUKernelManager& self, 
+                                        const cast::CPUKernelGenConfig& config, 
+                                        const cast::ir::CircuitGraphNode& graph, 
+                                        const std::string& graph_name) {
+        auto rst = self.genCPUGatesFromGraph(config, graph, graph_name);
+        if (!rst) {
+          throw std::runtime_error(
+            "Failed to generate CPU gates from graph. Reason: " +
+            rst.takeError()
+          );
+        }
+      },
       py::arg("config"), py::arg("graph"), py::arg("graph_name")
     )
     .def("get_kernels", [](const cast::CPUKernelManager& self) {
@@ -169,14 +172,9 @@ void bind_CPUKernelManager(py::module_& m) {
       },
       py::return_value_policy::copy
     )
-    .def("init_jit", 
-      [](cast::CPUKernelManager& self, int nThreads, int optLevel, 
-          bool useLazyJit, int verbose) {
-        // safe guard against multiple initializations
-        if (self.isJITed()) {
-          std::cerr << "JIT is already initialized.\n";
-          return;
-        }
+    .def("init_jit", [](cast::CPUKernelManager& self,
+                        int nThreads, int optLevel, 
+                        bool useLazyJit, int verbose) {
         llvm::OptimizationLevel llvmOptLevel = llvm::OptimizationLevel::O0;
         switch (optLevel) {
           case 0: llvmOptLevel = llvm::OptimizationLevel::O0; break;
@@ -186,7 +184,11 @@ void bind_CPUKernelManager(py::module_& m) {
           // we default it to O3 anyways
           default: llvmOptLevel = llvm::OptimizationLevel::O3; break;
         }
-        self.initJIT(nThreads, llvmOptLevel, useLazyJit, verbose);
+        auto rst = self.initJIT(nThreads, llvmOptLevel, useLazyJit, verbose);
+        if (!rst) {
+          throw std::runtime_error(
+            "Failed to initialize JIT: " + rst.takeError());
+        }
       },
       py::arg("num_threads") = 1,
       py::arg("opt_level") = 1,

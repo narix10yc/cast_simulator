@@ -46,7 +46,7 @@ static void internal_U1q() {
                         ).consumeError(); // ignore possible errors
   }
 
-  kernelMgr.initJIT();
+  kernelMgr.initJIT().consumeError(); // ignore possible errors
   for (unsigned i = 0; i < nQubits; i++) {
     randomizeSV();
     std::stringstream ss;
@@ -110,7 +110,7 @@ static void internal_U2q() {
                         ).consumeError(); // ignore possible errors
   }
 
-  kernelMgr.initJIT();
+  kernelMgr.initJIT().consumeError(); // ignore possible errors
   for (unsigned i = 0; i < nQubits; i++) {
     randomizeSV();
     int a = gates[i]->qubits()[0];

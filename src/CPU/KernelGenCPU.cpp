@@ -68,7 +68,7 @@ MaybeError<CPUKernelInfo*> CPUKernelManager::genCPUGate(
   return &_kernels.back();
 }
 
-void CPUKernelManager::genCPUGatesFromGraph(
+MaybeError<void> CPUKernelManager::genCPUGatesFromGraph(
     const CPUKernelGenConfig& config,
     const ir::CircuitGraphNode& graph,
     const std::string& graphName) {
@@ -86,11 +86,13 @@ void CPUKernelManager::genCPUGatesFromGraph(
                 std::to_string(graph.gateId(gate));
     auto result = genCPUGate(config, gate, name);
     if (!result) {
-      std::cerr << BOLDYELLOW("Warning: ")
-                << "error encountered when trying to generate kernel for gate "
-                << (void*)(gate.get()) << ": " << result.takeError() << "\n";
+      std::ostringstream oss;
+      oss << "Failed to generate kernel for gate "
+          << (void*)(gate.get()) << ": " << result.takeError() << "\n";
+      return cast::makeError<void>(oss.str());
     }
   }
+  return {};
 }
 
 std::vector<CPUKernelInfo*>
