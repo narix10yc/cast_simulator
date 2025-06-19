@@ -393,8 +393,11 @@ void PerformanceCache::runExperiments(
   CPUKernelManager kernelMgr;
   utils::timedExecute([&]() {
     int i = 0;
-    for (const auto& gate : gates)
-      kernelMgr.genCPUGate(cpuConfig, gate, "gate_" + std::to_string(i++));
+    for (const auto& gate : gates) {
+      kernelMgr.genCPUGate(cpuConfig, gate,
+                           "gate_" + std::to_string(i++)
+                          ).consumeError(); // ignore possible errors
+    }
   }, "Code Generation");
 
   utils::timedExecute([&]() {

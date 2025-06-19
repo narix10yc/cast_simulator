@@ -18,10 +18,10 @@ static void f() {
   CPUKernelGenConfig cpuConfig;
   cpuConfig.simd_s = simd_s;
 
-  cpuKernelMgr.genCPUGate(cpuConfig, getH(0), "gate_h_0");
-  cpuKernelMgr.genCPUGate(cpuConfig, getH(1), "gate_h_1");
-  cpuKernelMgr.genCPUGate(cpuConfig, getH(2), "gate_h_2");
-  cpuKernelMgr.genCPUGate(cpuConfig, getH(3), "gate_h_3");
+  cpuKernelMgr.genCPUGate(cpuConfig, getH(0), "gate_h_0").consumeError();
+  cpuKernelMgr.genCPUGate(cpuConfig, getH(1), "gate_h_1").consumeError();
+  cpuKernelMgr.genCPUGate(cpuConfig, getH(2), "gate_h_2").consumeError();
+  cpuKernelMgr.genCPUGate(cpuConfig, getH(3), "gate_h_3").consumeError();
 
   cpuKernelMgr.initJIT();
 

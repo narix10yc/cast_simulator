@@ -97,13 +97,17 @@ static void benchmark() {
     // some entries whose absolute value is less than our zero-tolerance (which
     // is 1e-8 by default). We set forceDenseKernel to always generate 
     // dense-gate kernels.
-    kernelGenConfig.forceDenseKernel = true;
+    kernelGenConfig.zeroTol = 0.0;
+    kernelGenConfig.oneTol = 0.0;
     kernelMgr.genCPUGate(kernelGenConfig, unitaryGate,
-                         "unitary_gate_" + std::to_string(k));
+                         "unitary_gate_" + std::to_string(k)
+                        ).consumeError(); // ignore possible error
     // And we relax forceDenseKernel for Hadamard gates
-    kernelGenConfig.forceDenseKernel = false;
+    kernelGenConfig.zeroTol = 1e-8;
+    kernelGenConfig.oneTol = 1e-8;
     kernelMgr.genCPUGate(kernelGenConfig, hadamardGate,
-                         "hadamard_gate_" + std::to_string(k));
+                         "hadamard_gate_" + std::to_string(k)
+                        ).consumeError(); // ignore possible error
   }
 
   // Initialize JIT engine

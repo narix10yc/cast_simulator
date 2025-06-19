@@ -7,8 +7,14 @@
 #include "cast/Transform/Transform.h"
 #include "openqasm/parser.h"
 
-
 namespace py = pybind11;
+
+static std::string forwardLLVMError(llvm::Error e, const llvm::Twine& banner) {
+  std::string str;
+  llvm::raw_string_ostream os(str);
+  llvm::logAllUnhandledErrors(std::move(e), os, banner);
+  return os.str();
+}
 
 namespace {
 
@@ -142,8 +148,16 @@ void bind_CPUKernelManager(py::module_& m) {
 
   py::class_<cast::CPUKernelManager>(m, "CPUKernelManager")
     .def(py::init<>())
-    .def("gen_cpu_gate",
-      &cast::CPUKernelManager::genCPUGate,
+    .def("gen_cpu_gate", [](cast::CPUKernelManager& self, 
+                            const cast::CPUKernelGenConfig& config, 
+                            const cast::QuantumGatePtr& gate, 
+                            const std::string& func_name) {
+        auto result = self.genCPUGate(config, gate, func_name);
+        if (!result) {
+          throw std::runtime_error("Failed to generate CPU gate. Reason: " +
+                                   result.takeError());
+        }
+      },
       py::arg("config"), py::arg("gate"), py::arg("func_name")
     )
     .def("gen_cpu_gates_from_graph",

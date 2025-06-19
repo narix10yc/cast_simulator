@@ -17,56 +17,47 @@
 using namespace cast;
 
 // Top-level entry
-CPUKernelManager& CPUKernelManager::genCPUGate(
-    const CPUKernelGenConfig& config,
+MaybeError<CPUKernelInfo*> CPUKernelManager::genCPUGate(
+    const CPUKernelGenConfig& config, 
     ConstQuantumGatePtr gate,
     const std::string& funcName) {
-
   auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
+  llvm::Function* func = nullptr;
   if (stdQuGate != nullptr && stdQuGate->noiseChannel() == nullptr) {
     // a normal gate, no noise channel
     const auto scalarGM = stdQuGate->getScalarGM();
     assert(scalarGM != nullptr && "Only supporting scalar GM for now");
-    auto* func = _gen(
-      config,
-      // temporarily const_cast to add constness
-      const_cast<const ComplexSquareMatrix&>(scalarGM->matrix()),
-      stdQuGate->qubits(),
-      funcName
-    );
-    // append the newly generated kernel
-    this->_kernels.emplace_back(
-      std::function<CPU_KERNEL_TYPE>(),
-      config.precision,
-      func->getName().str(),
-      config.matrixLoadMode,
-      gate,
-      config.simd_s,
-      gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol used in sigMat
-    );
-    return *this;
+    func = _gen(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
+  }
+  else {
+    // super op gates are treated as normal gates with twice the number of 
+    // qubits
+    auto superopGate = gate->getSuperopGate();
+    assert(superopGate != nullptr && "Superop gate should not be null");
+    const auto scalarGM = superopGate->getMatrix();
+    assert(scalarGM != nullptr && "superop gate matrix should not be null");
+    auto qubits = superopGate->qubits();
+    auto nQubits = superopGate->nQubits();
+    for (const auto& q : qubits)
+      qubits.push_back(q + nQubits);
+    func = _gen(config, scalarGM->matrix(), qubits, funcName);
   }
 
-  // super op gates are treated as normal gates with twice the number of qubits
-  auto superopGate = gate->getSuperopGate();
-  assert(superopGate != nullptr && "Superop gate should not be null");
-  const auto scalarGM = superopGate->getMatrix();
-  assert(scalarGM != nullptr && "superop gate matrix should not be null");
-  auto qubits = superopGate->qubits();
-  auto nQubits = superopGate->nQubits();
-  for (const auto& q : qubits)
-    qubits.push_back(q + nQubits);
-  auto* func = _gen(
-    config,
-    // temporarily const_cast to add constness
-    const_cast<const ComplexSquareMatrix&>(scalarGM->matrix()),
-    qubits,
-    funcName
-  );
-
+  auto llvmFuncName = func->getName().str();
+  // check if the kernel already exists
+  // TODO: llvm might resolve name conflicts itself, so we should not rely on
+  // this check.
+  for (auto& kernel : this->_kernels) {
+    if (kernel.llvmFuncName == llvmFuncName) {
+      std::ostringstream oss;
+      oss << "CPU kernel with name '" << llvmFuncName
+          << "' already exists. Reusing the existing kernel.\n";
+      return cast::makeError<CPUKernelInfo*>(oss.str());
+    }
+  }
   // append the newly generated kernel
   this->_kernels.emplace_back(
-    std::function<CPU_KERNEL_TYPE>(),
+    std::function<CPU_KERNEL_TYPE>(), // empty executable
     config.precision,
     func->getName().str(),
     config.matrixLoadMode,
@@ -74,10 +65,10 @@ CPUKernelManager& CPUKernelManager::genCPUGate(
     config.simd_s,
     gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol used in sigMat
   );
-  return *this;
+  return &_kernels.back();
 }
 
-CPUKernelManager& CPUKernelManager::genCPUGatesFromGraph(
+void CPUKernelManager::genCPUGatesFromGraph(
     const CPUKernelGenConfig& config,
     const ir::CircuitGraphNode& graph,
     const std::string& graphName) {
@@ -85,12 +76,21 @@ CPUKernelManager& CPUKernelManager::genCPUGatesFromGraph(
   auto mangledGraphName = internal::mangleGraphName(graphName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
+  // TODO: this is slighly inefficient, as we cross-check the kernel name for 
+  // each gate, which is O(n^2).
+  // We could optimize by introducing a graph name pool, so that it suffices to 
+  // check name collision for graphs, and let genCPUGate handle separate gate 
+  // names.
   for (const auto& gate : allGates) {
     auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
-      std::to_string(graph.gateId(gate));
-    genCPUGate(config, gate, name);
+                std::to_string(graph.gateId(gate));
+    auto result = genCPUGate(config, gate, name);
+    if (!result) {
+      std::cerr << BOLDYELLOW("Warning: ")
+                << "error encountered when trying to generate kernel for gate "
+                << (void*)(gate.get()) << ": " << result.takeError() << "\n";
+    }
   }
-  return *this;
 }
 
 std::vector<CPUKernelInfo*>

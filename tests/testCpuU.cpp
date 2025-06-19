@@ -31,14 +31,20 @@ static void internal_U1q() {
   CPUKernelGenConfig cpuConfig;
   cpuConfig.simd_s = simd_s;
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
-  for (int q = 0; q < nQubits; q++)
-    kernelMgr.genCPUGate(cpuConfig, gates[q], "gateImm_" + std::to_string(q));
+  for (int q = 0; q < nQubits; q++) {
+    kernelMgr.genCPUGate(cpuConfig, gates[q],
+                         "gateImm_" + std::to_string(q)
+                        ).consumeError(); // ignore possible errors
+  }
 
   cpuConfig.zeroTol = 0.0;
   cpuConfig.oneTol = 0.0;
   cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
-  for (int q = 0; q < nQubits; q++)
-    kernelMgr.genCPUGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q));
+  for (int q = 0; q < nQubits; q++) {
+    kernelMgr.genCPUGate(cpuConfig, gates[q],
+                         "gateLoad_" + std::to_string(q)
+                        ).consumeError(); // ignore possible errors
+  }
 
   kernelMgr.initJIT();
   for (unsigned i = 0; i < nQubits; i++) {
@@ -90,13 +96,19 @@ static void internal_U2q() {
   CPUKernelGenConfig cpuConfig;
   cpuConfig.simd_s = simd_s;
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
-  for (int q = 0; q < nQubits; q++)
-    kernelMgr.genCPUGate(cpuConfig, gates[q], "gateImm_" + std::to_string(q));
+  for (int q = 0; q < nQubits; q++) {
+    kernelMgr.genCPUGate(cpuConfig, gates[q],
+                         "gateImm_" + std::to_string(q)
+                        ).consumeError(); // ignore possible errors
+  }
   cpuConfig.zeroTol = 0.0;
   cpuConfig.oneTol = 0.0;
   cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
-  for (int q = 0; q < nQubits; q++)
-    kernelMgr.genCPUGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q));
+  for (int q = 0; q < nQubits; q++) {
+    kernelMgr.genCPUGate(cpuConfig, gates[q],
+                         "gateLoad_" + std::to_string(q)
+                        ).consumeError(); // ignore possible errors
+  }
 
   kernelMgr.initJIT();
   for (unsigned i = 0; i < nQubits; i++) {

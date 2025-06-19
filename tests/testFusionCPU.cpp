@@ -51,7 +51,8 @@ static void f() {
     for (const auto& gate : allGates) {
       kernelMgrBeforeFusion.genCPUGate(
         kernelGenConfig, gate,
-        "beforeFusion" + std::to_string(graph.gateId(gate)));
+        "beforeFusion" + std::to_string(graph.gateId(gate))
+      ).consumeError(); // ignore possible error
     }
 
     cast::applyGateFusion(fusionConfig, &costModel, graph);
@@ -61,7 +62,8 @@ static void f() {
     for (const auto& gate : allGates) {
       kernelMgrAfterFusion.genCPUGate(
         kernelGenConfig, gate,
-        "afterFusion" + std::to_string(graph.gateId(gate)));
+        "afterFusion" + std::to_string(graph.gateId(gate))
+      ).consumeError(); // ignore possible error
     }
 
     kernelMgrBeforeFusion.initJIT();

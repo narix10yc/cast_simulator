@@ -4,6 +4,7 @@
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 #include "cast/IR/IRNode.h"
+#include "utils/MaybeError.h"
 
 #define CPU_KERNEL_TYPE void(void*)
 namespace cast {
@@ -94,18 +95,19 @@ public:
     return llvmJIT != nullptr;
   }
 
-  // This is the main entry point to generate a CPU kernel.
-  CPUKernelManager& genCPUGate(const CPUKernelGenConfig& config,
-                               ConstQuantumGatePtr gate,
-                               const std::string& funcName);
+  // Generate a CPU kernel. Returns a reference to the generated kernel
+  // information.
+  MaybeError<CPUKernelInfo*> genCPUGate(const CPUKernelGenConfig& config,
+                                        ConstQuantumGatePtr gate,
+                                        const std::string& funcName);
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
   /// order of the gate in the circuit graph. <order> will be retrieved in
   /// \c collectKernelsFromGraphName 
-  CPUKernelManager& genCPUGatesFromGraph(const CPUKernelGenConfig& config,
-                                         const ir::CircuitGraphNode& graph,
-                                         const std::string& graphName);
+  void genCPUGatesFromGraph(const CPUKernelGenConfig& config,
+                            const ir::CircuitGraphNode& graph,
+                            const std::string& graphName);
 
   std::vector<CPUKernelInfo*>
   collectKernelsFromGraphName(const std::string& graphName);
