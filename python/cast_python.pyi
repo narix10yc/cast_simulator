@@ -45,14 +45,12 @@ class StandardGate(QuantumGate):
     """
     ...
 
-
 class SuperopQuantumGate(QuantumGate):
   """
   Represents a quantum gate in its superoperator form.
   """
   ...
   
-
 class Circuit:
   def __str__(self) -> str:
     ...
@@ -61,7 +59,6 @@ class Circuit:
     """Returns all circuit graphs in the circuit."""
     ...
   
-
 class CircuitGraph:
   def __str__(self) -> str:
     ...
@@ -147,9 +144,10 @@ class CPUKernelManager:
     """
     ...
 
-  def get_kernels(self) -> list[CPUKernelInfo]:
+  def get_kernel_by_name(self, llvm_func_name: str) -> CPUKernelInfo | None:
     """
-    Returns a list of all CPU kernels managed by this CPUKernelManager.
+    Returns the CPU kernel with the given LLVM function name, or None if it 
+    does not exist.
     """
     ...
 
@@ -186,5 +184,93 @@ class CPUKernelManager:
       llvm::OptimizationLevel::O0, 1 means llvm::OptimizationLevel::O1, etc
     - use_lazy_jit: If True, uses lazy JIT compilation.
     - verbose: Show progress bar if > 0.
+    """
+    ...
+
+  def apply_kernel_f32(self,
+                       sv: CPUStatevectorF32,
+                       kenrel: CPUKernelInfo,
+                       num_threads: int) -> None:
+    """
+    Apply a single-precision kernel.
+    """
+    ...
+
+  def apply_kernel_f64(self,
+                       sv: CPUStatevectorF64,
+                       kenrel: CPUKernelInfo,
+                       num_threads: int) -> None:
+    """
+    Apply a double-precision kernel.
+    """
+    ...
+
+class CPUStatevectorF32:
+  """
+  Represents a statevector in single precision (float).
+  """
+  def __init__(self, num_qubits: int, simd_s: int) -> None:
+    """
+    Initializes the statevector with the given number of qubits and SIMD size.
+    """
+    ...
+  
+  def __getitem__(self, index: int) -> complex:
+    """
+    Returns the amplitude at the given index.
+    """
+    ...
+
+  @property
+  def num_qubits(self) -> int:
+    """
+    Returns the number of qubits in the statevector.
+    """
+    ...
+    
+  def initialize(self) -> None:
+    """
+    Initializes the statevector to the |0...0> state.
+    """
+    ...
+    
+  def randomize(self, num_threads: int = 1) -> None:
+    """
+    Randomizes the statevector.
+    """
+    ...
+  
+class CPUStatevectorF64:
+  """
+  Represents a statevector in double precision (double).
+  """
+  def __init__(self, num_qubits: int, simd_s: int) -> None:
+    """
+    Initializes the statevector with the given number of qubits and SIMD size.
+    """
+    ...
+  
+  def __getitem__(self, index: int) -> complex:
+    """
+    Returns the amplitude at the given index.
+    """
+    ...
+
+  @property
+  def num_qubits(self) -> int:
+    """
+    Returns the number of qubits in the statevector.
+    """
+    ...
+
+  def initialize(self) -> None:
+    """
+    Initializes the statevector to the |0...0> state.
+    """
+    ...
+
+  def randomize(self, num_threads: int = 1) -> None:
+    """
+    Randomizes the statevector.
     """
     ...

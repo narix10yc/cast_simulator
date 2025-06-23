@@ -32,18 +32,18 @@ static void internal_U1q() {
   cpuConfig.simd_s = simd_s;
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
-    kernelMgr.genCPUGate(cpuConfig, gates[q],
-                         "gateImm_" + std::to_string(q)
-                        ).consumeError(); // ignore possible errors
+    kernelMgr.genStandaloneGate(
+      cpuConfig, gates[q], "gateImm_" + std::to_string(q)
+    ).consumeError(); // ignore possible errors
   }
 
   cpuConfig.zeroTol = 0.0;
   cpuConfig.oneTol = 0.0;
   cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++) {
-    kernelMgr.genCPUGate(cpuConfig, gates[q],
-                         "gateLoad_" + std::to_string(q)
-                        ).consumeError(); // ignore possible errors
+    kernelMgr.genStandaloneGate(
+      cpuConfig, gates[q], "gateLoad_" + std::to_string(q)
+    ).consumeError(); // ignore possible errors
   }
 
   kernelMgr.initJIT().consumeError(); // ignore possible errors
@@ -53,8 +53,14 @@ static void internal_U1q() {
     ss << "Apply U1q at " << gates[i]->qubits()[0];
     auto immFuncName = "gateImm_" + std::to_string(i);
     auto loadFuncName = "gateLoad_" + std::to_string(i);
-    kernelMgr.applyCPUKernel(sv0.data(), sv0.nQubits(), immFuncName);
-    kernelMgr.applyCPUKernel(sv1.data(), sv1.nQubits(), loadFuncName);
+    const auto* immKernel = kernelMgr.getKernelByName(immFuncName);
+    const auto* loadKernel = kernelMgr.getKernelByName(loadFuncName);
+    assert(immKernel);
+    assert(loadKernel);
+    kernelMgr.applyCPUKernel(
+      sv0.data(), sv0.nQubits(), *immKernel).consumeError();
+    kernelMgr.applyCPUKernel(
+      sv1.data(), sv1.nQubits(), *loadKernel).consumeError();
     sv2.applyGate(*gates[i]);
     suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
     suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
@@ -97,17 +103,17 @@ static void internal_U2q() {
   cpuConfig.simd_s = simd_s;
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
-    kernelMgr.genCPUGate(cpuConfig, gates[q],
-                         "gateImm_" + std::to_string(q)
-                        ).consumeError(); // ignore possible errors
+    kernelMgr.genStandaloneGate(
+      cpuConfig, gates[q], "gateImm_" + std::to_string(q)
+    ).consumeError(); // ignore possible errors
   }
   cpuConfig.zeroTol = 0.0;
   cpuConfig.oneTol = 0.0;
   cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++) {
-    kernelMgr.genCPUGate(cpuConfig, gates[q],
-                         "gateLoad_" + std::to_string(q)
-                        ).consumeError(); // ignore possible errors
+    kernelMgr.genStandaloneGate(
+      cpuConfig, gates[q], "gateLoad_" + std::to_string(q)
+    ).consumeError(); // ignore possible errors
   }
 
   kernelMgr.initJIT().consumeError(); // ignore possible errors
@@ -119,8 +125,14 @@ static void internal_U2q() {
     ss << "Apply U2q at " << a << " and " << b;
     auto immFuncName = "gateImm_" + std::to_string(i);
     auto loadFuncName = "gateLoad_" + std::to_string(i);
-    kernelMgr.applyCPUKernel(sv0.data(), sv0.nQubits(), immFuncName);
-    kernelMgr.applyCPUKernel(sv1.data(), sv1.nQubits(), loadFuncName);
+    const auto* immKernel = kernelMgr.getKernelByName(immFuncName);
+    const auto* loadKernel = kernelMgr.getKernelByName(loadFuncName);
+    assert(immKernel);
+    assert(loadKernel);
+    kernelMgr.applyCPUKernel(
+      sv0.data(), sv0.nQubits(), *immKernel).consumeError();
+    kernelMgr.applyCPUKernel(
+      sv1.data(), sv1.nQubits(), *loadKernel).consumeError();
     sv2.applyGate(*gates[i]);
     suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
     suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());

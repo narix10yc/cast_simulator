@@ -116,9 +116,9 @@ void bind_parse_circuit_from_qasm_file(py::module_& m) {
 }
 
 void bind_CPUStatevector(py::module_& m) {
-  py::class_<cast::CPUStatevector<float>>(m, "CPUStatevectorF32")
+  py::class_<cast::CPUStatevectorF32>(m, "CPUStatevectorF32")
     .def(py::init<int, int>(), py::arg("num_qubits"), py::arg("simd_s"))
-    .def("__getitem__", [](const cast::CPUStatevector<float>& self, size_t idx) {
+    .def("__getitem__", [](const cast::CPUStatevectorF32& self, size_t idx) {
       if (idx >= self.getN()) {
         throw std::out_of_range("Index out of range in CPUStatevectorF32");
       }
@@ -126,26 +126,26 @@ void bind_CPUStatevector(py::module_& m) {
     }, py::arg("idx")
     )
     .def_property_readonly("num_qubits",
-      [](const cast::CPUStatevector<float>& self) {
+      [](const cast::CPUStatevectorF32& self) {
         return self.nQubits();
       }
     )
-    .def("normSquared", &cast::CPUStatevector<float>::normSquared)
-    .def("norm", &cast::CPUStatevector<float>::norm)
+    .def("normSquared", &cast::CPUStatevectorF32::normSquared)
+    .def("norm", &cast::CPUStatevectorF32::norm)
     .def("probability",
-      &cast::CPUStatevector<float>::prob, 
+      &cast::CPUStatevectorF32::prob, 
       py::arg("qubit")
     )
     .def("initialize",
-      &cast::CPUStatevector<float>::initialize, py::arg("num_threads") = 1)
+      &cast::CPUStatevectorF32::initialize, py::arg("num_threads") = 1)
     .def("normalize",
-      &cast::CPUStatevector<float>::normalize, py::arg("num_threads") = 1)
+      &cast::CPUStatevectorF32::normalize, py::arg("num_threads") = 1)
     .def("randomize",
-      &cast::CPUStatevector<float>::randomize, py::arg("num_threads") = 1);
+      &cast::CPUStatevectorF32::randomize, py::arg("num_threads") = 1);
   
-  py::class_<cast::CPUStatevector<double>>(m, "CPUStatevectorF64")
+  py::class_<cast::CPUStatevectorF64>(m, "CPUStatevectorF64")
     .def(py::init<int, int>(), py::arg("num_qubits"), py::arg("simd_s"))
-    .def("__getitem__", [](const cast::CPUStatevector<double>& self, size_t idx) {
+    .def("__getitem__", [](const cast::CPUStatevectorF64& self, size_t idx) {
       if (idx >= self.getN()) {
         throw std::out_of_range("Index out of range in CPUStatevectorF64");
       }
@@ -153,22 +153,22 @@ void bind_CPUStatevector(py::module_& m) {
     }, py::arg("idx")
     )
     .def_property_readonly("num_qubits",
-      [](const cast::CPUStatevector<float>& self) {
+      [](const cast::CPUStatevectorF32& self) {
         return self.nQubits();
       }
     )
-    .def("normSquared", &cast::CPUStatevector<double>::normSquared)
-    .def("norm", &cast::CPUStatevector<double>::norm)
+    .def("normSquared", &cast::CPUStatevectorF64::normSquared)
+    .def("norm", &cast::CPUStatevectorF64::norm)
     .def("probability",
-      &cast::CPUStatevector<double>::prob, 
+      &cast::CPUStatevectorF64::prob, 
       py::arg("qubit")
     )
     .def("initialize",
-      &cast::CPUStatevector<double>::initialize, py::arg("nThreads") = 1)
+      &cast::CPUStatevectorF64::initialize, py::arg("nThreads") = 1)
     .def("normalize",
-      &cast::CPUStatevector<double>::normalize, py::arg("nThreads") = 1)
+      &cast::CPUStatevectorF64::normalize, py::arg("nThreads") = 1)
     .def("randomize",
-      &cast::CPUStatevector<double>::randomize, py::arg("nThreads") = 1);
+      &cast::CPUStatevectorF64::randomize, py::arg("nThreads") = 1);
 }
 
 void bind_CPUKernelManager(py::module_& m) {
@@ -226,7 +226,7 @@ void bind_CPUKernelManager(py::module_& m) {
                             const cast::CPUKernelGenConfig& config, 
                             const cast::QuantumGatePtr& gate, 
                             const std::string& func_name) {
-        auto result = self.genCPUGate(config, gate, func_name);
+        auto result = self.genStandaloneGate(config, gate, func_name);
         if (!result) {
           throw std::runtime_error(
             "Failed to generate CPU gate. Reason: " + result.takeError());
@@ -248,10 +248,12 @@ void bind_CPUKernelManager(py::module_& m) {
       },
       py::arg("config"), py::arg("graph"), py::arg("graph_name")
     )
-    .def("get_kernels", [](const cast::CPUKernelManager& self) {
-        return self.kernels();
+    .def("get_kernel_by_name",
+      [](const cast::CPUKernelManager& self, 
+         const std::string& funcName){
+        return self.getKernelByName(funcName);
       },
-      py::return_value_policy::copy
+      py::arg("func_name")
     )
     .def("init_jit", [](cast::CPUKernelManager& self,
                         int nThreads, int optLevel, 
@@ -275,6 +277,43 @@ void bind_CPUKernelManager(py::module_& m) {
       py::arg("opt_level") = 1,
       py::arg("use_lazy_jit") = false,
       py::arg("verbose") = 0
+    )
+    .def("apply_gate_f32", 
+      [](cast::CPUKernelManager& self, 
+         cast::CPUStatevectorF32& sv, 
+         const cast::CPUKernelInfo& kernel,
+         int nThreads) {
+        if (kernel.precision != 32) {
+          throw std::runtime_error(
+            "Kernel precision mismatch: expected 32, got " + 
+            std::to_string(kernel.precision));
+        }
+        auto rst = self.applyCPUKernel(
+          sv.data(), sv.nQubits(), kernel, nThreads); 
+        if (!rst) {
+          throw std::runtime_error(
+            "Failed to apply gate. Reason" + rst.takeError());
+        }
+      },
+      py::arg("sv"), py::arg("gate"), py::arg("num_threads") = 1
+    )
+    .def("apply_gate_f64", 
+      [](cast::CPUKernelManager& self, 
+         cast::CPUStatevectorF64& sv, 
+         const cast::CPUKernelInfo& kernel,
+         int nThreads) {
+        if (kernel.precision != 64) {
+          throw std::runtime_error(
+            "Kernel precision mismatch: expected 32, got " + 
+            std::to_string(kernel.precision));
+        }
+        auto rst = self.applyCPUKernel(
+          sv.data(), sv.nQubits(), kernel, nThreads); 
+        if (!rst) {
+          throw std::runtime_error("Failed to apply gate: " + rst.takeError());
+        }
+      },
+      py::arg("sv"), py::arg("gate"), py::arg("num_threads") = 1
     );
 }
 

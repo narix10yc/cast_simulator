@@ -16,8 +16,10 @@
 
 using namespace cast;
 
+std::atomic<int> cast::CPUKernelManager::_standaloneKernelCounter = 0;
+
 // Top-level entry
-MaybeError<void> CPUKernelManager::genCPUGate(
+MaybeError<CPUKernelManager::KernelInfoPtr> CPUKernelManager::_genCPUGate(
     const CPUKernelGenConfig& config, 
     ConstQuantumGatePtr gate,
     const std::string& funcName) {
@@ -43,20 +45,14 @@ MaybeError<void> CPUKernelManager::genCPUGate(
     func = _gen(config, scalarGM->matrix(), qubits, funcName);
   }
 
-  auto llvmFuncName = func->getName().str();
-  // check if the kernel already exists
-  // TODO: llvm might resolve name conflicts itself, so we should not rely on
-  // this check.
-  for (auto& kernel : this->_kernels) {
-    if (kernel.llvmFuncName == llvmFuncName) {
-      std::ostringstream oss;
-      oss << "CPU kernel with name '" << llvmFuncName
-          << "' already exists. Reusing the existing kernel.\n";
-      return cast::makeError<void>(oss.str());
-    }
+  if (func == nullptr) {
+    std::ostringstream oss;
+    oss << "Failed to generate kernel for gate " << (void*)(gate.get())
+        << " with name " << funcName;
+    return cast::makeError<KernelInfoPtr>(oss.str());
   }
-  // append the newly generated kernel
-  this->_kernels.emplace_back(
+
+  return std::make_unique<CPUKernelInfo>(
     std::function<CPU_KERNEL_TYPE>(), // empty executable
     config.precision,
     func->getName().str(),
@@ -65,6 +61,28 @@ MaybeError<void> CPUKernelManager::genCPUGate(
     config.simd_s,
     gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol used in sigMat
   );
+}
+
+MaybeError<void> CPUKernelManager::genStandaloneGate(
+    const CPUKernelGenConfig& config,
+    ConstQuantumGatePtr gate,
+    const std::string& _funcName) {
+  std::string funcName(_funcName);
+  if (funcName.empty())
+    funcName = "kernel_" + std::to_string(_standaloneKernelCounter++);
+  // check for name conflicts
+  for (const auto& kernel : _standaloneKernels) {
+    if (kernel->llvmFuncName == funcName) {
+      return cast::makeError<void>(
+          "Kernel with name '" + funcName + "' already exists.");
+    }
+  }
+
+  auto result = _genCPUGate(config, gate, funcName);
+  if (!result) {
+    return cast::makeError<void>("Err: " + result.takeError());
+  }
+  _standaloneKernels.emplace_back(result.moveValue());
   return {}; // success
 }
 
@@ -73,54 +91,64 @@ MaybeError<void> CPUKernelManager::genCPUGatesFromGraph(
     const ir::CircuitGraphNode& graph,
     const std::string& graphName) {
   assert(graph.checkConsistency());
+
+  if (_graphKernels.contains(graphName)) {
+    std::ostringstream oss;
+    oss << "Graph with name '" << graphName
+        << "' already has generated kernels. Please use a different name.";
+    return cast::makeError<void>(oss.str());
+  }
+
   auto mangledGraphName = internal::mangleGraphName(graphName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
-  // TODO: this is slighly inefficient, as we cross-check the kernel name for 
-  // each gate, which is O(n^2).
-  // We could optimize by introducing a graph name pool, so that it suffices to 
-  // check name collision for graphs, and let genCPUGate handle separate gate 
-  // names.
+  std::vector<KernelInfoPtr> kernels;
+  kernels.reserve(allGates.size());
+
   for (const auto& gate : allGates) {
     auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    auto result = genCPUGate(config, gate, name);
+    auto result = _genCPUGate(config, gate, name);
     if (!result) {
       std::ostringstream oss;
       oss << "Failed to generate kernel for gate "
           << (void*)(gate.get()) << ": " << result.takeError() << "\n";
       return cast::makeError<void>(oss.str());
     }
+    kernels.emplace_back(result.moveValue());
   }
-  return {};
+  // Store the generated kernels in the map
+  _graphKernels[graphName] = std::move(kernels);
+
+  return {}; // success
 }
 
-std::vector<CPUKernelInfo*>
-CPUKernelManager::collectKernelsFromGraphName(
-    const std::string& graphName) {
-  std::vector<std::pair<int, CPUKernelInfo*>> orderKernelPairs;
-  auto mangledGraphName = internal::mangleGraphName(graphName);
-  for (auto& kernel : _kernels) {
-    const auto& name = kernel.llvmFuncName;
-    if (!name.starts_with(mangledGraphName))
-      continue; // not a kernel from the given graph
-    // extract the order from the name
-    assert(name[mangledGraphName.size()] == '_');
-    auto subName = name.substr(mangledGraphName.size() + 1); // "<order>_<gateId>"
-    auto pos = subName.find('_');
-    assert(pos != std::string::npos && "Invalid kernel name format");
-    int order = std::stoi(subName.substr(0, pos));
-    orderKernelPairs.emplace_back(order, &kernel);
-  }
-  // sort by order and return the kernels
-  std::ranges::sort(orderKernelPairs);
-  std::vector<CPUKernelInfo*> kernels;
-  kernels.reserve(orderKernelPairs.size());
-  for (const auto& pair : orderKernelPairs)
-    kernels.push_back(pair.second);
+// std::vector<CPUKernelInfo*>
+// CPUKernelManager::collectKernelsFromGraphName(
+//     const std::string& graphName) {
+//   std::vector<std::pair<int, CPUKernelInfo*>> orderKernelPairs;
+//   auto mangledGraphName = internal::mangleGraphName(graphName);
+//   for (auto& kernel : _standaloneKernels) {
+//     const auto& name = kernel.llvmFuncName;
+//     if (!name.starts_with(mangledGraphName))
+//       continue; // not a kernel from the given graph
+//     // extract the order from the name
+//     assert(name[mangledGraphName.size()] == '_');
+//     auto subName = name.substr(mangledGraphName.size() + 1); // "<order>_<gateId>"
+//     auto pos = subName.find('_');
+//     assert(pos != std::string::npos && "Invalid kernel name format");
+//     int order = std::stoi(subName.substr(0, pos));
+//     orderKernelPairs.emplace_back(order, &kernel);
+//   }
+//   // sort by order and return the kernels
+//   std::ranges::sort(orderKernelPairs);
+//   std::vector<CPUKernelInfo*> kernels;
+//   kernels.reserve(orderKernelPairs.size());
+//   for (const auto& pair : orderKernelPairs)
+//     kernels.push_back(pair.second);
 
-  return kernels;
-}
+//   return kernels;
+// }
 
 namespace {
 

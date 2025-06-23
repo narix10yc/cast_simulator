@@ -18,10 +18,10 @@ static void f() {
   CPUKernelGenConfig cpuConfig;
   cpuConfig.simd_s = simd_s;
 
-  cpuKernelMgr.genCPUGate(cpuConfig, getH(0), "gate_h_0").consumeError();
-  cpuKernelMgr.genCPUGate(cpuConfig, getH(1), "gate_h_1").consumeError();
-  cpuKernelMgr.genCPUGate(cpuConfig, getH(2), "gate_h_2").consumeError();
-  cpuKernelMgr.genCPUGate(cpuConfig, getH(3), "gate_h_3").consumeError();
+  cpuKernelMgr.genStandaloneGate(cpuConfig, getH(0), "gate_h_0").consumeError();
+  cpuKernelMgr.genStandaloneGate(cpuConfig, getH(1), "gate_h_1").consumeError();
+  cpuKernelMgr.genStandaloneGate(cpuConfig, getH(2), "gate_h_2").consumeError();
+  cpuKernelMgr.genStandaloneGate(cpuConfig, getH(3), "gate_h_3").consumeError();
 
   cpuKernelMgr.initJIT().consumeError(); // ignore possible errors
 
@@ -30,22 +30,22 @@ static void f() {
   suite.assertClose(sv.norm(), 1.0, "SV Initialization: Norm", GET_INFO());
   suite.assertClose(sv.prob(0), 0.0, "SV Initialization: Prob", GET_INFO());
 
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_0");
+  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_0").consumeError();
   suite.assertClose(sv.norm(), 1.0, "Apply H at 0: Norm", GET_INFO());
   suite.assertClose(sv.prob(0), 0.5, "Apply H at 0: Prob", GET_INFO());
 
   sv.initialize();
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_1");
+  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_1").consumeError();
   suite.assertClose(sv.norm(), 1.0, "Apply H at 1: Norm", GET_INFO());
   suite.assertClose(sv.prob(1), 0.5, "Apply H at 1: Prob", GET_INFO());
 
   sv.initialize();
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_2");
+  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_2").consumeError();
   suite.assertClose(sv.norm(), 1.0, "Apply H at 2: Norm", GET_INFO());
   suite.assertClose(sv.prob(2), 0.5, "Apply H at 2: Prob", GET_INFO());
 
   sv.initialize();
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_3");
+  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_3").consumeError();
   suite.assertClose(sv.norm(), 1.0, "Apply H at 3: Norm", GET_INFO());
   suite.assertClose(sv.prob(3), 0.5, "Apply H at 3: Prob", GET_INFO());
 
@@ -56,7 +56,8 @@ static void f() {
 
   for (int q = 0; q < sv.nQubits(); q++)
     pBefore[q] = sv.prob(q);
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_0");
+  cpuKernelMgr.applyCPUKernel(
+    sv.data(), sv.nQubits(), "gate_h_0").consumeError();
   for (int q = 0; q < sv.nQubits(); q++)
     pAfter[q] = sv.prob(q);
   pAfter[0] = pBefore[0]; // probability could only change at the applied qubit
@@ -66,7 +67,8 @@ static void f() {
 
   for (int q = 0; q < sv.nQubits(); q++)
     pBefore[q] = sv.prob(q);
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_1");
+  cpuKernelMgr.applyCPUKernel(
+    sv.data(), sv.nQubits(), "gate_h_1").consumeError();
   for (int q = 0; q < sv.nQubits(); q++)
     pAfter[q] = sv.prob(q);
   pAfter[1] = pBefore[1]; // probability could only change at the applied qubit
@@ -76,7 +78,8 @@ static void f() {
 
   for (int q = 0; q < sv.nQubits(); q++)
     pBefore[q] = sv.prob(q);
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_2");
+  cpuKernelMgr.applyCPUKernel(
+    sv.data(), sv.nQubits(), "gate_h_2").consumeError();
   for (int q = 0; q < sv.nQubits(); q++)
     pAfter[q] = sv.prob(q);
   pAfter[2] = pBefore[2]; // probability could only change at the applied qubit
@@ -86,7 +89,8 @@ static void f() {
 
   for (int q = 0; q < sv.nQubits(); q++)
     pBefore[q] = sv.prob(q);
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_3");
+  cpuKernelMgr.applyCPUKernel(
+    sv.data(), sv.nQubits(), "gate_h_3").consumeError();
   for (int q = 0; q < sv.nQubits(); q++)
     pAfter[q] = sv.prob(q);
   pAfter[3] = pBefore[3]; // probability could only change at the applied qubit

@@ -447,6 +447,9 @@ public:
 
 }; // class CPUStatevector
 
+using CPUStatevectorF32 = CPUStatevector<float>;
+using CPUStatevectorF64 = CPUStatevector<double>;
+
 // extern template class CPUStatevector<float>;
 // extern template class CPUStatevector<double>;
 

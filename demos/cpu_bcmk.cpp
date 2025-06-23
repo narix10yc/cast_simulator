@@ -140,7 +140,7 @@ static void benchmark() {
   for (int k = 1; k < 5; ++k) {
     std::cerr << "Benchmarking " << k << "-qubit unitary gate:  ";
     timingResult = timer.timeit([&]() {
-      kernelMgr.applyCPUKernelMultithread(
+      kernelMgr.applyCPUKernel(
         statevector.data(),
         statevector.nQubits(), 
         "unitary_gate_" + std::to_string(k),
@@ -153,7 +153,7 @@ static void benchmark() {
 
     std::cerr << "Benchmarking " << k << "-qubit Hadamard gate: ";
     timingResult = timer.timeit([&]() {
-      kernelMgr.applyCPUKernelMultithread(
+      kernelMgr.applyCPUKernel(
         statevector.data(),
         statevector.nQubits(), 
         "hadamard_gate_" + std::to_string(k),

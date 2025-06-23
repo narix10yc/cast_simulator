@@ -46,89 +46,32 @@ static void* mallocGatePointer(const cast::QuantumGate* gate, int precision) {
   return p;
 }
 
-void CPUKernelManager::applyCPUKernel(
-    void* sv, int nQubits, const std::string& funcName) {
-  assert(isJITed() && "Must initialize JIT session "
-                      "before calling KernelManager::applyCPUKernel");
-  for (auto& kernel : _kernels) {
-    if (kernel.llvmFuncName == funcName) {
-      applyCPUKernel(sv, nQubits, kernel);
-      return;
-    }
+MaybeError<void> CPUKernelManager::applyCPUKernel(
+    void* sv, int nQubits, const CPUKernelInfo& kernel, int nThreads) const {
+  if (!isJITed()) {
+    return cast::makeError<void>(
+      "Must initialize JIT session before applying CPU kernel.");
   }
-  llvm_unreachable("KernelManager::applyCPUKernel: kernel not found by name");
-}
-
-void CPUKernelManager::applyCPUKernel(
-    void* sv, int nQubits, CPUKernelInfo& kernel) {
-  assert(isJITed() && "Must initialize JIT session "
-                      "before calling KernelManager::applyCPUKernel");
-  ensureExecutable(kernel);
+  if (kernel.executable == nullptr) {
+    return cast::makeError<void>(
+      "Kernel executable not available.");
+  }
   int tmp = nQubits - kernel.gate->nQubits() - kernel.simd_s;
-  assert(tmp >= 0);
-  uint64_t idxEnd = 1ULL << tmp;
-  void* pMat = nullptr;
-  if (kernel.matrixLoadMode == MatrixLoadMode::StackLoadMatElems)
-    pMat = mallocGatePointer(kernel.gate.get(), kernel.precision);
-  
-  uint64_t taskIDBegin = 0ULL;
-  uint64_t taskIDEnd = idxEnd;
-  void* args[4];
-  args[0] = sv; // state vector
-  args[1] = &taskIDBegin; // taskID begin
-  args[2] = &taskIDEnd; // taskID end
-  args[3] = pMat; // matrix pointer
-  kernel.executable(args);
-  std::free(pMat);
-}
-
-// void CPUKernelManager::applyCPUKernel(
-//     void* sv, 
-//     int nQubits,
-//     const std::string& funcName,
-//     const void* pMatArg
-// ) {
-//   assert(isJITed() && "Must initialize JIT session before calling applyCPUKernel");
-//   for (auto& kernel : _kernels) {
-//     if (kernel.llvmFuncName == funcName) {
-//       // Found the right kernel
-//       applyCPUKernel(sv, nQubits, kernel, pMatArg);
-//       return;
-//     }
-//   }
-//   llvm_unreachable("KernelManager::applyCPUKernel(pMatArg): kernel not found by name");
-// }
-
-// void CPUKernelManager::applyCPUKernel(
-//     void* sv, 
-//     int nQubits,
-//     CPUKernelInfo& kernel,
-//     const void* pMatArg) {
-//   assert(isJITed() && "Must initialize JIT session before calling applyCPUKernel");
-//   ensureExecutable(kernel);
-//   int tmp = nQubits - kernel.gate->nQubits() - kernel.simd_s;
-//   assert(tmp >= 0 && "Something's off with qubit count");
-//   uint64_t idxBegin = 0ULL;
-//   uint64_t idxEnd = 1ULL << tmp;
-//   void* argv[4];
-//   argv[0] = sv; // state vector pointer
-//   argv[1] = static_cast<void*>(&idxBegin); // taskID begin
-//   argv[2] = static_cast<void*>(&idxEnd); // taskID end
-//   argv[3] = const_cast<void*>(pMatArg); // matrix pointer
-//   kernel.executable(argv);
-// }
-
-void CPUKernelManager::applyCPUKernelMultithread(
-    void* sv, int nQubits, CPUKernelInfo& kernel, int nThreads) {
-  assert(isJITed() && "Must initialize JIT session "
-                      "before calling KernelManager::applyCPUKernel");
-  ensureExecutable(kernel);
-  int tmp = nQubits - kernel.gate->nQubits() - kernel.simd_s;
-  assert(tmp >= 0);
+  if (tmp < 0) {
+    std::ostringstream oss;
+    oss << "Invalid number of qubits for the kernel '" << kernel.llvmFuncName
+        << "'. This kernel must act on statevectors with at least "
+        << (kernel.gate->nQubits() + kernel.simd_s) << "qubits.";
+    return cast::makeError<void>(oss.str());
+  }
   uint64_t nTasks = 1ULL << tmp;
   void* pMat = nullptr;
-  if (kernel.matrixLoadMode == MatrixLoadMode::StackLoadMatElems)
+  if (kernel.matrixLoadMode == MatrixLoadMode::StackLoadMatElems) {
     pMat = mallocGatePointer(kernel.gate.get(), kernel.precision);
+    if (pMat == nullptr) {
+      return cast::makeError<void>("Failed to allocate memory for gate matrix.");
+    }
+  }
 
   std::vector<std::thread> threads;
   threads.reserve(nThreads);
@@ -158,21 +101,55 @@ void CPUKernelManager::applyCPUKernelMultithread(
   for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)
     delete[] argvs[tIdx];
   std::free(pMat);
+  return {}; // success
 }
 
-void CPUKernelManager::applyCPUKernelMultithread(
-    void* sv, int nQubits, const std::string& funcName, int nThreads) {
-  assert(isJITed() && "Must initialize JIT session "
-                      "before calling KernelManager::applyCPUKernel");
-  for (auto& kernel : _kernels) {
-    if (kernel.llvmFuncName == funcName) {
-      applyCPUKernelMultithread(sv, nQubits, kernel, nThreads);
-      return;
+MaybeError<void> CPUKernelManager::applyCPUKernel(
+    void* sv, int nQubits,
+    const std::string& llvmFuncName,
+    int nThreads) const {
+  const auto* kernel = getKernelByName(llvmFuncName);
+  if (kernel == nullptr) {
+    return cast::makeError<void>("Kernel not found: " + llvmFuncName);
+  }
+  auto rst = applyCPUKernel(sv, nQubits, *kernel, nThreads);
+  if (!rst) {
+    return cast::makeError<void>(rst.takeError());
+  }
+  return {}; // success
+}
+
+MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraphMultithread(
+    void* sv, int nQubits, const std::string& graphName, int nThreads) const {
+  if (!isJITed()) {
+    return cast::makeError<void>(
+      "Must initialize JIT session before applying CPU kernel.");
+  }
+  if (!_graphKernels.contains(graphName)) {
+    return cast::makeError<void>("Graph not found: " + graphName);
+  }
+  const auto& kernels = _graphKernels.at(graphName);
+  for (const auto& kernel : kernels) {
+    if (kernel->executable == nullptr) {
+      std::ostringstream oss;
+      oss << "Kernel '" << kernel->llvmFuncName << "' has no executable.";
+      return cast::makeError<void>(oss.str());
     }
   }
-  llvm_unreachable("KernelManager::applyCPUKernelMultithread: "
-                   "kernel not found by name");
+
+  for (const auto& kernel : kernels) {
+    auto result = applyCPUKernel(sv, nQubits, *kernel, nThreads);
+    if (!result) {
+      std::ostringstream oss;
+      oss << "Failed to apply kernel '" << kernel->llvmFuncName
+          << "': " << result.takeError();
+      return cast::makeError<void>(oss.str());
+    }
+  }
+
+  return {}; // success
 }
+
 
 // std::vector<CPUKernelInfo*>
 // CPUKernelManager::collectCPUKernelsFromLegacyCircuitGraph(

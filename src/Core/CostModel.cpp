@@ -397,9 +397,10 @@ void PerformanceCache::runExperiments(
   utils::timedExecute([&]() {
     int i = 0;
     for (const auto& gate : gates) {
-      kernelMgr.genCPUGate(cpuConfig, gate,
-                           "gate_" + std::to_string(i++)
-                          ).consumeError(); // ignore possible errors
+      // ignore possible errors
+      kernelMgr.genStandaloneGate(
+        cpuConfig, gate, "gate_" + std::to_string(i++)
+      ).consumeError();
     }
   }, "Code Generation");
 
@@ -417,21 +418,17 @@ void PerformanceCache::runExperiments(
     sv.randomize(nThreads);
   }, "Initialize statevector");
 
-  for (auto& kernel : kernelMgr.kernels()) {
-    if (nThreads == 1)
-      tr = timer.timeit([&]() {
-        kernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), kernel);
-      });
-    else
-      tr = timer.timeit([&]() {
-        kernelMgr.applyCPUKernelMultithread(
-          sv.data(), sv.nQubits(), kernel, nThreads);
-      });
-    auto memSpd = calculateMemUpdateSpeed(nQubits, kernel.precision, tr.min);
+  for (const auto& kernel : kernelMgr.getAllStandaloneKernels()) {
+    tr = timer.timeit([&]() {
+      // ignore possible errors
+      kernelMgr.applyCPUKernel(
+        sv.data(), sv.nQubits(), *kernel, nThreads).consumeError();
+    });
+    auto memSpd = calculateMemUpdateSpeed(nQubits, kernel->precision, tr.min);
     items.emplace_back(
-      kernel.gate->nQubits(), kernel.opCount, 64, nThreads, memSpd);
+      kernel->gate->nQubits(), kernel->opCount, 64, nThreads, memSpd);
     std::cerr << "Gate @ ";
-    utils::printSpan(std::cerr, std::span(kernel.gate->qubits()));
+    utils::printSpan(std::cerr, std::span(kernel->gate->qubits()));
     std::cerr << ": " << memSpd << " GiBps\n";
   }
 }

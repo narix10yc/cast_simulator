@@ -56,9 +56,12 @@ std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
 }
 
 std::ostream& CPUKernelManager::displayInfo(std::ostream& os) const {
+  int nKernels = _standaloneKernels.size();
+  for (const auto& [graphName, kernels] : _graphKernels)
+    nKernels += kernels.size();
   os << CYAN("=== CPU Kernel Manager Info ===\n");
   os << "- Is JITed:          " << (isJITed() ? "Yes" : "No") << "\n"
-     << "- Number of Kernels: " << _kernels.size() << "\n";
+     << "- Number of Kernels: " << nKernels << "\n";
 
   os << CYAN("=============================\n");
   return os;
@@ -67,17 +70,27 @@ std::ostream& CPUKernelManager::displayInfo(std::ostream& os) const {
 void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   assert(nThreads > 0);
   if (nThreads == 1) {
-    for (auto& kernel : _kernels)
-      ensureExecutable(kernel);
-    return;
+    for (auto& kernel : _standaloneKernels)
+      ensureExecutable(*kernel);
+    for (auto& [graphName, kernels] : _graphKernels) {
+      for (auto& kernel : kernels)
+        ensureExecutable(*kernel);
+    }
   }
 
   // multi-thread compile
   utils::TaskDispatcher dispatcher(nThreads);
-  for (auto& kernel : _kernels) {
+  for (auto& kernel : _standaloneKernels) {
 	  dispatcher.enqueue([this, &kernel]() {
-      ensureExecutable(kernel);
+      ensureExecutable(*kernel);
 	  });
+  }
+  for (auto& [graphName, kernels] : _graphKernels) {
+    for (auto& kernel : kernels) {
+      dispatcher.enqueue([this, &kernel]() {
+        ensureExecutable(*kernel);
+      });
+    }
   }
   if (progressBar)
     std::cerr << "Ensure All Executables...\n";
@@ -153,131 +166,5 @@ void CPUKernelManager::dumpIR(const std::string& funcName,
   std::cerr << RED("[Err] ") << "In CPUKernelManager::dumpIR: "
             << "Function " << funcName << " not found.\n";
 }
-
-
-/// Dump the native assembly of a JIT-compiled kernel using LLVM's disassembler API.
-/// This does not use disk I/O. The output will be written to the given std::ostream.
-/// Note: This is a simplified example and may need adaptation for your JIT setup.
-// void CPUKernelManager::dumpAsm(const std::string& funcName, llvm::raw_ostream& os) {
-//   using namespace llvm;
-
-//   assert(llvmJIT && "JIT must be initialized");
-
-//   // Find the symbol address
-//   auto symOrErr = llvmJIT->lookup(funcName);
-//   if (!symOrErr) {
-//     os << RED("[Err] ") << "In CPUKernelManager::dumpAsm: funcName "
-//        << funcName << " not found in JIT.\n";
-//     return;
-//   }
-//   uint64_t funcAddr = symOrErr.get().getValue();
-
-//   // Get the object buffer from the JIT's ObjectLinkingLayer
-//   auto& objLayer = llvmJIT->getObjLinkingLayer();
-//   bool found = false;
-
-//   for (auto it = objLayer.get)
-//   objLayer.forEachObject([&](orc::MaterializationResponsibility&,
-//                              const MemoryBufferRef& objBuffer) {
-//     auto objOrErr = object::ObjectFile::createObjectFile(objBuffer);
-//     if (!objOrErr)
-//       return true; // continue
-
-//     auto& obj = **objOrErr;
-//     for (const auto& sym : obj.symbols()) {
-//       auto addrOrErr = sym.getAddress();
-//       if (!addrOrErr)
-//         continue;
-//       if (*addrOrErr == funcAddr) {
-//         // Found the symbol in this object
-//         auto nameOrErr = sym.getName();
-//         if (!nameOrErr)
-//           continue;
-
-//         std::string tripleName = obj.makeTriple().getTriple();
-//         std::string error;
-//         const Target* target = TargetRegistry::lookupTarget(tripleName, error);
-//         if (!target) {
-//           os << "Target not found: " << error << "\n";
-//           found = true;
-//           return false;
-//         }
-
-//         // Set up disassembler
-//         std::string cpu = "generic";
-//         SubtargetFeatures features;
-//         auto sti = target->createMCSubtargetInfo(tripleName, cpu, features.getString());
-//         auto mri = target->createMCRegInfo(tripleName);
-//         auto asmInfo = target->createMCAsmInfo(*mri, tripleName);
-//         auto mcii = target->createMCInstrInfo();
-
-//         // Modern MCContext construction
-//         auto fileInfo = std::make_unique<MCObjectFileInfo>();
-//         auto ctx = std::make_unique<MCContext>(asmInfo.get(), mri.get(), fileInfo.get());
-//         fileInfo->InitMCObjectFileInfo(Triple(tripleName), /*PIC=*/false, *ctx, /*LargeCodeModel=*/false);
-
-//         auto disAsm = target->createMCDisassembler(*sti, *ctx);
-//         auto ip = target->createMCInstPrinter(
-//             Triple(tripleName), asmInfo->getAssemblerDialect(), *asmInfo, *mcii, *mri);
-
-//         if (!disAsm || !ip) {
-//           os << "Failed to create disassembler or printer.\n";
-//           found = true;
-//           return false;
-//         }
-
-//         // Find section containing the symbol
-//         for (const auto& sec : obj.sections()) {
-//           uint64_t secAddr = sec.getAddress();
-//           uint64_t secSize = sec.getSize();
-//           if (funcAddr >= secAddr && funcAddr < secAddr + secSize) {
-//             auto secDataOrErr = sec.getContents();
-//             if (!secDataOrErr) {
-//               os << "Failed to get section contents.\n";
-//               found = true;
-//               return false;
-//             }
-//             StringRef secData = *secDataOrErr;
-//             uint64_t offset = funcAddr - secAddr;
-//             if (offset >= secSize) {
-//               os << "Offset out of section bounds.\n";
-//               found = true;
-//               return false;
-//             }
-//             ArrayRef<uint8_t> bytes(
-//                 reinterpret_cast<const uint8_t*>(secData.data()) + offset,
-//                 secSize - offset);
-
-//             uint64_t index = 0;
-//             uint64_t absAddr = funcAddr;
-//             raw_os_ostream llvm_os(os);
-//             while (index < bytes.size()) {
-//               MCInst inst;
-//               uint64_t size = 0;
-//               if (disAsm->getInstruction(inst, size, bytes.slice(index), absAddr, nulls(), nulls())) {
-//                 llvm_os << format_hex(absAddr, 10) << ":\t";
-//                 ip->printInst(&inst, llvm_os, "", *sti);
-//                 llvm_os << "\n";
-//                 absAddr += size;
-//                 index += size;
-//               } else {
-//                 llvm_os << format_hex(absAddr, 10) << ":\t<unknown>\n";
-//                 break;
-//               }
-//             }
-//             found = true;
-//             return false;
-//           }
-//         }
-//       }
-//     }
-//     return !found; // continue if not found
-//   });
-
-//   if (!found) {
-//     os << "Could not find native code for function " << funcName << ".\n";
-//   }
-// }
-
 
 #undef DEBUG_TYPE

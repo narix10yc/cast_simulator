@@ -49,7 +49,7 @@ static void f() {
     std::cerr << "nqubits = " << graph.nQubits() << "\n";
     graph.visualize(std::cerr);
     for (const auto& gate : allGates) {
-      kernelMgrBeforeFusion.genCPUGate(
+      kernelMgrBeforeFusion.genStandaloneGate(
         kernelGenConfig, gate,
         "beforeFusion" + std::to_string(graph.gateId(gate))
       ).consumeError(); // ignore possible error
@@ -60,7 +60,7 @@ static void f() {
     std::cerr << "After fusion: " << allGates.size() << " gates\n";
     graph.visualize(std::cerr);
     for (const auto& gate : allGates) {
-      kernelMgrAfterFusion.genCPUGate(
+      kernelMgrAfterFusion.genStandaloneGate(
         kernelGenConfig, gate,
         "afterFusion" + std::to_string(graph.gateId(gate))
       ).consumeError(); // ignore possible error
@@ -74,14 +74,14 @@ static void f() {
     sv0.randomize();
     sv1 = sv0;
     
-    for (const auto& k : kernelMgrBeforeFusion.kernels()) {
+    for (const auto& k : kernelMgrBeforeFusion.getAllStandaloneKernels()) {
       kernelMgrBeforeFusion.applyCPUKernel(
-        sv0.data(), sv0.nQubits(), k.llvmFuncName);
+        sv0.data(), sv0.nQubits(), *k).consumeError();
     }
 
-    for (const auto& k : kernelMgrAfterFusion.kernels()) {
+    for (const auto& k : kernelMgrAfterFusion.getAllStandaloneKernels()) {
       kernelMgrAfterFusion.applyCPUKernel(
-        sv1.data(), sv1.nQubits(), k.llvmFuncName);
+        sv1.data(), sv1.nQubits(), *k).consumeError();
     }
 
     suite.assertClose(sv0.norm(), 1.0,
