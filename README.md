@@ -1,5 +1,5 @@
-## Update 9th June, 2025
-Code refactoring in process. Check the merge-dev and yl5619-dev branch.
+## Update 23th June, 2025
+Code refactoring in process. Python binding in progress. Check the yl5619-dev branch.
 
 For the main branch, CPU part does work. To test out, disable `CAST_USE_CUDA` and run
 ```
