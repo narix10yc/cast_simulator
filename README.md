@@ -10,6 +10,8 @@ Some demos also run
 ninja cpu_bcmk && ./cpu_bcmk
 ```
 
+To enable python binding, add `-DCAST_PYTHON_BIND=True` when configuring cmake.
+
 ## Environment Setup
 CAST is built with cmake and depends on the [LLVM project](https://github.com/llvm/llvm-project).
 
