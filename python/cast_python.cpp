@@ -48,7 +48,7 @@ void bind_QuantumGate(py::module_& m) {
       py::arg("p")
     )
     .def("get_superop_gate", &cast::StandardQuantumGate::getSuperopGate)
-    .def("get_infp",
+    .def("get_info",
       [](const cast::StandardQuantumGate& self, int verbose) {
         std::ostringstream oss;
         self.displayInfo(oss, verbose);
@@ -125,9 +125,17 @@ void bind_CPUStatevector(py::module_& m) {
       return self.amp(idx);
     }, py::arg("idx")
     )
-    .def("num_qubits", &cast::CPUStatevector<float>::nQubits)
+    .def_property_readonly("num_qubits",
+      [](const cast::CPUStatevector<float>& self) {
+        return self.nQubits();
+      }
+    )
     .def("normSquared", &cast::CPUStatevector<float>::normSquared)
     .def("norm", &cast::CPUStatevector<float>::norm)
+    .def("probability",
+      &cast::CPUStatevector<float>::prob, 
+      py::arg("qubit")
+    )
     .def("initialize",
       &cast::CPUStatevector<float>::initialize, py::arg("num_threads") = 1)
     .def("normalize",
@@ -144,9 +152,17 @@ void bind_CPUStatevector(py::module_& m) {
       return self.amp(idx);
     }, py::arg("idx")
     )
-    .def("num_qubits", &cast::CPUStatevector<double>::nQubits)
+    .def_property_readonly("num_qubits",
+      [](const cast::CPUStatevector<float>& self) {
+        return self.nQubits();
+      }
+    )
     .def("normSquared", &cast::CPUStatevector<double>::normSquared)
     .def("norm", &cast::CPUStatevector<double>::norm)
+    .def("probability",
+      &cast::CPUStatevector<double>::prob, 
+      py::arg("qubit")
+    )
     .def("initialize",
       &cast::CPUStatevector<double>::initialize, py::arg("nThreads") = 1)
     .def("normalize",

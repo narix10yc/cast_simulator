@@ -218,7 +218,6 @@ private:
   int _nQubits;
   ScalarType* _data;
 public:
-
   CPUStatevector(int nQubits, int simd_s, bool init = false)
     : simd_s(simd_s)
     , _nQubits(nQubits)
@@ -253,21 +252,26 @@ public:
 
   size_t sizeInBytes() const { return (2ULL << _nQubits) * sizeof(ScalarType); }
 
-  ScalarType normSquared() const {
-    ScalarType s = 0;
-    for (size_t i = 0; i < 2 * getN(); i++)
-      s += _data[i] * _data[i];
+  double normSquared() const {
+    double s = 0.0;
+    for (size_t i = 0; i < 2 * getN(); i++) {
+      double a = static_cast<double>(_data[i]);
+      s += a * a;
+    }
     return s;
   }
 
-  ScalarType norm() const { return std::sqrt(normSquared()); }
+  double norm() const { return std::sqrt<double>(normSquared()); }
 
   /// @brief Initialize to the |00...00> state.
+  /// Notice: even though we provide nThreads parameter, this function
+  /// uses a single-thread std::memset to initialize the statevector.
   void initialize(int nThreads = 1) {
     std::memset(_data, 0, sizeInBytes());
     _data[0] = 1.0;
   }
 
+  /// Notice: nThreads parameter is ignored in this function.
   void normalize(int nThreads = 1) {
     ScalarType n = norm();
     for (size_t i = 0; i < 2 * getN(); ++i)
@@ -275,6 +279,7 @@ public:
   }
 
   /// @brief Uniform randomize statevector (by the Haar-measure on sphere).
+  /// nThreads parameter does work here.
   void randomize(int nThreads = 1) {
     std::vector<std::thread> threads;
     threads.reserve(nThreads);
@@ -305,10 +310,10 @@ public:
   ScalarType& imag(size_t idx) {
     return _data[utils::insertOneToBit(idx, simd_s)];
   }
-  const ScalarType& real(size_t idx) const {
+  ScalarType real(size_t idx) const {
     return _data[utils::insertZeroToBit(idx, simd_s)];
   }
-  const ScalarType& imag(size_t idx) const {
+  ScalarType imag(size_t idx) const {
     return _data[utils::insertOneToBit(idx, simd_s)];
   }
 
@@ -333,12 +338,12 @@ public:
   }
 
   /// @brief Compute the probability of measuring 1 on qubit q
-  ScalarType prob(int q) const {
-    ScalarType p = 0.0;
+  double prob(int q) const {
+    double p = 0.0;
     for (size_t i = 0; i < (getN() >> 1); i++) {
       size_t idx = utils::insertZeroToBit(i, q);
-      const auto& re = real(idx);
-      const auto& im = imag(idx);
+      const double re = real(idx);
+      const double im = imag(idx);
       p += (re * re + im * im);
     }
     return 1.0 - p;
