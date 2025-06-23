@@ -16,13 +16,16 @@
 // For sampling qubits
 #include "utils/utils.h"
 
+// For get_num_threads()
+#include "cast/_config.h"
+
 using namespace cast;
 
 // 28-qubit statevector takes 2GiB memory for float and 4GiB for double
 constexpr int NUM_QUBITS = 28;
 
 // Number of threads to use for benchmarking.
-constexpr int NUM_THREADS = 10;
+int NUM_THREADS = cast::get_num_threads();
 
 // Unit in bytes.
 // 16 for ARM_NEON and SSE
@@ -112,12 +115,17 @@ static void benchmark() {
 
   // Initialize JIT engine
   utils::timedExecute([&]() {
-    kernelMgr.initJIT(
+    auto result = kernelMgr.initJIT(
       1,  /* number of threads */
       llvm::OptimizationLevel::O1, /* LLVM opt level */
       false, /* use lazy JIT */
       1 /* verbose (show progress bar) */
     );
+    if (!result) {
+      std::cerr << BOLDRED("[Error]: In initializing JIT engine: ")
+                << result.takeError() << "\n";
+      std::exit(EXIT_FAILURE);
+    }
   }, "Initialize JIT Engine");
 
   // Create a statevector with NUM_QUBITS qubits
@@ -159,6 +167,12 @@ static void benchmark() {
 }
 
 int main(int argc, char** argv) {
+  std::cerr << BOLDCYAN("[Info]: ")
+            << "Benchmarking CPU simulation speed of multi-qubit dense gates "
+            << "and multi-qubit Hadamard gates on CPU.\n";
+  std::cerr << BOLDCYAN("[Info]: ")
+            << "Using " << NUM_QUBITS << "-qubit statevector with "
+            << NUM_THREADS << " threads.\n";
   benchmark<float>();
   benchmark<double>();
   return 0;

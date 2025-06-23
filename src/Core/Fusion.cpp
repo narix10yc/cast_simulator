@@ -1,5 +1,5 @@
 #include "cast/Fusion.h"
-
+#include "cast/IR/IRNode.h"
 #include "utils/iocolor.h"
 #include "utils/PrintSpan.h"
 

@@ -17,7 +17,7 @@
 using namespace cast;
 
 // Top-level entry
-MaybeError<CPUKernelInfo*> CPUKernelManager::genCPUGate(
+MaybeError<void> CPUKernelManager::genCPUGate(
     const CPUKernelGenConfig& config, 
     ConstQuantumGatePtr gate,
     const std::string& funcName) {
@@ -52,7 +52,7 @@ MaybeError<CPUKernelInfo*> CPUKernelManager::genCPUGate(
       std::ostringstream oss;
       oss << "CPU kernel with name '" << llvmFuncName
           << "' already exists. Reusing the existing kernel.\n";
-      return cast::makeError<CPUKernelInfo*>(oss.str());
+      return cast::makeError<void>(oss.str());
     }
   }
   // append the newly generated kernel
@@ -65,7 +65,7 @@ MaybeError<CPUKernelInfo*> CPUKernelManager::genCPUGate(
     config.simd_s,
     gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol used in sigMat
   );
-  return &_kernels.back();
+  return {}; // success
 }
 
 MaybeError<void> CPUKernelManager::genCPUGatesFromGraph(

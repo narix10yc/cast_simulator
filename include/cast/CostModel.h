@@ -2,18 +2,13 @@
 #define CAST_COSTMODEL_H
 
 #include "cast/Core/QuantumGate.h"
-#include "cast/CPU/CPUKernelManager.h"
 #include <cassert>
 #include <string>
 #include <vector>
 
 namespace cast {
-
-struct CostResult {
-  double benefit;
-  legacy::QuantumGate* fusedGate;
-};
-
+  
+class CPUKernelGenConfig;
 class PerformanceCache;
 
 class CostModel {

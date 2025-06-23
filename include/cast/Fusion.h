@@ -2,14 +2,13 @@
 #define CAST_CPUFUSION_H
 
 #include "cast/CostModel.h"
-#include "cast/IR/IRNode.h"
 #include <cassert>
 
 namespace cast {
-  namespace legacy {
-    class CircuitGraph;
-    class QuantumGate;
-  } // namespace legacy
+
+namespace ir {
+  class CircuitGraphNode;
+}
 
 struct FusionConfig {
   int precision;
@@ -43,9 +42,8 @@ struct FusionConfig {
   std::ostream& display(std::ostream&) const;
 };
 
-void applyGateFusion(
-    const FusionConfig&, const CostModel*, legacy::CircuitGraph&, int max_k=7);
-
+// TODO: We might want to change this function to
+// ir::CircuitGraphNode::applyFusion()
 void applyGateFusion(
     const FusionConfig&, const CostModel*, ir::CircuitGraphNode&, int max_k=7);
 

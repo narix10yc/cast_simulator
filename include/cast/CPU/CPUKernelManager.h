@@ -7,6 +7,7 @@
 #include "utils/MaybeError.h"
 
 #define CPU_KERNEL_TYPE void(void*)
+
 namespace cast {
 
 enum class MatrixLoadMode { 
@@ -71,6 +72,8 @@ public:
     , _kernels()
     , llvmJIT(nullptr) {}
 
+  std::ostream& displayInfo(std::ostream& os) const;
+
   std::vector<CPUKernelInfo>& kernels() { return _kernels; }
   const std::vector<CPUKernelInfo>& kernels() const { return _kernels; }
 
@@ -95,11 +98,10 @@ public:
     return llvmJIT != nullptr;
   }
 
-  // Generate a CPU kernel. Returns a reference to the generated kernel
-  // information.
-  MaybeError<CPUKernelInfo*> genCPUGate(const CPUKernelGenConfig& config,
-                                        ConstQuantumGatePtr gate,
-                                        const std::string& funcName);
+  // Generate a CPU kernel.
+  MaybeError<void> genCPUGate(const CPUKernelGenConfig& config,
+                              ConstQuantumGatePtr gate,
+                              const std::string& funcName);
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the

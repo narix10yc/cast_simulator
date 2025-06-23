@@ -12,12 +12,60 @@ namespace py = pybind11;
 namespace {
 
 void bind_QuantumGate(py::module_& m) {
+  // Base class: QuantumGate
   py::class_<cast::QuantumGate, cast::QuantumGatePtr>(m, "QuantumGate")
-    .def("nqubits", &cast::QuantumGate::nQubits)
-    .def("get_info", [](const cast::QuantumGate& self, int verbose=1) {
-      std::ostringstream oss;
-      self.displayInfo(oss, verbose);
-      return oss.str();
+    .def_property_readonly("num_qubits", &cast::QuantumGate::nQubits)
+    .def_property_readonly("qubits", 
+      [](const cast::QuantumGate& self) {
+        return self.qubits();
+      }
+    )
+    .def("op_count", &cast::QuantumGate::opCount, py::arg("zero_tol"))
+    .def("get_superop_gate", &cast::QuantumGate::getSuperopGate)
+    .def("get_info", 
+      [](const cast::QuantumGate& self, int verbose) {
+        std::ostringstream oss;
+        self.displayInfo(oss, verbose);
+        return oss.str();
+      },
+      py::arg("verbose") = 1
+    );
+
+  // Derived class: StandardQuantumGate
+  py::class_<cast::StandardQuantumGate,
+              cast::QuantumGate,
+              cast::StandardQuantumGatePtr>(m, "StandardQuantumGate")
+    .def_static("random_unitary",
+      [](const std::vector<int>& qubits) {
+        return cast::StandardQuantumGate::RandomUnitary(qubits);
+      },
+      py::arg("qubits")
+    )
+    .def_static("I1", &cast::StandardQuantumGate::I1, py::arg("q"))
+    .def_static("H", &cast::StandardQuantumGate::H, py::arg("q"))
+    .def("set_noise_spc",
+      &cast::StandardQuantumGate::setNoiseSPC,
+      py::arg("p")
+    )
+    .def("get_superop_gate", &cast::StandardQuantumGate::getSuperopGate)
+    .def("get_infp",
+      [](const cast::StandardQuantumGate& self, int verbose) {
+        std::ostringstream oss;
+        self.displayInfo(oss, verbose);
+        return oss.str();
+    },
+    py::arg("verbose") = 1
+  );
+
+  // Derived class: SuperopQuantumGate
+  py::class_<cast::SuperopQuantumGate,
+             cast::QuantumGate,
+             cast::SuperopQuantumGatePtr>(m, "SuperopQuantumGate")
+    .def("get_info",
+      [](const cast::SuperopQuantumGate& self, int verbose) {
+        std::ostringstream oss;
+        self.displayInfo(oss, verbose);
+        return oss.str();
     },
     py::arg("verbose") = 1
   );
@@ -107,8 +155,12 @@ void bind_CPUStatevector(py::module_& m) {
       &cast::CPUStatevector<double>::randomize, py::arg("nThreads") = 1);
 }
 
-
 void bind_CPUKernelManager(py::module_& m) {
+  py::enum_<cast::MatrixLoadMode>(m, "MatrixLoadMode")
+    .value("UseMatImmValues", cast::MatrixLoadMode::UseMatImmValues)
+    .value("StackLoadMatElems", cast::MatrixLoadMode::StackLoadMatElems)
+    .export_values();
+
   py::class_<cast::CPUKernelGenConfig>(m, "CPUKernelGenConfig")
     .def(py::init<>())
     .def_readwrite("simd_s", &cast::CPUKernelGenConfig::simd_s)
@@ -128,6 +180,14 @@ void bind_CPUKernelManager(py::module_& m) {
   
   py::class_<cast::CPUKernelInfo>(m, "CPUKernelInfo")
     .def(py::init<>())
+    .def_readonly("precision", &cast::CPUKernelInfo::precision)
+    .def_readonly("llvm_func_name", &cast::CPUKernelInfo::llvmFuncName)
+    .def_readonly("gate", &cast::CPUKernelInfo::gate)
+    .def_property_readonly("executable",
+      [](const cast::CPUKernelInfo& self) {
+        return self.executable ? true : false;
+      }
+    )
     .def("get_info", [](const cast::CPUKernelInfo& self) {
         std::ostringstream oss;
         oss << "=== Info of CPUKernel @ " << (void*)&self << " ===\n";
@@ -141,14 +201,19 @@ void bind_CPUKernelManager(py::module_& m) {
 
   py::class_<cast::CPUKernelManager>(m, "CPUKernelManager")
     .def(py::init<>())
+    .def("get_info", [](const cast::CPUKernelManager& self) {
+        std::ostringstream oss;
+        self.displayInfo(oss);
+        return oss.str();
+      })
     .def("gen_cpu_gate", [](cast::CPUKernelManager& self, 
                             const cast::CPUKernelGenConfig& config, 
                             const cast::QuantumGatePtr& gate, 
                             const std::string& func_name) {
         auto result = self.genCPUGate(config, gate, func_name);
         if (!result) {
-          throw std::runtime_error("Failed to generate CPU gate. Reason: " +
-                                   result.takeError());
+          throw std::runtime_error(
+            "Failed to generate CPU gate. Reason: " + result.takeError());
         }
       },
       py::arg("config"), py::arg("gate"), py::arg("func_name")
@@ -192,7 +257,7 @@ void bind_CPUKernelManager(py::module_& m) {
       },
       py::arg("num_threads") = 1,
       py::arg("opt_level") = 1,
-      py::arg("use_lazy_jit") = true,
+      py::arg("use_lazy_jit") = false,
       py::arg("verbose") = 0
     );
 }

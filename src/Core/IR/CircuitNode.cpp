@@ -57,3 +57,11 @@ std::vector<CircuitGraphNode*> CircuitNode::getAllCircuitGraphs() const {
 unsigned CircuitNode::countNumCircuitGraphs() const {
   return getAllCircuitGraphs().size();
 }
+
+void CircuitNode::optimize(const FusionConfig& fusionConfig,
+                           const CostModel* costModel) {
+  auto allCircuitGraphs = getAllCircuitGraphs();
+  for (auto* graph : allCircuitGraphs)
+    applyGateFusion(fusionConfig, costModel, *graph);
+
+}

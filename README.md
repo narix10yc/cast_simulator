@@ -115,10 +115,26 @@ cd build-debug && \
 cmake -GNinja \
 -DCMAKE_BUILD_TYPE=Debug \
 -DCAST_USE_CUDA=True \
--DCUDAToolkit_ROOT=/use/local/cuda-12.3
+-DCUDAToolkit_ROOT=/usr/local/cuda-12.3
 ```
 
 Then run `ninja unit_test && ./unit_test` to run some unit tests, and confirm it compiles and runs correctly.
+
+## Running Demos
+We provide several demos for testing purposes.
+
+### Demo: `cpu_bcmk`
+To compile it, run `ninja cpu_bcmk`. This will give an executable `cpu_bcmk` in the build directory.
+
+The demo generates each one of 1-qubit, 2-qubit, 3-qubit, and 4-qubit random unitary gates as well as 1-qubit, 2-qubit, 3-qubit, and 4-qubit Hadamard gates, for a total of 8 kernels. Then it applies each of these gates to a (defaulted) 28-qubit statevector and reports the time and effective memory update speed of the run. The experiment runs both single-precision and double-precision modes.
+
+You may try out different thread configuration by
+```
+# assume in the build directory
+CAST_NUM_THREADS=<N> ./cpu_bcmk
+```
+This command basically sets enviroment variable `CAST_NUM_THREADS` which overrides the number of threads query `cast::get_num_threads()`.
+
 
 ## Running Experiments
 To use our provided CostModel class to conduct benchmarks for a cost model specialized to your hardware platform follow the steps below:

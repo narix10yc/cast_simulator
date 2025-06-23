@@ -19,3 +19,4 @@ analysis/*
 # python-related
 python_envs/*
 *.ipynb
+_deps/*

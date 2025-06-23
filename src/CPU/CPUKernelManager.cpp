@@ -55,6 +55,15 @@ std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
   return os;
 }
 
+std::ostream& CPUKernelManager::displayInfo(std::ostream& os) const {
+  os << CYAN("=== CPU Kernel Manager Info ===\n");
+  os << "- Is JITed:          " << (isJITed() ? "Yes" : "No") << "\n"
+     << "- Number of Kernels: " << _kernels.size() << "\n";
+
+  os << CYAN("=============================\n");
+  return os;
+}
+
 void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   assert(nThreads > 0);
   if (nThreads == 1) {

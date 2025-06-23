@@ -6,6 +6,9 @@ if(CAST_USE_CUDA)
   add_compile_definitions(CAST_USE_CUDA)
 endif()
 option(CAST_PYTHON_BIND "Bind Python" OFF)
+option(CAST_NUM_THREADS "Default number of threads to use" 0)
+# forward definition to 'CMAKE_CAST_NUM_THREADS'. Setting to 0 means fallback
+add_compile_definitions(CMAKE_CAST_NUM_THREADS=${CAST_NUM_THREADS})
 
 message("############ Custom Setups ############")
 # There are two modes: 
@@ -114,6 +117,13 @@ if(EXISTS "${LIBCXX_INCLUDE_DIR}/vector" AND
 else()
   message(STATUS "No libc++ found along with LLVM release-install, "
                  "using system defaults.")
+endif()
+
+# Number of threads
+if(DEFINED CAST_NUM_THREADS AND CAST_NUM_THREADS GREATER 0)
+  message(STATUS "CAST_NUM_THREADS is set to ${CAST_NUM_THREADS}.")
+else()
+  message(STATUS "-DCAST_NUM_THREADS=<N> is not explicitly set.")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)

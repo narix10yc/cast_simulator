@@ -111,16 +111,14 @@ public:
       status.setErrorChecked();
       return *this;
     }
-    // If the states are different, we need to destroy the current value and
     this->~MaybeError();
     new (this) MaybeError(std::move(other));
     return *this;
   }
 
-  // Consume (ignore) the error message. This function is only to be 
-  // called when error is present.
+  // Consume (ignore) the error message. This function will not check if error
+  // is present.
   void consumeError() {
-    assert(status.isErrorPresent() && "No error to consume");
     status.setErrorChecked();
   }
 
@@ -131,9 +129,14 @@ public:
 
   bool hasValue() const { return !hasError(); }
 
-  const value_type& getValue() const requires(NotVoid){
+  const value_type& getValue() const requires(NotVoid) {
     assert(hasValue() && "No value present in MaybeError");
     return _value;
+  }
+
+  value_type&& moveValue() requires(NotVoid) {
+    assert(hasValue() && "No value present in MaybeError");
+    return std::move(_value);
   }
 
   std::string takeError() {

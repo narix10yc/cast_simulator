@@ -2,6 +2,8 @@
 #define CAST_IR_IRNODE_H
 
 #include "cast/Core/QuantumGate.h"
+#include "utils/MaybeError.h"
+#include "cast/Fusion.h"
 #include <iostream>
 #include <list>
 #include <unordered_map>
@@ -255,11 +257,21 @@ public:
 
   std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
 
+  void optimize(const cast::FusionConfig& fusionConfig,
+                const cast::CostModel* costModel);
+
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_Circuit;
   }
 }; // class CircuitNode
 
 } // namespace cast::ir
+
+namespace cast {
+  /// @brief Parse a QASM file and return a cast::ir::CircuitNode.
+  /// The definition is in src/Core/IR/ParseCircuitFromQASM.cpp.
+  cast::MaybeError<ir::CircuitNode>
+  parseCircuitFromQASMFile(const std::string& fileName);
+}; // namespace cast
 
 #endif // CAST_IR_IRNODE_H

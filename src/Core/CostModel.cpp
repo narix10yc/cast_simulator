@@ -1,8 +1,11 @@
 #include "cast/CostModel.h"
 #include "cast/CPU/CPUStatevector.h"
+#include "cast/CPU/CPUKernelManager.h"
 #include "utils/Formats.h"
 #include "utils/PrintSpan.h"
 #include "timeit/timeit.h"
+
+#include "llvm/Support/Casting.h"
 
 #include <fstream>
 #include <iomanip>
