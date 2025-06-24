@@ -24,23 +24,13 @@ using namespace llvm;
 std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
   os << std::scientific;
   os << CYAN("=== CPU Kernel Gen Config ===\n")
-     << "simd_s:     " << simd_s << "\n"
-     << "precision:  " << precision << "\n"
-     << "amp format: ";
-  switch (this->ampFormat) {
-    case AltFormat:
-      os << "AltFormat\n"; break;
-    case SepFormat:
-      os << "SepFormat\n"; break;
-    default:
-      assert(0 && "Unreachable");
-  }
-
-  os << "useFMA:         " << useFMA << "\n"
-     << "useFMS:         " << useFMS << "\n"
-     << "usePDEP:        " << usePDEP << "\n"
-     << "zeroTolerance:  " << zeroTol << "\n"
-     << "oneTolerance:   " << oneTol << "\n"
+     << "SIMD Width:      " << static_cast<int>(simdWidth) << "\n"
+     << "Precision:       " << precision << "\n"
+     << "Use FMA:         " << useFMA << "\n"
+     << "Use FMS:         " << useFMS << "\n"
+     << "Use PDEP:        " << usePDEP << "\n"
+     << "Zero Tolerance:  " << zeroTol << "\n"
+     << "One Tolerance:   " << oneTol << "\n"
      << "matrixLoadMode: ";
   switch (this->matrixLoadMode) {
     case MatrixLoadMode::UseMatImmValues:

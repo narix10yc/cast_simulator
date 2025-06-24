@@ -4,6 +4,7 @@
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 #include "cast/IR/IRNode.h"
+#include "cast/CPU/Config.h"
 #include "utils/MaybeError.h"
 
 #define CPU_KERNEL_TYPE void(void*)
@@ -31,29 +32,46 @@ struct CPUKernelInfo {
   MatrixLoadMode matrixLoadMode;
   ConstQuantumGatePtr gate;
   // extra information
-  int simd_s;
-  int opCount;
+  CPUSimdWidth simdWidth;
+  double opCount;
 };
 
 struct CPUKernelGenConfig {
-  enum AmpFormat { AltFormat, SepFormat };
-
-  int simd_s = 2;
-  int precision = 64;
-  AmpFormat ampFormat = AltFormat;
-  bool useFMA = true;
-  bool useFMS = true;
+  CPUSimdWidth simdWidth;
+  int precision;
+  bool useFMA;
+  bool useFMS;
   // parallel bits deposit from BMI2
-  bool usePDEP = false;
-  double zeroTol = 1e-8;
-  double oneTol = 1e-8;
-  MatrixLoadMode matrixLoadMode = MatrixLoadMode::UseMatImmValues;
+  bool usePDEP;
+  double zeroTol;
+  double oneTol;
+  MatrixLoadMode matrixLoadMode;
+
+  CPUKernelGenConfig()
+    : simdWidth(get_cpu_simd_width())
+    , precision(64) // default to double precision
+    , useFMA(true)
+    , useFMS(true)
+    , usePDEP(false)
+    , zeroTol(1e-8)
+    , oneTol(1e-8)
+    , matrixLoadMode(MatrixLoadMode::UseMatImmValues) {}
+
+  CPUKernelGenConfig(CPUSimdWidth simdWidth, int precision)
+    : simdWidth(simdWidth)
+    , precision(precision)
+    , useFMA(true)
+    , useFMS(true)
+    , usePDEP(false)
+    , zeroTol(1e-8)
+    , oneTol(1e-8)
+    , matrixLoadMode(MatrixLoadMode::UseMatImmValues) {}
+
+  int get_simd_s() const {
+    return cast::get_simd_s(simdWidth, precision);
+  }  
 
   std::ostream& displayInfo(std::ostream& os) const;
-
-  // TODO: set up default configurations
-  static const CPUKernelGenConfig NativeDefaultF32;
-  static const CPUKernelGenConfig NativeDefaultF64;
 };
 
 class CPUKernelManager : public KernelManagerBase {

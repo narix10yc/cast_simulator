@@ -56,12 +56,13 @@ MaybeError<void> CPUKernelManager::applyCPUKernel(
     return cast::makeError<void>(
       "Kernel executable not available.");
   }
-  int tmp = nQubits - kernel.gate->nQubits() - kernel.simd_s;
+  int simd_s = cast::get_simd_s(kernel.simdWidth, kernel.precision);
+  int tmp = nQubits - kernel.gate->nQubits() - simd_s;
   if (tmp < 0) {
     std::ostringstream oss;
     oss << "Invalid number of qubits for the kernel '" << kernel.llvmFuncName
         << "'. This kernel must act on statevectors with at least "
-        << (kernel.gate->nQubits() + kernel.simd_s) << "qubits.";
+        << (kernel.gate->nQubits() + simd_s) << "qubits.";
     return cast::makeError<void>(oss.str());
   }
   uint64_t nTasks = 1ULL << tmp;

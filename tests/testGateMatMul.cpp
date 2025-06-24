@@ -32,10 +32,10 @@ static void basics() {
   suite.displayResult();
 }
 
-template<unsigned nQubits, unsigned simd_s>
+template<CPUSimdWidth SimdWidth, int nQubits>
 static void internal() {
   std::stringstream titleSS;
-  titleSS << "MatMul between Gates (s=" << simd_s
+  titleSS << "MatMul between Gates (s=" << SimdWidth
           << ", nQubits=" << nQubits << ")";
   TestSuite suite(titleSS.str());
 
@@ -49,7 +49,8 @@ static void internal() {
     auto gate1 = legacy::QuantumGate::RandomUnitary(b);
     auto gate = gate0.lmatmul(gate1);
 
-    cast::CPUStatevector<double> sv0(nQubits, simd_s), sv1(nQubits, simd_s);
+    cast::CPUStatevector<double> sv0(nQubits, SimdWidth),
+                                 sv1(nQubits, SimdWidth);
     sv0.randomize();
     sv1 = sv0;
 
@@ -68,6 +69,6 @@ static void internal() {
 
 void cast::test::test_gateMatMul() {
   basics();
-  internal<4, 1>();
-  internal<8, 2>();
+  internal<W128, 4>();
+  internal<W256, 8>();
 }

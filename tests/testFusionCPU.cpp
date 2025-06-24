@@ -11,15 +11,15 @@ namespace fs = std::filesystem;
 
 using namespace cast;
 
-template<unsigned simd_s>
+template<CPUSimdWidth SimdWidth>
 static void f() {
-  cast::test::TestSuite suite("Fusion CPU (s = " + std::to_string(simd_s) + ")");
+  cast::test::TestSuite suite("Fusion CPU (s = " + std::to_string(SimdWidth) + ")");
 
   cast::CPUKernelManager kernelMgrBeforeFusion;
   cast::CPUKernelManager kernelMgrAfterFusion;
 
   cast::CPUKernelGenConfig kernelGenConfig;
-  kernelGenConfig.simd_s = simd_s;
+  kernelGenConfig.simdWidth = SimdWidth;
 
   auto fusionConfig = cast::FusionConfig::Default;
   cast::NaiveCostModel costModel(2, -1, 0);
@@ -69,8 +69,8 @@ static void f() {
     kernelMgrBeforeFusion.initJIT().consumeError(); // ignore possible error
     kernelMgrAfterFusion.initJIT().consumeError(); // ignore possible error
 
-    cast::CPUStatevector<double> sv0(graph.nQubits(), simd_s);
-    cast::CPUStatevector<double> sv1(graph.nQubits(), simd_s);
+    cast::CPUStatevector<double> sv0(graph.nQubits(), SimdWidth);
+    cast::CPUStatevector<double> sv1(graph.nQubits(), SimdWidth);
     sv0.randomize();
     sv1 = sv0;
     
@@ -97,6 +97,6 @@ static void f() {
 }
 
 void cast::test::test_fusionCPU() {
-  f<1>();
-  // f<2>();
+  f<W128>();
+  f<W256>();
 }

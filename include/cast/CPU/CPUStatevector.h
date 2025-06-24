@@ -3,6 +3,7 @@
 
 #include "cast/Legacy/QuantumGate.h"
 #include "cast/Core/QuantumGate.h"
+#include "cast/CPU/Config.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 #include "utils/TaskDispatcher.h"
@@ -218,15 +219,33 @@ private:
   int _nQubits;
   ScalarType* _data;
 public:
-  CPUStatevector(int nQubits, int simd_s, bool init = false)
-    : simd_s(simd_s)
-    , _nQubits(nQubits)
+  CPUStatevector(int nQubits, CPUSimdWidth simdWidth)
+    : _nQubits(nQubits)
     , _data(static_cast<ScalarType*>(
       ::operator new((2ULL << nQubits) * sizeof(ScalarType),
       static_cast<std::align_val_t>(64)))) {
-    if (init)
-      initialize();
+    // initialize simd_s
+    if constexpr (std::is_same_v<ScalarType, float>) {
+      switch (simdWidth) {
+        case CPUSimdWidth::W128: simd_s = 2; break; // 4 elements
+        case CPUSimdWidth::W256: simd_s = 3; break; // 8 elements
+        case CPUSimdWidth::W512: simd_s = 4; break; // 16 elements
+        default: assert(false && "Unsupported SIMD Width for float");
+      }
+    } else if constexpr (std::is_same_v<ScalarType, double>) {
+      switch (simdWidth) {
+        case CPUSimdWidth::W128: simd_s = 1; break; // 2 elements
+        case CPUSimdWidth::W256: simd_s = 2; break; // 4 elements
+        case CPUSimdWidth::W512: simd_s = 3; break; // 8 elements
+        default: assert(false && "Unsupported SIMD Width for double");
+      }
+    } else {
+      static_assert(std::is_same_v<ScalarType, float> ||
+                    std::is_same_v<ScalarType, double>,
+                    "Unsupported ScalarType for CPUStatevector");
+    }
   }
+
 
   CPUStatevector(const CPUStatevector&) = delete;
 

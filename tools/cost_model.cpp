@@ -73,7 +73,7 @@ ArgOverwriteMode("overwrite",
   cl::init(false));
 
 cl::opt<int>
-ArgSimdS("simd-s", cl::desc("simd_s"), cl::init(1));
+ArgSimdWidth("simd-width", cl::desc("simd width"), cl::init(0));
 
 cl::opt<int>
 ArgNTests("N", cl::desc("Number of tests"), cl::Prefix, cl::Required);
@@ -123,8 +123,13 @@ int main(int argc, char** argv) {
   inFile.close();
 
   PerformanceCache cache;
-  CPUKernelGenConfig cpuConfig;
-  cpuConfig.simd_s = ArgSimdS;
+  CPUSimdWidth simdWidth;
+  if (ArgSimdWidth == 0) {
+    simdWidth = get_cpu_simd_width();
+  else 
+    simdWidth = static_cast<CPUSimdWidth>(static_cast<int>(ArgSimdWidth));
+    
+  CPUKernelGenConfig cpuConfig(simdWidth, precision);
   cache.runExperiments(cpuConfig, ArgNQubits, ArgNThreads, ArgNTests);
   cache.writeResults(outFile);
 

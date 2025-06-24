@@ -9,14 +9,13 @@ static QuantumGatePtr getH(int q) {
   return StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {q});
 }
 
-template<unsigned simd_s>
+template<CPUSimdWidth SimdWidth>
 static void f() {
-  test::TestSuite suite("Gate H (s = " + std::to_string(simd_s) + ")");
+  test::TestSuite suite("Gate H (s = " + std::to_string(SimdWidth) + ")");
 
   CPUKernelManager cpuKernelMgr;
 
-  CPUKernelGenConfig cpuConfig;
-  cpuConfig.simd_s = simd_s;
+  CPUKernelGenConfig cpuConfig(SimdWidth, 64);
 
   cpuKernelMgr.genStandaloneGate(cpuConfig, getH(0), "gate_h_0").consumeError();
   cpuKernelMgr.genStandaloneGate(cpuConfig, getH(1), "gate_h_1").consumeError();
@@ -25,12 +24,16 @@ static void f() {
 
   cpuKernelMgr.initJIT().consumeError(); // ignore possible errors
 
-  CPUStatevector<double> sv(6, simd_s);
+  CPUStatevector<double> sv(6, SimdWidth);
   sv.initialize();
   suite.assertClose(sv.norm(), 1.0, "SV Initialization: Norm", GET_INFO());
   suite.assertClose(sv.prob(0), 0.0, "SV Initialization: Prob", GET_INFO());
 
-  cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_0").consumeError();
+  auto rst = cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_0");
+  if (!rst) {
+    std::cerr << BOLDRED("[ERR]: ") << "Failed to apply kernel gate_h_0: "
+              << rst.takeError() << std::endl;
+  }
   suite.assertClose(sv.norm(), 1.0, "Apply H at 0: Norm", GET_INFO());
   suite.assertClose(sv.prob(0), 0.5, "Apply H at 0: Prob", GET_INFO());
 
@@ -102,6 +105,6 @@ static void f() {
 }
 
 void test::test_cpuH() {
-  f<1>();
-  f<2>();
+  f<W128>();
+  f<W256>();
 }

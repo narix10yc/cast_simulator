@@ -10,7 +10,7 @@ int main() {
   auto gate = StandardQuantumGate::RandomUnitary({3, 1});
   CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.precision = 32;
-  kernelGenConfig.simd_s = 2;
+  kernelGenConfig.simdWidth = 2;
 
   kernelManager.genCPUGate(kernelGenConfig, gate, "my_gate");
   // kernelManager.initJIT(/* nThreads */ 1, llvm::OptimizationLevel::O1);

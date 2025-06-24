@@ -5,13 +5,13 @@
 
 using namespace cast;
 
-template<unsigned simd_s, unsigned nQubits>
+template<CPUSimdWidth SimdWidth, unsigned nQubits>
 static void internal_U1q() {
   test::TestSuite suite(
-    "Gate U1q (s=" + std::to_string(simd_s) +
+    "Gate U1q (s=" + std::to_string(SimdWidth) +
     ", n=" + std::to_string(nQubits) + ")");
   cast::CPUStatevector<double>
-    sv0(nQubits, simd_s), sv1(nQubits, simd_s), sv2(nQubits, simd_s);
+    sv0(nQubits, SimdWidth), sv1(nQubits, SimdWidth), sv2(nQubits, SimdWidth);
 
   const auto randomizeSV = [&sv0, &sv1, &sv2]() {
     sv0.randomize();
@@ -28,8 +28,7 @@ static void internal_U1q() {
     gates.emplace_back(StandardQuantumGate::RandomUnitary({q}));
   }
 
-  CPUKernelGenConfig cpuConfig;
-  cpuConfig.simd_s = simd_s;
+  CPUKernelGenConfig cpuConfig(SimdWidth, 64);
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
     kernelMgr.genStandaloneGate(
@@ -72,13 +71,13 @@ static void internal_U1q() {
   suite.displayResult();
 }
 
-template<unsigned simd_s, unsigned nQubits>
+template<CPUSimdWidth SimdWidth, unsigned nQubits>
 static void internal_U2q() {
   test::TestSuite suite(
-    "Gate U2q (s=" + std::to_string(simd_s) +
+    "Gate U2q (s=" + std::to_string(SimdWidth) +
     ", n=" + std::to_string(nQubits) + ")");
   cast::CPUStatevector<double>
-    sv0(nQubits, simd_s), sv1(nQubits, simd_s), sv2(nQubits, simd_s);
+    sv0(nQubits, SimdWidth), sv1(nQubits, SimdWidth), sv2(nQubits, SimdWidth);
 
   const auto randomizeSV = [&sv0, &sv1, &sv2]() {
     sv0.randomize();
@@ -99,8 +98,7 @@ static void internal_U2q() {
     gates.emplace_back(StandardQuantumGate::RandomUnitary({a, b}));
   }
 
-  CPUKernelGenConfig cpuConfig;
-  cpuConfig.simd_s = simd_s;
+  CPUKernelGenConfig cpuConfig(SimdWidth, 64);
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
     kernelMgr.genStandaloneGate(
@@ -146,8 +144,8 @@ static void internal_U2q() {
 }
 
 void test::test_cpuU() {
-  internal_U1q<1, 8>();
-  internal_U1q<2, 12>();
-  internal_U2q<1, 8>();
-  internal_U2q<2, 8>();
+  internal_U1q<W128, 8>();
+  internal_U1q<W256, 12>();
+  internal_U2q<W128, 8>();
+  internal_U2q<W256, 8>();
 }

@@ -5,13 +5,13 @@
 using namespace cast;
 using namespace utils;
 
-template<unsigned simd_s, unsigned nQubits>
+template<CPUSimdWidth SimdWidth, unsigned nQubits>
 static void internal_U1q() {
   std::stringstream ss;
-  ss << "applyGate U1q (s=" << simd_s << ", nQubits=" << nQubits << ")";
+  ss << "applyGate U1q (s=" << SimdWidth << ", nQubits=" << nQubits << ")";
   test::TestSuite suite(ss.str());
 
-  CPUStatevector<double> sv(nQubits, simd_s);
+  CPUStatevector<double> sv(nQubits, SimdWidth);
   sv.initialize();
   for (int q = 0; q < nQubits; q++)
     sv.applyGate(legacy::QuantumGate::H(q));
@@ -42,6 +42,6 @@ static void internal_U1q() {
 }
 
 void test::test_applyGate() {
-  internal_U1q<1, 8>();
-  internal_U1q<2, 8>();
+  internal_U1q<W128, 8>();
+  internal_U1q<W256, 8>();
 }

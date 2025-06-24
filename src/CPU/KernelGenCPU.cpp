@@ -58,7 +58,7 @@ MaybeError<CPUKernelManager::KernelInfoPtr> CPUKernelManager::_genCPUGate(
     func->getName().str(),
     config.matrixLoadMode,
     gate,
-    config.simd_s,
+    config.simdWidth,
     gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol used in sigMat
   );
 }
@@ -224,7 +224,7 @@ std::vector<IRMatData> initMatrixData(
   // Step 2: set the values, either as imm values (llvm::Constant) or as
   // run-time loaded values
   auto* ty = (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
-  auto ec = llvm::ElementCount::getFixed(1 << config.simd_s);
+  auto ec = llvm::ElementCount::getFixed(1 << config.get_simd_s());
   switch (config.matrixLoadMode) {
   case MatrixLoadMode::UseMatImmValues: {
     for (unsigned i = 0; i < KK; ++i) {
@@ -316,7 +316,7 @@ llvm::Function* CPUKernelManager::_gen(
     const ComplexSquareMatrix& mat,
     const QuantumGate::TargetQubitsType& qubits,
     const std::string& funcName) {
-  const unsigned s = config.simd_s;
+  const unsigned s = config.get_simd_s();
   const unsigned S = 1ULL << s;
   const unsigned k = qubits.size();
   const unsigned K = 1ULL << k;

@@ -33,8 +33,8 @@ void bind_QuantumGate(py::module_& m) {
 
   // Derived class: StandardQuantumGate
   py::class_<cast::StandardQuantumGate,
-              cast::QuantumGate,
-              cast::StandardQuantumGatePtr>(m, "StandardQuantumGate")
+             cast::QuantumGate,
+             cast::StandardQuantumGatePtr>(m, "StandardQuantumGate")
     .def_static("random_unitary",
       [](const std::vector<int>& qubits) {
         return cast::StandardQuantumGate::RandomUnitary(qubits);
@@ -179,7 +179,7 @@ void bind_CPUKernelManager(py::module_& m) {
 
   py::class_<cast::CPUKernelGenConfig>(m, "CPUKernelGenConfig")
     .def(py::init<>())
-    .def_readwrite("simd_s", &cast::CPUKernelGenConfig::simd_s)
+    .def_readwrite("simd_s", &cast::CPUKernelGenConfig::simdWidth)
     .def_readwrite("precision", &cast::CPUKernelGenConfig::precision)
     .def_readwrite("ampFormat", &cast::CPUKernelGenConfig::ampFormat)
     .def_readwrite("useFMA", &cast::CPUKernelGenConfig::useFMA)
@@ -278,7 +278,7 @@ void bind_CPUKernelManager(py::module_& m) {
       py::arg("use_lazy_jit") = false,
       py::arg("verbose") = 0
     )
-    .def("apply_gate_f32", 
+    .def("apply_kernel_f32", 
       [](cast::CPUKernelManager& self, 
          cast::CPUStatevectorF32& sv, 
          const cast::CPUKernelInfo& kernel,
@@ -297,7 +297,7 @@ void bind_CPUKernelManager(py::module_& m) {
       },
       py::arg("sv"), py::arg("gate"), py::arg("num_threads") = 1
     )
-    .def("apply_gate_f64", 
+    .def("apply_kernel_f64", 
       [](cast::CPUKernelManager& self, 
          cast::CPUStatevectorF64& sv, 
          const cast::CPUKernelInfo& kernel,
