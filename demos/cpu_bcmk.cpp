@@ -2,6 +2,7 @@
   cpu_bcmk.cpp
   A demo for benchmarking the simulation speed of multi-qubit dense gates and
   multi-qubit Hadamard gates on CPU.
+  Its executable takes no arguments.
 */
 
 // CPU/CPUKernelManager.h contains all components needed for CPU simulation
@@ -16,49 +17,14 @@
 // For sampling qubits
 #include "utils/utils.h"
 
-// For get_num_threads()
-#include "cast/_config.h"
-
 using namespace cast;
 
 // 28-qubit statevector takes 2GiB memory for float and 4GiB for double
 constexpr int NUM_QUBITS = 28;
 
 // Number of threads to use for benchmarking.
-int NUM_THREADS = cast::get_num_threads();
-
-// Unit in bytes.
-// 16 for ARM_NEON and SSE
-// 32 for AVX2
-// 64 for AVX512
-constexpr int SIMD_REG_SIZE = 16;
-
-static_assert(SIMD_REG_SIZE == 16 ||
-              SIMD_REG_SIZE == 32 ||
-              SIMD_REG_SIZE == 64);
-
-constexpr int GetSimdS_F32() {
-  if constexpr (SIMD_REG_SIZE == 16)
-    return 2; // <4 x float>
-  if constexpr (SIMD_REG_SIZE == 32)
-    return 3; // <8 x float>
-  if constexpr (SIMD_REG_SIZE == 64)
-    return 4; // <16 x float>
-  return 0; // Unreachable
-}
-
-constexpr int GetSimdS_F64() {
-  if constexpr (SIMD_REG_SIZE == 16)
-    return 1; // <2 x double>
-  if constexpr (SIMD_REG_SIZE == 32)
-    return 2; // <4 x double>
-  if constexpr (SIMD_REG_SIZE == 64)
-    return 3; // <8 x double>
-  return 0; // Unreachable
-}
-
-constexpr int SIMD_S_F32 = GetSimdS_F32();
-constexpr int SIMD_S_F64 = GetSimdS_F64();
+int NUM_THREADS = cast::get_cpu_num_threads();
+CPUSimdWidth SIMD_WIDTH = cast::get_cpu_simd_width();
 
 static double calculateGiBPerSecond(
     std::size_t memoryInBytes, double timeInSeconds) {
@@ -71,13 +37,12 @@ static void benchmark() {
   static_assert(std::is_same_v<ScalarType, float> ||
                 std::is_same_v<ScalarType, double>,
                 "ScalarType must be either float or double");
-  constexpr int SIMD_S = std::is_same_v<ScalarType, float> ? SIMD_S_F32
-                                                           : SIMD_S_F64;
 
   CPUKernelManager kernelMgr;
-  CPUKernelGenConfig kernelGenConfig;
-  kernelGenConfig.simdWidth = SIMD_S;
-  kernelGenConfig.precision = std::is_same_v<ScalarType, float> ? 32 : 64;
+  CPUKernelGenConfig kernelGenConfig(
+    SIMD_WIDTH,
+    (std::is_same_v<ScalarType, float> ? 32 : 64)
+  );
 
   // Generate 1 to 4-qubit random unitary and Hadamard gates
   for (int k = 1; k < 5; ++k) {
@@ -98,19 +63,18 @@ static void benchmark() {
 
     // While extremely unlikely, a randomly generated unitary gate could have 
     // some entries whose absolute value is less than our zero-tolerance (which
-    // is 1e-8 by default). We set forceDenseKernel to always generate 
-    // dense-gate kernels.
+    // is 1e-8 by default). We force to generate dense kernels here.
     kernelGenConfig.zeroTol = 0.0;
     kernelGenConfig.oneTol = 0.0;
-    kernelMgr.genCPUGate(kernelGenConfig, unitaryGate,
-                         "unitary_gate_" + std::to_string(k)
-                        ).consumeError(); // ignore possible error
+    kernelMgr.genStandaloneGate(
+      kernelGenConfig, unitaryGate, "unitary_gate_" + std::to_string(k)
+    ).consumeError(); // ignore possible error
     // And we relax forceDenseKernel for Hadamard gates
     kernelGenConfig.zeroTol = 1e-8;
     kernelGenConfig.oneTol = 1e-8;
-    kernelMgr.genCPUGate(kernelGenConfig, hadamardGate,
-                         "hadamard_gate_" + std::to_string(k)
-                        ).consumeError(); // ignore possible error
+    kernelMgr.genStandaloneGate(
+      kernelGenConfig, hadamardGate, "hadamard_gate_" + std::to_string(k)
+    ).consumeError(); // ignore possible error
   }
 
   // Initialize JIT engine
@@ -129,7 +93,7 @@ static void benchmark() {
   }, "Initialize JIT Engine");
 
   // Create a statevector with NUM_QUBITS qubits
-  cast::CPUStatevector<ScalarType> statevector(NUM_QUBITS, SIMD_S);
+  cast::CPUStatevector<ScalarType> statevector(NUM_QUBITS, SIMD_WIDTH);
   utils::timedExecute([&]() {
     statevector.randomize(NUM_THREADS); 
   }, "Initialize statevector");
@@ -140,12 +104,14 @@ static void benchmark() {
   for (int k = 1; k < 5; ++k) {
     std::cerr << "Benchmarking " << k << "-qubit unitary gate:  ";
     timingResult = timer.timeit([&]() {
-      kernelMgr.applyCPUKernel(
+      auto rst = kernelMgr.applyCPUKernel(
         statevector.data(),
         statevector.nQubits(), 
         "unitary_gate_" + std::to_string(k),
         NUM_THREADS
       );
+      if (!rst)
+        std::cerr << BOLDRED("[Err]: ") << rst.takeError() << "\n";
     });
     std::cerr << timingResult.med * 1000 << " ms @ " << 
       calculateGiBPerSecond(statevector.sizeInBytes(), timingResult.med)
@@ -153,12 +119,14 @@ static void benchmark() {
 
     std::cerr << "Benchmarking " << k << "-qubit Hadamard gate: ";
     timingResult = timer.timeit([&]() {
-      kernelMgr.applyCPUKernel(
+      auto rst = kernelMgr.applyCPUKernel(
         statevector.data(),
         statevector.nQubits(), 
         "hadamard_gate_" + std::to_string(k),
         NUM_THREADS
       );
+      if (!rst)
+        std::cerr << BOLDRED("[Err]: ") << rst.takeError() << "\n";
     });
     std::cerr << timingResult.med * 1000 << " ms @ " << 
       calculateGiBPerSecond(statevector.sizeInBytes(), timingResult.med)
@@ -173,7 +141,11 @@ int main(int argc, char** argv) {
   std::cerr << BOLDCYAN("[Info]: ")
             << "Using " << NUM_QUBITS << "-qubit statevector with "
             << NUM_THREADS << " threads.\n";
+
+  std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
   benchmark<float>();
+
+  std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
   benchmark<double>();
   return 0;
 }
