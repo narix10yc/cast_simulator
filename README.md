@@ -1,5 +1,5 @@
 ## Update 23th June, 2025
-Code refactoring in process. Python binding in progress. Check the yl5619-dev branch.
+Code refactoring in process. Python binding in progress. Check the yl5619-dev branch. Stay tuned... :)
 
 For the main branch, CPU part does work. To test out, disable `CAST_USE_CUDA` and run
 ```
@@ -135,13 +135,14 @@ You may try out different thread configuration by
 # assume in the build directory
 CAST_NUM_THREADS=<N> ./cpu_bcmk
 ```
-This command basically sets enviroment variable `CAST_NUM_THREADS` which overrides the number of threads query `cast::get_num_threads()`.
+This command basically sets enviroment variable `CAST_NUM_THREADS` which overrides CAST's query to the number of threads `cast::get_cpu_num_threads()`.
 
 
 ## Running Experiments
-To use our provided CostModel class to conduct benchmarks for a cost model specialized to your hardware platform follow the steps below:
+Update 23 June, 2025: To add README here
+<!-- To use our provided CostModel class to conduct benchmarks for a cost model specialized to your hardware platform follow the steps below: -->
 
-### CPU
+<!-- ### CPU
 To perform benchmarks on your CPU, run a command such as the following from inside the build-debug folder:
 ```
 ninja cost_model && ./cost_model -o cost_model.csv -T4 -N 10 -simd-s 2
@@ -160,4 +161,16 @@ Note: you can customise the flags above, or include additional ones. Run `ninja 
 
 ```
 ninja demo_ptx && ./demo_ptx ../examples/qft/qft-28-cp.qasm -T4 --run-no-fuse --run-naive-fuse --run-adaptive-fuse --run-cuda-fuse --model cost_model.csv --cuda-model cost_model_cuda.csv --blocksize 128
+``` -->
+
+## Citing
+
+If you find our work interesting, please consider citing it:
+```
+@article{lu2025versatile,
+  title={Versatile Cross-platform Compilation Toolchain for Schr$\backslash$" odinger-style Quantum Circuit Simulation},
+  author={Lu, Yuncheng and Liang, Shuang and Fan, Hongxiang and Guo, Ce and Luk, Wayne and Kelly, Paul HJ},
+  journal={arXiv preprint arXiv:2503.19894},
+  year={2025}
+}
 ```
