@@ -65,7 +65,7 @@ cl::opt<int>
 ArgNQubits("nqubits", cl::desc("Number of qubits"), cl::init(28));
 
 cl::opt<int>
-ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::Required);
+ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
 
 cl::opt<bool>
 ArgOverwriteMode("overwrite",
@@ -92,6 +92,19 @@ bool checkFileName() {
                "If this filename is desired, please add '-force' "
                "commandline option\n";
   return true;
+}
+
+int unwrapNumThreads() {
+  if (ArgNThreads == 0)
+    return cast::get_cpu_num_threads();
+  return ArgNThreads;
+}
+
+CPUSimdWidth unwrapSimdWidth() {
+  if (ArgSimdWidth == 0)
+    return get_cpu_simd_width();
+  else 
+    return static_cast<CPUSimdWidth>(static_cast<int>(ArgSimdWidth));
 }
 
 int main(int argc, char** argv) {
@@ -123,14 +136,11 @@ int main(int argc, char** argv) {
   inFile.close();
 
   PerformanceCache cache;
-  CPUSimdWidth simdWidth;
-  if (ArgSimdWidth == 0) {
-    simdWidth = get_cpu_simd_width();
-  else 
-    simdWidth = static_cast<CPUSimdWidth>(static_cast<int>(ArgSimdWidth));
-    
+  auto nThreads = unwrapNumThreads();
+  auto simdWidth = unwrapSimdWidth();
+
   CPUKernelGenConfig cpuConfig(simdWidth, precision);
-  cache.runExperiments(cpuConfig, ArgNQubits, ArgNThreads, ArgNTests);
+  cache.runExperiments(cpuConfig, ArgNQubits, nThreads, ArgNTests);
   cache.writeResults(outFile);
 
   outFile.close();
