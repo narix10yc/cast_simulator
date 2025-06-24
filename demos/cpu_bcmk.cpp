@@ -14,9 +14,6 @@
 // Timing utilities
 #include "timeit/timeit.h"
 
-// For sampling qubits
-#include "utils/utils.h"
-
 using namespace cast;
 
 // 28-qubit statevector takes 2GiB memory for float and 4GiB for double
