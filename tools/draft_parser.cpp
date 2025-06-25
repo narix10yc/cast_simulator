@@ -3,19 +3,31 @@
 #include "cast/Fusion.h"
 
 using namespace cast;
-using namespace cast;
 
 static const char* Program = R"(
 Circuit my_circuit {
   H 0;
   CX 0 1;
+  CX 0 2;
+  RZ(Pi/2) 1;
+  RZ(Pi/3) 2;
   If (Measure 0) {
     X 0;
+    RZ(Pi/4) 1;
+    RZ(Pi/5) 2;
+    H 0;
+    CX 0 1;
   }
   Else {
-    X 1;
+    H 0;
+    RZ(Pi/6) 1;
+    RZ(Pi/7) 2;
+    CX 0 2;
   }
-  RZ(Pi/4) 0;
+  RZ(Pi/8) 1;
+  RZ(Pi/9) 2;
+  CX 1 0;
+  CX 2 0;
   Out (Measure 0);
 }
 )";
@@ -30,7 +42,7 @@ int main(int argc, char** argv) {
 
   auto* root = parser.parse();
   ast::PrettyPrinter p(std::cerr);
-  root->prettyPrint(p, 0);
+  // root->prettyPrint(p, 0);
   root->print(std::cerr);
   const auto* astCircuit = root->lookupCircuit("my_circuit");
   assert(astCircuit != nullptr && "Failed to find circuit my_circuit");
@@ -41,8 +53,12 @@ int main(int argc, char** argv) {
     std::cerr << "Failed to transform AST to IR\n";
     return 1;
   }
-  irCircuit->print(std::cerr, 0);
-  irCircuit->displayInfo(std::cerr, 3);
+  irCircuit->visualize(std::cerr);
+  std::cerr << "\nAfter optimize:\n";
 
+
+  NaiveCostModel costModel(2, -1, 1e-8);
+  irCircuit->optimize({}, &costModel);
+  irCircuit->visualize(std::cerr);
   return 0;
 }

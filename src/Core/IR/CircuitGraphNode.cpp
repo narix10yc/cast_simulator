@@ -9,6 +9,13 @@ using namespace cast::ir;
 
 int CircuitGraphNode::_gateMapId = 0;
 
+int CircuitGraphNode::getWidthForVisualize() {
+  int width = std::log10(_gateMapId) + 1;
+  if ((width & 1) == 0) // make it odd
+    ++width;
+  return width;
+}
+
 // checks if all rows in the circuit graph have the same size
 static bool checkConsistency_rowSize(const CircuitGraphNode& graph) {
   auto it = graph.tile_begin();
@@ -371,29 +378,32 @@ std::ostream& CircuitGraphNode::displayInfo(std::ostream& os, int verbose) const
   return os;
 }
 
-std::ostream& CircuitGraphNode::visualize(std::ostream& os, int verbose) const {
-  os << BOLDCYAN("=== Visualizing CircuitGraph @ " << this << " === ")
-     << "(Verbose " << verbose << ")\n";
+std::ostream& CircuitGraphNode::impl_visualize(std::ostream& os,
+                                           int width,
+                                           int n_qubits) const {
+  assert(n_qubits >= _nQubits &&
+         "n_qubits cannot be less than the true number of qubits");
   if (_tile.empty())
     return os << "<empty tile>\n";
-  int width = static_cast<int>(std::log10(_gateMapId) + 1);
-  if ((width & 1) == 0)
-    width++;
 
   const std::string vbar =
       std::string(width / 2, ' ') + "|" + std::string(width / 2 + 1, ' ');
 
   for (const auto& row : _tile) {
-    if (verbose > 1)
-      os << &row << ": ";
-    for (unsigned q = 0; q < nQubits(); q++) {
+    for (unsigned q = 0; q < _nQubits; ++q) {
       if (const auto* gate = row[q]; gate != nullptr)
         os << std::setw(width) << std::setfill('0') << gateId(gate) << " ";
       else
         os << vbar;
     }
+    for (unsigned q = _nQubits; q < n_qubits; ++q) {
+      os << vbar;
+    }
     os << "\n";
   }
-  os << BOLDCYAN("====================================") << "\n";
   return os;
+}
+
+std::ostream& CircuitGraphNode::visualize(std::ostream& os) const {
+  return impl_visualize(os, getWidthForVisualize(), _nQubits);
 }

@@ -24,7 +24,7 @@ public:
       IRNode_OutState,
       IRNode_End
   };
-private:
+protected:
   NodeKind _kind;
 public:
   explicit IRNode(NodeKind kind) : _kind(kind) {}
@@ -37,6 +37,15 @@ public:
     assert(indent >= 0);
     for (int i = 0; i < indent; ++i)
       os.put(' ');
+    return os;
+  }
+
+  // The implementation of visualize(). visualize() function is only provided
+  // for class CircuitGraphNode and CircuitNode.
+  // Use parameter name n_qubits to avoid name conflicts.
+  virtual std::ostream&
+  impl_visualize(std::ostream& os, int width, int n_qubits) const {
+    assert(false && "Not implemented yet (called from base class)");
     return os;
   }
 
@@ -59,6 +68,9 @@ public:
 
   std::ostream& print(std::ostream& os, int indent) const override;
 
+  std::ostream&
+  impl_visualize(std::ostream& os, int width, int n_qubits) const override;
+  
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_Compound;
   }
@@ -75,6 +87,9 @@ public:
 
   std::ostream& print(std::ostream& os, int indent) const override;
 
+  std::ostream&
+  impl_visualize(std::ostream& os, int width, int n_qubits) const override;
+
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_IfMeasure;
   }
@@ -90,6 +105,13 @@ private:
   using row_t = std::vector<QuantumGate*>;
   std::list<row_t> _tile;
 public:
+  static int _gateMapId;
+
+  // This is the width to display in each qubit wire.
+  static int getWidthForVisualize();
+  
+  static constexpr int DefaultRowCapacity = 32;
+
   using row_iterator = std::list<row_t>::iterator;
   using const_row_iterator = std::list<row_t>::const_iterator;
   // struct TransparentHash {
@@ -129,8 +151,6 @@ public:
 private:
   // _gateMap manages memory and stores the id of gates
   std::unordered_map<QuantumGatePtr, int> _gateMap;
-  static int _gateMapId;
-  static constexpr int DefaultRowCapacity = 32;
 
   void resizeRowsIfNeeded(int size);
 public:
@@ -231,7 +251,10 @@ public:
 
   std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
 
-  std::ostream& visualize(std::ostream& os, int verbose=1) const;
+  std::ostream& visualize(std::ostream& os) const;
+
+  std::ostream&
+  impl_visualize(std::ostream& os, int width, int n_qubits) const override;
 
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_CircuitGraph;
@@ -256,6 +279,11 @@ public:
   unsigned countNumCircuitGraphs() const;
 
   std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
+
+  std::ostream& visualize(std::ostream& os) const;
+
+  std::ostream&
+  impl_visualize(std::ostream& os, int width, int n_qubits) const override;
 
   void optimize(const cast::FusionConfig& fusionConfig,
                 const cast::CostModel* costModel);

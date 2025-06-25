@@ -22,6 +22,20 @@ std::ostream& CircuitNode::displayInfo(std::ostream& os, int verbose) const {
   return os;
 }
 
+std::ostream& CircuitNode::impl_visualize(std::ostream& os,
+                                      int width, 
+                                      int n_qubits) const {
+  return body.impl_visualize(os, width, n_qubits);
+}
+
+std::ostream& CircuitNode::visualize(std::ostream& os) const {
+  // Some circuit graphs may have fewer qubits
+  int nQubits = 0;
+  for (const auto& graph : getAllCircuitGraphs())
+    nQubits = std::max(nQubits, graph->nQubits());
+  return impl_visualize(os, CircuitGraphNode::getWidthForVisualize(), nQubits);
+}
+
 // implementation of countNumCircuitGraphs
 namespace {
   void impl_getAllCircuitGraphs(IRNode* node,

@@ -106,3 +106,9 @@ UnitaryPermGateMatrixPtr UnitaryPermGateMatrix::FromGateMatrix(
     "Unsupported GateMatrix type for conversion to UnitaryPermGateMatrix");
   return nullptr;
 }
+
+GateMatrixPtr ScalarGateMatrix::subsystem(uint32_t mask) const {
+  assert(mask != 0 && "Mask must not be zero");
+  assert(false && "Unimplemented");
+  return nullptr;
+}

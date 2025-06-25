@@ -50,8 +50,17 @@ public:
   
   int nQubits() const { return _nQubits; }
 
+  /// Compute the gate matrix of a subsystem.
+  /// @param mask A bitmask indicating which qubits to keep. For example, a 
+  /// mask of 0b011 means to keep the least significant 2 qubits by partial 
+  /// tracing away the more significant qubits.
+  virtual GateMatrixPtr subsystem(uint32_t mask) const {
+    assert(false && "Not implemented yet (called from base class)");
+    return nullptr;
+  }
+
   virtual std::ostream& displayInfo(std::ostream& os, int verbose=1) const {
-    assert(false && "Calling from base class");
+    assert(false && "Not implemented yet (called from base class)");
     return os;
   }
 
@@ -109,6 +118,8 @@ public:
 
   ComplexSquareMatrix& matrix() { return _matrix; }
   const ComplexSquareMatrix& matrix() const { return _matrix; }
+
+  GateMatrixPtr subsystem(uint32_t mask) const override;
 
   std::ostream& displayInfo(std::ostream& os, int verbose=1) const override;
 
