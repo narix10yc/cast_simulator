@@ -137,36 +137,90 @@ void CircuitGraphNode::resizeRowsIfNeeded(int newNQubits) {
   _nQubits = newNQubits;
 }
 
-void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
-  assert(gate != nullptr && "Inserting a null gate");
-  resizeRowsIfNeeded(gate->qubits().back() + 1);
-  // add gate to gateMap
-  auto [gateMapIt, inserted] = _gateMap.insert({gate, _gateMapId++});
-  assert(inserted && "Gate already exists");
+// void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
+//   assert(gate != nullptr && "Inserting a null gate");
+//   resizeRowsIfNeeded(gate->qubits().back() + 1);
+//   // add gate to gateMap
+//   auto [gateMapIt, inserted] = _gateMap.insert({gate, _gateMapId++});
+//   assert(inserted && "Gate already exists");
   
-  auto rowIt = --_tile.end();
-  if (rowIt == _tile.end() || !isRowVacant(rowIt, gate->qubits())) {
-    // insert a new row if either tile is empty or the last row is not vacant
-    rowIt = insertNewRow(tile_end());
-  }
+//   auto rowIt = --_tile.end();
+//   if (rowIt == _tile.end() || !isRowVacant(rowIt, gate->qubits())) {
+//     // insert a new row if either tile is empty or the last row is not vacant
+//     rowIt = insertNewRow(tile_end());
+//   }
 
-  for (auto q : gate->qubits()) {
-    assert((*rowIt)[q] == nullptr && "Gate already exists");
-    (*rowIt)[q] = gate.get();
-  }
+//   for (auto q : gate->qubits()) {
+//     assert((*rowIt)[q] == nullptr && "Gate already exists");
+//     (*rowIt)[q] = gate.get();
+//   }
+// }
+
+void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
+  return insertGate(gate, tile_end());
 }
+
+// void CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
+//   assert(gate != nullptr && "Inserting a null gate");
+//   resizeRowsIfNeeded(gate->qubits().back() + 1);
+//   // add gate to gateMap
+//   auto [it, inserted] = _gateMap.insert({gate, _gateMapId++});
+//   assert(inserted && "Gate already exists in the gate map");
+
+//   for (const auto& q : gate->qubits()) {
+//     assert((*rowIt)[q] == nullptr && "The tile is already occupied");
+//     (*rowIt)[q] = gate.get();
+//   }
+// }
 
 void CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
   assert(gate != nullptr && "Inserting a null gate");
   resizeRowsIfNeeded(gate->qubits().back() + 1);
   // add gate to gateMap
   auto [it, inserted] = _gateMap.insert({gate, _gateMapId++});
-  assert(inserted && "Gate already exists");
+  assert(inserted && "Gate already exists in the gate map");
 
-  for (auto q : gate->qubits()) {
-    assert((*rowIt)[q] == nullptr && "Gate already exists");
-    (*rowIt)[q] = gate.get();
+  // empty tile: insert a new row and put the gate there
+  if (_tile.empty()) {
+    assert(rowIt == tile_end() &&
+           "rowIt should always be the end iterator with an empty tile");
+    rowIt = insertNewRow(tile_end());
+    for (const auto& q : gate->qubits())
+      (*rowIt)[q] = gate.get();
+    return;
   }
+
+  // if rowIt fits the gate, put it there
+  if (rowIt != tile_end() && isRowVacant(rowIt, gate->qubits())) {
+    for (const auto& q : gate->qubits())
+      (*rowIt)[q] = gate.get();
+    return;
+  }
+
+  // rowIt is already the first row and it does not fit the gate,
+  // insert a new row in front of it and put the gate there.
+  if (rowIt == tile_begin()) {
+    rowIt = insertNewRow(rowIt);
+    for (const auto& q : gate->qubits())
+      (*rowIt)[q] = gate.get();
+    return;
+  }
+
+  // otherwise, find the top-most vacant row
+  bool hasVacant = false;
+  while (rowIt != tile_begin()) {
+    --rowIt;
+    if (!isRowVacant(rowIt, gate->qubits())) {
+      ++rowIt;
+      break;
+    }
+    hasVacant = true;
+  }
+  if (!hasVacant)
+    rowIt = insertNewRow(rowIt);
+
+  for (const auto& q : gate->qubits())
+    (*rowIt)[q] = gate.get();
 }
 
 void CircuitGraphNode::removeGate(row_iterator rowIt, int qubit) {

@@ -60,11 +60,17 @@ public:
   std::vector<std::unique_ptr<IRNode>> nodes;
   CompoundNode() : IRNode(IRNode_Compound), nodes() {}
 
+  void push_front(std::unique_ptr<IRNode> node) {
+    nodes.insert(nodes.begin(), std::move(node));
+  }
+  
   void push_back(std::unique_ptr<IRNode> node) {
     nodes.push_back(std::move(node));
   }
 
   size_t size() const { return nodes.size(); }
+
+  bool empty() const { return nodes.empty(); }
 
   std::ostream& print(std::ostream& os, int indent) const override;
 

@@ -56,9 +56,11 @@ int main(int argc, char** argv) {
   irCircuit->visualize(std::cerr);
   std::cerr << "\nAfter optimize:\n";
 
-
   NaiveCostModel costModel(2, -1, 1e-8);
   irCircuit->optimize({}, &costModel);
+  for (auto& graph : irCircuit->getAllCircuitGraphs()) 
+    cast::applyGateFusion(FusionConfig::Default, &costModel, *graph);
+  irCircuit->displayInfo(std::cerr, 2);
   irCircuit->visualize(std::cerr);
   return 0;
 }

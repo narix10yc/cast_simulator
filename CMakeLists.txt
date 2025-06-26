@@ -6,9 +6,14 @@ if(CAST_USE_CUDA)
   add_compile_definitions(CAST_USE_CUDA)
 endif()
 option(CAST_PYTHON_BIND "Bind Python" OFF)
-option(CAST_NUM_THREADS "Default number of threads to use" 0)
-# forward definition to 'CMAKE_CAST_NUM_THREADS'. Setting to 0 means fallback
-add_compile_definitions(CMAKE_CAST_NUM_THREADS=${CAST_NUM_THREADS})
+option(CAST_NUM_THREADS "Default number of threads to use" OFF)
+# forward definition to 'CMAKE_CAST_NUM_THREADS'. Setting to OFF means fallback
+
+if(NOT CAST_NUM_THREADS)
+  add_compile_definitions(CMAKE_CAST_NUM_THREADS=0)
+else()
+  add_compile_definitions(CMAKE_CAST_NUM_THREADS=${CAST_NUM_THREADS})
+endif()
 
 message("############ Custom Setups ############")
 # There are two modes: 
