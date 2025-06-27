@@ -1,7 +1,7 @@
 #ifndef CAST_TRANSFORM_TRANSFORM_H
 #define CAST_TRANSFORM_TRANSFORM_H
 
-#include "cast/IR/IRNode.h"
+#include "cast/Core/IRNode.h"
 #include "cast/Core/AST/ASTContext.h"
 #include "cast/Core/AST/AST.h"
 #include "openqasm/ast.h"

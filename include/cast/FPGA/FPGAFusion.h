@@ -1,7 +1,7 @@
 #ifndef CAST_FPGA_FPGAFUSION_H
 #define CAST_FPGA_FPGAFUSION_H
 
-#include "cast/IR/IRNode.h"
+#include "cast/Core/IRNode.h"
 #include "cast/FPGA/FPGAGateCategory.h"
 
 namespace cast::fpga {

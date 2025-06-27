@@ -41,6 +41,8 @@ public:
     failures.emplace_back(title, info, "AssertEqual failed");
   }
 
+  void assertFalse(const std::string& title, const std::string& info);
+
   void assertClose(
       float a, float b,
       const std::string& title, const std::string& info, float tol=1e-4);

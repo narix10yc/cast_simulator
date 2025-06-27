@@ -21,6 +21,12 @@ bool TestSuite::displayResult() const {
   return false;
 }
 
+void TestSuite::assertFalse(
+    const std::string& title, const std::string& info) {
+  ++nTests;
+  failures.emplace_back(title, info, "AssertFalse");
+}
+
 void TestSuite::assertClose(
     float a, float b,
     const std::string& title, const std::string& info, float tol) {

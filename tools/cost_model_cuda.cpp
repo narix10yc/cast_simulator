@@ -1,4 +1,4 @@
-#include "cast/CostModel.h"
+#include "cast/Core/CostModel.h"
 #include "utils/iocolor.h"
 #include "llvm/Support/CommandLine.h"
 

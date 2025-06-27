@@ -1,6 +1,6 @@
 #include "cast/Core/AST/Parser.h"
 #include "cast/Transform/Transform.h"
-#include "cast/Fusion.h"
+#include "cast/Core/Optimize.h"
 
 using namespace cast;
 
@@ -57,9 +57,9 @@ int main(int argc, char** argv) {
   std::cerr << "\nAfter optimize:\n";
 
   NaiveCostModel costModel(2, -1, 1e-8);
-  irCircuit->optimize({}, &costModel);
+  cast::optimize(*irCircuit, FusionConfig::Default, &costModel);
   for (auto& graph : irCircuit->getAllCircuitGraphs()) 
-    cast::applyGateFusion(FusionConfig::Default, &costModel, *graph);
+    cast::applyGateFusion(*graph, FusionConfig::Default, &costModel);
   irCircuit->displayInfo(std::cerr, 2);
   irCircuit->visualize(std::cerr);
   return 0;

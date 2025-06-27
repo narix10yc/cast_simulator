@@ -1,4 +1,4 @@
-#include "cast/IR/IRNode.h"
+#include "cast/Core/IRNode.h"
 #include "openqasm/parser.h"
 #include "cast/Transform/Transform.h"
 

@@ -3,7 +3,7 @@
 
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
-#include "cast/IR/IRNode.h"
+#include "cast/Core/IRNode.h"
 #include "cast/CPU/Config.h"
 #include "utils/MaybeError.h"
 

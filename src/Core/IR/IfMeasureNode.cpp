@@ -1,4 +1,4 @@
-#include "cast/IR/IRNode.h"
+#include "cast/Core/IRNode.h"
 
 using namespace cast::ir;
 

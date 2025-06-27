@@ -1,7 +1,8 @@
-#include "cast/Fusion.h"
-#include "cast/IR/IRNode.h"
+#include "cast/Core/Optimize.h"
 #include "utils/iocolor.h"
 #include "utils/PrintSpan.h"
+
+#include "llvm/Support/Casting.h"
 
 #define DEBUG_TYPE "fusion-new"
 #include "llvm/Support/Debug.h"
@@ -86,13 +87,15 @@ struct TentativeFusedItem {
   row_iterator iter;
 };
 
+} // end of anonymous namespace
+
 /// @return Number of fused gates
-int startFusion(ir::CircuitGraphNode& graph,
-                const FusionConfig& config,
-                const CostModel* costModel,
-                const int maxK,
-                row_iterator curIt,
-                const int qubit) {
+int cast::startFusion(ir::CircuitGraphNode& graph,
+                      const FusionConfig& config,
+                      const CostModel* costModel,
+                      int maxK,
+                      row_iterator curIt,
+                      int qubit) {
   
   // In the first stage of fusion, we greedily collect gates that may possibly
   // be fused together.
@@ -205,11 +208,10 @@ int startFusion(ir::CircuitGraphNode& graph,
   return fusedGates.size() - 1;
 }
 
-} // anonymous namespace
-
-void cast::applyGateFusion(
-    const FusionConfig& config, const CostModel* costModel,
-    ir::CircuitGraphNode& graph, int max_k) {
+void cast::applyGateFusion(ir::CircuitGraphNode& graph,
+                           const FusionConfig& config,
+                           const CostModel* costModel) {
+  constexpr int MAX_K = 7;
   int curMaxK = 2;
   int nFused = 0;
   do {
@@ -220,9 +222,139 @@ void cast::applyGateFusion(
     // change graph tile
     while (it != graph.tile_end()) {
       for (q = 0; q < graph.nQubits(); ++q) 
-        nFused += startFusion(graph, config, costModel, curMaxK, it, q);
+        nFused += cast::startFusion(graph, config, costModel, curMaxK, it, q);
       ++it;
     }
     graph.squeeze();
-  } while (nFused > 0 && ++curMaxK <= max_k);
+  } while (nFused > 0 && ++curMaxK <= MAX_K);
+}
+
+// helper functions to optimize
+namespace {
+
+using namespace cast::ir;
+
+CircuitGraphNode*
+getOrAppendCGNodeToCompoundNodeFront(CompoundNode& compoundNode) {
+  if (!compoundNode.empty() && 
+      llvm::isa<CircuitGraphNode>(compoundNode.nodes[0].get())) {
+    return llvm::cast<CircuitGraphNode>(compoundNode.nodes[0].get());
+  }
+  compoundNode.push_front(std::make_unique<CircuitGraphNode>());
+  return llvm::cast<CircuitGraphNode>(compoundNode.nodes[0].get());
+}
+
+CircuitGraphNode*
+getOrAppendCGNodeToCompoundNodeBack(CompoundNode& compoundNode) {
+  if (!compoundNode.empty() && 
+      llvm::isa<CircuitGraphNode>(compoundNode.nodes.back().get())) {
+    return llvm::cast<CircuitGraphNode>(compoundNode.nodes.back().get());
+  }
+  compoundNode.push_back(std::make_unique<CircuitGraphNode>());
+  return llvm::cast<CircuitGraphNode>(compoundNode.nodes.back().get());
+}
+
+// returns true if the pass takes effect
+// move single-qubit gates not on the measurement wire at the bottom of the 
+// prior circuit graph node to the top of the if node
+static bool applyPriorIfPass(CircuitGraphNode* priorCGNode,
+                             IfMeasureNode* ifNode) {
+  assert(priorCGNode != nullptr);
+  assert(ifNode != nullptr);
+  bool hasEffect = false;
+  auto thenCGNode = getOrAppendCGNodeToCompoundNodeFront(ifNode->thenBody);
+  auto elseCGNode = getOrAppendCGNodeToCompoundNodeFront(ifNode->elseBody);
+  
+  const int nQubits = priorCGNode->nQubits();
+  const auto begin = priorCGNode->tile_begin();
+  for (int q = 0; q < nQubits; ++q) {
+    if (q == ifNode->qubit)
+      continue; // skip the measurement wire
+    auto it = priorCGNode->tile_end();
+    while (it != begin) {
+      --it;
+      auto gate = priorCGNode->lookup((*it)[q]);
+      if (gate == nullptr)
+        continue;
+      if (gate->nQubits() != 1)
+        continue;
+      thenCGNode->insertGate(gate, thenCGNode->tile_begin());
+      elseCGNode->insertGate(gate, elseCGNode->tile_begin());
+      priorCGNode->removeGate(it, q);
+      hasEffect = true;
+    }
+  }
+  if (hasEffect) {
+    thenCGNode->squeeze();
+    elseCGNode->squeeze();
+  }
+
+  return hasEffect;
+}
+
+// returns true if the pass takes effect
+// move all single-qubit gates at the top of the join circuit graph node to 
+// the bottom of the if node
+static bool applyIfJoinPass(IfMeasureNode* ifNode,
+                            CircuitGraphNode* joinCGNode) {
+  assert(joinCGNode != nullptr);
+  assert(ifNode != nullptr);
+  bool hasEffect = false;
+  auto thenCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->thenBody);
+  auto elseCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->elseBody);
+
+  const int nQubits = joinCGNode->nQubits();
+  auto end = joinCGNode->tile_end();
+  for (int q = 0; q < nQubits; ++q) {
+    auto it = joinCGNode->tile_begin();
+    do {
+      auto gate = joinCGNode->lookup((*it)[q]);
+      if (gate == nullptr)
+        continue;
+      if (gate->nQubits() != 1)
+        continue;
+      thenCGNode->insertGate(gate, thenCGNode->tile_end());
+      elseCGNode->insertGate(gate, elseCGNode->tile_end());
+      joinCGNode->removeGate(it, q);
+      hasEffect = true;
+    } while (++it != end);
+  }
+  if (hasEffect) {
+    thenCGNode->squeeze();
+    elseCGNode->squeeze();
+  }
+
+  return hasEffect;
+}
+
+} // end of anynymous namespace
+
+void cast::optimize(ir::CircuitNode& circuit,
+                    const FusionConfig& config,
+                    const CostModel* costModel) {
+  const auto end = circuit.body.nodes.end();
+  auto curIt = circuit.body.nodes.begin();
+  while (curIt != end) {
+    ++curIt;
+    if (curIt == end)
+      break;
+    auto prevIt = std::prev(curIt);
+    auto nextIt = std::next(curIt);
+    assert(prevIt != end && "prevIt should never be end");
+    if (nextIt == end)
+      break;
+
+    bool hasEffect = false;
+    if (auto* ifNode = llvm::dyn_cast<IfMeasureNode>(curIt->get())) {
+      if (auto* priorCGNode = llvm::dyn_cast<CircuitGraphNode>(prevIt->get()))
+        hasEffect |= applyPriorIfPass(priorCGNode, ifNode);
+      if (auto* joinCGNode = llvm::dyn_cast<CircuitGraphNode>(nextIt->get()))
+        hasEffect |= applyIfJoinPass(ifNode, joinCGNode);
+    }
+  }
+
+  // perform fusion in each block
+  // auto allCircuitGraphs = getAllCircuitGraphs();
+  // for (auto* graph : allCircuitGraphs)
+    // applyGateFusion(fusionConfig, costModel, *graph);
 }

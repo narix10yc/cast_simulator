@@ -1,4 +1,4 @@
-#include "cast/IR/IRNode.h"
+#include "cast/Core/IRNode.h"
 #include "utils/iocolor.h"
 
 #include <set>
@@ -321,9 +321,9 @@ QuantumGatePtr CircuitGraphNode::lookup(QuantumGate* gate) const {
   return nullptr; // gate not found
 }
 
-void CircuitGraphNode::squeeze() {
+void CircuitGraphNode::squeeze(row_iterator beginIt) {
   // first step: relocate gates to the top
-  for (auto rowIt = ++tile_begin(), rowEnd = tile_end();
+  for (auto rowIt = std::next(beginIt), rowEnd = tile_end();
        rowIt != rowEnd;
        ++rowIt) {
     for (int q = 0; q < _nQubits; ++q) {
@@ -350,8 +350,7 @@ void CircuitGraphNode::squeeze() {
 
   // second step: remove empty rows
   auto rowIt = tile_end();
-  auto rowBegin = tile_begin();
-  while (rowIt != rowBegin) {
+  while (rowIt != beginIt) {
     --rowIt;
     bool isEmpty = true;
     for (int q = 0; q < _nQubits; ++q) {

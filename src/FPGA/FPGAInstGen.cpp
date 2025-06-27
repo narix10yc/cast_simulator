@@ -1,4 +1,4 @@
-// #include "cast/IR/IRNode.h"
+// #include "cast/Core/IRNode.h"
 // #include "cast/FPGA/FPGAInst.h"
 // #include "utils/PrintSpan.h"
 

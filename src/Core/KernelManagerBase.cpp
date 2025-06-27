@@ -3,8 +3,6 @@
 
 #include "cast/Core/KernelManager.h"
 
-#include "cast/Fusion.h"
-
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 

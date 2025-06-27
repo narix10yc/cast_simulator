@@ -1,6 +1,6 @@
 #include "cast/Core/AST/Parser.h"
 #include "cast/Transform/Transform.h"
-#include "cast/Fusion.h"
+#include "cast/Core/Optimize.h"
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUStatevector.h"
 #include "tests/TestKit.h"
@@ -55,7 +55,7 @@ static void f() {
       ).consumeError(); // ignore possible error
     }
 
-    cast::applyGateFusion(fusionConfig, &costModel, graph);
+    cast::applyGateFusion(graph, fusionConfig, &costModel);
     allGates = graph.getAllGatesShared();
     std::cerr << "After fusion: " << allGates.size() << " gates\n";
     graph.visualize(std::cerr);

@@ -1,9 +1,8 @@
-#ifndef CAST_IR_IRNODE_H
-#define CAST_IR_IRNODE_H
+#ifndef CAST_CORE_IRNODE_H
+#define CAST_CORE_IRNODE_H
 
 #include "cast/Core/QuantumGate.h"
 #include "utils/MaybeError.h"
-#include "cast/Fusion.h"
 #include <iostream>
 #include <list>
 #include <unordered_map>
@@ -212,7 +211,10 @@ public:
   row_iterator replaceGatesOnConsecutiveRowsWith(
       QuantumGatePtr gate, row_iterator rowItL, int qubit);
 
-  void squeeze();
+  /// @brief Squeeze the circuit graph between rows [rowIt, tile_end()).
+  void squeeze(row_iterator beginIt);
+
+  void squeeze() { return squeeze(tile_begin()); }
 
   const std::unordered_map<QuantumGatePtr, int>& gateMap() const {
     return _gateMap;
@@ -291,9 +293,6 @@ public:
   std::ostream&
   impl_visualize(std::ostream& os, int width, int n_qubits) const override;
 
-  void optimize(const cast::FusionConfig& fusionConfig,
-                const cast::CostModel* costModel);
-
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_Circuit;
   }
@@ -308,4 +307,4 @@ namespace cast {
   parseCircuitFromQASMFile(const std::string& fileName);
 }; // namespace cast
 
-#endif // CAST_IR_IRNODE_H
+#endif // CAST_CORE_IRNODE_H

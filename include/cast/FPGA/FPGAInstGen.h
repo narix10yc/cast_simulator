@@ -1,7 +1,7 @@
 #ifndef CAST_FPGA_FPGAINSTGEN_H
 #define CAST_FPGA_FPGAINSTGEN_H
 
-#include "cast/IR/IRNode.h"
+#include "cast/Core/IRNode.h"
 #include "cast/FPGA/FPGAInst.h"
 
 namespace cast::fpga {
