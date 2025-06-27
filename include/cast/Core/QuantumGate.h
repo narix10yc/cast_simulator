@@ -53,6 +53,12 @@ public:
     return 0.0;
   }
 
+  // The inverse of this quantum gate. Return nullptr if the inverse cannot be
+  // found.
+  virtual QuantumGatePtr inverse() const {
+    return nullptr;
+  }
+
   virtual SuperopQuantumGatePtr getSuperopGate() const {
     assert(false && "QuantumGate::getSuperopGate called from base class");
     return nullptr;
@@ -99,6 +105,8 @@ public:
   }
 
   double opCount(double zeroTol) const override;
+
+  QuantumGatePtr inverse() const override;
 
   // Try to cast the gate matrix to ScalarGateMatrix. Returns nullptr if
   // the casting is not possible.

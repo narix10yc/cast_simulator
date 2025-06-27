@@ -246,3 +246,10 @@ double SuperopQuantumGate::opCount(double zeroTol) const {
   assert(_superopMatrix != nullptr && "Superop matrix is null");
   return countNonZeroElems(*_superopMatrix, zeroTol);
 }
+
+QuantumGatePtr StandardQuantumGate::inverse() const {
+  if (_noiseChannel != nullptr)
+    return nullptr;
+  
+  
+}

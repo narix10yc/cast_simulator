@@ -1,5 +1,6 @@
 #include "cast/ADT/ComplexSquareMatrix.h"
 #include "utils/utils.h"
+#include "utils/PrintSpan.h"
 
 #include <random>
 
@@ -238,8 +239,8 @@ void cast::matmul(const cast::ComplexSquareMatrix& A,
                   const cast::ComplexSquareMatrix& B,
                   cast::ComplexSquareMatrix& C) {
   assert(A.edgeSize() == B.edgeSize() && "Input size mismatch");
-  assert(A.edgeSize() == C.edgeSize() && "Output size mismatch");
-  const size_t edgeSize = A.edgeSize();
+  const auto edgeSize = A.edgeSize();
+  C = ComplexSquareMatrix(edgeSize);
   for (size_t i = 0; i < edgeSize; ++i) {
     for (size_t j = 0; j < edgeSize; ++j) {
       auto re = 0.0;
@@ -324,3 +325,119 @@ ComplexSquareMatrix ComplexSquareMatrix::RandomUnitary(size_t edgeSize) {
   return m;
 }
 
+// helper functions to compute inverse
+namespace {
+
+constexpr double EPS = 1e-10; // tolerance to check singularity
+
+/// The result of LUPDecompose is stored in LU, which contains both L and U 
+/// matrices such that PA = LU.
+/// The permutation is stored in P, where P[i] is the index of the row that was
+/// swapped with row i during the decomposition. The last element P[edgeSize]
+/// contains the number of row swaps made during the decomposition, which can be
+/// used to compute determinant later.
+/// This is the Wikipedia version adapted to complex matrices for our needs.
+/// https://en.wikipedia.org/wiki/LU_decomposition
+bool LUPDecompose(const ComplexSquareMatrix& A,
+                  ComplexSquareMatrix& LU,
+                  int* P) {
+  const auto edgeSize = A.edgeSize();
+  LU = A; // copy A to LU
+
+  // initialize P to be the identity permutation
+  for (int i = 0; i <= edgeSize; ++i)
+    P[i] = i;
+
+  for (int i = 0; i < edgeSize; ++i) {
+    double pivotMag = 0.0;
+    int pivotRow = i;
+
+    for (int row = i; row < edgeSize; row++) {
+      double mag = std::abs(LU.rc(row, i));
+      if (mag > pivotMag) { 
+        pivotMag = mag;
+        pivotRow = row;
+      }
+    }
+
+    if (pivotMag < EPS) {
+      return false; // failure, matrix is degenerate
+    }
+
+    if (pivotRow != i) {
+      // apply partial pivoting
+      std::swap(P[i], P[pivotRow]);
+      // swap row i and row imax in LU
+      auto tmp = std::make_unique<double[]>(edgeSize);
+      const size_t memSize = edgeSize * sizeof(double);
+      // copy real part
+      std::memcpy(tmp.get(),
+                  LU.reBegin() + i * edgeSize,
+                  memSize);
+      std::memcpy(LU.reBegin() + i * edgeSize,
+                  LU.reBegin() + pivotRow * edgeSize,
+                  memSize);
+      std::memcpy(LU.reBegin() + pivotRow * edgeSize,
+                  tmp.get(),
+                  memSize);
+
+      // copy imag part
+      std::memcpy(tmp.get(),
+                  LU.imBegin() + i * edgeSize,
+                  memSize);
+      std::memcpy(LU.imBegin() + i * edgeSize,
+                  LU.imBegin() + pivotRow * edgeSize,
+                  memSize);
+      std::memcpy(LU.imBegin() + pivotRow * edgeSize,
+                  tmp.get(), 
+                  memSize);
+
+      // counting pivots starting from N (for determinant)
+      P[edgeSize]++;
+    }
+
+    const auto factor = 1.0 / LU.rc(i, i);
+    for (int j = i + 1; j < edgeSize; ++j) {
+      auto newValue = LU.rc(j, i) * factor;
+      LU.setRC(j, i, newValue);
+      for (int col = i + 1; col < edgeSize; ++col)
+        LU.setRC(j, col, LU.rc(j, col) - newValue * LU.rc(i, col));
+    }
+  }
+
+  return true; // success
+}
+
+void LUPInvert(const ComplexSquareMatrix& LU,
+               const int* P,
+               ComplexSquareMatrix& AInv) {
+  const auto edgeSize = LU.edgeSize();
+  AInv = ComplexSquareMatrix(edgeSize);
+
+  for (int j = 0; j < edgeSize; j++) {
+    for (int i = 0; i < edgeSize; i++) {
+      AInv.setRC(i, j, (P[i] == j ? 1.0 : 0.0), 0.0);
+
+      for (int k = 0; k < i; k++)
+        AInv.setRC(i, j, AInv.rc(i, j) - LU.rc(i, k) * AInv.rc(k, j));
+    }
+
+    for (int i = edgeSize - 1; i >= 0; i--) {
+      for (int k = i + 1; k < edgeSize; k++)
+        AInv.setRC(i, j, AInv.rc(i, j) - LU.rc(i, k) * AInv.rc(k, j));
+      AInv.setRC(i, j, AInv.rc(i, j) / LU.rc(i, i));
+    }
+  }
+}
+
+} // end of anonymous namespace
+
+bool cast::matinv(const ComplexSquareMatrix& A, ComplexSquareMatrix& AInv) {
+  auto P = std::make_unique<int[]>(A.edgeSize() + 1);
+  ComplexSquareMatrix LU;
+  if (!LUPDecompose(A, LU, P.get()))
+    return false; // LUP decomposition failed
+  
+  LUPInvert(LU, P.get(), AInv);
+  return true; // success
+}

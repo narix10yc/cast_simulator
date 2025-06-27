@@ -15,10 +15,23 @@ class ComplexSquareMatrix {
 private:
   size_t _edgeSize;
   double* _data;
+
+  void allocData() {
+    assert(_edgeSize > 0);
+    _data = new double[_edgeSize * _edgeSize * 2];
+    assert(_data != nullptr && "Allocation failed");
+  }
+
+  void freeData() {
+    delete[] _data;
+    _data = nullptr;
+  }
 public:
-  ComplexSquareMatrix(size_t edgeSize) : _edgeSize(edgeSize) {
-    _data = static_cast<double*>(std::malloc(sizeInBytes()));
-    assert(_data != nullptr && "Memory allocation failed");
+  ComplexSquareMatrix() : _edgeSize(0), _data(nullptr) {}
+
+  ComplexSquareMatrix(size_t edgeSize) {
+    _edgeSize = edgeSize;
+    allocData();
   }
 
   explicit ComplexSquareMatrix(std::initializer_list<double> re,
@@ -27,16 +40,14 @@ public:
     size_t s = static_cast<size_t>(std::sqrt(re.size()));
     assert(s * s == re.size() && "Size is not a perfect square");
     this->_edgeSize = s;
-    _data = static_cast<double*>(std::malloc(sizeInBytes()));
-    assert(_data != nullptr && "Memory allocation failed");
+    allocData();
     std::memcpy(reData(), re.begin(), re.size() * sizeof(double));
     std::memcpy(imData(), im.begin(), im.size() * sizeof(double));
   }
 
-  ComplexSquareMatrix(const ComplexSquareMatrix& other)
-    : _edgeSize(other._edgeSize) {
-    _data = static_cast<double*>(std::malloc(sizeInBytes()));
-    assert(_data != nullptr && "Memory allocation failed");
+  ComplexSquareMatrix(const ComplexSquareMatrix& other) {
+    _edgeSize = other._edgeSize;
+    allocData();
     std::memcpy(_data, other._data, sizeInBytes());
   }
 
@@ -48,24 +59,21 @@ public:
   ComplexSquareMatrix& operator=(const ComplexSquareMatrix& other) {
     if (this == &other)
       return *this;
-    _edgeSize = other._edgeSize;
-    std::free(_data);
-    std::memcpy(_data, other._data, sizeInBytes());
+    this->~ComplexSquareMatrix();
+    new (this) ComplexSquareMatrix(other);
     return *this;
   }
 
   ComplexSquareMatrix& operator=(ComplexSquareMatrix&& other) noexcept {
     if (this == &other)
       return *this;
-    _edgeSize = other._edgeSize;
-    std::free(_data);
-    _data = other._data;
-    other._data = nullptr;
+    this->~ComplexSquareMatrix();
+    new (this) ComplexSquareMatrix(std::move(other));
     return *this;
   }
 
   ~ComplexSquareMatrix() {
-    std::free(_data);
+    freeData();
   }
 
   size_t edgeSize() const { return _edgeSize; }
@@ -84,6 +92,10 @@ public:
 
   size_t sizeInBytes() const {
     return sizeof(double) * 2ULL * _edgeSize * _edgeSize;
+  }
+
+  void fillZeros() {
+    std::fill(_data, _data + size(), 0.0);
   }
 
   double* data() { return _data; }
@@ -106,28 +118,44 @@ public:
   const double* imEnd() const { return _data + 2 * _edgeSize * _edgeSize; }
 
   double& real(unsigned row, unsigned col) {
+    assert(row < _edgeSize && col < _edgeSize &&
+           "Row or column index out of bounds");
     return _data[row * _edgeSize + col];
   }
 
   double real(unsigned row, unsigned col) const {
+    assert(row < _edgeSize && col < _edgeSize &&
+           "Row or column index out of bounds");
     return _data[row * _edgeSize + col];
   }
 
   double& imag(unsigned row, unsigned col) {
+    assert(row < _edgeSize && col < _edgeSize &&
+           "Row or column index out of bounds");
     return _data[(row + _edgeSize) * _edgeSize + col];
   }
 
   double imag(unsigned row, unsigned col) const {
+    assert(row < _edgeSize && col < _edgeSize &&
+           "Row or column index out of bounds");
     return _data[(row + _edgeSize) * _edgeSize + col];
   }
 
   std::complex<double> rc(unsigned row, unsigned col) const {
+    assert(row < _edgeSize && col < _edgeSize &&
+           "Row or column index out of bounds");
     return { real(row, col), imag(row, col) };
   }
 
   void setRC(unsigned row, unsigned col, double re, double im) {
+    assert(row < _edgeSize && col < _edgeSize &&
+           "Row or column index out of bounds");
     real(row, col) = re;
     imag(row, col) = im;
+  }
+
+  void setRC(unsigned row, unsigned col, std::complex<double> c) {
+    return setRC(row, col, c.real(), c.imag());
   }
 
   /* Addition */
@@ -182,6 +210,9 @@ void matmul(const cast::ComplexSquareMatrix& A,
             const cast::ComplexSquareMatrix& B,
             cast::ComplexSquareMatrix& C);
 
+[[nodiscard("matinv could return false, indicating failure")]]
+bool matinv(const cast::ComplexSquareMatrix& A,
+            cast::ComplexSquareMatrix& AInv);
 }; // namespace cast
 
 

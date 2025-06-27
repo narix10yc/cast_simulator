@@ -26,5 +26,18 @@ void test::test_complexSquareMatrix() {
   suite.assertClose(maximum_norm(matResult, mat_iZ), 0.0,
                     "XY == iZ", GET_INFO());
 
+  auto matA = ComplexSquareMatrix::RandomUnitary(4);
+  ComplexSquareMatrix matAInv;
+  auto rst = cast::matinv(matA, matAInv);
+  if (!rst) {
+    suite.assertEqual(1, 0, "Matrix inversion failed", GET_INFO());
+  }
+  else {
+    ComplexSquareMatrix matAAInv;
+    cast::matmul(matA, matAInv, matAAInv);
+    suite.assertClose(maximum_norm(matAAInv, ComplexSquareMatrix::eye(4)),
+                      0.0, "A * AInv == I", GET_INFO());
+  }
+
   suite.displayResult();
 }
