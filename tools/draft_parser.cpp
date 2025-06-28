@@ -35,7 +35,7 @@ Circuit my_circuit {
 int main(int argc, char** argv) {
   ast::ASTContext astCtx;
   astCtx.loadRawBuffer(Program);
-  astCtx.displayLineTable(std::cerr);
+  // astCtx.displayLineTable(std::cerr);
   ast::Parser parser(astCtx);
   
   // parser.loadFromFile(argv[1]);
@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
   auto* root = parser.parse();
   ast::PrettyPrinter p(std::cerr);
   // root->prettyPrint(p, 0);
-  root->print(std::cerr);
+  // root->print(std::cerr);
   const auto* astCircuit = root->lookupCircuit("my_circuit");
   assert(astCircuit != nullptr && "Failed to find circuit my_circuit");
 
@@ -54,13 +54,15 @@ int main(int argc, char** argv) {
     return 1;
   }
   irCircuit->visualize(std::cerr);
-  std::cerr << "\nAfter optimize:\n";
 
-  NaiveCostModel costModel(2, -1, 1e-8);
-  cast::optimize(*irCircuit, FusionConfig::Default, &costModel);
-  for (auto& graph : irCircuit->getAllCircuitGraphs()) 
-    cast::applyGateFusion(*graph, FusionConfig::Default, &costModel);
-  irCircuit->displayInfo(std::cerr, 2);
+  cast::applyPreFusionCFOPass(*irCircuit);
+  irCircuit->displayInfo(std::cerr << "After PreFusionCFO", 2);
+  irCircuit->visualize(std::cerr);
+  
+  FusionConfig fusionConfig = FusionConfig::Default;
+  NaiveCostModel costModel(3, -1, 1e-8);
+  cast::applyGateFusion(*irCircuit, fusionConfig, &costModel);
+  irCircuit->displayInfo(std::cerr << "After Fusion\n", 2);
   irCircuit->visualize(std::cerr);
   return 0;
 }

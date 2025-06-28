@@ -187,11 +187,11 @@ public:
   bool checkConsistency() const;
 
   /// @brief Insert a gate into the end of the circuit graph.
-  void insertGate(QuantumGatePtr gate);
+  row_iterator insertGate(QuantumGatePtr gate);
 
-  /// @brief Insert a gate into the circuit graph at a specific row.
-  /// This function assumes \c rowIt is a vacant row to fit the gate.
-  void insertGate(QuantumGatePtr gate, row_iterator rowIt);
+  /// @brief Insert a gate into the circuit graph at or before rowIt.
+  /// @return The row in which the gate is inserted.
+  row_iterator insertGate(QuantumGatePtr gate, row_iterator rowIt);
 
   /// @brief Remove a gate from the circuit graph at a specific row and qubit.
   void removeGate(row_iterator rowIt, int qubit);

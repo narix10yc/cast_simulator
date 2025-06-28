@@ -11,25 +11,68 @@ std::ostream& CircuitNode::print(std::ostream& os, int indent) const {
   return os;
 }
 
+// implementation of num gates in critical path
+namespace {
+  int impl_nGatesCriticalPath(const IRNode* node);
+
+  int impl_nGatesCriticalPath(const CompoundNode* compoundNode) {
+    int length = 0;
+    for (const auto& child : compoundNode->nodes) {
+      length += impl_nGatesCriticalPath(child.get());
+    }
+    return length;
+  }
+
+  int impl_nGatesCriticalPath(const CircuitNode* circuitNode) {
+    return impl_nGatesCriticalPath(&circuitNode->body);
+  }
+
+  int impl_nGatesCriticalPath(const CircuitGraphNode* graphNode) {
+    return graphNode->nGates();
+  }
+
+  int impl_nGatesCriticalPath(const IfMeasureNode* ifNode) {
+    int thenLength = impl_nGatesCriticalPath(&ifNode->thenBody);
+    int elseLength = impl_nGatesCriticalPath(&ifNode->elseBody);
+    return std::max(thenLength, elseLength);
+  }
+  
+  int impl_nGatesCriticalPath(const IRNode* node) {
+    if (auto* n = llvm::dyn_cast<CompoundNode>(node))
+      return impl_nGatesCriticalPath(n);
+    if (auto* n = llvm::dyn_cast<CircuitNode>(node))
+      return impl_nGatesCriticalPath(n);
+    if (auto* n = llvm::dyn_cast<CircuitGraphNode>(node))
+      return impl_nGatesCriticalPath(n);
+    if (auto* n = llvm::dyn_cast<IfMeasureNode>(node))
+      return impl_nGatesCriticalPath(n);
+    assert(false && "Unknown node type in impl_nGatesCriticalPath");
+    return 0; // unreachable
+  }
+
+} // end of anonymous namespace
+
 std::ostream& CircuitNode::displayInfo(std::ostream& os, int verbose) const {
   os << BOLDCYAN("=== Info of ir::CircuitNode @ " << this << " === ")
      << "(Verbose " << verbose << ")\n";
 
-  os << CYAN("- name: ") << name << "\n";
+  os << CYAN("- Name: ") << name << "\n";
   auto graphs = getAllCircuitGraphs();
-  os << CYAN("- Num CircuitGraph: ") << graphs.size() << "\n";
+  os << CYAN("- Num CircuitGraphs: ") << graphs.size() << "\n";
   int nGates = 0;
   for (const auto& graph : graphs)
     nGates += graph->nGates();
-  os << CYAN("- Num Gates: ") << nGates << "\n";
+  os << CYAN("- Num Gates: ") << nGates << "\n"
+     <<      "             "  << impl_nGatesCriticalPath(&body)
+     << " in critical path\n";
 
   os << BOLDCYAN("====================================") << "\n";
   return os;
 }
 
 std::ostream& CircuitNode::impl_visualize(std::ostream& os,
-                                      int width, 
-                                      int n_qubits) const {
+                                          int width, 
+                                          int n_qubits) const {
   return body.impl_visualize(os, width, n_qubits);
 }
 

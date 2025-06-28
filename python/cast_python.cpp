@@ -181,7 +181,6 @@ void bind_CPUKernelManager(py::module_& m) {
     .def(py::init<>())
     .def_readwrite("simd_s", &cast::CPUKernelGenConfig::simdWidth)
     .def_readwrite("precision", &cast::CPUKernelGenConfig::precision)
-    .def_readwrite("ampFormat", &cast::CPUKernelGenConfig::ampFormat)
     .def_readwrite("useFMA", &cast::CPUKernelGenConfig::useFMA)
     .def_readwrite("useFMS", &cast::CPUKernelGenConfig::useFMS)
     .def_readwrite("usePDEP", &cast::CPUKernelGenConfig::usePDEP)

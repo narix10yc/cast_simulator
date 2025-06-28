@@ -156,7 +156,8 @@ void CircuitGraphNode::resizeRowsIfNeeded(int newNQubits) {
 //   }
 // }
 
-void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
+CircuitGraphNode::row_iterator
+CircuitGraphNode::insertGate(QuantumGatePtr gate) {
   return insertGate(gate, tile_end());
 }
 
@@ -173,7 +174,8 @@ void CircuitGraphNode::insertGate(QuantumGatePtr gate) {
 //   }
 // }
 
-void CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
+CircuitGraphNode::row_iterator
+CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
   assert(gate != nullptr && "Inserting a null gate");
   resizeRowsIfNeeded(gate->qubits().back() + 1);
   // add gate to gateMap
@@ -187,14 +189,14 @@ void CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
     rowIt = insertNewRow(tile_end());
     for (const auto& q : gate->qubits())
       (*rowIt)[q] = gate.get();
-    return;
+    return rowIt;
   }
 
   // if rowIt fits the gate, put it there
   if (rowIt != tile_end() && isRowVacant(rowIt, gate->qubits())) {
     for (const auto& q : gate->qubits())
       (*rowIt)[q] = gate.get();
-    return;
+    return rowIt;
   }
 
   // rowIt is already the first row and it does not fit the gate,
@@ -203,7 +205,7 @@ void CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
     rowIt = insertNewRow(rowIt);
     for (const auto& q : gate->qubits())
       (*rowIt)[q] = gate.get();
-    return;
+    return rowIt;
   }
 
   // otherwise, find the top-most vacant row
@@ -221,6 +223,7 @@ void CircuitGraphNode::insertGate(QuantumGatePtr gate, row_iterator rowIt) {
 
   for (const auto& q : gate->qubits())
     (*rowIt)[q] = gate.get();
+  return rowIt;
 }
 
 void CircuitGraphNode::removeGate(row_iterator rowIt, int qubit) {
@@ -322,6 +325,10 @@ QuantumGatePtr CircuitGraphNode::lookup(QuantumGate* gate) const {
 }
 
 void CircuitGraphNode::squeeze(row_iterator beginIt) {
+  // TODO: there a bug when tile has only one elem. temporary work-around
+  if (_tile.size() <= 1)
+    return;
+
   // first step: relocate gates to the top
   for (auto rowIt = std::next(beginIt), rowEnd = tile_end();
        rowIt != rowEnd;

@@ -10,31 +10,24 @@
 
 using namespace cast;
 
-const FusionConfig FusionConfig::Disable {
-  .zeroTol = 0.0,
-  .multiTraverse = false,
-  .incrementScheme = false,
-  .benefitMargin = 0.0,
-};
-
 const FusionConfig FusionConfig::Minor {
   .zeroTol = 1e-8,
-  .multiTraverse = false,
   .incrementScheme = true,
-  .benefitMargin = 0.5,
+  .maxKOverride = 3,
+  .benefitMargin = 0.2,
 };
 
 const FusionConfig FusionConfig::Default {
   .zeroTol = 1e-8,
-  .multiTraverse = true,
   .incrementScheme = true,
-  .benefitMargin = 0.2,
+  .maxKOverride=6,
+  .benefitMargin = 0.0,
 };
 
 const FusionConfig FusionConfig::Aggressive {
   .zeroTol = 1e-8,
-  .multiTraverse = true,
   .incrementScheme = true,
+  .maxKOverride = GLOBAL_MAX_K,
   .benefitMargin = 0.0,
 };
 
@@ -93,7 +86,7 @@ struct TentativeFusedItem {
 int cast::startFusion(ir::CircuitGraphNode& graph,
                       const FusionConfig& config,
                       const CostModel* costModel,
-                      int maxK,
+                      int cur_max_k,
                       row_iterator curIt,
                       int qubit) {
   
@@ -123,7 +116,7 @@ int cast::startFusion(ir::CircuitGraphNode& graph,
       if (gate.get() == candidateGate)
         return false;
     }
-    return getKAfterFusion(productGate.get(), candidateGate) <= maxK;
+    return getKAfterFusion(productGate.get(), candidateGate) <= cur_max_k;
   };
 
   // Start with same-row gates
@@ -211,22 +204,18 @@ int cast::startFusion(ir::CircuitGraphNode& graph,
 void cast::applyGateFusion(ir::CircuitGraphNode& graph,
                            const FusionConfig& config,
                            const CostModel* costModel) {
-  constexpr int MAX_K = 7;
-  int curMaxK = 2;
-  int nFused = 0;
+  int curMaxK = (config.incrementScheme ? 2 : config.maxKOverride);
   do {
-    nFused = 0;
     auto it = graph.tile_begin();
-    int q = 0;
     // we need to query graph.tile_end() every time, because startFusion may
     // change graph tile
     while (it != graph.tile_end()) {
-      for (q = 0; q < graph.nQubits(); ++q) 
-        nFused += cast::startFusion(graph, config, costModel, curMaxK, it, q);
+      for (int q = 0; q < graph.nQubits(); ++q) 
+        cast::startFusion(graph, config, costModel, curMaxK, it, q);
       ++it;
     }
     graph.squeeze();
-  } while (nFused > 0 && ++curMaxK <= MAX_K);
+  } while (++curMaxK <= config.maxKOverride);
 }
 
 // helper functions to optimize
@@ -312,7 +301,7 @@ static bool applyIfJoinPass(IfMeasureNode* ifNode,
       if (gate == nullptr)
         continue;
       if (gate->nQubits() != 1)
-        continue;
+        break;
       thenCGNode->insertGate(gate, thenCGNode->tile_end());
       elseCGNode->insertGate(gate, elseCGNode->tile_end());
       joinCGNode->removeGate(it, q);
@@ -327,11 +316,78 @@ static bool applyIfJoinPass(IfMeasureNode* ifNode,
   return hasEffect;
 }
 
-} // end of anynymous namespace
+bool applyIfJoinFusionPass(IfMeasureNode* ifNode, 
+                           CircuitGraphNode* joinCGNode,
+                           const FusionConfig& config,
+                           const CostModel* costModel) {
+  assert(joinCGNode != nullptr);
+  assert(ifNode != nullptr);
+  bool hasEffect = false;
+  auto thenCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->thenBody);
+  auto elseCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->elseBody);
 
-void cast::optimize(ir::CircuitNode& circuit,
-                    const FusionConfig& config,
-                    const CostModel* costModel) {
+  const int nQubits = joinCGNode->nQubits();
+  assert(nQubits < 64);
+  uint64_t thenMask = (1ULL << nQubits) - 1;
+  uint64_t elseMask = (1ULL << nQubits) - 1;
+
+  while (thenMask != 0 || elseMask != 0) {
+    // find the first qubit that is not checked
+    int q;
+    for (q = 0; q < nQubits; ++q) {
+      if ((thenMask >> q) & 1)
+        break;
+      if ((elseMask >> q) & 1)
+        break;
+    }
+    assert(q < nQubits && "There should be at least one qubit left to check");
+
+    // Move the gate from the join block to the if block
+    auto gate = joinCGNode->lookup((*joinCGNode->tile_begin())[q]);
+    if (gate == nullptr) {
+      // remove the qubit from the mask
+      thenMask &= ~(1ULL << q);
+      elseMask &= ~(1ULL << q);
+      continue;
+    }
+    auto thenRowIt = thenCGNode->insertGate(gate, thenCGNode->tile_end());
+    auto elseRowIt = elseCGNode->insertGate(gate, elseCGNode->tile_end());
+    joinCGNode->removeGate(joinCGNode->tile_begin(), q);
+    int thenFused = 0, elseFused = 0;
+    if (thenRowIt != thenCGNode->tile_begin()) {
+      thenFused = cast::startFusion(
+        *thenCGNode, config, costModel, 2, std::prev(thenRowIt), q);
+    }
+    if (elseRowIt != elseCGNode->tile_begin()) {
+      elseFused = cast::startFusion(
+        *elseCGNode, config, costModel, 2, std::prev(elseRowIt), q);
+    }
+    if (thenFused > 0 || elseFused > 0) {
+      hasEffect = true;
+      joinCGNode->squeeze();
+      if (thenFused > 0)
+        thenCGNode->squeeze(std::prev(thenRowIt));
+      if (elseFused > 0)
+        elseCGNode->squeeze(std::prev(elseRowIt));
+    } else {
+      // no effect
+      // put the gate back to the join block
+      thenCGNode->removeGate(thenRowIt, q);
+      elseCGNode->removeGate(elseRowIt, q);
+      joinCGNode->insertGate(gate, joinCGNode->tile_begin());
+      thenCGNode->squeeze(thenRowIt);
+      elseCGNode->squeeze(elseRowIt);
+      // remove the qubit from the mask
+      thenMask &= ~(1ULL << q);
+      elseMask &= ~(1ULL << q);
+      continue;
+    }
+  }
+  return hasEffect;
+}
+
+bool applyPreFusionCFOStage1(ir::CircuitNode& circuit) {
+  bool hasEffect = false;
   const auto end = circuit.body.nodes.end();
   auto curIt = circuit.body.nodes.begin();
   while (curIt != end) {
@@ -344,7 +400,6 @@ void cast::optimize(ir::CircuitNode& circuit,
     if (nextIt == end)
       break;
 
-    bool hasEffect = false;
     if (auto* ifNode = llvm::dyn_cast<IfMeasureNode>(curIt->get())) {
       if (auto* priorCGNode = llvm::dyn_cast<CircuitGraphNode>(prevIt->get()))
         hasEffect |= applyPriorIfPass(priorCGNode, ifNode);
@@ -352,9 +407,56 @@ void cast::optimize(ir::CircuitNode& circuit,
         hasEffect |= applyIfJoinPass(ifNode, joinCGNode);
     }
   }
+  return hasEffect;
+}
+
+bool applyPreFusionCFOStage3(ir::CircuitNode& circuit,
+                             const FusionConfig& config,
+                             const CostModel* costModel) {
+  bool hasEffect = false;
+  const auto end = circuit.body.nodes.end();
+  auto curIt = circuit.body.nodes.begin();
+  while (curIt != end) {
+    ++curIt;
+    if (curIt == end)
+      break;
+    auto prevIt = std::prev(curIt);
+    auto nextIt = std::next(curIt);
+    assert(prevIt != end && "prevIt should never be end");
+    if (nextIt == end)
+      break;
+
+    if (auto* ifNode = llvm::dyn_cast<IfMeasureNode>(curIt->get())) {
+      if (auto* joinCGNode = llvm::dyn_cast<CircuitGraphNode>(nextIt->get()))
+        hasEffect |= applyIfJoinFusionPass(
+          ifNode, joinCGNode, config, costModel);
+    }
+  }
+  return hasEffect;
+}
+
+} // end of anynymous namespace
+
+void cast::applyGateFusion(ir::CircuitNode& circuit,
+                           const FusionConfig& config,
+                           const CostModel* costModel) {
+  // perform fusion in each block
+  auto allCircuitGraphs = circuit.getAllCircuitGraphs();
+  for (auto* graph : allCircuitGraphs)
+    applyGateFusion(*graph, config, costModel);
+
+}
+
+void cast::applyPreFusionCFOPass(ir::CircuitNode& circuit) {
+  applyPreFusionCFOStage1(circuit);
 
   // perform fusion in each block
-  // auto allCircuitGraphs = getAllCircuitGraphs();
-  // for (auto* graph : allCircuitGraphs)
-    // applyGateFusion(fusionConfig, costModel, *graph);
+  auto fusionConfig = FusionConfig::Aggressive;
+  fusionConfig.maxKOverride = 2; // size-only fusion with k=2
+  NaiveCostModel costModel(2, -1, 1e-8);
+  auto allCircuitGraphs = circuit.getAllCircuitGraphs();
+  for (auto* graph : allCircuitGraphs)
+    applyGateFusion(*graph, fusionConfig, &costModel);
+
+  applyPreFusionCFOStage3(circuit, fusionConfig, &costModel);
 }
