@@ -208,8 +208,9 @@ public:
       int nQubits,
       const std::string& graphName,
       int nThreads = 1) const;
-};
 
-};
+}; // class CPUKernelManager
+
+}; // namespace cast
 
 #endif // CAST_CPU_KERNEL_MANAGER_CPU_H

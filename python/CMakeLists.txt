@@ -1,7 +1,7 @@
 # CAST Python Bindings
 
-# This will put the dependencies in a root-level _deps directory
-# so if we delete the build directory, we don't lose the dependencies.
+# This will put the dependencies in a top-level _deps directory
+# so if we delete the build directory, we don't need to re-download.
 set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/_deps")
 
 include(FetchContent)
