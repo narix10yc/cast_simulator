@@ -1,6 +1,8 @@
 #ifndef CAST_CPU_CONFIG_H
 #define CAST_CPU_CONFIG_H
 
+#include "cast/Core/Precision.h"
+
 namespace cast {
   enum CPUSimdWidth : int {
     W128 = 128, // 128 bits, such as SSE and NEON
@@ -19,7 +21,6 @@ namespace cast {
   // Get the native SIMD width in bits. This function relies on LLVM's 
   // implementation. If unavailable, we return 128 bits.
   CPUSimdWidth get_cpu_simd_width();
-
 
   // Get the simd_s to be used in kernel generation. Each SIMD register holds
   // (1 << simd_s) number of elements. For example, if simdWidth is W256,

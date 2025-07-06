@@ -13,6 +13,8 @@ struct FusionConfig {
   int nThreads;
 
   double zeroTol;
+  // Swapping tolerance. Set to 0.0 or negative to disable.
+  double swaTol;
   bool incrementScheme;
   // the maximum number of qubits in fused gates
   int maxKOverride;

@@ -95,8 +95,9 @@ void utils::timedExecute(std::function<void()> f, const char* msg) {
             << ") " << msg << "\n";
 }
 
-std::ostream& utils::print_complex(
-    std::ostream& os, std::complex<double> c, Precision precision) {
+std::ostream& utils::print_complex(std::ostream& os,
+                                   std::complex<double> c,
+                                   int precision) {
   const double thres = 0.5 * std::pow(0.1, precision);
   if (c.real() >= -thres)
     os << " ";

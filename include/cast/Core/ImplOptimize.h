@@ -36,7 +36,9 @@ int applySizeOnlyFusion(cast::ir::CircuitGraphNode& graph,
                         int max_k,
                         double swaTol);
 
-bool applyFusionCFOPass(ir::CircuitNode& circuit, const FusionConfig& config);
+int applyCFOFusion(ir::CircuitNode& circuit,
+                   const FusionConfig& config,
+                   int max_k_candidate);
 
                         
 } // namespace impl

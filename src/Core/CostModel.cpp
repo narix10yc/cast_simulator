@@ -435,8 +435,11 @@ void PerformanceCache::runExperiments(
         sv.data(), sv.nQubits(), *kernel, nThreads).consumeError();
     });
     auto memSpd = calculateMemUpdateSpeed(nQubits, kernel->precision, tr.min);
-    items.emplace_back(
-      kernel->gate->nQubits(), kernel->opCount, 64, nThreads, memSpd);
+    items.emplace_back(kernel->gate->nQubits(),
+                       kernel->opCount,
+                       Precision::F64,
+                       nThreads,
+                       memSpd);
     std::cerr << "Gate @ ";
     utils::printSpan(std::cerr, std::span(kernel->gate->qubits()));
     std::cerr << ": " << memSpd << " GiBps\n";
