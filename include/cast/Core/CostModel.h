@@ -2,9 +2,8 @@
 #define CAST_COSTMODEL_H
 
 #include "cast/Core/QuantumGate.h"
-#include <cassert>
+#include "cast/Core/Precision.h"
 #include <string>
-#include <vector>
 
 namespace cast {
   
@@ -13,26 +12,45 @@ class PerformanceCache;
 
 class CostModel {
 public:
+  enum CostModelKind {
+    CM_Base,
+    CM_SizeOnly, // Size only cost model
+    CM_Standard, // Standard cost model based on performance cache
+    CM_Constant, // Constant cost model
+    CM_End
+  };
+protected:
+  CostModelKind _kind;
+public:
+  explicit CostModel(CostModelKind kind) : _kind(kind) {}
+
   virtual ~CostModel() = default;
+
+  CostModelKind getKind() const { return _kind; }
 
   // The time it takes to update 1 GiB of memory, in seconds.
   virtual double computeGiBTime(
-      QuantumGatePtr gate, int precision, int nThreads) const = 0;
+      QuantumGatePtr gate, Precision precision, int nThreads) const = 0;
 };
 
 /// @brief \c NaiveCostModel is based on the size and operation count of fused
 /// gates.
-class NaiveCostModel : public CostModel {
+class SizeOnlyCostModel : public CostModel {
   int maxNQubits;
   int maxOp;
   double zeroTol;
 
 public:
-  NaiveCostModel(int maxNQubits, int maxOp, double zeroTol)
-    : maxNQubits(maxNQubits), maxOp(maxOp), zeroTol(zeroTol) {}
+  SizeOnlyCostModel(int maxNQubits, int maxOp, double zeroTol)
+    : CostModel(CM_SizeOnly)
+    , maxNQubits(maxNQubits), maxOp(maxOp), zeroTol(zeroTol) {}
 
   double computeGiBTime(
-      QuantumGatePtr gate, int precision, int nThreads) const override;
+      QuantumGatePtr gate, Precision precision, int nThreads) const override;
+  
+  static bool classof(const CostModel* model) {
+    return model->getKind() == CM_SizeOnly;
+  }
 };
 
 /// \c StandardCostModel assumes simulation time is proportional to opCount and
@@ -46,7 +64,7 @@ class StandardCostModel : public CostModel {
 
   struct Item {
     int nQubits;
-    int precision;
+    Precision precision;
     int nThreads;
     int nData; // number of data points;
     double totalGibTimePerOpCount;
@@ -62,7 +80,25 @@ public:
   std::ostream& display(std::ostream& os, int nLines = 0) const;
 
   double computeGiBTime(
-      QuantumGatePtr gate, int precision, int nThreads) const override;
+      QuantumGatePtr gate, Precision precision, int nThreads) const override;
+  
+  static bool classof(const CostModel* model) {
+    return model->getKind() == CM_Standard;
+  }
+};
+
+class ConstantCostModel : public CostModel {
+public:
+  ConstantCostModel() : CostModel(CM_Constant) {}
+
+  double computeGiBTime(
+      QuantumGatePtr gate, Precision precision, int nThreads) const override {
+    return 1.0;
+  }
+
+  static bool classof(const CostModel* model) {
+    return model->getKind() == CM_Constant;
+  }
 };
 
 class PerformanceCache {
@@ -70,7 +106,7 @@ public:
   struct Item {
     int nQubits;
     double opCount;
-    int precision;
+    Precision precision;
     int nThreads;
     /// memory update speed in Gigabytes per second (GiBps)
     double memUpdateSpeed;
@@ -98,7 +134,7 @@ public:
   struct Item {
     int nQubits;
     int opCount;
-    int precision;
+    Precision precision;
     int blockSize;
     double occupancy;
     double coalescingScore;
@@ -120,7 +156,7 @@ public:
   void writeResults(const std::string& filename) const;
   static CUDAPerformanceCache LoadFromCSV(const std::string& filename);
   const Item* findClosestMatch(
-      const legacy::QuantumGate& gate, int precision, int blockSize) const;
+      const legacy::QuantumGate& gate, Precision precision, int blockSize) const;
   
   constexpr static const char* CSV_HEADER = 
       "nQubits,opCount,precision,blockSize,occupancy,coalescing,memSpd";
@@ -136,7 +172,7 @@ public:
     explicit CUDACostModel(const CUDAPerformanceCache* c, double zt = 1e-8)
       : cache(c), zeroTol(zt), currentBlockSize(256), minGibTimeCap(1e-9) {}
     
-    double computeGiBTime(const legacy::QuantumGate& gate, int precision, int) const override;
+    double computeGiBTime(const legacy::QuantumGate& gate, Precision precision, int) const override;
 
     void setBlockSize(int blockSize) { 
       if (blockSize < 32 || blockSize > 1024 || 

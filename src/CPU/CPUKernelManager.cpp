@@ -25,7 +25,7 @@ std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
   os << std::scientific;
   os << CYAN("=== CPU Kernel Gen Config ===\n")
      << "SIMD Width:      " << static_cast<int>(simdWidth) << "\n"
-     << "Precision:       " << precision << "\n"
+     << "Precision:       " << static_cast<int>(precision) << "\n"
      << "Use FMA:         " << useFMA << "\n"
      << "Use FMS:         " << useFMS << "\n"
      << "Use PDEP:        " << usePDEP << "\n"

@@ -74,10 +74,6 @@ public:
 
 }; // class QuantumGate
 
-// Return gateA @ gateB. In the context of quantum gates, gateB is applied
-// first.
-QuantumGatePtr matmul(const QuantumGate* gateA, const QuantumGate* gateB);
-
 /// @brief StandardQuantumGate consists of a GateMatrix and a NoiseChannel.
 /// GateMatrix could be parametrized.
 /// We take the convention that noise comes `after` the gate operation. For 
@@ -194,6 +190,14 @@ public:
     return qg->kind() == QG_Superop;
   }
 }; // class SuperopQuantumGate
+
+// Return gateA @ gateB. In the context of quantum gates, gateB is applied
+// first.
+QuantumGatePtr matmul(const QuantumGate* gateA, const QuantumGate* gateB);
+
+bool isCommuting(const QuantumGate* gateA,
+                 const QuantumGate* gateB,
+                 double tol = 1e-8);
 
 }; // namespace cast
 

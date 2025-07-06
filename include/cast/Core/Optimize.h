@@ -3,11 +3,13 @@
 
 #include "cast/Core/IRNode.h"
 #include "cast/Core/CostModel.h"
+#include "cast/Core/Precision.h"
 
 namespace cast {
 
 struct FusionConfig {
-  int precision;
+  std::unique_ptr<CostModel> costModel;
+  Precision precision;
   int nThreads;
 
   double zeroTol;
@@ -22,17 +24,14 @@ struct FusionConfig {
   static const FusionConfig Default;
   static const FusionConfig Aggressive;
 
+  // Get a size-only fusion configuration. The cost model will be set to null,
+  // which means to accept all fusion candidates. 
+  static FusionConfig SizeOnly(int max_k);
+
   std::ostream& display(std::ostream&) const;
 };
 
 constexpr int GLOBAL_MAX_K = 7;
-
-int startFusion(cast::ir::CircuitGraphNode& graph,
-                const FusionConfig& config,
-                const CostModel* costModel,
-                int cur_max_k,
-                cast::ir::CircuitGraphNode::row_iterator rowIt,
-                int qubit);
 
 /// @brief Optimize the circuit by trying to fuse away all single-qubit gates,
 /// including those in if statements.
@@ -41,15 +40,14 @@ int startFusion(cast::ir::CircuitGraphNode& graph,
 /// 2. Apply a max-k fusion pass in each block with k=2.
 /// 3. Seek for further fusion opportunities by moving gates at the top of the 
 /// join block to the bottom of the then and else blocks.
-void applyPreFusionCFOPass(ir::CircuitNode& circuit);
+void applyCanonicalizationPass(ir::CircuitNode& circuit, double swaTol = 1e-8);
 
 void applyGateFusion(ir::CircuitGraphNode& graph,
-                     const FusionConfig& fusionConfig,
-                     const CostModel* costModel);
+                     const FusionConfig& fusionConfig);
 
-void applyGateFusion(ir::CircuitNode& circuit,
-                     const FusionConfig& config,
-                     const CostModel* costModel);
+void applyGateFusionPass(ir::CircuitNode& circuit,
+                         const FusionConfig& config,
+                         bool applyFusionCFOPass = true);
                         
 } // namespace cast::ir
 

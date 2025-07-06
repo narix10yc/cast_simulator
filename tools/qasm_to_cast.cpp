@@ -2,7 +2,7 @@
 #include "cast/Legacy/CircuitGraph.h"
 #include "cast/Fusion.h"
 #include "cast/cpu.h"
-#include "cast/Core/ir_generator.h"
+#include "cast/Legacy/ir_generator.h"
 
 #include "utils/iocolor.h"
 #include "utils/utils.h"

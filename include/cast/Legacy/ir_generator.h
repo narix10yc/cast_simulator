@@ -1,5 +1,8 @@
-#ifndef CAST_CORE_IRGENERATOR_H
-#define CAST_CORE_IRGENERATOR_H
+#ifndef CAST_LEGACY_IR_GENERATOR_H
+#define CAST_LEGACY_IR_GENERATOR_H
+
+#include "cast/Legacy/CircuitGraph.h"
+#include "cast/Legacy/QuantumGate.h"
 
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/IR/IRBuilder.h"
@@ -10,9 +13,6 @@
 
 #include <array>
 #include <vector>
-
-#include "cast/Legacy/CircuitGraph.h"
-#include "cast/Legacy/QuantumGate.h"
 
 namespace simulation {
 
@@ -189,4 +189,4 @@ public:
 
 } // namespace simulation
 
-#endif // CAST_CORE_IRGENERATOR_H
+#endif // CAST_LEGACY_IR_GENERATOR_H

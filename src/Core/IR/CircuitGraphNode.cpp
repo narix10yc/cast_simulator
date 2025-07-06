@@ -438,9 +438,8 @@ std::ostream& CircuitGraphNode::displayInfo(std::ostream& os, int verbose) const
   return os;
 }
 
-std::ostream& CircuitGraphNode::impl_visualize(std::ostream& os,
-                                           int width,
-                                           int n_qubits) const {
+std::ostream& CircuitGraphNode::impl_visualize(
+    std::ostream& os, int width, int n_qubits) const {
   assert(n_qubits >= _nQubits &&
          "n_qubits cannot be less than the true number of qubits");
   if (_tile.empty())
@@ -466,4 +465,26 @@ std::ostream& CircuitGraphNode::impl_visualize(std::ostream& os,
 
 std::ostream& CircuitGraphNode::visualize(std::ostream& os) const {
   return impl_visualize(os, getWidthForVisualize(), _nQubits);
+}
+
+void CircuitGraphNode::dump_visualize() const {
+  if (_tile.empty()) {
+    std::cerr << "<empty tile>\n";
+    return;
+  }
+
+  const auto width = getWidthForVisualize();
+  const std::string vbar =
+      std::string(width / 2, ' ') + "|" + std::string(width / 2 + 1, ' ');
+
+  for (const auto& row : _tile) {
+    std::cerr << "Row @ " << (void*)(&row) << ": ";
+    for (unsigned q = 0; q < _nQubits; ++q) {
+      if (const auto* gate = row[q]; gate != nullptr)
+        std::cerr << std::setw(width) << std::setfill('0') << gateId(gate) << " ";
+      else
+        std::cerr << vbar;
+    }
+    std::cerr << "\n";
+  }
 }

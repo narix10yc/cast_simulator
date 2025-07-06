@@ -26,7 +26,7 @@ namespace cast {
   // then the 256-bit register can hold 4 double precision elements, so
   // simd_s will be 2 under precision 64, and simd_s will be 3 under precision
   // 32.
-  int get_simd_s(CPUSimdWidth simdWidth, int precision);
+  int get_simd_s(CPUSimdWidth simdWidth, Precision precision);
 
 } // namespace cast
 

@@ -223,7 +223,9 @@ std::vector<IRMatData> initMatrixData(
 
   // Step 2: set the values, either as imm values (llvm::Constant) or as
   // run-time loaded values
-  auto* ty = (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
+  assert(config.precision != Precision::Unknown);
+  auto* ty = (config.precision == Precision::F32) ? B.getFloatTy()
+                                                  : B.getDoubleTy();
   auto ec = llvm::ElementCount::getFixed(1 << config.get_simd_s());
   switch (config.matrixLoadMode) {
   case MatrixLoadMode::UseMatImmValues: {
@@ -329,8 +331,9 @@ llvm::Function* CPUKernelManager::_gen(
   auto& llvmModule = *llvmContextModulePair.llvmModule;
 
   llvm::IRBuilder<> B(llvmContext);
-  assert(config.precision == 32 || config.precision == 64);
-  auto* scalarTy = (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
+  assert(config.precision != Precision::Unknown);
+  auto* scalarTy = (config.precision == Precision::F32) ? B.getFloatTy()
+                                                        : B.getDoubleTy();
 
   // Create function declaration
   CPUArgs args;

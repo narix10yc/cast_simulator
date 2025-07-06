@@ -55,14 +55,9 @@ int main(int argc, char** argv) {
   }
   irCircuit->visualize(std::cerr);
 
-  cast::applyPreFusionCFOPass(*irCircuit);
-  irCircuit->displayInfo(std::cerr << "After PreFusionCFO", 2);
+  cast::applyCanonicalizationPass(*irCircuit, 1e-8);
+  irCircuit->displayInfo(std::cerr << "\nAfter Canonicalization\n", 1);
   irCircuit->visualize(std::cerr);
-  
-  FusionConfig fusionConfig = FusionConfig::Default;
-  NaiveCostModel costModel(3, -1, 1e-8);
-  cast::applyGateFusion(*irCircuit, fusionConfig, &costModel);
-  irCircuit->displayInfo(std::cerr << "After Fusion\n", 2);
-  irCircuit->visualize(std::cerr);
+
   return 0;
 }

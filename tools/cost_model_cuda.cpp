@@ -106,7 +106,7 @@ bool checkFileName() {
 
 int main(int argc, char** argv) {
   cl::ParseCommandLineOptions(argc, argv);
-  int precision;
+  Precision precision;
   if (checkPrecisionArgsCollision(precision))
     return ERR_PRECISION;
   

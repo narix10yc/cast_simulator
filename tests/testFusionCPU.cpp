@@ -22,7 +22,7 @@ static void f() {
   kernelGenConfig.simdWidth = SimdWidth;
 
   auto fusionConfig = cast::FusionConfig::Default;
-  cast::NaiveCostModel costModel(2, -1, 0);
+  cast::SizeOnlyCostModel costModel(2, -1, 0);
 
   std::cerr << "Test Dir: " << TEST_DIR << "\n";
   fs::path circuitDir = fs::path(TEST_DIR) / "circuits";

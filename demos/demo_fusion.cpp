@@ -1,6 +1,6 @@
 #include "cast/CPU/CPUStatevector.h"
 
-#include "cast/Fusion.h"
+#include "cast/Core/Fusion.h"
 #include "cast/Transform/Transform.h"
 #include "timeit/timeit.h"
 #include "openqasm/parser.h"

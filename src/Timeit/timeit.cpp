@@ -56,7 +56,7 @@ std::string TimingResult::timeToString(double t, int n_sig_dig) {
   }
 
   // significant digits
-  int precision =
+  Precision precision =
       n_sig_dig - 1 - static_cast<int>(std::floor(std::log10(timeValue)));
 
   std::ostringstream ss;

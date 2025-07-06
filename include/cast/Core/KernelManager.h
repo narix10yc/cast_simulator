@@ -1,11 +1,13 @@
 #ifndef CAST_CORE_KERNEL_MANAGER_H
 #define CAST_CORE_KERNEL_MANAGER_H
 
+#include "cast/Legacy/QuantumGate.h"
+#include "cast/Core/Precision.h"
+
 #include "llvm/IR/Module.h"
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/Passes/OptimizationLevel.h"
 
-#include "cast/Legacy/QuantumGate.h"
 #include <memory>
 
 #ifdef CAST_USE_CUDA
@@ -79,7 +81,7 @@ struct CUDAKernelInfo {
   // We expect large stream writes anyway, so always trigger heap allocation.
   using PTXStringType = llvm::SmallString<0>;
   PTXStringType ptxString;
-  int precision;
+  Precision precision;
   std::string llvmFuncName;
   std::shared_ptr<legacy::QuantumGate> gate;
   CUDATuple cuTuple;
@@ -117,7 +119,7 @@ struct CUDAKernelGenConfig {
   enum MatrixLoadMode { 
     UseMatImmValues, LoadInDefaultMemSpace, LoadInConstMemSpace
   };
-  int precision = 64;
+  Precision precision = Precision::F64; // default to double precision
   double zeroTol = 1e-8;
   double oneTol = 1e-8;
   bool forceDenseKernel = false;

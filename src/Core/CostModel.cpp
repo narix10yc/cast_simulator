@@ -14,8 +14,9 @@
 using namespace cast;
 using namespace llvm;
 
-double NaiveCostModel::computeGiBTime(
-    QuantumGatePtr gate, int precision, int nThreads) const {
+double SizeOnlyCostModel::computeGiBTime(QuantumGatePtr gate,
+                                         Precision precision,
+                                         int nThreads) const {
   assert(gate != nullptr);
   if (gate->nQubits() > maxNQubits)
     return 1.0;
@@ -25,7 +26,8 @@ double NaiveCostModel::computeGiBTime(
 }
 
 StandardCostModel::StandardCostModel(PerformanceCache* cache, double zeroTol)
-  : cache(cache), zeroTol(zeroTol), items() {
+  : CostModel(CM_Standard)
+  , cache(cache), zeroTol(zeroTol), items() {
   items.reserve(32);
 
   // loop through cache and initialize this->items
@@ -60,7 +62,7 @@ StandardCostModel::StandardCostModel(PerformanceCache* cache, double zeroTol)
 }
 
 double StandardCostModel::computeGiBTime(
-    QuantumGatePtr gate, int precision, int nThreads) const {
+    QuantumGatePtr gate, Precision precision, int nThreads) const {
   assert(gate != nullptr);
   assert(!items.empty());
   const auto gateNQubits = gate->nQubits();
@@ -140,7 +142,7 @@ std::ostream& StandardCostModel::display(std::ostream& os, int nLines) const {
     double GibTimePerOpCount = items[i].getAvgGibTimePerOpCount();
     double denseMemSpd = 1.0 / (GibTimePerOpCount * denseOpCount);
     os << "    " << std::fixed << std::setw(2) << items[i].nQubits
-       << "    |    f" << items[i].precision
+       << "    |    f" << static_cast<int>(items[i].precision)
        << "    |    " << items[i].nThreads
        << "    |    " << utils::fmt_1_to_1e3(denseMemSpd, 5)
        << "\n";
@@ -153,20 +155,20 @@ void PerformanceCache::writeResults(std::ostream& os) const {
   for (const auto&
       [nQubits, opCount, precision, nThreads, memUpdateSpeed] : items) {
     os << nQubits << "," << opCount << ","
-       << precision << "," << nThreads << ","
+       << static_cast<int>(precision) << "," << nThreads << ","
        << std::scientific << std::setw(6) << memUpdateSpeed << "\n";
   }
 }
 
 namespace {
   /// @return Speed in gigabytes per second (GiBps)
-  double calculateMemUpdateSpeed(int nQubits, int precision, double t) {
+  double calculateMemUpdateSpeed(int nQubits, Precision precision, double t) {
     assert(nQubits >= 0);
-    assert(precision == 32 || precision == 64);
+    assert(precision != Precision::Unknown);
     assert(t >= 0.0);
 
     return static_cast<double>(
-      (precision == 32 ? 8ULL : 16ULL) << nQubits) * 1e-9 / t;
+      (precision == Precision::F32 ? 8ULL : 16ULL) << nQubits) * 1e-9 / t;
   }
 
   // Take the scalar gate matrix representation of the gate and randomly zero
@@ -275,7 +277,15 @@ PerformanceCache::Item parseLine(const char*& curPtr, const char* bufferEnd) {
   item.opCount = parseDouble(curPtr, bufferEnd);
   assert(*curPtr == ',');
   ++curPtr;
-  item.precision = parseInt(curPtr, bufferEnd);
+  auto precision = parseInt(curPtr, bufferEnd);
+  if (precision == 32)
+    item.precision = Precision::F32;
+  else if (precision == 64)
+    item.precision = Precision::F64;
+  else {
+    assert(false && "Unknown precision in CSV file");
+    item.precision = Precision::Unknown; // fallback
+  }
   assert(*curPtr == ',');
   ++curPtr;
   item.nThreads = parseInt(curPtr, bufferEnd);
@@ -456,7 +466,7 @@ inline void driverGetFuncAttributes(CUfunction func, int& numRegs, int& sharedSi
   }
 }
 
-double calculateMemUpdateSpeedCuda(int nQubits, int precision, double t,
+double calculateMemUpdateSpeedCuda(int nQubits, Precision precision, double t,
                                 double coalescingScore,
                                 double occupancy) {
   assert(nQubits >= 0);
@@ -625,7 +635,7 @@ void CUDAPerformanceCache::writeResults(const std::string& filename) const {
 }
 
 const CUDAPerformanceCache::Item* CUDAPerformanceCache::findClosestMatch(
-    const legacy::QuantumGate& gate, int precision, int blockSize) const {
+    const legacy::QuantumGate& gate, Precision precision, int blockSize) const {
     
     const Item* bestMatch = nullptr;
     double bestScore = -1.0;
@@ -660,7 +670,7 @@ inline double regPenalty(int regsPerThr, int blk, int regsPerSM = 65536)
 }
 
 double CUDACostModel::computeGiBTime(const legacy::QuantumGate& gate,
-                                     int precision, int) const
+                                     Precision precision, int) const
 {
   const double gpuPeakTFLOPs = (precision == 32 ? 35.6 : 0.556); // RTX‑3090
   const double launchOverhead = 3.0e-6;

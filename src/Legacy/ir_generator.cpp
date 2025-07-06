@@ -1,4 +1,4 @@
-#include "cast/Core/ir_generator.h"
+#include "cast/Legacy/ir_generator.h"
 
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IRReader/IRReader.h"

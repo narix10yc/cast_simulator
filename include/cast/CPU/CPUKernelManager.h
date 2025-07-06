@@ -27,7 +27,7 @@ enum class MatrixLoadMode {
 
 struct CPUKernelInfo {
   std::function<CPU_KERNEL_TYPE> executable;
-  int precision;
+  Precision precision;
   std::string llvmFuncName;
   MatrixLoadMode matrixLoadMode;
   ConstQuantumGatePtr gate;
@@ -38,7 +38,7 @@ struct CPUKernelInfo {
 
 struct CPUKernelGenConfig {
   CPUSimdWidth simdWidth;
-  int precision;
+  Precision precision;
   bool useFMA;
   bool useFMS;
   // parallel bits deposit from BMI2
@@ -49,7 +49,7 @@ struct CPUKernelGenConfig {
 
   CPUKernelGenConfig()
     : simdWidth(get_cpu_simd_width())
-    , precision(64) // default to double precision
+    , precision(Precision::F64) // default to double precision
     , useFMA(true)
     , useFMS(true)
     , usePDEP(false)
@@ -57,7 +57,7 @@ struct CPUKernelGenConfig {
     , oneTol(1e-8)
     , matrixLoadMode(MatrixLoadMode::UseMatImmValues) {}
 
-  CPUKernelGenConfig(CPUSimdWidth simdWidth, int precision)
+  CPUKernelGenConfig(CPUSimdWidth simdWidth, Precision precision)
     : simdWidth(simdWidth)
     , precision(precision)
     , useFMA(true)

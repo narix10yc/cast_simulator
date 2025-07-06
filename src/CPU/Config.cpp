@@ -93,7 +93,7 @@ CPUSimdWidth cast::get_cpu_simd_width() {
   return W128;
 }
 
-int cast::get_simd_s(CPUSimdWidth simdWidth, int precision) {
+int cast::get_simd_s(CPUSimdWidth simdWidth, Precision precision) {
   if (precision == 32) {
     switch (simdWidth) {
       case W128: return 2; // 128 bits / 32 bits = 4 elements

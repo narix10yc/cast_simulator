@@ -18,7 +18,9 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
   const int bnQubits = bQubits.size();
 
   struct TargetQubitsInfo {
-    int q, aIdx, bIdx;
+    int q; // the qubit
+    int aIdx; // index in aQubits, -1 if not in aQubits
+    int bIdx; // index in bQubits, -1 if not in bQubits
   };
 
   // setup result gate target qubits
@@ -47,8 +49,10 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
         targetQubitsInfo.emplace_back(aQubit, aIdx++, -1);
         continue;
       }
+      // otherwise, aQubit > bQubit
       targetQubitsInfo.emplace_back(bQubit, -1, bIdx++);
     }
+    assert(aIdx == anQubits && bIdx == bnQubits);
   }
 
   const int cnQubits = targetQubitsInfo.size();
@@ -234,22 +238,68 @@ double StandardQuantumGate::opCount(double zeroTol) const {
   // If there is a noise channel, we need to compute the superoperator matrix
   // and count the non-zero elements in it.
   auto superopGate = getSuperopGate();
-  assert(superopGate != nullptr && "Superop gate is null");
+  assert(superopGate != nullptr && "Superop gate should not be null");
+  return superopGate->opCount(zeroTol);
+}
+
+double SuperopQuantumGate::opCount(double zeroTol) const {
+  assert(_superopMatrix != nullptr && "Superop matrix is null");
   double count = static_cast<double>(
-    countNonZeroElems(*superopGate->getMatrix(), zeroTol));
+    countNonZeroElems(*_superopMatrix, zeroTol));
   
   // superop matrices are treated as 2n-qubit gates
   return count * std::pow<double>(2.0, 1 - 2 * nQubits());
 }
 
-double SuperopQuantumGate::opCount(double zeroTol) const {
-  assert(_superopMatrix != nullptr && "Superop matrix is null");
-  return countNonZeroElems(*_superopMatrix, zeroTol);
-}
+/**** Inverse ****/
 
 QuantumGatePtr StandardQuantumGate::inverse() const {
   if (_noiseChannel != nullptr)
     return nullptr;
-  
-  
+  auto scalarGM = getScalarGM();
+  if (scalarGM == nullptr)
+    return nullptr;
+  ComplexSquareMatrix matinv(scalarGM->matrix().edgeSize());
+  if (!cast::matinv(scalarGM->matrix(), matinv))
+    return nullptr;
+  return StandardQuantumGate::Create(
+    std::make_shared<ScalarGateMatrix>(std::move(matinv)),
+    nullptr, // No noise channel
+    qubits()
+  );
 }
+
+/**** is commuting ****/
+
+bool cast::isCommuting(const QuantumGate* gateA,
+                       const QuantumGate* gateB,
+                       double tol) {
+  if (gateA == nullptr || gateB == nullptr) {
+    assert(false && "One of the gates is null");
+    return false;
+  }
+
+  auto gateAB = matmul(gateA, gateB);
+  if (gateAB == nullptr) {
+    assert(false && "Failed to compute AB");
+    return false;
+  }
+  auto gateBA = matmul(gateB, gateA);
+  if (gateBA == nullptr) {
+    assert(false && "Failed to compute BA");
+    return false;
+  }
+
+  auto* stdGateAB = llvm::dyn_cast<StandardQuantumGate>(gateAB.get());
+  auto* stdGateBA = llvm::dyn_cast<StandardQuantumGate>(gateBA.get());
+  if (stdGateAB == nullptr || stdGateBA == nullptr) {
+    assert(false && "Both gates must be StandardQuantumGate for now");
+    return false;
+  }
+  auto scalarGM_AB = stdGateAB->getScalarGM();
+  auto scalarGM_BA = stdGateBA->getScalarGM();
+  auto diff = cast::maximum_norm(scalarGM_AB->matrix(), scalarGM_BA->matrix());
+  return diff <= tol;
+}
+
+

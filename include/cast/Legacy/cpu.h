@@ -1,7 +1,7 @@
 #ifndef CAST_CPU_H
 #define CAST_CPU_H
 
-#include "cast/Core/ir_generator.h"
+#include "cast/Legacy/ir_generator.h"
 
 namespace simulation {
 class IRGeneratorConfig;

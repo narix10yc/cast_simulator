@@ -261,6 +261,9 @@ public:
 
   std::ostream& visualize(std::ostream& os) const;
 
+  // mainly for debugs
+  void dump_visualize() const;
+
   std::ostream&
   impl_visualize(std::ostream& os, int width, int n_qubits) const override;
 
