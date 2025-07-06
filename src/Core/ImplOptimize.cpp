@@ -638,6 +638,22 @@ int applyFusionCFOPass_IfJoin(IfMeasureNode* ifNode,
 
 } // end of anonymous namespace
 
+void cast::impl::applyGateFusion(ir::CircuitGraphNode& graph,
+                           const FusionConfig& config) {
+  int max_k_candidate = (config.incrementScheme ? 2 : config.maxKOverride);
+  do {
+    auto it = graph.tile_begin();
+    // we need to query graph.tile_end() every time, because impl::startFusion may
+    // change graph tile
+    while (it != graph.tile_end()) {
+      for (int q = 0; q < graph.nQubits(); ++q) 
+        cast::impl::startFusion(graph, config, max_k_candidate, it, q);
+      ++it;
+    }
+    graph.squeeze();
+  } while (++max_k_candidate <= config.maxKOverride);
+}
+
 int cast::impl::applyCFOFusion(ir::CircuitNode& circuit,
                                const FusionConfig& config,
                                int max_k_candidate) {

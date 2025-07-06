@@ -50,6 +50,47 @@ namespace {
     return 0; // unreachable
   }
 
+  double impl_opcount(const IRNode* node);
+
+  double impl_opcount(const CompoundNode* compoundNode) {
+    double count = 0.0;
+    for (const auto& child : compoundNode->nodes) {
+      count += impl_opcount(child.get());
+    }
+    return count;
+  }
+
+  double impl_opcount(const CircuitNode* circuitNode) {
+    return impl_opcount(&circuitNode->body);
+  }
+
+  double impl_opcount(const CircuitGraphNode* graphNode) {
+    double count = 0.0;
+    auto gates = graphNode->getAllGates();
+    for (const auto& gate : gates)
+      count += gate->opCount(1e-8);
+    return count;
+  }
+
+  double impl_opcount(const IfMeasureNode* ifNode) {
+    double thenCount = impl_opcount(&ifNode->thenBody);
+    double elseCount = impl_opcount(&ifNode->elseBody);
+    return std::max(thenCount, elseCount);
+  }
+
+  double impl_opcount(const IRNode* node) {
+    if (auto* n = llvm::dyn_cast<CompoundNode>(node))
+      return impl_opcount(n);
+    if (auto* n = llvm::dyn_cast<CircuitNode>(node))
+      return impl_opcount(n);
+    if (auto* n = llvm::dyn_cast<CircuitGraphNode>(node))
+      return impl_opcount(n);
+    if (auto* n = llvm::dyn_cast<IfMeasureNode>(node))
+      return impl_opcount(n);
+    assert(false && "Unknown node type in impl_opcount");
+    return 0; // unreachable
+  }
+
 } // end of anonymous namespace
 
 std::ostream& CircuitNode::displayInfo(std::ostream& os, int verbose) const {
@@ -65,6 +106,7 @@ std::ostream& CircuitNode::displayInfo(std::ostream& os, int verbose) const {
   os << CYAN("- Num Gates: ") << nGates << "\n"
      <<      "             "  << impl_nGatesCriticalPath(&body)
      << " in critical path\n";
+  os << CYAN("- Op Count:  ") << impl_opcount(&body) << " in critical path\n";
 
   os << BOLDCYAN("====================================") << "\n";
   return os;

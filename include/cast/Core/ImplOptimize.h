@@ -36,6 +36,9 @@ int applySizeOnlyFusion(cast::ir::CircuitGraphNode& graph,
                         int max_k,
                         double swaTol);
 
+void applyGateFusion(ir::CircuitGraphNode& graph,
+                     const FusionConfig& fusionConfig);
+                     
 int applyCFOFusion(ir::CircuitNode& circuit,
                    const FusionConfig& config,
                    int max_k_candidate);

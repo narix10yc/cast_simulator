@@ -37,15 +37,8 @@ constexpr int GLOBAL_MAX_K = 7;
 
 /// @brief Optimize the circuit by trying to fuse away all single-qubit gates,
 /// including those in if statements.
-/// This pass consists of three sub-steps:
-/// 1. Eagerly move single-qubit gates inside the then and else blocks.
-/// 2. Apply a max-k fusion pass in each block with k=2.
-/// 3. Seek for further fusion opportunities by moving gates at the top of the 
-/// join block to the bottom of the then and else blocks.
+/// TODO: swaTol not in used yet.
 void applyCanonicalizationPass(ir::CircuitNode& circuit, double swaTol = 1e-8);
-
-void applyGateFusion(ir::CircuitGraphNode& graph,
-                     const FusionConfig& fusionConfig);
 
 void applyGateFusionPass(ir::CircuitNode& circuit,
                          const FusionConfig& config,

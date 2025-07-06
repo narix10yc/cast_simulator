@@ -28,7 +28,7 @@ cl::opt<bool>
 ArgF64("f64", cl::Optional, cl::init(false));
 
 // return true on error
-static bool checkPrecisionArgsCollision(int& precision) {
+static bool checkPrecisionArgsCollision(Precision& precision) {
   if (ArgF32 && ArgF64) {
     std::cerr << BOLDRED("[Error]: ")
               << "-f32 and -f64 cannot be set together.\n";
@@ -40,7 +40,7 @@ static bool checkPrecisionArgsCollision(int& precision) {
                 << "Precision arguments contradict with each other.\n";
       return true;
     }
-    precision = 32;
+    precision = Precision::F32;
     return false;
   }
   if (ArgF64) {
@@ -49,7 +49,7 @@ static bool checkPrecisionArgsCollision(int& precision) {
                 << "Precision arguments contradict with each other.\n";
       return true;
     }
-    precision = 64;
+    precision = Precision::F64;
     return false;
   }
   if (ArgPrecision != 32 && ArgPrecision != 64) {
@@ -57,7 +57,7 @@ static bool checkPrecisionArgsCollision(int& precision) {
               << "Precision should be either 32 or 64.\n";
     return true;
   }
-  precision = ArgPrecision;
+  precision = Precision::Unknown;
   return false;
 }
 

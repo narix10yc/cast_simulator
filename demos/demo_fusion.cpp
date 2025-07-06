@@ -1,9 +1,9 @@
 #include "cast/CPU/CPUStatevector.h"
+#include "cast/CPU/CPUKernelManager.h"
 
-#include "cast/Core/Fusion.h"
-#include "cast/Transform/Transform.h"
+#include "cast/Core/Optimize.h"
 #include "timeit/timeit.h"
-#include "openqasm/parser.h"
+#include "utils/iocolor.h"
 
 #include "llvm/Support/CommandLine.h"
 
@@ -96,18 +96,18 @@ int main(int argc, const char** argv) {
   }
 
   // parse source QASM file
-  openqasm::Parser qasmParser(ArgInputFilename, 0);
-  auto qasmRoot = qasmParser.parse();
-  ast::ASTContext astCtx;
-  auto* circuitStmt = transform::cvtQasmCircuitToAstCircuit(*qasmRoot, astCtx);
-  assert(circuitStmt != nullptr);
-  auto irCircuit = transform::cvtAstCircuitToIrCircuit(*circuitStmt, astCtx);
-  assert(irCircuit != nullptr);
+  auto circuitOrErr = cast::parseCircuitFromQASMFile(ArgInputFilename);
+  if (!circuitOrErr) {
+    std::cerr << BOLDRED("[Err] ")
+              << "Failed to parse circuit from file: "
+              << ArgInputFilename << "\n"
+              << "Error: " << circuitOrErr.takeError() << "\n";
+    return 1;
+  }
 
-  std::cerr << "AST Context: Allocated "
-            << astCtx.bytesAllocated() << " bytes.\n";
+  auto circuit = circuitOrErr.moveValue();
 
-  auto allGraphs = irCircuit->getAllCircuitGraphs();
+  auto allGraphs = circuit.getAllCircuitGraphs();
   assert(allGraphs.size() == 1 && "There should be exactly one circuit graph.");
 
   const ir::CircuitGraphNode& graphOrginal = *allGraphs[0];
