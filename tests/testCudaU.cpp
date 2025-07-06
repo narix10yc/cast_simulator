@@ -37,7 +37,7 @@ static void f() {
   cudaGenConfig.matrixLoadMode = CUDAKernelGenConfig::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
     kernelMgrCUDA.genCUDAGate(
-      cudaGenConfig, gates[q], "gateImm_" + std::to_string(q));
+      cudaGenConfig, gates[q], "gateImm_" + std::to_string(q), nQubits);
   }
 
   // cudaGenConfig.forceDenseKernel = true;

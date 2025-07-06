@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <regex>
 
 #include "openqasm/parser.h"
 #include "openqasm/ast.h"
@@ -67,16 +68,39 @@ static void printTimingStats(const std::string& label, const timeit::TimingResul
             << " ms (median=" << medianMs << " ms, n=" << tr.tArr.size() << ")\n";
 }
 
+static int getQubitCount(const std::string& qasm_path) {
+  const auto slash = qasm_path.find_last_of("/\\");
+  std::string name = (slash == std::string::npos)
+                        ? qasm_path
+                        : qasm_path.substr(slash + 1);
+
+  // drop the extension
+  const auto dot = name.rfind('.');
+  if (dot != std::string::npos)
+      name.erase(dot);
+
+  // regex “q<digits>…”
+  static const std::regex rx(R"(q(\d+))", std::regex::icase);
+
+  std::smatch m;
+  if (std::regex_search(name, m, rx))
+      return std::stoi(m[1].str());
+
+  return -1;
+}
+
 int main() {
   using namespace timeit;
 
   // std::string qasmFile = "../examples/qft/qft-16-cp.qasm";
   // std::string qasmFile = "../examples/rqc/q12_189_128.qasm";
-  // std::string qasmFile = "../examples/rqc/q20_592_427.qasm";
+  std::string qasmFile = "../examples/rqc/q20_592_427.qasm";
   // std::string qasmFile = "../examples/rqc/q30_521_379.qasm";
-  std::string qasmFile = "../examples/rqc/q30_4299_3272.qasm";
+  // std::string qasmFile = "../examples/rqc/q30_4299_3272.qasm";
   std::string adaptiveModelPath = "cost_model_simd1.csv";
   std::string cudaModelPath     = "cuda128test.csv";
+  int qubit_count = getQubitCount(qasmFile);
+  assert(qubit_count > 0 && "Failed to properly extract qubit number from file name");
   int naiveMaxK    = 2;
   int nReps        = 3;
   int blockSize    = 256;
@@ -218,7 +242,7 @@ int main() {
   Timer kernelGenTimer(nReps);
   TimingResult kernelGenTR = kernelGenTimer.timeit([&]() {
     CUDAKernelManager localKM;
-    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+    localKM.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit", qubit_count);
   });
 
   printTimingStats("4) Kernel Gen Time", kernelGenTR);
@@ -231,7 +255,7 @@ int main() {
     // preMethod:
     [&]() {
       localKMptx = std::make_unique<CUDAKernelManager>();
-      localKMptx->genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+      localKMptx->genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit", qubit_count);
     },
     // timedMethod: measure initCUJIT
     [&]() {
@@ -259,7 +283,7 @@ int main() {
     // preMethod:
     [&]() {
       localKM = std::make_unique<CUDAKernelManager>();
-      localKM->genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+      localKM->genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit", qubit_count);
       localKM->emitPTX(nThreads, optLevel, 0);
     },
     // timedMethod: measure initCUJIT
@@ -298,7 +322,7 @@ int main() {
 
   // Final kernel manager that we'll actually use for execution
   CUDAKernelManager kernelMgr;
-  kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit");
+  kernelMgr.genCUDAGatesFromCircuitGraph(genConfig, *graphPtr, "testCircuit", qubit_count);
 
   auto& allKernels = kernelMgr.kernels(); // returns std::vector<CUDAKernelInfo>
   std::cout << "[LOG] Number of generated GPU kernels: " 

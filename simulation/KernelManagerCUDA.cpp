@@ -1,6 +1,6 @@
 #include "simulation/KernelManager.h"
 #include "simulation/KernelGenInternal.h"
-
+#include <fstream>
 #include "llvm/IR/IntrinsicsNVPTX.h"
 
 #include "llvm/Support/TargetSelect.h"
@@ -48,86 +48,242 @@ std::ostream& CUDAKernelGenConfig::displayInfo(std::ostream& os) const {
   return os;
 }
 
+// void CUDAKernelManager::emitPTX(
+//     int nThreads, OptimizationLevel optLevel, int verbose) {
+//   assert(nThreads > 0);
+
+//   InitializeAllTargets();
+//   InitializeAllTargetMCs();
+//   InitializeAllAsmParsers();
+//   InitializeAllAsmPrinters();
+
+//   applyLLVMOptimization(nThreads, optLevel, /* progressBar */ verbose > 0);
+
+//   // Check registry info to make sure LLVM is built for NVPTX
+//   std::string targetTriple = "nvptx64-nvidia-cuda";
+//   std::string err;
+//   const auto* target = TargetRegistry::lookupTarget(targetTriple, err);
+//   if (!target) {
+//     errs() << RED("[Error]: ") << "Failed to lookup target. Error trace: "
+//            << err << "\n";
+//     return;
+//   }
+
+//   #ifdef CAST_USE_CUDA
+//   // Query device for compute capability
+//   cuInit(0);
+//   CUdevice device;
+//   cuDeviceGet(&device, 0);
+
+//   int major = 0, minor = 0;
+//   cuDeviceGetAttribute(
+//     &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
+//   cuDeviceGetAttribute(
+//     &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
+
+//   std::ostringstream archOss;
+//   archOss << "sm_" << major << minor;
+//   std::string archString = archOss.str();
+//   #else
+//   // Fallback to default compute capability
+//   std::string archString = "sm_76";
+//   #endif // #ifdef CAST_USE_CUDA
+
+//   const auto createTargetMachine = [&]() -> TargetMachine* {
+//     return target->createTargetMachine(
+//       targetTriple,   // target triple
+//       archString,     // cpu
+//       "",             // features
+//       {},             // options
+//       std::nullopt    // RM
+//     );
+//   };
+
+//   for (auto& [ctx, mod] : llvmContextModulePairs) {
+//     mod->setTargetTriple(targetTriple);
+//     mod->setDataLayout(createTargetMachine()->createDataLayout());
+//     if (llvm::verifyModule(*mod, &llvm::errs())) {
+//       llvm::errs() << "Module verification failed!\n";
+//       return;
+//     }
+//   }
+
+//   assert(_cudaKernels.size() == llvmContextModulePairs.size());
+//   utils::TaskDispatcher dispatcher(nThreads);
+
+//   for (unsigned i = 0; i < _cudaKernels.size(); i++) {
+//     dispatcher.enqueue([&, i=i]() {
+//       raw_svector_ostream sstream(_cudaKernels[i].ptxString);
+//       legacy::PassManager passManager;
+//       if (createTargetMachine()->addPassesToEmitFile(
+//           passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
+//         errs() << "The target machine can't emit a file of this type\n";
+//         return;
+//       }
+//       passManager.run(*llvmContextModulePairs[i].llvmModule);
+//     });
+//   }
+//   if (verbose > 0)
+//     std::cerr << "Emitting PTX codes...\n";
+//   dispatcher.sync(/* progressBar */ verbose > 0);
+//   jitState = JIT_PTXEmitted;
+// }
+
+// void CUDAKernelManager::emitPTX(
+//     int nThreads, OptimizationLevel optLevel, int verbose) {
+//   assert(nThreads > 0);
+
+//   InitializeAllTargets();
+//   InitializeAllTargetMCs();
+//   InitializeAllAsmParsers();
+//   InitializeAllAsmPrinters();
+
+//   applyLLVMOptimization(nThreads, optLevel, /* progressBar */ verbose > 0);
+
+//   // Check registry info to make sure LLVM is built for NVPTX
+//   std::string targetTriple = "nvptx64-nvidia-cuda";
+//   std::string err;
+//   const auto* target = TargetRegistry::lookupTarget(targetTriple, err);
+//   if (!target) {
+//     errs() << RED("[Error]: ") << "Failed to lookup target. Error trace: "
+//            << err << "\n";
+//     return;
+//   }
+
+//   #ifdef CAST_USE_CUDA
+//   // Query device for compute capability
+//   cuInit(0);
+//   CUdevice device;
+//   cuDeviceGet(&device, 0);
+
+//   int major = 0, minor = 0;
+//   cuDeviceGetAttribute(
+//     &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
+//   cuDeviceGetAttribute(
+//     &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
+
+//   std::ostringstream archOss;
+//   archOss << "sm_" << major << minor;
+//   std::string archString = archOss.str();
+//   #else
+//   // Fallback to default compute capability
+//   std::string archString = "sm_76";
+//   #endif // #ifdef CAST_USE_CUDA
+
+//   const auto createTargetMachine = [&]() -> TargetMachine* {
+//     return target->createTargetMachine(
+//       targetTriple,   // target triple
+//       archString,     // cpu
+//       "",             // features
+//       {},             // options
+//       std::nullopt    // RM
+//     );
+//   };
+
+//   for (auto& [ctx, mod] : llvmContextModulePairs) {
+//     mod->setTargetTriple(targetTriple);
+//     mod->setDataLayout(createTargetMachine()->createDataLayout());
+//     if (llvm::verifyModule(*mod, &llvm::errs())) {
+//       llvm::errs() << "Module verification failed!\n";
+//       return;
+//     }
+//   }
+
+//   assert(_cudaKernels.size() == llvmContextModulePairs.size());
+//   utils::TaskDispatcher dispatcher(nThreads);
+
+//   for (unsigned i = 0; i < _cudaKernels.size(); i++) {
+//     dispatcher.enqueue([&, i=i]() {
+//       raw_svector_ostream sstream(_cudaKernels[i].ptxString);
+//       legacy::PassManager passManager;
+//       if (createTargetMachine()->addPassesToEmitFile(
+//           passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
+//         errs() << "The target machine can't emit a file of this type\n";
+//         return;
+//       }
+//       passManager.run(*llvmContextModulePairs[i].llvmModule);
+//       // -------------------------------- Debug: Dump PTX to file ----------------------------------
+//       // std::ofstream ptxFile("kernel_" + std::to_string(i) + ".ptx");
+//       // ptxFile << _cudaKernels[i].ptxString.str().str(); // Convert StringRef to std::string
+//       // ptxFile.close();
+//       // -------------------------------------------------------------------------------------------
+//     });
+//   }
+//   if (verbose > 0)
+//     std::cerr << "Emitting PTX codes...\n";
+//   dispatcher.sync(/* progressBar */ verbose > 0); // Revert to sync
+//   jitState = JIT_PTXEmitted;
+// }
+
 void CUDAKernelManager::emitPTX(
     int nThreads, OptimizationLevel optLevel, int verbose) {
-  assert(nThreads > 0);
+    assert(nThreads > 0);
 
-  InitializeAllTargets();
-  InitializeAllTargetMCs();
-  InitializeAllAsmParsers();
-  InitializeAllAsmPrinters();
+    InitializeAllTargets();
+    InitializeAllTargetMCs();
+    InitializeAllAsmParsers();
+    InitializeAllAsmPrinters();
 
-  applyLLVMOptimization(nThreads, optLevel, /* progressBar */ verbose > 0);
+    applyLLVMOptimization(nThreads, optLevel, /* progressBar */ verbose > 0);
 
-  // Check registry info to make sure LLVM is built for NVPTX
-  std::string targetTriple = "nvptx64-nvidia-cuda";
-  std::string err;
-  const auto* target = TargetRegistry::lookupTarget(targetTriple, err);
-  if (!target) {
-    errs() << RED("[Error]: ") << "Failed to lookup target. Error trace: "
-           << err << "\n";
-    return;
-  }
-
-  #ifdef CAST_USE_CUDA
-  // Query device for compute capability
-  cuInit(0);
-  CUdevice device;
-  cuDeviceGet(&device, 0);
-
-  int major = 0, minor = 0;
-  cuDeviceGetAttribute(
-    &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
-  cuDeviceGetAttribute(
-    &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
-
-  std::ostringstream archOss;
-  archOss << "sm_" << major << minor;
-  std::string archString = archOss.str();
-  #else
-  // Fallback to default compute capability
-  std::string archString = "sm_76";
-  #endif // #ifdef CAST_USE_CUDA
-
-  const auto createTargetMachine = [&]() -> TargetMachine* {
-    return target->createTargetMachine(
-      targetTriple,   // target triple
-      archString,     // cpu
-      "",             // features
-      {},             // options
-      std::nullopt    // RM
-    );
-  };
-
-  for (auto& [ctx, mod] : llvmContextModulePairs) {
-    mod->setTargetTriple(targetTriple);
-    mod->setDataLayout(createTargetMachine()->createDataLayout());
-    if (llvm::verifyModule(*mod, &llvm::errs())) {
-      llvm::errs() << "Module verification failed!\n";
-      return;
-    }
-  }
-
-  assert(_cudaKernels.size() == llvmContextModulePairs.size());
-  utils::TaskDispatcher dispatcher(nThreads);
-
-  for (unsigned i = 0; i < _cudaKernels.size(); i++) {
-    dispatcher.enqueue([&, i=i]() {
-      raw_svector_ostream sstream(_cudaKernels[i].ptxString);
-      legacy::PassManager passManager;
-      if (createTargetMachine()->addPassesToEmitFile(
-          passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
-        errs() << "The target machine can't emit a file of this type\n";
+    std::string targetTriple = "nvptx64-nvidia-cuda";
+    std::string err;
+    const auto* target = TargetRegistry::lookupTarget(targetTriple, err);
+    if (!target) {
+        errs() << RED("[Error]: ") << "Failed to lookup target. Error trace: "
+               << err << "\n";
         return;
-      }
-      passManager.run(*llvmContextModulePairs[i].llvmModule);
-    });
-  }
-  if (verbose > 0)
-    std::cerr << "Emitting PTX codes...\n";
-  dispatcher.sync(/* progressBar */ verbose > 0);
-  jitState = JIT_PTXEmitted;
+    }
+
+#ifdef CAST_USE_CUDA
+    cuInit(0);
+    CUdevice device;
+    cuDeviceGet(&device, 0);
+    int major = 0, minor = 0;
+    cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
+    cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
+    std::ostringstream archOss;
+    archOss << "sm_" << major << minor;
+    std::string archString = archOss.str();
+#else
+    std::string archString = "sm_76";
+#endif
+
+    const auto createTargetMachine = [&]() -> TargetMachine* {
+        return target->createTargetMachine(
+            targetTriple, archString, "", {}, std::nullopt
+        );
+    };
+
+    for (auto& [ctx, mod] : llvmContextModulePairs) {
+        mod->setTargetTriple(targetTriple);
+        mod->setDataLayout(createTargetMachine()->createDataLayout());
+        if (llvm::verifyModule(*mod, &llvm::errs())) {
+            llvm::errs() << "Module verification failed, attempting to proceed with PTX emission\n";
+        }
+    }
+
+    assert(_cudaKernels.size() == llvmContextModulePairs.size());
+    utils::TaskDispatcher dispatcher(nThreads);
+
+    for (unsigned i = 0; i < _cudaKernels.size(); i++) {
+        dispatcher.enqueue([&, i=i]() {
+            raw_svector_ostream sstream(_cudaKernels[i].ptxString);
+            legacy::PassManager passManager;
+            if (createTargetMachine()->addPassesToEmitFile(
+                passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
+                errs() << "The target machine can't emit a file of this type\n";
+                return;
+            }
+            passManager.run(*llvmContextModulePairs[i].llvmModule);
+        });
+    }
+    if (verbose > 0)
+        std::cerr << "Emitting PTX codes...\n";
+    dispatcher.sync(/* progressBar */ verbose > 0);
+    jitState = JIT_PTXEmitted;
 }
+
 
 std::vector<CUDAKernelInfo*>
 CUDAKernelManager::collectCUDAKernelsFromCircuitGraph(
@@ -281,90 +437,157 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
 //     ), "cuLaunchKernel");
 // }
 
+// void CUDAKernelManager::launchCUDAKernel(
+//     void* dData, int nQubits, CUDAKernelInfo& kernelInfo, int blockSize)
+// {
+//     assert(dData != nullptr);
+//     assert(kernelInfo.cuTuple.cuContext != nullptr);
+//     assert(kernelInfo.cuTuple.cuModule != nullptr);
+//     assert(kernelInfo.cuTuple.cuFunction != nullptr);
+//     assert(blockSize == 4 || blockSize == 8 || blockSize == 16 || blockSize == 32 || blockSize == 64 || 
+//            blockSize == 128 || blockSize == 256 || blockSize == 512);
+
+//     cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
+
+//     int blockSizeInNumBits = 0;
+//     if      (blockSize == 512) blockSizeInNumBits = 9;
+//     else if (blockSize == 256) blockSizeInNumBits = 8;
+//     else if (blockSize == 128) blockSizeInNumBits = 7;
+//     else if (blockSize == 64)  blockSizeInNumBits = 6;
+//     else if (blockSize == 32)  blockSizeInNumBits = 5;
+//     else if (blockSize == 8)   blockSizeInNumBits = 3;
+//     else if (blockSize == 4)   blockSizeInNumBits = 2;
+
+//     int nGateQubits = 0;
+//     void* cMatPtr = nullptr;
+//     int gridSize = 0;
+
+//     if (kernelInfo.gate) {
+//         nGateQubits = kernelInfo.gate->nQubits();
+//         if (auto cMat = kernelInfo.gate->gateMatrix.getConstantMatrix()) {
+//             cMatPtr = (void*)cMat->data();
+//         }
+
+//         if (blockSize != (1 << nGateQubits)) {
+//             blockSize = 1 << nGateQubits;
+//             blockSizeInNumBits = nGateQubits;
+//         }
+
+//         int gridSizeInNumBits = nQubits - nGateQubits;
+//         if (gridSizeInNumBits < 0) {
+//             gridSizeInNumBits = 0;
+//         }
+//         gridSize = 1 << gridSizeInNumBits;
+
+//         void* kernelParams[2];
+//         kernelParams[0] = &dData;
+//         kernelParams[1] = &cMatPtr;
+
+//         CUresult status = cuLaunchKernel(
+//             kernelInfo.cuTuple.cuFunction,
+//             gridSize, 1, 1,
+//             blockSize, 1, 1,
+//             kernelInfo.cuTuple.sharedMemBytes,
+//             0,
+//             kernelParams,
+//             nullptr
+//         );
+//         if (status != CUDA_SUCCESS) {
+//             throw std::runtime_error("cuLaunchKernel failed");
+//         }
+//     } else {
+//         // Handle non-gate kernels if necessary
+//         throw std::runtime_error("Non-gate kernels not supported");
+//     }
+// }
+
+// void CUDAKernelManager::launchCUDAKernel(
+//     void* dData, int nQubits, CUDAKernelInfo& kernelInfo, int blockSize)
+// {
+//     assert(dData != nullptr);
+//     assert(kernelInfo.cuTuple.cuContext != nullptr);
+//     assert(kernelInfo.cuTuple.cuModule != nullptr);
+//     assert(kernelInfo.cuTuple.cuFunction != nullptr);
+
+//     cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
+
+//     if (kernelInfo.gate) {
+//         int nGateQubits = kernelInfo.gate->nQubits();
+//         unsigned N = 1u << nGateQubits; // Size of gate matrix and statevector segment
+//         const unsigned TILE_WIDTH = 32; // Must match kernel's TILE_WIDTH
+
+//         // Override blockSize to match kernel's expectation
+//         unsigned blockDimX = TILE_WIDTH;
+//         // Calculate grid size to cover all N rows
+//         unsigned gridDimX = (N + TILE_WIDTH - 1) / TILE_WIDTH;
+
+//         dim3 blockDim(blockDimX, 1, 1);
+//         dim3 gridDim(gridDimX, 1, 1);
+
+//         void* cMatPtr = nullptr;
+//         if (auto cMat = kernelInfo.gate->gateMatrix.getConstantMatrix()) {
+//             cMatPtr = (void*)cMat->data();
+//         }
+
+//         void* kernelParams[2];
+//         kernelParams[0] = &dData;
+//         kernelParams[1] = &cMatPtr;
+
+//         CUresult status = cuLaunchKernel(
+//             kernelInfo.cuTuple.cuFunction,
+//             gridDim.x, gridDim.y, gridDim.z,
+//             blockDim.x, blockDim.y, blockDim.z,
+//             kernelInfo.cuTuple.sharedMemBytes,
+//             0, // Stream
+//             kernelParams,
+//             nullptr
+//         );
+//         if (status != CUDA_SUCCESS) {
+//             throw std::runtime_error("cuLaunchKernel failed with error code: " + std::to_string(status));
+//         }
+//     } else {
+//         throw std::runtime_error("Non-gate kernels not supported");
+//     }
+// }
+
 void CUDAKernelManager::launchCUDAKernel(
-    void* dData, int nQubits, CUDAKernelInfo& kernelInfo, int blockSize)
+        void* dData,        /* device state‑vector                     */
+        int   nQubits,      /* total system‑qubits                     */
+        CUDAKernelInfo& kernelInfo,
+        int   /*blockSize -> ignored – TILE is fixed in kernel */)
 {
     assert(dData != nullptr);
-    assert(kernelInfo.cuTuple.cuContext != nullptr);
-    assert(kernelInfo.cuTuple.cuModule  != nullptr);
-    assert(kernelInfo.cuTuple.cuFunction != nullptr);
-    assert(blockSize == 32 || blockSize == 64 || 
-           blockSize == 128 || blockSize == 256 || blockSize == 512);
+    assert(kernelInfo.cuTuple.cuContext  && kernelInfo.cuTuple.cuFunction);
 
-    // Switch to the context of the kernel
     cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
 
-    // Compute log2(blockSize)
-    int blockSizeInNumBits = 0;
-    if      (blockSize == 512) blockSizeInNumBits = 9;
-    else if (blockSize == 256) blockSizeInNumBits = 8;
-    else if (blockSize == 128) blockSizeInNumBits = 7;
-    else if (blockSize == 64)  blockSizeInNumBits = 6;
-    else if (blockSize == 32)  blockSizeInNumBits = 5;
+    /* parameters of the generated kernel */
+    constexpr unsigned TILE = 32;          /* must match kernel‑code       */
+    unsigned k = kernelInfo.gate->nQubits();
+    unsigned N = 1u << k;
 
-    // Local variables
-    int   nGateQubits = 0;
+    /* number of different assignments of the non‑target qubits           */
+    unsigned combos        = 1u << (nQubits - k);     /* 2^{nSys-k}        */
+    unsigned tilesPerGate  = (N + TILE - 1) / TILE;   /* rows per slice    */
+
+    dim3 blockDim(TILE, 1, 1);
+    dim3 gridDim (combos * tilesPerGate, 1, 1);
+
     void* cMatPtr = nullptr;
-    int   gridSize = 0;
+    if (auto cMat = kernelInfo.gate->gateMatrix.getConstantMatrix())
+        cMatPtr = const_cast<void*>(
+                      static_cast<const void*>(cMat->data()));
 
-    // If this kernel corresponds to a single gate:
-    if (kernelInfo.gate) {
-        nGateQubits = kernelInfo.gate->nQubits();
+    void* kernelParams[2] = { &dData, &cMatPtr };
 
-        // If the gate is known to have a constant matrix:
-        if (auto cMat = kernelInfo.gate->gateMatrix.getConstantMatrix()) {
-            cMatPtr = (void*)cMat->data();
-        }
-
-        // gridSize = 2^( nQubits - blockSizeInNumBits - nGateQubits )
-        int gridSizeInNumBits = nQubits - blockSizeInNumBits - nGateQubits;
-        assert(gridSizeInNumBits >= 0 && "gridSize must be positive");
-        gridSize = (1 << gridSizeInNumBits);
-
-        // Prepare kernel params: ( pSv, pMat )
-        void* kernelParams[2];
-        kernelParams[0] = &dData;
-        kernelParams[1] = &cMatPtr;
-
-        // Launch
-        CUresult status = cuLaunchKernel(
-            kernelInfo.cuTuple.cuFunction,
-            gridSize, 1, 1,    // grid
-            (1 << blockSizeInNumBits), 1, 1,  // block
-            kernelInfo.cuTuple.sharedMemBytes,
-            /* stream = */ 0,
-            kernelParams,
-            nullptr
-        );
-        if (status != CUDA_SUCCESS) {
-            throw std::runtime_error("cuLaunchKernel failed");
-        }
-    }
-    // Otherwise, multi‐chunk kernel (gate == nullptr). 
-    else {
-        // No single gate => no matrix pointer needed
-        nGateQubits = 0;  // or just skip
-        int gridSizeInNumBits = nQubits - blockSizeInNumBits;
-        if (gridSizeInNumBits < 0) {
-            gridSizeInNumBits = 0;
-        }
-        gridSize = (1 << gridSizeInNumBits);
-        void* kernelParams[1];
-        kernelParams[0] = &dData;
-
-        CUresult status = cuLaunchKernel(
-            kernelInfo.cuTuple.cuFunction,
-            gridSize, 1, 1,
-            (1 << blockSizeInNumBits), 1, 1,
-            kernelInfo.cuTuple.sharedMemBytes,
-            /* stream = */ 0,
-            kernelParams,
-            nullptr
-        );
-        if (status != CUDA_SUCCESS) {
-            throw std::runtime_error("cuLaunchKernel failed");
-        }
-    }
+    CU_CALL(cuLaunchKernel(kernelInfo.cuTuple.cuFunction,
+                           gridDim.x, gridDim.y, gridDim.z,
+                           blockDim.x, blockDim.y, blockDim.z,
+                           kernelInfo.cuTuple.sharedMemBytes,
+                           /*stream*/0,
+                           kernelParams,
+                           /*extra*/nullptr),
+            "cuLaunchKernel");
 }
 
 void CUDAKernelManager::launchCUDAKernelParam(

@@ -31,6 +31,14 @@ utils::randomUnitaryMatrix(unsigned edgeSize) {
   return matrix;
 }
 
+square_matrix<std::complex<double>> utils::identityMatrix(unsigned edgeSize) {
+    square_matrix<std::complex<double>> matrix(edgeSize);
+    for (unsigned i = 0; i < edgeSize; ++i) {
+        matrix(i, i) = {1.0, 0.0}; // Set diagonal to 1
+    }
+    return matrix;
+}
+
 std::ostream& utils::printComplexMatrixF64(
     std::ostream& os,
     const utils::square_matrix<std::complex<double>>& matrix) {

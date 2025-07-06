@@ -933,7 +933,7 @@ void CUDAPerformanceCache::runExperiments(
   utils::timedExecute([&]() {
     int i = 0;
     for (const auto& gate : gates)
-      kernelMgr.genCUDAGate(gpuConfig, gate, "gate_" + std::to_string(i++));
+      kernelMgr.genCUDAGate(gpuConfig, gate, "gate_" + std::to_string(i++), nQubits);
   }, "CUDA Kernel Generation");
 
   // Initialize JIT with GPU-specific parameters

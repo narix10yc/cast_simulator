@@ -264,7 +264,7 @@ public:
 
   CUDAKernelManager& genCUDAGate(
       const CUDAKernelGenConfig& config,
-      std::shared_ptr<QuantumGate> gate, const std::string& funcName);
+      std::shared_ptr<QuantumGate> gate, const std::string& funcName, int nQubits);
   
   CUDAKernelManager& genCUDAGateMulti(
     const CUDAKernelGenConfig& config,
@@ -273,7 +273,7 @@ public:
 
   CUDAKernelManager& genCUDAGatesFromCircuitGraph(
       const CUDAKernelGenConfig& config,
-      const CircuitGraph& graph, const std::string& graphName);
+      const CircuitGraph& graph, const std::string& graphName, int nQubits);
 
   CUDAKernelManager& genCUDAGatesFromCircuitGraphMulti(
     const CUDAKernelGenConfig& config,

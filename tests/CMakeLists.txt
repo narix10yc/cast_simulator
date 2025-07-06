@@ -4,6 +4,7 @@ if (NOT CAST_USE_CUDA)
   list(REMOVE_ITEM ALL_SRC_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/testStatevectorCUDA.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/testCudaU.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/testCudaGateVariation.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/testCudaRzParam.cpp")
 endif()
 

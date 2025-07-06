@@ -138,6 +138,14 @@ public:
         sortedQubits);
   }
 
+  static QuantumGate Identity(const std::vector<int>& qubits) {
+    llvm::SmallVector<int> sortedQubits(qubits.begin(), qubits.end());
+    std::ranges::sort(sortedQubits);
+    return QuantumGate(
+        GateMatrix(utils::identityMatrix(1U << sortedQubits.size())),
+        sortedQubits);
+  }
+
 };
 
 } // namespace cast

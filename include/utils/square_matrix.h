@@ -174,6 +174,7 @@ double maximum_norm(
 }
 
 square_matrix<std::complex<double>> randomUnitaryMatrix(unsigned edgeSize);
+square_matrix<std::complex<double>> identityMatrix(unsigned edgeSize);
 
 std::ostream& printComplexMatrixF64(
     std::ostream& os,

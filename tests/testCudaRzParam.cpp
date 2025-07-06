@@ -76,7 +76,7 @@ static void f() {
     for (int i = 0; i < nGates; i++) {
       kernelMgrCUDA.genCUDAGate(
           cudaConfig, gates[i],
-          "rz_param_gate_def_" + std::to_string(i));
+          "rz_param_gate_def_" + std::to_string(i), nQubits);
     }
   }
 
@@ -89,16 +89,16 @@ static void f() {
     for (int i = 0; i < nGates; i++) {
       kernelMgrCUDA.genCUDAGate(
           cudaConfig, gates[i],
-          "rz_param_gate_const_" + std::to_string(i));
+          "rz_param_gate_const_" + std::to_string(i), nQubits);
     }
   }
 
   // Now we have 2 * nGates = 6 kernels total, can compile them all at once
   kernelMgrCUDA.emitPTX(/*nThreads=*/2, llvm::OptimizationLevel::O1, /*verbose=*/0);
-  llvm::outs() << "\n=== DUMPING PTX FOR INSPECTION ===\n";
-  kernelMgrCUDA.dumpPTX("rz_param_gate_def_0", llvm::outs());
-  kernelMgrCUDA.dumpPTX("rz_param_gate_const_0", llvm::outs());
-  llvm::outs() << "=== END PTX DUMP ===\n\n";
+  // llvm::outs() << "\n=== DUMPING PTX FOR INSPECTION ===\n";
+  // kernelMgrCUDA.dumpPTX("rz_param_gate_def_0", llvm::outs());
+  // kernelMgrCUDA.dumpPTX("rz_param_gate_const_0", llvm::outs());
+  // llvm::outs() << "=== END PTX DUMP ===\n\n";
   kernelMgrCUDA.initCUJIT(/*nThreads=*/2, /*verbose=*/0);
 
   utils::StatevectorCUDA<double> sv(nQubits);
