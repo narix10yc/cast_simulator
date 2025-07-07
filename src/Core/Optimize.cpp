@@ -12,28 +12,34 @@
 using namespace cast;
 
 const FusionConfig FusionConfig::Minor {
+  .costModel = nullptr,
   .precision = Precision::Unknown,
   .zeroTol = 1e-8,
   .swaTol = 0.0,
   .incrementScheme = true,
+  .multiTraversal = false,
   .maxKOverride = 3,
   .benefitMargin = 0.2,
 };
 
 const FusionConfig FusionConfig::Default {
+  .costModel = nullptr,
   .precision = Precision::Unknown,
   .zeroTol = 1e-8,
   .swaTol = 0.0,
   .incrementScheme = true,
+  .multiTraversal = false,
   .maxKOverride = 5,
   .benefitMargin = 0.0,
 };
 
 const FusionConfig FusionConfig::Aggressive {
+  .costModel = nullptr,
   .precision = Precision::Unknown,
   .zeroTol = 1e-8,
   .swaTol = 1e-8,
   .incrementScheme = true,
+  .multiTraversal = true,
   .maxKOverride = GLOBAL_MAX_K,
   .benefitMargin = 0.0,
 };
@@ -45,6 +51,7 @@ FusionConfig FusionConfig::SizeOnly(int max_k) {
     .zeroTol = 1e-8,
     .swaTol = 1e-8,
     .incrementScheme = true,
+    .multiTraversal = false,
     .maxKOverride = max_k,
     .benefitMargin = 0.0,
   };
@@ -62,10 +69,12 @@ void cast::applyCanonicalizationPass(ir::CircuitNode& circuit, double swaTol) {
   // perform fusion in each block
   auto allCircuitGraphs = circuit.getAllCircuitGraphs();
   for (auto* graph : allCircuitGraphs)
-    cast::impl::applySizeOnlyFusion(*graph, 2, swaTol);
+    cast::impl::applySizeTwoFusion(*graph, swaTol);
 
-  // circuit.displayInfo(std::cerr << "\nAfter Size-Only Fusion\n", 1);
-  // circuit.visualize(std::cerr) << "\n";
+  circuit.displayInfo(std::cerr << "\nAfter Size-2 Fusion\n", 1);
+  circuit.visualize(std::cerr) << "\n";
 
-  cast::impl::applyCFOFusion(circuit, FusionConfig::SizeOnly(2), 2);
+  auto cfoFusionConfig = FusionConfig::SizeOnly(2);
+  cfoFusionConfig.swaTol = swaTol;
+  cast::impl::applyCFOFusion(circuit, cfoFusionConfig, 2);
 }

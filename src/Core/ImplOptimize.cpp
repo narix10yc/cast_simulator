@@ -55,12 +55,14 @@ int getKAfterFusion(const QuantumGate* gateA, const QuantumGate* gateB) {
 using row_iterator = ir::CircuitGraphNode::row_iterator;
 
 int absorbSingleQubitGate(ir::CircuitGraphNode& graph,
-                          row_iterator& it,
+                          row_iterator it,
                           int qubit) {
+  assert(it != graph.tile_end());
   auto* gate = (*it)[qubit];
   assert(gate != nullptr && gate->nQubits() == 1 && 
         "We expect a single-qubit gate when calling absorbSingleQubitGate");
 
+  // Try to fuse it with gates in next rows
   auto end = graph.tile_end();
   auto curIt = it;
   while (++curIt != end) {
@@ -78,7 +80,56 @@ int absorbSingleQubitGate(ir::CircuitGraphNode& graph,
            "curIt should have enough space for the fused gate");
     return 1; // fused one gate
   }
-  return 0; // fused no gates
+
+  // Try to fuse it with gates in previous rows
+  auto begin = graph.tile_begin();
+  curIt = it;
+  while (curIt != begin) {
+    --curIt;
+    auto* prevGate = (*curIt)[qubit];
+    if (prevGate == nullptr)
+      continue;
+
+    // fuse them together
+    auto fusedGate = cast::matmul(gate, prevGate);
+    assert(fusedGate != nullptr);
+    graph.removeGate(it, qubit);
+    graph.removeGate(curIt, qubit);
+    auto inserted = graph.insertGate(fusedGate, curIt);
+    assert(inserted == curIt &&
+           "curIt should have enough space for the fused gate");
+    return 1; // fused one gate
+  }
+
+  return 0; // no fusion happened
+}
+
+// We expect gateA, gateG, and gateH are on three consecutive rows with at least
+// one shared target qubit. This function checks if it might be beneficial to
+// swap gateG and gateH, so that we can fuse gateA with the gateH. That is, 
+// instead of doing HGA, we do GHA, with HA fused together.
+// When gateG and gateH are already very large, checking their commutation
+// may be super expensive. We skip the check if the gateG * gateH would act on
+// more than max_k_cutoff qubits.
+bool checkSwappable(const QuantumGate* gateA,
+                    const QuantumGate* gateG,
+                    const QuantumGate* gateH,
+                    int max_k_candidate,
+                    int max_k_cutoff,
+                    double swaTol) {
+  if (swaTol <= 0.0)
+    return false; // swapping is disabled
+  
+  if (gateA == nullptr || gateG == nullptr || gateH == nullptr)
+    return false; // no gates to swap
+
+  if (getKAfterFusion(gateA, gateH) > max_k_candidate)
+    return false; // resulting gate would be too large
+  
+  if (getKAfterFusion(gateG, gateH) > max_k_cutoff)
+    return false; // commutation check is too expensive
+  
+  return cast::isCommuting(gateG, gateH, swaTol);
 }
 
 struct TentativeFusedItem {
@@ -100,11 +151,7 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
   auto productGate = graph.lookup((*curIt)[qubit]);
   if (productGate == nullptr)
     return 0;
-  if (productGate->nQubits() == 1) {
-    auto status = absorbSingleQubitGate(graph, curIt, qubit);
-    if (status > 0)
-      return status;
-  }
+
   auto fusedIt = curIt;
   int nFused = 0;
 
@@ -132,14 +179,6 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
   // Start with same-row gates
   for (int q = qubit + 1; q < graph.nQubits(); ++q) {
     auto* candidateGate = (*curIt)[q];
-    if (candidateGate == nullptr)
-      continue;
-
-    if (candidateGate->nQubits() == 1) {
-      nFused += absorbSingleQubitGate(graph, curIt, q);
-      candidateGate = (*curIt)[q]; // re-query after absorbing
-    }
-
     if (checkFuseable(candidateGate) == false)
       continue;
 
@@ -161,11 +200,39 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
     progress = false;
     for (const auto& q : productGate->qubits()) {
       auto* candidateGate = (*curIt)[q];
-      if (checkFuseable(candidateGate) == false)
-        continue;
+      if (checkFuseable(candidateGate) == false) {
+        if (config.swaTol <= 0.0)
+          continue; // swapping is disabled
+        // check if we can swap candidateGate with the next gate
+        auto nextIt = std::next(curIt);
+        if (nextIt == graph.tile_end())
+          continue; // no next row to swap with
+        auto* nextGate = (*nextIt)[q];
+        if (checkSwappable(productGate.get(), candidateGate, nextGate,
+                           max_k_candidate,
+                           GLOBAL_MAX_K + 1, // max_k_cutoff
+                           config.swaTol) == false) {
+          // std::cerr << "Not triggering swap\n";
+          continue;
+        }
+        // We can swap candidateGate with nextGate
+        LLVM_DEBUG(
+          std::cerr << "Swapping gates at (" 
+                    << graph.gateId(productGate) << ", " 
+                    << graph.gateId(candidateGate) << ") with gate "
+                    << graph.gateId(nextGate) << "\n";
+        );
+        graph.swapGates(curIt, q);
+        graph.squeeze(nextIt);
+        // swapping may add a new row between fusedIt and curIt
+        curIt = std::next(fusedIt);
+        assert((*curIt)[q] == nextGate);
+        candidateGate = nextGate;
+      }
       // candidateGate is accepted
       fusedGates.emplace_back(graph.lookup(candidateGate), curIt);
-      fusedIt = graph.fuseAndInsertDiffRow(std::prev(curIt), q);
+      assert(curIt == std::next(fusedIt));
+      fusedIt = graph.fuseAndInsertDiffRow(fusedIt, q);
       productGate = graph.lookup((*fusedIt)[candidateGate->qubits()[0]]);
       assert(productGate != nullptr);
       progress = true;
@@ -231,6 +298,97 @@ int cast::impl::applySizeOnlyFusion(ir::CircuitGraphNode& graph,
     }
     ++it;
   }
+  graph.squeeze();
+  return nFused;
+}
+
+int cast::impl::applySizeTwoFusion(ir::CircuitGraphNode& graph, double swaTol) {
+  // Step 1: absorb single-qubit gates
+  // When step 1 finishes, all single-qubit gates should be absorbed. The only
+  // exception is when there is precisely one single-qubit gate in a qubit wire.
+  // In that case, we will wait for the main fusion algorithm to handle it.
+  auto it = graph.tile_begin();
+  int nFused = 0;
+  do {
+    for (int q = 0; q < graph.nQubits(); ++q) {
+      auto* gate = (*it)[q];
+      if (gate == nullptr || gate->nQubits() != 1)
+        continue;
+      nFused += absorbSingleQubitGate(graph, it, q);
+    }
+  } while (++it != graph.tile_end());
+  graph.squeeze();
+
+  // Step 2: fuse two-qubit gates
+  it = graph.tile_begin();
+  do {
+    auto nextIt = std::next(it);
+    if (nextIt == graph.tile_end())
+      break; // no next row to fuse with
+
+    for (int q = 0; q < graph.nQubits(); ++q) {
+      auto* gateL = (*it)[q];
+      if (gateL == nullptr || gateL->nQubits() != 2)
+        continue;
+      auto* gateR = (*nextIt)[q];
+      if (gateR == nullptr || gateR->nQubits() != 2)
+        continue;
+
+      // We have two two-qubit gates now
+      const auto q0L = gateL->qubits()[0];
+      const auto q1L = gateL->qubits()[1];
+      const auto q0R = gateR->qubits()[0];
+      const auto q1R = gateR->qubits()[1];
+      // They act on the same qubits. Always fuse them.
+      if (q0L == q0R && q1L == q1R) {
+        graph.fuseAndInsertDiffRow(it, q);
+        nFused++;
+        continue;
+      }
+      // They act on different qubits. Directly fusing them gives a 3-qubit
+      // gate. We check commutation of gateR with another gate and see if we
+      // can swap them.
+      if (swaTol <= 0.0)
+        continue; // swapping analysis is disabled
+      QuantumGate* gateToSwap = nullptr;
+      auto nextNextIt = std::next(nextIt);
+      if (nextNextIt != graph.tile_end()) {
+        auto* nextGate = (*nextNextIt)[q];
+        if (nextGate != nullptr && nextGate->nQubits() == 2 &&
+            nextGate->qubits()[0] == q0L &&
+            nextGate->qubits()[1] == q1L && 
+            cast::isCommuting(gateR, nextGate)) {
+          gateToSwap = nextGate;
+        }
+      }
+      if (gateToSwap == nullptr) {
+        LLVM_DEBUG(
+          std::cerr << "Cannot swap gates at (" 
+                    << graph.gateId(gateL) << ", " 
+                    << graph.gateId(gateR) << ") with next gate\n";
+        );
+        continue; // cannot swap, skip
+      }
+
+      // We can swap gateR and gateToSwap
+      graph.swapGates(nextIt, q);
+      graph.squeeze(nextIt);
+      // After swapping, it may not be true that nextIt == std::next(it).
+      // But we are sure gateL still equals to (*it)[q].
+      assert((*it)[q] == gateL && "GateL should not be changed after swapping");
+      assert((*(std::next(it)))[q] == gateToSwap &&
+             "GateToSwap should be in the next row after swapping");
+      LLVM_DEBUG(
+        std::cerr << "Swapped gates at (" 
+                  << graph.gateId(gateL) << ", " 
+                  << graph.gateId(gateR) << ") with gate "
+                  << graph.gateId(gateToSwap) << "\n";
+      );
+      graph.fuseAndInsertDiffRow(it, q);
+      nFused++;
+    }
+  } while (++it != graph.tile_end());
+
   graph.squeeze();
   return nFused;
 }
@@ -551,12 +709,60 @@ int applyFusionCFOPass_PriorIf(CircuitGraphNode* priorCGNode,
   if (priorCGNode->tile().empty())
     return false; // nothing to do
 
-  int nFused = 0;
   auto thenCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->thenBody);
   auto elseCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->elseBody);
-
+  
   auto freeGates = collectCommutingGatesWithMeasurement(
     *priorCGNode, ifNode->qubit, config.swaTol);
+      
+  int nFused = 0;
+  int i;
+  int size = freeGates.size();
+  // we need to handle the empty case. Otherwise the loop that tries to put
+  // remaining gates back to the prior CG node will not work.
+  if (size == 0) {
+    return nFused;
+  }
+
+  for (i = 0; i < size; ++i) {
+    auto gate = freeGates[i];
+    // insert the gate to both then and else CG nodes
+    auto thenRowIt = thenCGNode->insertGate(gate, thenCGNode->tile_begin());
+    auto elseRowIt = elseCGNode->insertGate(gate, elseCGNode->tile_begin());
+
+    // start fusion on both CG nodes
+    auto thenFused = cast::impl::startFusion(
+        *thenCGNode, config, max_k_candidate, thenRowIt, gate->qubits()[0]);
+    auto elseFused = cast::impl::startFusion(
+        *elseCGNode, config, max_k_candidate, elseRowIt, gate->qubits()[0]);
+    bool progress = (thenFused > 0 || elseFused > 0);
+    if (thenFused > 0) {
+      nFused += thenFused;
+      thenCGNode->squeeze(); 
+    }
+    if (elseFused > 0) {;
+      nFused += elseFused;
+      elseCGNode->squeeze();
+    }
+    if (progress) {
+      // we have successfully fused the gate, continue to the next gate
+      continue;
+    }
+    // no effect
+    // put the gate back to the prior CG node
+    thenCGNode->removeGate(thenRowIt, gate->qubits()[0]);
+    elseCGNode->removeGate(elseRowIt, gate->qubits()[0]);
+    thenCGNode->squeeze();
+    elseCGNode->squeeze();
+    break;
+  }
+
+  // put the remaining gates back to the prior CG node
+  for (int j = size - 1; j >= i; --j) {
+    priorCGNode->insertGate(freeGates[j]);
+  }
+  priorCGNode->squeeze();
+
   return nFused;
 }
 
@@ -639,19 +845,33 @@ int applyFusionCFOPass_IfJoin(IfMeasureNode* ifNode,
 } // end of anonymous namespace
 
 void cast::impl::applyGateFusion(ir::CircuitGraphNode& graph,
-                           const FusionConfig& config) {
+                                 const FusionConfig& config) {
   int max_k_candidate = (config.incrementScheme ? 2 : config.maxKOverride);
-  do {
+  while (true) {
+    int nFusedThisRound = 0;
     auto it = graph.tile_begin();
-    // we need to query graph.tile_end() every time, because impl::startFusion may
-    // change graph tile
+    // we need to query graph.tile_end() every time, because impl::startFusion
+    // may change graph tile
     while (it != graph.tile_end()) {
-      for (int q = 0; q < graph.nQubits(); ++q) 
-        cast::impl::startFusion(graph, config, max_k_candidate, it, q);
+      for (int q = 0; q < graph.nQubits(); ++q) {
+        nFusedThisRound += cast::impl::startFusion(
+          graph, config, max_k_candidate, it, q);
+      }
       ++it;
     }
-    graph.squeeze();
-  } while (++max_k_candidate <= config.maxKOverride);
+    if (nFusedThisRound > 0)
+      graph.squeeze();
+      
+    if (config.multiTraversal && nFusedThisRound > 0) {
+      // continue without increasing max_k_candidate
+      continue;
+    }
+    ++max_k_candidate;
+    if (max_k_candidate > config.maxKOverride) {
+      // we have reached the maximum k candidate
+      break;
+    }
+  }
 }
 
 int cast::impl::applyCFOFusion(ir::CircuitNode& circuit,

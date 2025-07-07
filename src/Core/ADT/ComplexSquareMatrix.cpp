@@ -40,9 +40,9 @@ static const ComplexSquareMatrix matH(
 static const ComplexSquareMatrix matCX(
   // real part
   {1, 0, 0, 0,
-   0, 1, 0, 0,
    0, 0, 0, 1,
-   0, 0, 1, 0},
+   0, 0, 1, 0,
+   0, 1, 0, 0},
   // imag part
   {0, 0, 0, 0,
    0, 0, 0, 0,
@@ -54,7 +54,7 @@ static const ComplexSquareMatrix matCZ(
   // real part
   {1, 0, 0, 0,
    0, 1, 0, 0,
-   0, 0, -1, 0,
+   0, 0, 1, 0,
    0, 0, 0, -1},
   // imag part
   {0, 0, 0, 0,

@@ -16,6 +16,7 @@ struct FusionConfig {
   // Swapping tolerance. Set to 0.0 or negative to disable.
   double swaTol;
   bool incrementScheme;
+  bool multiTraversal;
   // the maximum number of qubits in fused gates
   int maxKOverride;
   /// How much benefit do we recognize as significant. For example, if set to
@@ -37,8 +38,7 @@ constexpr int GLOBAL_MAX_K = 7;
 
 /// @brief Optimize the circuit by trying to fuse away all single-qubit gates,
 /// including those in if statements.
-/// TODO: swaTol not in used yet.
-void applyCanonicalizationPass(ir::CircuitNode& circuit, double swaTol = 1e-8);
+void applyCanonicalizationPass(ir::CircuitNode& circuit, double swaTol = 0.0);
 
 void applyGateFusionPass(ir::CircuitNode& circuit,
                          const FusionConfig& config,

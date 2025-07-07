@@ -22,17 +22,19 @@ namespace impl {
 /// @param max_k_candidate This is different from FusionConfig::maxKOverride.
 // This max_k is used to limit the size of the product gate before fusion 
 // eligibility check.
-int startFusion(cast::ir::CircuitGraphNode& graph,
+int startFusion(ir::CircuitGraphNode& graph,
                 const FusionConfig& config,
                 int max_k_candidate,
                 cast::ir::CircuitGraphNode::row_iterator rowIt,
                 int qubit);
 
+int applySizeTwoFusion(ir::CircuitGraphNode& graph, double swaTol);
+
 /// @brief Size-only fusion
 /// @param swaTol The tolerance used in swapping analysis. Set to 0.0 or 
 /// negative to disable swapping analysis.
 /// @return Number of fused gates
-int applySizeOnlyFusion(cast::ir::CircuitGraphNode& graph,
+int applySizeOnlyFusion(ir::CircuitGraphNode& graph,
                         int max_k,
                         double swaTol);
 

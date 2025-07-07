@@ -175,6 +175,11 @@ public:
   /// Fuse two gates on different rows given by (*rowItL)[qubit] and
   /// (*std::next(rowItL))[qubit].
   /// This function removes old gates from the graph and inserts the fused gate.
+  /// The row in which fused gate is inserted takes the following priority:
+  /// 1. Put the fused gate in row \c std::next(rowItL) if is vacant; If not,
+  /// 2. Put the fused gate in row \c rowItL if is vacant. If not,
+  /// 3. Insert a new row immediately after \c rowItL and put the fused gate
+  /// there.
   /// @return the tile iterator of the fused gate
   row_iterator fuseAndInsertDiffRow(row_iterator rowItL, int qubit);
 public:
@@ -208,14 +213,26 @@ public:
   /// 2. Put \c gate in row \c rowItL if is vacant. If not,
   /// 3. Insert a new row immediately after \c rowItL and put \c gate there.
   /// @return row of the inserted gate
-  row_iterator replaceGatesOnConsecutiveRowsWith(
-      QuantumGatePtr gate, row_iterator rowItL, int qubit);
+  row_iterator replaceGatesOnConsecutiveRowsWith(QuantumGatePtr gate,
+                                                 row_iterator rowItL,
+                                                 int qubit);
+
+  /// @brief Swap the gates \c (*rowItL)[qubit] and
+  /// \c (*std::next(rowItL))[qubit] in the circuit graph.
+  /// Before calling this function, make sure the gates commute.
+  /// Swapping may introduce bubbles. This function does NOT call squeeze().
+  /// In certain cases, swapGates() introduces an extra row before \c rowItL.
+  /// In either case, it suffices to call squeeze(std::next(rowItL)) to
+  /// remove bubbles. Notice that calling squeeze() changes the tile at and
+  /// after that row.
+  void swapGates(row_iterator rowItL, int qubit);
 
   /// @brief Squeeze the circuit graph between rows [rowIt, tile_end()).
   void squeeze(row_iterator beginIt);
 
   void squeeze() { return squeeze(tile_begin()); }
 
+  // gate map is read-only
   const std::unordered_map<QuantumGatePtr, int>& gateMap() const {
     return _gateMap;
   }

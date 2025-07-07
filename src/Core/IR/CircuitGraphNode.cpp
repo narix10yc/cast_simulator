@@ -279,6 +279,7 @@ CircuitGraphNode::fuseAndInsertDiffRow(row_iterator rowItL, int qubit) {
   assert(rowItL != tile_end() && rowItR != tile_end());
   auto* gateL = (*rowItL)[qubit];
   auto* gateR = (*rowItR)[qubit];
+  assert(gateL != nullptr && gateR != nullptr && "Fusing null gates");
 
   auto gateFused = cast::matmul(gateR, gateL);
   return replaceGatesOnConsecutiveRowsWith(gateFused, rowItL, qubit);
@@ -305,6 +306,22 @@ CircuitGraphNode::replaceGatesOnConsecutiveRowsWith(
   return rowItInserted;
 }
 
+void CircuitGraphNode::swapGates(row_iterator rowItL, int qubit) {
+  assert(rowItL != tile_end());
+  auto rowItR = std::next(rowItL);
+  assert(rowItR != tile_end());
+  auto gateL = lookup((*rowItL)[qubit]);
+  auto gateR = lookup((*rowItR)[qubit]);
+  assert(gateL != nullptr && gateR != nullptr && "Swapping null gates");
+  assert(cast::isCommuting(gateL.get(), gateR.get()) &&
+         "Gates do not commute, cannot swap");
+         
+  removeGate(rowItL, qubit);
+  removeGate(rowItR, qubit);
+
+  insertGate(gateR, rowItL);
+  insertGate(gateL, rowItR);
+}
 
 int CircuitGraphNode::gateId(const QuantumGate* gate) const {
   for (const auto& [itGate, id] : _gateMap) {
@@ -325,32 +342,43 @@ QuantumGatePtr CircuitGraphNode::lookup(QuantumGate* gate) const {
 }
 
 void CircuitGraphNode::squeeze(row_iterator beginIt) {
-  // TODO: there a bug when tile has only one elem. temporary work-around
-  if (_tile.size() <= 1)
-    return;
-
+  assert(beginIt != tile_end() && "beginIt cannot be the end iterator");
   // first step: relocate gates to the top
-  for (auto rowIt = std::next(beginIt), rowEnd = tile_end();
-       rowIt != rowEnd;
+  for (auto rowIt = std::next(beginIt), end = tile_end();
+       rowIt != end;
        ++rowIt) {
     for (int q = 0; q < _nQubits; ++q) {
       auto* gate = (*rowIt)[q];
       if (gate == nullptr)
         continue;
       // find the top-most vacant row
-      auto rowVacant = std::prev(rowIt);
-      while (rowVacant != tile_end() && isRowVacant(rowVacant, gate->qubits())) {
-        --rowVacant;
+      // when the while loop exits, candidateRow is the row we will insert the
+      // gate to
+      auto candidateRow = rowIt;
+      while (true) {
+        --candidateRow;
+        if (candidateRow == beginIt) {
+          if (!isRowVacant(candidateRow, gate->qubits()))
+            ++candidateRow;
+          break;
+        }
+        if (isRowVacant(candidateRow, gate->qubits()))
+          continue;
+        ++candidateRow;
+        break;
       }
-      ++rowVacant; // move to the next row, which is vacant
-      if (rowVacant == rowIt)
+      if (candidateRow == rowIt) {
+        // the gate is already in the right place
         continue;
+      }
+      assert(isRowVacant(candidateRow, gate->qubits()));
+
       // relocate the gate
       for (const auto& qq : gate->qubits()) {
         assert((*rowIt)[qq] == gate);
-        assert((*rowVacant)[qq] == nullptr);
+        assert((*candidateRow)[qq] == nullptr);
         (*rowIt)[qq] = nullptr;
-        (*rowVacant)[qq] = gate;
+        (*candidateRow)[qq] = gate;
       }
     }
   }
@@ -360,7 +388,7 @@ void CircuitGraphNode::squeeze(row_iterator beginIt) {
   while (rowIt != beginIt) {
     --rowIt;
     bool isEmpty = true;
-    for (int q = 0; q < _nQubits; ++q) {
+    for (int q = 0; q < rowIt->size(); ++q) {
       if ((*rowIt)[q] != nullptr) {
         isEmpty = false;
         break;

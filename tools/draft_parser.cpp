@@ -10,7 +10,7 @@ Circuit my_circuit {
   CX 0 1;
   CX 0 2;
   RZ(Pi/2) 1;
-  RZ(Pi/3) 2;
+  // RZ(Pi/3) 2;
   If (Measure 0) {
     X 0;
     RZ(Pi/4) 1;
