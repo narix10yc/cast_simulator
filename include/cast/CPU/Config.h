@@ -25,8 +25,7 @@ namespace cast {
   // Get the simd_s to be used in kernel generation. Each SIMD register holds
   // (1 << simd_s) number of elements. For example, if simdWidth is W256,
   // then the 256-bit register can hold 4 double precision elements, so
-  // simd_s will be 2 under precision 64, and simd_s will be 3 under precision
-  // 32.
+  // simd_s will be 2 under F64 and 3 under F32.
   int get_simd_s(CPUSimdWidth simdWidth, Precision precision);
 
 } // namespace cast

@@ -18,48 +18,11 @@ ArgForceFilename("force-name",
   cl::desc("Force output file name as it is, possibly not ending with .csv"),
   cl::init(false));
 
-cl::opt<int>
-ArgPrecision("precision", cl::desc("Precision"), cl::init(64));
+cl::opt<bool>
+ArgF32("f32", cl::desc("Enable single-precision"), cl::init(true));
 
 cl::opt<bool>
-ArgF32("f32", cl::Optional, cl::init(false));
-
-cl::opt<bool>
-ArgF64("f64", cl::Optional, cl::init(false));
-
-// return true on error
-static bool checkPrecisionArgsCollision(Precision& precision) {
-  if (ArgF32 && ArgF64) {
-    std::cerr << BOLDRED("[Error]: ")
-              << "-f32 and -f64 cannot be set together.\n";
-    return true;
-  }
-  if (ArgF32) {
-    if (ArgPrecision == 64) {
-      std::cerr << BOLDRED("[Error]: ")
-                << "Precision arguments contradict with each other.\n";
-      return true;
-    }
-    precision = Precision::F32;
-    return false;
-  }
-  if (ArgF64) {
-    if (ArgPrecision == 32) {
-      std::cerr << BOLDRED("[Error]: ")
-                << "Precision arguments contradict with each other.\n";
-      return true;
-    }
-    precision = Precision::F64;
-    return false;
-  }
-  if (ArgPrecision != 32 && ArgPrecision != 64) {
-    std::cerr << BOLDRED("[Error]: ")
-              << "Precision should be either 32 or 64.\n";
-    return true;
-  }
-  precision = Precision::Unknown;
-  return false;
-}
+ArgF64("f64", cl::desc("Enable double-precision"), cl::init(true));
 
 cl::opt<int>
 ArgNQubits("nqubits", cl::desc("Number of qubits"), cl::init(28));

@@ -38,7 +38,7 @@ static void benchmark() {
   CPUKernelManager kernelMgr;
   CPUKernelGenConfig kernelGenConfig(
     SIMD_WIDTH,
-    (std::is_same_v<ScalarType, float> ? 32 : 64)
+    (std::is_same_v<ScalarType, float> ? Precision::F32 : Precision::F64)
   );
 
   // Generate 1 to 4-qubit random unitary and Hadamard gates

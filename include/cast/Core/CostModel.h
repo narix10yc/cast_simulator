@@ -1,5 +1,5 @@
-#ifndef CAST_COSTMODEL_H
-#define CAST_COSTMODEL_H
+#ifndef CAST_CORE_COSTMODEL_H
+#define CAST_CORE_COSTMODEL_H
 
 #include "cast/Core/QuantumGate.h"
 #include "cast/Core/Precision.h"
@@ -193,4 +193,4 @@ private:
 
 } // namespace cast
 
-#endif // CAST_COSTMODEL_H
+#endif // CAST_CORE_COSTMODEL_H
