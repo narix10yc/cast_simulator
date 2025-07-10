@@ -134,7 +134,7 @@
 
 // /// @return Number of fused blocks
 // int startFusion(
-//     legacy::CircuitGraph& graph, const FusionConfig& config,
+//     legacy::CircuitGraph& graph, const FusionConfig* config,
 //     const CostModel* costModel,
 //     const int maxK, tile_iter_t curIt, const int qubit) {
 //   auto* fusedBlock = (*curIt)[qubit];
@@ -252,7 +252,7 @@
 // } // anonymous namespace
 
 // void cast::applyGateFusion(
-//     const FusionConfig& config, const CostModel* costModel,
+//     const FusionConfig* config, const CostModel* costModel,
 //     legacy::CircuitGraph& graph, int max_k) {
 //   int curMaxK = 2;
 //   int nFused = 0;

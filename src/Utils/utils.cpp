@@ -28,7 +28,7 @@ void utils::sampleNoReplacement(unsigned N, unsigned K, std::vector<int>& holder
 bool utils::isPermutation(llvm::ArrayRef<int> arr) {
   std::vector<int> copy(arr.begin(), arr.end());
   std::ranges::sort(copy);
-  for (unsigned i = 0, S = copy.size(); i < S; i++) {
+  for (unsigned i = 0, S = copy.size(); i < S; ++i) {
     if (copy[i] != i)
       return false;
   }
@@ -39,7 +39,7 @@ uint64_t utils::pdep64(uint64_t src, uint64_t mask, int nbits) {
   assert(0 <= nbits && nbits <= 64 && "nbits must be in [0, 64]");
   uint64_t dst = 0;
   unsigned k = 0;
-  for (unsigned i = 0; i < nbits; i++) {
+  for (unsigned i = 0; i < nbits; ++i) {
     if (mask & (1ULL << i)) {
       if (src & (1ULL << k))
         dst |= (1ULL << i);
@@ -53,7 +53,7 @@ uint32_t utils::pdep32(uint32_t src, uint32_t mask, int nbits) {
   assert(0 <= nbits && nbits <= 32 && "nbits must be in [0, 32]");
   uint32_t dst = 0;
   unsigned k = 0;
-  for (unsigned i = 0; i < nbits; i++) {
+  for (unsigned i = 0; i < nbits; ++i) {
     if (mask & (1U << i)) {
       if (src & (1U << k))
         dst |= (1U << i);
@@ -67,7 +67,7 @@ uint64_t utils::pext64(uint64_t src, uint64_t mask, int nbits) {
   assert(0 <= nbits && nbits <= 64 && "nbits must be in [0, 64]");
   uint64_t dst = 0;
   unsigned k = 0;
-  for (unsigned i = 0; i < nbits; i++) {
+  for (unsigned i = 0; i < nbits; ++i) {
     if (mask & (1ULL << i)) {
       if (src & (1ULL << i))
         dst |= (1 << k);
@@ -120,7 +120,7 @@ std::complex<double> utils::inner_product(
     const std::complex<double>* bArr,
     size_t length) {
   std::complex<double> s = 0.0;
-  for (size_t i = 0; i < length; i++) {
+  for (size_t i = 0; i < length; ++i) {
     // (ar - i ai) * (br + i bi) = (ar*br + ai*bi) + i * (ar*bi - ai*br)
     s.real(
       s.real() + aArr[i].real() * bArr[i].real() +
@@ -134,7 +134,7 @@ std::complex<double> utils::inner_product(
 
 double utils::norm_squared(const std::complex<double>* arr, size_t len) {
   double s = 0.0;
-  for (size_t i = 0; i < len; i++)
+  for (size_t i = 0; i < len; ++i)
     s += arr[i].real() * arr[i].real() + arr[i].imag() * arr[i].imag();
   return s;
 }

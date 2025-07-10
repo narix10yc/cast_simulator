@@ -28,7 +28,7 @@ static void internal_U1q() {
     gates.emplace_back(StandardQuantumGate::RandomUnitary({q}));
   }
 
-  CPUKernelGenConfig cpuConfig(SimdWidth, 64);
+  CPUKernelGenConfig cpuConfig(SimdWidth, Precision::F64);
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
     kernelMgr.genStandaloneGate(
@@ -98,7 +98,7 @@ static void internal_U2q() {
     gates.emplace_back(StandardQuantumGate::RandomUnitary({a, b}));
   }
 
-  CPUKernelGenConfig cpuConfig(SimdWidth, 64);
+  CPUKernelGenConfig cpuConfig(SimdWidth, Precision::F64);
   cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
     kernelMgr.genStandaloneGate(

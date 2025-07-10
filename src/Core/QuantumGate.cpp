@@ -103,13 +103,15 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
   // std::cerr << RESET;
 
 
-  const auto matmulComplexSquareMatrix = [&](
+  const auto matmulComplexSquareMatrix = [&, cnQubits=cnQubits](
       const ComplexSquareMatrix& matA,
       const ComplexSquareMatrix& matB,
       ComplexSquareMatrix& matC) -> void {
     for (uint64_t cIdx = 0ULL; cIdx < matC.halfSize(); ++cIdx) {
-      uint64_t aIdxBegin = utils::pext64(cIdx, aPextMask) & aZeroingMask;
-      uint64_t bIdxBegin = utils::pext64(cIdx, bPextMask) & bZeroingMask;
+      uint64_t aIdxBegin =
+        utils::pext64(cIdx, aPextMask, 2 * cnQubits) & aZeroingMask;
+      uint64_t bIdxBegin =
+        utils::pext64(cIdx, bPextMask, 2 * cnQubits) & bZeroingMask;
 
       // std::cerr << "Ready to update cmat[" << i
       //           << " (" << utils::as0b(i, 2 * cnQubits) << ")]\n"

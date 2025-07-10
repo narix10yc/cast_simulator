@@ -21,8 +21,7 @@ static void f() {
   cast::CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.simdWidth = SimdWidth;
 
-  auto fusionConfig = cast::FusionConfig::Default;
-  cast::SizeOnlyCostModel costModel(2, -1, 0);
+  auto fusionConfig = cast::FusionConfig::SizeOnly(3);
 
   std::cerr << "Test Dir: " << TEST_DIR << "\n";
   fs::path circuitDir = fs::path(TEST_DIR) / "circuits";
@@ -55,7 +54,7 @@ static void f() {
       ).consumeError(); // ignore possible error
     }
 
-    cast::applyGateFusion(graph, fusionConfig, &costModel);
+    cast::applyGateFusionPass(*circuitNode, fusionConfig);
     allGates = graph.getAllGatesShared();
     std::cerr << "After fusion: " << allGates.size() << " gates\n";
     graph.visualize(std::cerr);

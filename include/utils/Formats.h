@@ -2,8 +2,10 @@
 #define UTILS_FORMATS_H
 
 #include <iostream>
+#include <iomanip>
 #include <cstdlib>
 #include <span>
+#include <cassert>
 
 namespace utils {
 

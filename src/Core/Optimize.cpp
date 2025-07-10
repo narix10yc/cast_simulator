@@ -11,70 +11,37 @@
 
 using namespace cast;
 
-const FusionConfig FusionConfig::Minor {
-  .costModel = nullptr,
-  .precision = Precision::Unknown,
-  .zeroTol = 1e-8,
-  .swaTol = 0.0,
-  .incrementScheme = true,
-  .multiTraversal = false,
-  .maxKOverride = 3,
-  .benefitMargin = 0.2,
-};
-
-const FusionConfig FusionConfig::Default {
-  .costModel = nullptr,
-  .precision = Precision::Unknown,
-  .zeroTol = 1e-8,
-  .swaTol = 0.0,
-  .incrementScheme = true,
-  .multiTraversal = false,
-  .maxKOverride = 5,
-  .benefitMargin = 0.0,
-};
-
-const FusionConfig FusionConfig::Aggressive {
-  .costModel = nullptr,
-  .precision = Precision::Unknown,
-  .zeroTol = 1e-8,
-  .swaTol = 1e-8,
-  .incrementScheme = true,
-  .multiTraversal = true,
-  .maxKOverride = GLOBAL_MAX_K,
-  .benefitMargin = 0.0,
-};
-
-FusionConfig FusionConfig::SizeOnly(int max_k) {
-  return FusionConfig {
-    .costModel = nullptr,
-    .precision = Precision::Unknown,
-    .zeroTol = 1e-8,
-    .swaTol = 1e-8,
-    .incrementScheme = true,
-    .multiTraversal = false,
-    .maxKOverride = max_k,
-    .benefitMargin = 0.0,
-  };
-}
-
 void cast::applyGateFusionPass(ir::CircuitNode& circuit,
-                               const FusionConfig& _config,
-                               bool applyCFO) {
+                               const FusionConfig* config) {
   auto allCircuitGraphs = circuit.getAllCircuitGraphs();
-  for (auto* graph : allCircuitGraphs)
-    impl::applyGateFusion(*graph, _config);
+  for (int maxCandidateSize = config->sizeMin;
+       maxCandidateSize <= config->sizeMax;
+       ++maxCandidateSize) {
+    int nFusedThisSize = 0;
+    for (auto* graph : allCircuitGraphs) {
+      int nFusedThisRound = 0;
+      do {
+        nFusedThisRound =
+          impl::applyGateFusion(*graph, config, maxCandidateSize);
+        nFusedThisSize += nFusedThisRound;
+      } while (config->enableMultiTraverse && nFusedThisRound > 0);
+    }
+    // Processed every graph in this size. Run CFO fusion if enabled
+    if (config->enableFusionCFOPass && nFusedThisSize > 0)
+      nFusedThisSize += impl::applyCFOFusion(circuit, config, maxCandidateSize);
+  }
 }
 
-void cast::applyCanonicalizationPass(ir::CircuitNode& circuit, double swaTol) {
+void cast::applyCanonicalizationPass(ir::CircuitNode& circuit, double swapTol) {
   // perform fusion in each block
   auto allCircuitGraphs = circuit.getAllCircuitGraphs();
   for (auto* graph : allCircuitGraphs)
-    cast::impl::applySizeTwoFusion(*graph, swaTol);
+    cast::impl::applySizeTwoFusion(*graph, swapTol);
 
-  circuit.displayInfo(std::cerr << "\nAfter Size-2 Fusion\n", 1);
-  circuit.visualize(std::cerr) << "\n";
+  // circuit.displayInfo(std::cerr << "\nAfter Size-2 Fusion\n", 1);
+  // circuit.visualize(std::cerr) << "\n";
 
-  auto cfoFusionConfig = FusionConfig::SizeOnly(2);
-  cfoFusionConfig.swaTol = swaTol;
-  cast::impl::applyCFOFusion(circuit, cfoFusionConfig, 2);
+  SizeOnlyFusionConfig cfoFusionConfig(2);
+  cfoFusionConfig.swapTol = swapTol;
+  cast::impl::applyCFOFusion(circuit, &cfoFusionConfig, 2);
 }

@@ -15,7 +15,7 @@ static void f() {
 
   CPUKernelManager cpuKernelMgr;
 
-  CPUKernelGenConfig cpuConfig(SimdWidth, 64);
+  CPUKernelGenConfig cpuConfig(SimdWidth, Precision::F64);
 
   cpuKernelMgr.genStandaloneGate(cpuConfig, getH(0), "gate_h_0").consumeError();
   cpuKernelMgr.genStandaloneGate(cpuConfig, getH(1), "gate_h_1").consumeError();

@@ -14,4 +14,26 @@ namespace cast {
   };
 } // namespace cast
 
+#include "utils/CSVParsable.h"
+
+namespace utils {
+
+template<>
+struct CSVField<cast::Precision> {
+  static void parse(std::string_view token, cast::Precision& field) {
+    if (token == "32")
+      field = cast::Precision::F32;
+    else if (token == "64")
+      field = cast::Precision::F64;
+    else
+      field = cast::Precision::Unknown;
+  }
+
+  static void write(std::ostream& os, const cast::Precision& value) {
+    os << static_cast<int>(value);
+  }
+};
+
+}
+
 #endif // CAST_CORE_PRECISION_H

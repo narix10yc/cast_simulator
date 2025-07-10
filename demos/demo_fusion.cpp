@@ -146,7 +146,7 @@ int main(int argc, const char** argv) {
 
   if (ArgRunAdaptiveFuse) {
     auto cache = PerformanceCache::LoadFromCSV(ArgModelPath);
-    StandardCostModel standardCostModel(&cache);
+    CPUCostModel standardCostModel(&cache);
     standardCostModel.display(std::cerr); 
     applyGateFusion(fusionConfig, &standardCostModel, graphAdaptiveFuse);
     if (ArgRunDenseKernel)

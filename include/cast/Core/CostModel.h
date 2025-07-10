@@ -2,21 +2,19 @@
 #define CAST_CORE_COSTMODEL_H
 
 #include "cast/Core/QuantumGate.h"
-#include "cast/Core/Precision.h"
 #include <string>
 
 namespace cast {
   
-class CPUKernelGenConfig;
-class PerformanceCache;
-
+// An abstract class for all cost models.
 class CostModel {
 public:
   enum CostModelKind {
     CM_Base,
     CM_SizeOnly, // Size only cost model
-    CM_Standard, // Standard cost model based on performance cache
-    CM_Constant, // Constant cost model
+    CM_Constant, // Constant cost model. Every gate takes the same time.
+    CM_CPU, // CPU cost model
+    CM_CUDA,
     CM_End
   };
 protected:
@@ -29,61 +27,30 @@ public:
   CostModelKind getKind() const { return _kind; }
 
   // The time it takes to update 1 GiB of memory, in seconds.
-  virtual double computeGiBTime(
-      QuantumGatePtr gate, Precision precision, int nThreads) const = 0;
+  virtual double computeGiBTime(const QuantumGate* gate) const = 0;
+
+  virtual std::ostream& displayInfo(std::ostream& os, int verbose) const {
+    return os << "CostModel::displayInfo() not implemented";
+  }
 };
 
 /// @brief \c NaiveCostModel is based on the size and operation count of fused
 /// gates.
 class SizeOnlyCostModel : public CostModel {
-  int maxNQubits;
+  int maxSize;
   int maxOp;
   double zeroTol;
-
 public:
-  SizeOnlyCostModel(int maxNQubits, int maxOp, double zeroTol)
+  SizeOnlyCostModel(int maxSize, int maxOp, double zeroTol)
     : CostModel(CM_SizeOnly)
-    , maxNQubits(maxNQubits), maxOp(maxOp), zeroTol(zeroTol) {}
+    , maxSize(maxSize), maxOp(maxOp), zeroTol(zeroTol) {}
 
-  double computeGiBTime(
-      QuantumGatePtr gate, Precision precision, int nThreads) const override;
+  double computeGiBTime(const QuantumGate* gate) const override;
   
+  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
+
   static bool classof(const CostModel* model) {
     return model->getKind() == CM_SizeOnly;
-  }
-};
-
-/// \c StandardCostModel assumes simulation time is proportional to opCount and
-/// independent to target qubits.
-class StandardCostModel : public CostModel {
-  PerformanceCache* cache;
-  double zeroTol;
-  // Minimum time it will take to update 1GiB memory. Calculated by
-  // 1.0 / bandwidth
-  double minGibTimeCap;
-
-  struct Item {
-    int nQubits;
-    Precision precision;
-    int nThreads;
-    int nData; // number of data points;
-    double totalGibTimePerOpCount;
-
-    double getAvgGibTimePerOpCount() const {
-      return totalGibTimePerOpCount / nData;
-    }
-  };
-  std::vector<Item> items;
-public:
-  StandardCostModel(PerformanceCache* cache, double zeroTol = 1e-8);
-
-  std::ostream& display(std::ostream& os, int nLines = 0) const;
-
-  double computeGiBTime(
-      QuantumGatePtr gate, Precision precision, int nThreads) const override;
-  
-  static bool classof(const CostModel* model) {
-    return model->getKind() == CM_Standard;
   }
 };
 
@@ -91,40 +58,15 @@ class ConstantCostModel : public CostModel {
 public:
   ConstantCostModel() : CostModel(CM_Constant) {}
 
-  double computeGiBTime(
-      QuantumGatePtr gate, Precision precision, int nThreads) const override {
+  double computeGiBTime(const QuantumGate* gate) const override {
     return 1.0;
   }
+
+  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
 
   static bool classof(const CostModel* model) {
     return model->getKind() == CM_Constant;
   }
-};
-
-class PerformanceCache {
-public:
-  struct Item {
-    int nQubits;
-    double opCount;
-    Precision precision;
-    int nThreads;
-    /// memory update speed in Gigabytes per second (GiBps)
-    double memUpdateSpeed;
-  };
-
-  std::vector<Item> items;
-  PerformanceCache() : items() {}
-
-  void runExperiments(
-      const CPUKernelGenConfig& cpuConfig,
-      int nQubits, int nThreads, int nRuns);
-
-  void writeResults(std::ostream& os) const;
-  
-  static PerformanceCache LoadFromCSV(const std::string& fileName);
-  
-  constexpr static const char*
-  CSV_Title = "nQubits,opCount,precision,nThreads,memSpd";
 };
 
 #ifdef CAST_USE_CUDA
