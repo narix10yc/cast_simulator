@@ -219,22 +219,123 @@ namespace {
       }
     }
   } // randRemoveQuantumGate
+
 } // anonymous namespace
+
+void CPUPerformanceCache::runPreliminaryExperiments(
+    const CPUKernelGenConfig& cpuConfig,
+    int nQubits, int nThreads,
+    WeightType& weights,
+    int verbose) {
+  CPUKernelManager kernelMgr;
+  std::vector<int> qubits;
+  utils::timedExecute([&]() {
+    for (int k = 1; k <= 5; ++k) {
+      utils::sampleNoReplacement(nQubits, k, qubits);
+      kernelMgr.genStandaloneGate(
+        cpuConfig,
+        StandardQuantumGate::RandomUnitary(qubits),
+        "gate_k" + std::to_string(k)
+      ).consumeError(); // ignore possible errors
+    }
+    kernelMgr.initJIT(nThreads,
+                      llvm::OptimizationLevel::O1,
+                      false, // useLazyJIT
+                      0 // verbose
+    ).consumeError(); // ignore possible errors
+  }, "Code Generation and JIT Initialization");
+  
+  void* sv;
+  void* svData;
+  utils::timedExecute([&]() {
+    if (cpuConfig.precision == Precision::F32) {
+      auto* p = new CPUStatevectorF32(nQubits, cpuConfig.simdWidth);
+      p->randomize(nThreads);
+      sv = p;
+      svData = p->data();
+    } else {
+      assert(cpuConfig.precision == Precision::F64);
+      auto* p = new CPUStatevectorF64(nQubits, cpuConfig.simdWidth);
+      p->randomize(nThreads);
+      sv = p;
+      svData = p->data();
+    }
+  }, "Initialize statevector");
+
+
+  timeit::Timer timer(3, /* verbose */ 0);
+  timeit::TimingResult tr;
+  std::array<double, 5> memSpds;
+  for (int k = 1; k <= 5; ++k) {
+    tr = timer.timeit([&]() {
+      kernelMgr.applyCPUKernel(
+        svData, nQubits, "gate_k" + std::to_string(k), nThreads
+      ).consumeError(); // ignore possible errors
+    });
+    memSpds[k-1] = 
+      calculateMemUpdateSpeed(nQubits, cpuConfig.precision, tr.min);
+    if (verbose > 0) {
+      std::cerr << "Dense " << k << "-qubit gate @ "
+                << memSpds[k-1] << " GiBps\n";
+    }
+  }
+
+  assert(weights.size() >= 5);
+  weights[0] = 100; // 1-qubit gates
+  for (int k = 2; k <= 5; ++k) {
+    // The ratio decides the scaling of weights when mem speeds halves.
+    // Set to a larger value to focus more on the transition region.
+    constexpr double ratio = 1.7;
+    // weights[k] is the weight for k-qubit gates
+    weights[k-1] = static_cast<int>(
+      static_cast<double>(weights[k-2]) *
+      ((ratio - 1.0) * (memSpds[k-2] / memSpds[k-1]) + 2 - ratio)
+    );
+  }
+  for (int k = 6; k < weights.size() + 1; ++k) {
+    weights[k-1] = static_cast<int>(static_cast<double>(weights[k-2]) * 0.4);
+  }
+  
+  if (verbose > 0) {
+    double sum = 0.0;
+    for (const auto& w : weights)
+      sum += static_cast<double>(w);
+    std::cerr << "Relative weights:\n";
+    for (int k = 1; k <= CPU_GLOBAL_MAX_SIZE; ++k) {
+      std::cerr << "  " << k << "-qubit: "
+                << "weight = " << weights[k-1]
+                << "; percentage = "
+                << (100.0 * static_cast<double>(weights[k-1]) / sum)
+                << "\n";
+    }
+  }
+
+  if (cpuConfig.precision == Precision::F32)
+    delete static_cast<cast::CPUStatevectorF32*>(sv);
+  else {
+    assert(cpuConfig.precision == Precision::F64);
+    delete static_cast<cast::CPUStatevectorF64*>(sv);
+  }
+}
+
 
 void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
                                          int nQubits,
                                          int nThreads,
-                                         int nRuns) {
+                                         int nRuns,
+                                         int verbose) {
   std::vector<StandardQuantumGatePtr> gates;
   gates.reserve(nRuns);
 
   // nQubitsWeights[k-1] denotes the weight for k-qubit gates
-  std::array<int, 7> nQubitsWeights;
+  WeightType nQubitsWeights;
+  runPreliminaryExperiments(cpuConfig, nQubits, nThreads,
+                            nQubitsWeights, verbose);
   
   // Add a random quantum gate whose size follows distribution of nQubitsWeights
   const auto addRandomQuGate = [&](float erasureProb) {
     int sum = 0;
-    for (auto weight : nQubitsWeights)
+    for (const auto& weight : nQubitsWeights)
       sum += weight;
     assert(sum > 0 && "nQubitsWeight is empty");
     std::random_device rd;
@@ -255,16 +356,14 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
     assert(false && "Unreachable: addRandomQuGate failed to add a gate");
   };
 
-  // For the initial run, we add some random 1 to 4-qubit gates
-  for (int q = 1; q <= 4; ++q) {
+  // For the initial run, we add some random dense 1 to 5-qubit gates
+  for (int q = 1; q <= 5; ++q) {
     std::vector<int> targetQubits;
     utils::sampleNoReplacement(nQubits, q, targetQubits);
     gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
-    randRemoveQuantumGate(gates.back(), 0.0f);
 
     utils::sampleNoReplacement(nQubits, q, targetQubits);
     gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
-    randRemoveQuantumGate(gates.back(), 0.0f);
   }
 
   nQubitsWeights = { 3, 5, 5, 3, 2, 2, 1 };
@@ -312,9 +411,11 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
                        Precision::F64,
                        nThreads,
                        memSpd);
-    std::cerr << "Gate @ ";
-    utils::printSpan(std::cerr, std::span(kernel->gate->qubits()));
-    std::cerr << ": " << memSpd << " GiBps\n";
+    if (verbose > 0) {
+      utils::printSpan(std::cerr << "Gate @ ",
+                       std::span(kernel->gate->qubits()));
+      std::cerr << ": " << memSpd << " GiBps\n";
+    }
   }
 }
 

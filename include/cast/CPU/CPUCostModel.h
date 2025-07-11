@@ -4,6 +4,7 @@
 #include "cast/Core/CostModel.h"
 #include "cast/Core/Precision.h"
 #include "utils/CSVParsable.h"
+#include "cast/CPU/Config.h"
 
 namespace cast {
 
@@ -32,9 +33,16 @@ public:
 
   std::vector<Item> items;
   CPUPerformanceCache() : items() {}
-
+// private:
+  using WeightType = std::array<int, CPU_GLOBAL_MAX_SIZE>;
+  void runPreliminaryExperiments(const CPUKernelGenConfig& cpuConfig,
+                                 int nQubits,
+                                 int nThreads,
+                                 WeightType& weights,
+                                 int verbose = 1);
+public:
   void runExperiments(const CPUKernelGenConfig& cpuConfig,
-                      int nQubits, int nThreads, int nRuns);
+                      int nQubits, int nThreads, int nRuns, int verbose = 1);
 
   void writeResults(std::ostream& os) const;
   

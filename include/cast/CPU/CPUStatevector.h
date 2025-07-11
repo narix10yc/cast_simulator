@@ -215,15 +215,25 @@ public:
 template<typename ScalarType>
 class CPUStatevector {
 private:
-  int simd_s;
-  int _nQubits;
   ScalarType* _data;
+  int _nQubits;
+  int simd_s;
+
+  // Make sure _nQubits is set.
+  [[nodiscard]] inline ScalarType* allocate() {
+    const size_t size = sizeInBytes();
+    const auto align =
+      static_cast<std::align_val_t>(std::min<size_t>(size, 64));
+    return static_cast<ScalarType*>(::operator new(size, align));
+  }
 public:
-  CPUStatevector(int nQubits, CPUSimdWidth simdWidth)
-    : _nQubits(nQubits)
-    , _data(static_cast<ScalarType*>(
-      ::operator new((2ULL << nQubits) * sizeof(ScalarType),
-      static_cast<std::align_val_t>(64)))) {
+  CPUStatevector(int nQubits, CPUSimdWidth simdWidth) {
+    assert(nQubits > 0);
+    _nQubits = nQubits;
+    
+    // initialize _data
+    _data = allocate();
+
     // initialize simd_s
     if constexpr (std::is_same_v<ScalarType, float>) {
       switch (simdWidth) {
@@ -246,10 +256,21 @@ public:
     }
   }
 
+  CPUStatevector(const CPUStatevector& other) {
+    _nQubits = other._nQubits;
+    simd_s = other.simd_s;
+    _data = allocate();
+    std::memcpy(_data, other._data, sizeInBytes());
+  }
 
-  CPUStatevector(const CPUStatevector&) = delete;
-
-  CPUStatevector(CPUStatevector&&) = delete;
+  CPUStatevector(CPUStatevector&& other) noexcept {
+    if (this == &other)
+      return;
+    _nQubits = other._nQubits;
+    simd_s = other.simd_s;
+    _data = other._data;
+    other._data = nullptr; // Prevent double deletion
+  }
 
   ~CPUStatevector() { ::operator delete(_data); }
 
@@ -260,7 +281,16 @@ public:
     return *this;
   }
 
-  CPUStatevector& operator=(CPUStatevector&&) = delete;
+  CPUStatevector& operator=(CPUStatevector&& other) noexcept {
+    if (this == &other)
+      return *this;
+    ::operator delete(_data);
+    _nQubits = other._nQubits;
+    simd_s = other.simd_s;
+    _data = other._data;
+    other._data = nullptr; // Prevent double deletion
+    return *this;
+  }
 
   ScalarType* data() { return _data; }
   const ScalarType* data() const { return _data; }
@@ -499,47 +529,9 @@ ScalarType fidelity(
   return re * re + im * im;
 }
 
-// template<typename ScalarType>
-// static ScalarType fidelity(const StatevectorSep<ScalarType>& sep, const
-// StatevectorAlt<ScalarType>& alt) {
-//     assert(sep.nQubits == alt.nQubits);
+using CPUStatevectorF32 = CPUStatevector<float>;
+using CPUStatevectorF64 = CPUStatevector<double>;
 
-//     ScalarType re = 0.0, im = 0.0;
-//     for (size_t i = 0; i < sep.N; i++) {
-//         re += ( sep.real[i] * alt.data[2*i] + sep.imag[i] * alt.data[2*i+1]);
-//         im += (-sep.real[i] * alt.data[2*i+1] + sep.imag[i] * alt.data[2*i]);
-//     }
-//     return re * re + im * im;
-// }
-
-// template<typename ScalarType>
-// ScalarType fidelity(const StatevectorAlt<ScalarType>& alt, const
-// StatevectorSep<ScalarType>& sep) {
-//     return fidelity(sep, alt);
-// }
-
-// template<typename ScalarType>
-// void StatevectorSep<ScalarType>::copyValueFrom(const StatevectorAlt<ScalarType>& alt)
-// {
-//     assert(nQubits == alt.nQubits);
-
-//     for (size_t i = 0; i < N; i++) {
-//         real[i] = alt.data[2*i];
-//         imag[i] = alt.data[2*i+1];
-//     }
-// }
-
-// template<typename ScalarType>
-// void StatevectorAlt<ScalarType>::copyValueFrom(const StatevectorSep<ScalarType>& sep)
-// {
-//     assert(nQubits == sep.nQubits);
-
-//     for (size_t i = 0; i < N; i++) {
-//         data[2*i] = sep.real[i];
-//         data[2*i+1] = sep.imag[i];
-//     }
-// }
-
-} // namespace utils
+} // end of namespace cast
 
 #endif // CAST_CPU_CPU_STATEVECTOR_H

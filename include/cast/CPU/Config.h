@@ -4,6 +4,9 @@
 #include "cast/Core/Precision.h"
 
 namespace cast {
+  // Maximum number of qubits for which we can generate kernels.
+  constexpr int CPU_GLOBAL_MAX_SIZE = 7;
+  
   enum CPUSimdWidth : int {
     W128 = 128, // 128 bits, such as SSE and NEON
     W256 = 256, // 256 bits, such as AVX and AVX2

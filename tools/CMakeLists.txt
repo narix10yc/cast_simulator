@@ -15,8 +15,8 @@ add_executable(fpga_playground "fpga_playground.cpp")
 
 add_executable(fpga_vary_buffer "fpga_vary_buffer.cpp")
 
-add_executable(cost_model "cost_model.cpp")
-target_link_libraries(cost_model cast)
+add_executable(cpu_cost_model "cpu_cost_model.cpp")
+target_link_libraries(cpu_cost_model cast)
 
 add_executable(blank "blank.cpp")
 

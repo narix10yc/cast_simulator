@@ -3,7 +3,9 @@
 
 #include <random>
 
-void utils::sampleNoReplacement(unsigned N, unsigned K, std::vector<int>& holder) {
+void utils::sampleNoReplacement(unsigned N,
+                                unsigned K,
+                                std::vector<int>& holder) {
   assert(K <= N);
   holder.clear();
   holder.reserve(K);
