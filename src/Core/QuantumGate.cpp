@@ -217,6 +217,9 @@ SuperopQuantumGatePtr StandardQuantumGate::getSuperopGate() const {
 /**** op count *****/
 namespace {
   size_t countNonZeroElems(const ScalarGateMatrix& matrix, double zeroTol) {
+    if (zeroTol <= 0.0)
+      return matrix.matrix().size();
+      
     size_t count = 0;
     size_t len = matrix.matrix().size();
     const auto* data = matrix.matrix().data();
