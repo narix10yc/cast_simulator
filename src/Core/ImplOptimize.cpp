@@ -7,7 +7,7 @@
 
 #define DEBUG_TYPE "impl-optimize"
 #include "llvm/Support/Debug.h"
-// #define LLVM_DEBUG(X) X
+#define LLVM_DEBUG(X) X
 
 using namespace cast;
 
@@ -111,25 +111,53 @@ int absorbSingleQubitGate(ir::CircuitGraphNode& graph,
 // When gateG and gateH are already very large, checking their commutation
 // may be super expensive. We skip the check if the product gateG * gateH would
 // act on more than max_k_cutoff qubits.
-bool checkSwappable(const QuantumGate* gateA,
-                    const QuantumGate* gateG,
-                    const QuantumGate* gateH,
+bool swapIfPossible(ir::CircuitGraphNode& graph,
+                    row_iterator rowA,
+                    int qubit,
                     int maxCandidateSize,
                     int max_k_cutoff,
                     double swapTol) {
   if (swapTol <= 0.0)
-    return false; // swapping is disabled
-  
-  if (gateA == nullptr || gateG == nullptr || gateH == nullptr)
-    return false; // no gates to swap
+    return false;
+  auto* gateA = (*rowA)[qubit];
+  if (gateA == nullptr)
+    return false;
+  auto rowG = std::next(rowA);
+  if (rowG == graph.tile_end())
+    return false;
+  auto rowH = std::next(rowG);
+  if (rowH == graph.tile_end())
+    return false;
+  auto* gateH = (*rowH)[qubit];
+  if (gateH == nullptr)
+    return false; // no gate to swap with
 
   if (getKAfterFusion(gateA, gateH) > maxCandidateSize)
     return false; // resulting gate would be too large
   
-  if (getKAfterFusion(gateG, gateH) > max_k_cutoff)
-    return false; // commutation check is too expensive
-  
-  return cast::isCommuting(gateG, gateH, swapTol);
+  std::vector<QuantumGate*> checkedGates;
+
+  for (auto q : gateH->qubits()) {
+    auto* gateG = (*rowG)[q];
+    if (gateG == nullptr)
+      continue; // no gate to swap with
+    if (std::ranges::find(checkedGates, gateG) != checkedGates.end())
+      continue; // already checked this gate
+    if (getKAfterFusion(gateG, gateH) > max_k_cutoff)
+      return false; // commutation check is too expensive
+    if (cast::isCommuting(gateG, gateH, swapTol) == false)
+      return false; // gates do not commute, cannot swap
+    checkedGates.push_back(gateG);
+  }
+
+  // swapping is possible
+  auto sharedGateH = graph.lookup(gateH);
+  graph.removeGate(rowH, qubit);
+  auto insertRow = graph.insertGate(sharedGateH, rowG);
+  assert(std::prev(insertRow) == rowA);
+  graph.squeeze(insertRow);
+
+  return true;
 }
 
 struct TentativeFusedItem {
@@ -147,25 +175,25 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
                             int maxCandidateSize,
                             row_iterator curIt,
                             int qubit) {
-  // productGate is the product of all fusedGates
-  auto productGate = graph.lookup((*curIt)[qubit]);
-  if (productGate == nullptr)
+  // prodGate is the product of all fusedGates
+  auto prodGate = graph.lookup((*curIt)[qubit]);
+  if (prodGate == nullptr)
     return 0;
 
-  auto fusedIt = curIt;
+  auto prodIt = curIt;
   int nFused = 0;
 
   // keep track of all gates that are being fused, and restore them upon
   // rejecting the fusion
   std::vector<TentativeFusedItem> fusedGates;
   fusedGates.reserve(4);
-  fusedGates.emplace_back(productGate, fusedIt);
+  fusedGates.emplace_back(prodGate, prodIt);
 
   // function that checks if candidateGate can be added to the fusedGates
   const auto checkFuseable = [&](QuantumGate* candidateGate) {
     if (candidateGate == nullptr)
       return false;
-    if (productGate.get() == candidateGate)
+    if (prodGate.get() == candidateGate)
       return false;
 
     // is candidateGate already in the fusedGates?
@@ -173,7 +201,7 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
       if (gate.get() == candidateGate)
         return false;
     }
-    return getKAfterFusion(productGate.get(), candidateGate) <= maxCandidateSize;
+    return getKAfterFusion(prodGate.get(), candidateGate) <= maxCandidateSize;
   };
 
   // Start with same-row gates
@@ -184,57 +212,44 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
 
     // candidateGate could be added to the fusedGates
     fusedGates.emplace_back(graph.lookup(candidateGate), curIt);
-    graph.fuseAndInsertSameRow(curIt, q, productGate->qubits()[0]);
-    productGate = graph.lookup((*curIt)[q]);
-    assert(productGate != nullptr);
+    graph.fuseAndInsertSameRow(curIt, q, prodGate->qubits()[0]);
+    prodGate = graph.lookup((*curIt)[q]);
+    assert(prodGate != nullptr);
   }
 
-  assert(curIt == fusedIt);
+  assert(curIt == prodIt);
 
   bool progress;
   do {
-    curIt = std::next(fusedIt);
+    curIt = std::next(prodIt);
     if (curIt == graph.tile_end())
       break;
 
     progress = false;
-    for (const auto& q : productGate->qubits()) {
+    for (const auto& q : prodGate->qubits()) {
       auto* candidateGate = (*curIt)[q];
       if (checkFuseable(candidateGate) == false) {
-        if (config->swapTol <= 0.0)
-          continue; // swapping is disabled
-        // check if we can swap candidateGate with the next gate
-        auto nextIt = std::next(curIt);
-        if (nextIt == graph.tile_end())
-          continue; // no next row to swap with
-        auto* nextGate = (*nextIt)[q];
-        if (checkSwappable(productGate.get(), candidateGate, nextGate,
-                           maxCandidateSize,
-                           GLOBAL_MAX_K + 1, // max_k_cutoff
-                           config->swapTol) == false) {
-          // std::cerr << "Not triggering swap\n";
-          continue;
-        }
-        // We can swap candidateGate with nextGate
-        LLVM_DEBUG(
-          std::cerr << "Swapping gates at (" 
-                    << graph.gateId(productGate) << ", " 
-                    << graph.gateId(candidateGate) << ") with gate "
-                    << graph.gateId(nextGate) << "\n";
+        assert(std::next(prodIt) == curIt);
+        bool swapped = swapIfPossible(
+          graph, prodIt, q, maxCandidateSize, GLOBAL_MAX_K, config->swapTol
         );
-        graph.swapGates(curIt, q);
-        graph.squeeze(nextIt);
-        // swapping may add a new row between fusedIt and curIt
-        curIt = std::next(fusedIt);
-        assert((*curIt)[q] == nextGate);
-        candidateGate = nextGate;
+        if (!swapped)
+          continue;
+        // swapping triggered, so we can use the swapped gate
+        curIt = std::next(prodIt);
+        candidateGate = (*curIt)[q];
+        LLVM_DEBUG(
+          std::cerr << "Swapping triggered. Fusing "
+                    << graph.gateId(prodGate) << " with "
+                    << graph.gateId((*curIt)[q]) << "\n";
+        )
       }
       // candidateGate is accepted
       fusedGates.emplace_back(graph.lookup(candidateGate), curIt);
-      assert(curIt == std::next(fusedIt));
-      fusedIt = graph.fuseAndInsertDiffRow(fusedIt, q);
-      productGate = graph.lookup((*fusedIt)[candidateGate->qubits()[0]]);
-      assert(productGate != nullptr);
+      assert(curIt == std::next(prodIt));
+      prodIt = graph.fuseAndInsertDiffRow(prodIt, q);
+      prodGate = graph.lookup((*prodIt)[candidateGate->qubits()[0]]);
+      assert(prodGate != nullptr);
       progress = true;
       break;
     }
@@ -244,7 +259,7 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
   if (fusedGates.size() == 1)
     return nFused;
 
-  assert(fusedIt != graph.tile_end());
+  assert(prodIt != graph.tile_end());
 
   if (config->costModel == nullptr)
     return nFused + fusedGates.size() - 1;
@@ -253,7 +268,7 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
   double oldTime = 0.0;
   for (const auto& [gate, iter] : fusedGates)
     oldTime += config->costModel->computeGiBTime(gate.get());
-  double newTime = config->costModel->computeGiBTime(productGate.get());
+  double newTime = config->costModel->computeGiBTime(prodGate.get());
 
   // for (const auto& [gate, iter] : fusedGates) {
   //   oldTime += config->costModel->computeGiBTime(
@@ -271,16 +286,16 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
            << "(nQubits=" << item.gate->nQubits()
            << ", opCount=" << item.gate->opCount(1e-8) << ")";
       });
-    std::cerr << " => " << graph.gateId(productGate)
-              << "(nQubits=" << productGate->nQubits()
-              << ", opCount=" << productGate->opCount(1e-8) << "). "
+    std::cerr << " => " << graph.gateId(prodGate)
+              << "(nQubits=" << prodGate->nQubits()
+              << ", opCount=" << prodGate->opCount(1e-8) << "). "
               << "Benefit = " << benefit << "; ";
   );
 
   // not enough benefit, undo this fusion
   if (benefit < config->benefitMargin) {
     LLVM_DEBUG(std::cerr << "Fusion Rejected\n");
-    graph.removeGate(fusedIt, productGate->qubits()[0]);
+    graph.removeGate(prodIt, prodGate->qubits()[0]);
     for (const auto& [gate, iter] : fusedGates)
       graph.insertGate(gate, iter);
     return nFused;
@@ -322,7 +337,9 @@ int cast::impl::applySizeTwoFusion(ir::CircuitGraphNode& graph, double swapTol) 
       nFused += absorbSingleQubitGate(graph, it, q);
     }
   } while (++it != graph.tile_end());
-  graph.squeeze();
+
+  if (nFused > 0)
+    graph.squeeze();
 
   // Step 2: fuse two-qubit gates
   it = graph.tile_begin();
@@ -367,28 +384,32 @@ int cast::impl::applySizeTwoFusion(ir::CircuitGraphNode& graph, double swapTol) 
         }
       }
       if (gateToSwap == nullptr) {
-        LLVM_DEBUG(
-          std::cerr << "Cannot swap gates at (" 
-                    << graph.gateId(gateL) << ", " 
-                    << graph.gateId(gateR) << ") with next gate\n";
-        );
+        // LLVM_DEBUG(
+        //   std::cerr << "Cannot swap gates at (" 
+        //             << graph.gateId(gateL) << ", " 
+        //             << graph.gateId(gateR) << ") with next gate\n";
+        // );
         continue; // cannot swap, skip
       }
 
       // We can swap gateR and gateToSwap
+      LLVM_DEBUG(
+        std::cerr << "Swapping gates at (" 
+                  << graph.gateId(gateL) << ", " 
+                  << graph.gateId(gateR) << ") with gate "
+                  << graph.gateId(gateToSwap) << "\n";
+        graph.visualize(std::cerr << "Before swapping:\n");
+      );
       graph.swapGates(nextIt, q);
       graph.squeeze(nextIt);
+      LLVM_DEBUG(
+        graph.visualize(std::cerr << "After swapping:\n");
+      );
       // After swapping, it may not be true that nextIt == std::next(it).
       // But we are sure gateL still equals to (*it)[q].
       assert((*it)[q] == gateL && "GateL should not be changed after swapping");
       assert((*(std::next(it)))[q] == gateToSwap &&
              "GateToSwap should be in the next row after swapping");
-      LLVM_DEBUG(
-        std::cerr << "Swapped gates at (" 
-                  << graph.gateId(gateL) << ", " 
-                  << graph.gateId(gateR) << ") with gate "
-                  << graph.gateId(gateToSwap) << "\n";
-      );
       graph.fuseAndInsertDiffRow(it, q);
       nFused++;
     }

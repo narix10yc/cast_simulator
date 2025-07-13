@@ -306,23 +306,6 @@ CircuitGraphNode::replaceGatesOnConsecutiveRowsWith(
   return rowItInserted;
 }
 
-void CircuitGraphNode::swapGates(row_iterator rowItL, int qubit) {
-  assert(rowItL != tile_end());
-  auto rowItR = std::next(rowItL);
-  assert(rowItR != tile_end());
-  auto gateL = lookup((*rowItL)[qubit]);
-  auto gateR = lookup((*rowItR)[qubit]);
-  assert(gateL != nullptr && gateR != nullptr && "Swapping null gates");
-  assert(cast::isCommuting(gateL.get(), gateR.get()) &&
-         "Gates do not commute, cannot swap");
-         
-  removeGate(rowItL, qubit);
-  removeGate(rowItR, qubit);
-
-  insertGate(gateR, rowItL);
-  insertGate(gateL, rowItR);
-}
-
 int CircuitGraphNode::gateId(const QuantumGate* gate) const {
   for (const auto& [itGate, id] : _gateMap) {
     if (itGate.get() == gate)

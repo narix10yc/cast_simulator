@@ -5,51 +5,95 @@
 #include "cast/CPU/CPUFusionConfig.h"
 #include "utils/MaybeError.h"
 
+#include "llvm/Support/Casting.h"
+
 namespace cast {
 
 class CPUOptimizerBuilder {
   // CPUOptimizerBuilder is likely to be used in main(). We want to keep the 
   // stack clean
   struct Data {
-    CPUFusionConfig fusionConfig;
+    std::unique_ptr<FusionConfig> fusionConfig;
 
     bool enableCanonicalization = true;
     bool enableFusion = true;
+    bool enableCFO = true;
+    int verbose = 0;
   };
   std::unique_ptr<Data> data;
+
 public:
-  CPUOptimizerBuilder() : data(std::make_unique<Data>()) {}
-
-  void setNThreads(int nThreads) {
-    data->fusionConfig.nThreads = nThreads;
+  CPUOptimizerBuilder() : data(std::make_unique<Data>()) {
+    data->fusionConfig = std::make_unique<CPUFusionConfig>();
   }
 
-  void setPrecision(Precision precision) {
-    data->fusionConfig.precision = precision;
+  CPUOptimizerBuilder& setSizeOnlyFusion(int size) {
+    data->fusionConfig = std::make_unique<SizeOnlyFusionConfig>(size);
+    return *this;
   }
 
-  void setZeroTol(double zeroTol) {
-    data->fusionConfig.zeroTol = zeroTol;
+  // Only meaningful for CPUFusionConfig
+  CPUOptimizerBuilder& setNThreads(int nThreads) {
+    if (auto* cpuFusionConfig = 
+        llvm::dyn_cast<CPUFusionConfig>(data->fusionConfig.get())) {
+      cpuFusionConfig->nThreads = nThreads;
+    }
+    return *this;
   }
 
-  void setSwapTol(double swapTol) {
-    data->fusionConfig.swapTol = swapTol;
+  // Only meaningful for CPUFusionConfig
+  CPUOptimizerBuilder& setPrecision(Precision precision) {
+    if (auto* cpuFusionConfig = 
+        llvm::dyn_cast<CPUFusionConfig>(data->fusionConfig.get())) {
+      cpuFusionConfig->precision = precision;
+    }
+    return *this;
   }
 
-  void disableCanonicalization() {
+  CPUOptimizerBuilder& setZeroTol(double zeroTol) {
+    if (data->fusionConfig)
+      data->fusionConfig->zeroTol = zeroTol;
+    return *this;
+  }
+
+  CPUOptimizerBuilder& setSwapTol(double swapTol) {
+    data->fusionConfig->swapTol = swapTol;
+    return *this;
+  }
+
+  CPUOptimizerBuilder& disableCanonicalization() {
     data->enableCanonicalization = false;
+    return *this;
   }
 
-  void disableFusion() {
+  CPUOptimizerBuilder& disableFusion() {
     data->enableFusion = false;
+    return *this;
   }
 
-  void enableCanonicalization() {
+  CPUOptimizerBuilder& disableCFO() {
+    data->enableCFO = false;
+    return *this;
+  }
+
+  CPUOptimizerBuilder& enableCanonicalization() {
     data->enableCanonicalization = true;
+    return *this;
   }
 
-  void enableFusion() {
+  CPUOptimizerBuilder& enableFusion() {
     data->enableFusion = true;
+    return *this;
+  }
+
+  CPUOptimizerBuilder& enableCFO() {
+    data->enableCFO = true;
+    return *this;
+  }
+
+  CPUOptimizerBuilder& setVerbose(int verbose) {
+    data->verbose = verbose;
+    return *this;
   }
 
   MaybeError<Optimizer> build();

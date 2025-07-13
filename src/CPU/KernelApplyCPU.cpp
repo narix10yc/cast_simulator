@@ -120,7 +120,7 @@ MaybeError<void> CPUKernelManager::applyCPUKernel(
   return {}; // success
 }
 
-MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraphMultithread(
+MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraph(
     void* sv, int nQubits, const std::string& graphName, int nThreads) const {
   if (!isJITed()) {
     return cast::makeError<void>(

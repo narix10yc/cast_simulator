@@ -82,7 +82,7 @@ MaybeError<void> CPUKernelManager::genStandaloneGate(
   if (!result) {
     return cast::makeError<void>("Err: " + result.takeError());
   }
-  _standaloneKernels.emplace_back(result.moveValue());
+  _standaloneKernels.emplace_back(result.takeValue());
   return {}; // success
 }
 
@@ -115,40 +115,13 @@ MaybeError<void> CPUKernelManager::genCPUGatesFromGraph(
           << (void*)(gate.get()) << ": " << result.takeError() << "\n";
       return cast::makeError<void>(oss.str());
     }
-    kernels.emplace_back(result.moveValue());
+    kernels.emplace_back(result.takeValue());
   }
   // Store the generated kernels in the map
   _graphKernels[graphName] = std::move(kernels);
 
   return {}; // success
 }
-
-// std::vector<CPUKernelInfo*>
-// CPUKernelManager::collectKernelsFromGraphName(
-//     const std::string& graphName) {
-//   std::vector<std::pair<int, CPUKernelInfo*>> orderKernelPairs;
-//   auto mangledGraphName = internal::mangleGraphName(graphName);
-//   for (auto& kernel : _standaloneKernels) {
-//     const auto& name = kernel.llvmFuncName;
-//     if (!name.starts_with(mangledGraphName))
-//       continue; // not a kernel from the given graph
-//     // extract the order from the name
-//     assert(name[mangledGraphName.size()] == '_');
-//     auto subName = name.substr(mangledGraphName.size() + 1); // "<order>_<gateId>"
-//     auto pos = subName.find('_');
-//     assert(pos != std::string::npos && "Invalid kernel name format");
-//     int order = std::stoi(subName.substr(0, pos));
-//     orderKernelPairs.emplace_back(order, &kernel);
-//   }
-//   // sort by order and return the kernels
-//   std::ranges::sort(orderKernelPairs);
-//   std::vector<CPUKernelInfo*> kernels;
-//   kernels.reserve(orderKernelPairs.size());
-//   for (const auto& pair : orderKernelPairs)
-//     kernels.push_back(pair.second);
-
-//   return kernels;
-// }
 
 namespace {
 
@@ -166,8 +139,7 @@ struct IRMatData {
   ScalarKind reFlag;     // flag for the real entry
   ScalarKind imFlag;     // flag for the imag entry
 
-  // We have to provide this default constructor to ensure all un-initialized
-  // entries are set to nullptr.
+  // Default constructor needed here
   IRMatData()
     : reElmVal(nullptr), imElmVal(nullptr),
       reVecVal(nullptr), imVecVal(nullptr),

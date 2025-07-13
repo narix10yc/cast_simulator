@@ -217,16 +217,6 @@ public:
                                                  row_iterator rowItL,
                                                  int qubit);
 
-  /// @brief Swap the gates \c (*rowItL)[qubit] and
-  /// \c (*std::next(rowItL))[qubit] in the circuit graph.
-  /// Before calling this function, make sure the gates commute.
-  /// Swapping may introduce bubbles. This function does NOT call squeeze().
-  /// In certain cases, swapGates() introduces an extra row before \c rowItL.
-  /// In either case, it suffices to call squeeze(std::next(rowItL)) to
-  /// remove bubbles. Notice that calling squeeze() changes the tile at and
-  /// after that row.
-  void swapGates(row_iterator rowItL, int qubit);
-
   /// @brief Squeeze the circuit graph between rows [rowIt, tile_end()).
   void squeeze(row_iterator beginIt);
 

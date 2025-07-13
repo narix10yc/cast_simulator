@@ -203,7 +203,7 @@ public:
       const std::string& llvmFuncName,
       int nThreads = 1) const;
   
-  MaybeError<void> applyCPUKernelsFromGraphMultithread(
+  MaybeError<void> applyCPUKernelsFromGraph(
       void* sv,
       int nQubits,
       const std::string& graphName,

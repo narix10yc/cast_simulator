@@ -1,22 +1,14 @@
 #include "llvm/Support/TargetSelect.h"
 
-#include "llvm/Object/ObjectFile.h"
-#include "llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h"
-#include "llvm/MC/MCDisassembler/MCDisassembler.h"
-#include "llvm/MC/MCInstPrinter.h"
-#include "llvm/MC/MCInstrInfo.h"
-#include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/MC/TargetRegistry.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/Support/MemoryBufferRef.h"
-#include "llvm/Support/FormattedStream.h"
-
 #include "cast/CPU/CPUKernelManager.h"
 #include "utils/iocolor.h"
 #include "utils/TaskDispatcher.h"
 
 #include <cassert>
+
+#define DEBUG_TYPE "cpu-kernel-mgr"
+#include "llvm/Support/Debug.h"
+// #define LLVM_DEBUG(X) X
 
 using namespace cast;
 using namespace llvm;
@@ -71,9 +63,9 @@ void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   // multi-thread compile
   utils::TaskDispatcher dispatcher(nThreads);
   for (auto& kernel : _standaloneKernels) {
-	  dispatcher.enqueue([this, &kernel]() {
+      dispatcher.enqueue([this, &kernel]() {
       ensureExecutable(*kernel);
-	  });
+      });
   }
   for (auto& [graphName, kernels] : _graphKernels) {
     for (auto& kernel : kernels) {
@@ -107,9 +99,6 @@ MaybeError<void> CPUKernelManager::initJIT(
   if (useLazyJIT) {
     // lazy JIT engine
     orc::LLLazyJITBuilder jitBuilder;
-    /// It seems not matter the concurrency we set here.
-    /// As long as we set it, we can invoke multiple lookup. We control the 
-    /// actual number of threads via our custom TaskDispatcher
     jitBuilder.setNumCompileThreads(nThreads);
     auto lazyJIT = cantFail(jitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
@@ -136,7 +125,6 @@ MaybeError<void> CPUKernelManager::initJIT(
       }
     }
     this->llvmJIT = std::move(eagerJIT);
-    // eager compile all kernels
     ensureAllExecutable(nThreads, /* progressBar */ verbose > 0);
   }
   this->llvmContextModulePairs.clear();

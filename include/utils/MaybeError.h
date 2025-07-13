@@ -54,9 +54,7 @@ class [[nodiscard]] MaybeError {
   };
   mutable impl::MaybeErrorStatus status;
 public:
-  MaybeError() requires(!NotVoid) : status(impl::ErrorAbsentNotChecked) {
-    // No value to initialize, so we don't need to do anything.
-  }
+  MaybeError() requires(!NotVoid) : status(impl::ErrorAbsentNotChecked) {}
 
   MaybeError(const impl::MaybeErrorInitializer<T>& i)
     : status(impl::ErrorPresentNotChecked) {
@@ -129,12 +127,7 @@ public:
 
   bool hasValue() const { return !hasError(); }
 
-  const value_type& getValue() const requires(NotVoid) {
-    assert(hasValue() && "No value present in MaybeError");
-    return _value;
-  }
-
-  value_type&& moveValue() requires(NotVoid) {
+  value_type&& takeValue() requires(NotVoid) {
     assert(hasValue() && "No value present in MaybeError");
     return std::move(_value);
   }
@@ -144,8 +137,6 @@ public:
     status.setErrorChecked();
     return std::move(_errorMsg);
   }
-
-  const value_type& operator*() const requires(NotVoid) { return getValue(); }
 
   operator bool() const { return hasValue(); }
 }; // class MaybeError

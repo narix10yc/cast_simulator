@@ -9,9 +9,21 @@ namespace cast {
 
 class FusionConfig {
 public:
-  FusionConfig() = default;
+  enum FusionConfigKind {
+    FC_Base,          // Base fusion config
+    FC_SizeOnly,      // Size only fusion config
+    FC_CPU,           // CPU fusion config
+    FC_CUDA,          // CUDA fusion config
+    FC_End
+  };
+protected:
+  FusionConfigKind _kind;
+public:
+  explicit FusionConfig(FusionConfigKind kind) : _kind(kind) {}
 
   virtual ~FusionConfig() = default;
+
+  FusionConfigKind getKind() const { return _kind; }
 
   std::unique_ptr<CostModel> costModel = nullptr;
 
@@ -40,13 +52,17 @@ public:
 
 class SizeOnlyFusionConfig : public FusionConfig {
 public:
-  SizeOnlyFusionConfig(int size) : FusionConfig() {
+  SizeOnlyFusionConfig(int size) : FusionConfig(FC_SizeOnly) {
     sizeMin = size;
     sizeMax = size;
   }
 
   std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override {
     return os << "SizeOnlyFusionConfig with size " << sizeMin << "\n";
+  }
+
+  static bool classof(const FusionConfig* config) {
+    return config->getKind() == FC_SizeOnly;
   }
 }; // SizeOnlyFusionConfig
 

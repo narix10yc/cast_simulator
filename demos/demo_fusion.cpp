@@ -105,7 +105,7 @@ int main(int argc, const char** argv) {
     return 1;
   }
 
-  auto circuit = circuitOrErr.moveValue();
+  auto circuit = circuitOrErr.takeValue();
 
   auto allGraphs = circuit.getAllCircuitGraphs();
   assert(allGraphs.size() == 1 && "There should be exactly one circuit graph.");

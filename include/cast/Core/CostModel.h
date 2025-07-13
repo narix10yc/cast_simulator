@@ -34,7 +34,7 @@ public:
   }
 };
 
-/// @brief \c NaiveCostModel is based on the size and operation count of fused
+/// @brief \c SizeOnlyCostModel is based on the size and operation count of fused
 /// gates.
 class SizeOnlyCostModel : public CostModel {
   int maxSize;

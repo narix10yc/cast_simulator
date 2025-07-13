@@ -1,11 +1,13 @@
-#include "cast/CPU/CPUCostModel.h"
-#include "cast/CPU/CPUKernelManager.h"
+#include "cast/CPU/CPUOptimizerBuilder.h"
 
 using namespace cast;
 
 int main() {
-  CPUPerformanceCache cache;
-  CPUPerformanceCache::WeightType weights;
-  CPUKernelGenConfig config(CPUSimdWidth::W128, Precision::F64);
-  cache.runPreliminaryExperiments(CPUKernelGenConfig(), 28, 10, weights, 3);
+  CPUOptimizerBuilder builder;
+  auto opt = builder.setSizeOnlyFusion(3).build();
+  if (!opt) {
+    std::cerr << "Failed to build optimizer: " << opt.takeError() << std::endl;
+    return 1;
+  }
+  return 0;
 }
