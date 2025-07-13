@@ -4,27 +4,27 @@
 using namespace cast::test;
 
 int main() {
-  // utils::timedExecute([] {
-  //   test_complexSquareMatrix();
-  // }, "Complex Square Matrix Test Finished!");
+  utils::timedExecute([] {
+    test_complexSquareMatrix();
+  }, "Complex Square Matrix Test Finished!");
 
-  // utils::timedExecute([] {
-  //   test_applyGate();
-  //   test_gateMatMul();
-  // }, "Gate Matrix Test Finished!");
+  utils::timedExecute([] {
+    test_applyGate();
+    test_gateMatMul();
+  }, "Gate Matrix Test Finished!");
 
-  // utils::timedExecute([] {
-  //   test_cpuH();
-  //   test_cpuU();
-  // }, "CPU Codegen Test Finished!");
+  utils::timedExecute([] {
+    test_cpuH();
+    test_cpuU();
+  }, "CPU Codegen Test Finished!");
 
-  // utils::timedExecute([] {
-  //   test_quantumGate();
-  // }, "Quantum Gate Test Finished!");
+  utils::timedExecute([] {
+    test_quantumGate();
+  }, "Quantum Gate Test Finished!");
 
-  // utils::timedExecute([] {
-  //   test_quantumChannel();
-  // }, "Quantum Channel Test Finished!");
+  utils::timedExecute([] {
+    test_quantumChannel();
+  }, "Quantum Channel Test Finished!");
 
   utils::timedExecute([] {
     test_fusionCPU();

@@ -7,7 +7,7 @@
 
 #define DEBUG_TYPE "impl-optimize"
 #include "llvm/Support/Debug.h"
-#define LLVM_DEBUG(X) X
+// #define LLVM_DEBUG(X) X
 
 using namespace cast;
 
@@ -242,7 +242,7 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
           std::cerr << "Swapping triggered. Fusing "
                     << graph.gateId(prodGate) << " with "
                     << graph.gateId((*curIt)[q]) << "\n";
-        )
+        );
       }
       // candidateGate is accepted
       fusedGates.emplace_back(graph.lookup(candidateGate), curIt);
@@ -372,44 +372,9 @@ int cast::impl::applySizeTwoFusion(ir::CircuitGraphNode& graph, double swapTol) 
       // can swap them.
       if (swapTol <= 0.0)
         continue; // swapping analysis is disabled
-      QuantumGate* gateToSwap = nullptr;
-      auto nextNextIt = std::next(nextIt);
-      if (nextNextIt != graph.tile_end()) {
-        auto* nextGate = (*nextNextIt)[q];
-        if (nextGate != nullptr && nextGate->nQubits() == 2 &&
-            nextGate->qubits()[0] == q0L &&
-            nextGate->qubits()[1] == q1L && 
-            cast::isCommuting(gateR, nextGate)) {
-          gateToSwap = nextGate;
-        }
-      }
-      if (gateToSwap == nullptr) {
-        // LLVM_DEBUG(
-        //   std::cerr << "Cannot swap gates at (" 
-        //             << graph.gateId(gateL) << ", " 
-        //             << graph.gateId(gateR) << ") with next gate\n";
-        // );
-        continue; // cannot swap, skip
-      }
-
-      // We can swap gateR and gateToSwap
-      LLVM_DEBUG(
-        std::cerr << "Swapping gates at (" 
-                  << graph.gateId(gateL) << ", " 
-                  << graph.gateId(gateR) << ") with gate "
-                  << graph.gateId(gateToSwap) << "\n";
-        graph.visualize(std::cerr << "Before swapping:\n");
-      );
-      graph.swapGates(nextIt, q);
-      graph.squeeze(nextIt);
-      LLVM_DEBUG(
-        graph.visualize(std::cerr << "After swapping:\n");
-      );
-      // After swapping, it may not be true that nextIt == std::next(it).
-      // But we are sure gateL still equals to (*it)[q].
-      assert((*it)[q] == gateL && "GateL should not be changed after swapping");
-      assert((*(std::next(it)))[q] == gateToSwap &&
-             "GateToSwap should be in the next row after swapping");
+      auto swapped = swapIfPossible(graph, it, q, 2, 2, swapTol);
+      if (!swapped)
+        continue;
       graph.fuseAndInsertDiffRow(it, q);
       nFused++;
     }
