@@ -67,6 +67,13 @@ GateMatrixPtr transform::cvtAstGateToGateMatrix(
     return ScalarGateMatrix::CX();
   }
 
+  if (name == "CP") {
+    assertGate(2, 1);
+    auto* phi = ast::reduceExprToSimpleNumeric(astCtx, astGate->params[0]);
+    assert(phi != nullptr && "Only supporting scalar values for now");
+    return ScalarGateMatrix::CP(phi->getValue());
+  }
+
   std::cerr << BOLDRED("Err: ") << "In converting AST Gate to GateMatrix: "
     "Not implemented or unsupported gate: " << name << "\n";
   assert(false && "Not implemented or unsupported gate");

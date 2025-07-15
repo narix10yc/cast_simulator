@@ -50,43 +50,44 @@ namespace {
     return 0; // unreachable
   }
 
-  double impl_opcount(const IRNode* node);
+  double impl_opcount(const IRNode* node, double zeroTol);
 
-  double impl_opcount(const CompoundNode* compoundNode) {
+  double impl_opcount(const CompoundNode* compoundNode, double zeroTol) {
     double count = 0.0;
     for (const auto& child : compoundNode->nodes) {
-      count += impl_opcount(child.get());
+      count += impl_opcount(child.get(), zeroTol);
     }
     return count;
   }
 
-  double impl_opcount(const CircuitNode* circuitNode) {
-    return impl_opcount(&circuitNode->body);
+  double impl_opcount(const CircuitNode* circuitNode, double zeroTol) {
+    return impl_opcount(&circuitNode->body, zeroTol);
   }
 
-  double impl_opcount(const CircuitGraphNode* graphNode) {
+  double impl_opcount(const CircuitGraphNode* graphNode, double zeroTol) {
     double count = 0.0;
     auto gates = graphNode->getAllGates();
-    for (const auto& gate : gates)
-      count += gate->opCount(1e-8);
+    for (const auto& gate : gates) {
+      count += gate->opCount(zeroTol); // Pass zeroTol to opCount
+    }
     return count;
   }
 
-  double impl_opcount(const IfMeasureNode* ifNode) {
-    double thenCount = impl_opcount(&ifNode->thenBody);
-    double elseCount = impl_opcount(&ifNode->elseBody);
+  double impl_opcount(const IfMeasureNode* ifNode, double zeroTol) {
+    double thenCount = impl_opcount(&ifNode->thenBody, zeroTol);
+    double elseCount = impl_opcount(&ifNode->elseBody, zeroTol);
     return std::max(thenCount, elseCount);
   }
 
-  double impl_opcount(const IRNode* node) {
+  double impl_opcount(const IRNode* node, double zeroTol) {
     if (auto* n = llvm::dyn_cast<CompoundNode>(node))
-      return impl_opcount(n);
+      return impl_opcount(n, zeroTol);
     if (auto* n = llvm::dyn_cast<CircuitNode>(node))
-      return impl_opcount(n);
+      return impl_opcount(n, zeroTol);
     if (auto* n = llvm::dyn_cast<CircuitGraphNode>(node))
-      return impl_opcount(n);
+      return impl_opcount(n, zeroTol);
     if (auto* n = llvm::dyn_cast<IfMeasureNode>(node))
-      return impl_opcount(n);
+      return impl_opcount(n, zeroTol);
     assert(false && "Unknown node type in impl_opcount");
     return 0; // unreachable
   }
@@ -106,7 +107,8 @@ std::ostream& CircuitNode::displayInfo(std::ostream& os, int verbose) const {
   os << CYAN("- Num Gates: ") << nGates << "\n"
      <<      "             "  << impl_nGatesCriticalPath(&body)
      << " in critical path\n";
-  os << CYAN("- Op Count:  ") << impl_opcount(&body) << " in critical path\n";
+  os << CYAN("- Op Count:  ") << impl_opcount(&body, 1e-8) << " in critical path\n"
+     << CYAN("             ") << impl_opcount(&body, 0.0)  << " if dense\n";
 
   os << BOLDCYAN("====================================") << "\n";
   return os;

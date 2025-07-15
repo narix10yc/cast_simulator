@@ -205,6 +205,7 @@ add_subdirectory(src)
 add_subdirectory(tests)
 add_subdirectory(demos)
 add_subdirectory(tools)
+add_subdirectory(experiments)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/drafts")
   add_subdirectory(drafts)

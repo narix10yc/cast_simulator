@@ -108,9 +108,19 @@ ComplexSquareMatrix ComplexSquareMatrix::SWAP() {
 
 ComplexSquareMatrix ComplexSquareMatrix::eye(size_t edgeSize) {
   ComplexSquareMatrix m(edgeSize);
-  std::memset(m.data(), 0, m.sizeInBytes());
+  std::fill_n(m.data(), m.size(), 0.0);
   for (size_t i = 0; i < edgeSize; ++i)
     m.reBegin()[i * edgeSize + i] = 1.0;
+  return m;
+}
+
+ComplexSquareMatrix ComplexSquareMatrix::CP(double phi) {
+  ComplexSquareMatrix m(4);
+  std::fill_n(m.data(), m.size(), 0.0);
+  m.setRC(0, 0, 1.0, 0.0);
+  m.setRC(1, 1, 1.0, 0.0);
+  m.setRC(2, 2, 1.0, 0.0);
+  m.setRC(3, 3, std::cos(phi), std::sin(phi));
   return m;
 }
 

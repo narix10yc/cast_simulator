@@ -194,7 +194,7 @@ public:
   static ComplexSquareMatrix CNOT() { return CX(); }
   static ComplexSquareMatrix CZ();
   static ComplexSquareMatrix SWAP();
-
+  static ComplexSquareMatrix CP(double phi);
 }; // class ComplexSquareMatrix
 
 /// @brief The maximum norm of two matrices is defined as the maximum of the

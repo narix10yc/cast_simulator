@@ -126,11 +126,54 @@ struct CSVParsable {
 };
 
 // -------------------- Macro for Field Registration --------------------
+
+// Trim the leading and trailing spaces from a string_view
+consteval std::string_view trim(std::string_view str) {
+  std::size_t start = 0;
+  std::size_t end = str.size();
+
+  while (start < end && str[start] == ' ')
+    ++start;
+  while (end > start && str[end - 1] == ' ')
+    --end;
+
+  return str.substr(start, end - start);
+}
+
+// Main consteval function to clean CSV title
+template<std::size_t N>
+consteval auto clean_csv_title(const char (&input)[N]) {
+  std::array<char, N> out{};
+  std::size_t out_i = 0;
+
+  std::size_t token_start = 0;
+  for (std::size_t i = 0; i <= N; ++i) {
+    if (input[i] == ',' || input[i] == '\0') {
+      auto token = trim(std::string_view(&input[token_start], i - token_start));
+      for (char c : token)
+        out[out_i++] = c;
+
+      // Add comma if not at the end
+      if (input[i] == ',') {
+        out[out_i++] = ',';
+        token_start = i + 1;
+      } else break;
+    }
+  }
+
+  out[out_i] = '\0';
+  return out;
+}
+
+#define CSV_STRINGIFY(...) #__VA_ARGS__
+
 #define CSV_DATA_FIELD(...) \
   auto tie_fields() { return std::tie(__VA_ARGS__); } \
   auto tie_fields() const { return std::tie(__VA_ARGS__); } \
   static constexpr size_t num_fields = \
-    std::tuple_size<decltype(std::tie(__VA_ARGS__))>::value;
+    std::tuple_size<decltype(std::tie(__VA_ARGS__))>::value; \
+  static constexpr auto CSV_TITLE_STORAGE = utils::clean_csv_title(CSV_STRINGIFY(__VA_ARGS__)); \
+  static constexpr std::string_view CSV_TITLE{CSV_TITLE_STORAGE.data()};
     
 } // end namespace utils
 

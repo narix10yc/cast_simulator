@@ -175,7 +175,10 @@ public:
   static ScalarGateMatrixPtr CX() {
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::CX());
   }
-
+  
+  static ScalarGateMatrixPtr CP(double phi) {
+    return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::CP(phi));
+  }
 }; // class ScalarGateMatrix
 
 class UnitaryPermGateMatrix : public GateMatrix {
