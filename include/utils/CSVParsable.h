@@ -7,6 +7,7 @@
 #include <string_view>
 #include <sstream>
 #include <vector>
+#include <array>
 #include <type_traits>
 
 namespace utils {

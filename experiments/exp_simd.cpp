@@ -40,22 +40,33 @@ int main() {
 
   CPUKernelManager kernelMgr;
   for (int k = 0; k < NQUBITS; ++k) {
-    kernelMgr.genStandaloneGate(
+    if (!kernelMgr.genStandaloneGate(
       config,
       StandardQuantumGate::RandomUnitary(k),
       "test_gate_" + std::to_string(k)
-    ).consumeError();
+    )) {
+      std::cerr << "Failed to generate kernel for qubit " << k << "\n";
+      return 1;
+    }
   }
-  kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false).consumeError();
+  if (!kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false)) {
+    std::cerr << "Failed to initialize JIT\n";
+    return 1;
+  }
 
-  auto sv = std::make_unique<double[]>(2ULL << NQUBITS);
+  auto sv = std::make_unique<double[]>((2ULL << NQUBITS) + 8);
+  std::uintptr_t raw_addr = reinterpret_cast<std::uintptr_t>(sv.get());
+  std::size_t misalignment = raw_addr % 64;
+  std::size_t offset = misalignment == 0 ? 0 : (64 - misalignment) / sizeof(double);
+
+  double* data = sv.get() + offset;
   auto mat = std::make_unique<double[]>(8); // 2x2 complex matrix
 
   double memSpd;
   for (int k = 0; k < NQUBITS; ++k) {
     tr = timer.timeit([&]() {
       tplt::applySingleQubit<double>(
-        sv.get(), sv.get() + (1ULL << NQUBITS), mat.get(), NQUBITS, k
+        data, data + (1ULL << NQUBITS), mat.get(), NQUBITS, k
       );
     });
     memSpd = calculateMemSpd<double>(NQUBITS, tr.min);
@@ -65,7 +76,7 @@ int main() {
 
     tr = timer.timeit([&]() {
       tplt::applySingleQubitTemplateSwitch<double>(
-        sv.get(), sv.get() + (1ULL << NQUBITS), mat.get(), NQUBITS, k
+        data, data + (1ULL << NQUBITS), mat.get(), NQUBITS, k
       );
     });
     memSpd = calculateMemSpd<double>(NQUBITS, tr.min);
@@ -75,7 +86,7 @@ int main() {
 
     tr = timer.timeit([&]() {
       kernelMgr.applyCPUKernel(
-        sv.get(), NQUBITS, "test_gate_" + std::to_string(k), 1
+        data, NQUBITS, "test_gate_" + std::to_string(k), 1
       ).consumeError();
     });
     memSpd = calculateMemSpd<double>(NQUBITS, tr.min);

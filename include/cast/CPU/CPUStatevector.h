@@ -8,6 +8,7 @@
 #include "utils/utils.h"
 #include "utils/TaskDispatcher.h"
 
+#include <cmath>
 #include <complex>
 #include <iostream>
 #include <random>
@@ -310,7 +311,7 @@ public:
     return s;
   }
 
-  double norm() const { return std::sqrt<double>(normSquared()); }
+  double norm() const { return std::sqrt(normSquared()); }
 
   /// @brief Initialize to the |00...00> state.
   /// Notice: even though we provide nThreads parameter, this function
