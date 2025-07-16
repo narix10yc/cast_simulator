@@ -265,7 +265,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
 
   timeit::Timer timer(3, /* verbose */ 0);
   timeit::TimingResult tr;
-  std::array<double, 5> memSpds;
+  std::array<double, 5> memSpds { 120.0, 120.0, 77.6, 32.1, 12.9};
   for (int k = 1; k <= 5; ++k) {
     tr = timer.timeit([&]() {
       kernelMgr.applyCPUKernel(
@@ -285,7 +285,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
   for (int k = 2; k <= 5; ++k) {
     // The ratio decides the scaling of weights when mem speeds halves.
     // Set to a larger value to focus more on the transition region.
-    constexpr double ratio = 1.7;
+    constexpr double ratio = 1.1;
     // weights[k] is the weight for k-qubit gates
     weights[k-1] = static_cast<int>(
       static_cast<double>(weights[k-2]) *
@@ -293,8 +293,26 @@ void CPUPerformanceCache::runPreliminaryExperiments(
     );
   }
   for (int k = 6; k < weights.size() + 1; ++k) {
-    weights[k-1] = static_cast<int>(static_cast<double>(weights[k-2]) * 0.4);
+    weights[k-1] = static_cast<int>(static_cast<double>(weights[k-2]) * 0.45);
   }
+
+  int maxIdx = 0;
+  double maxWeight = 0.0;
+  for (int k = 0; k < weights.size(); ++k) {
+    if (weights[k] > maxWeight) {
+      maxWeight = static_cast<double>(weights[k]);
+      maxIdx = k;
+    }
+  }
+  for (int k = 0; k < weights.size(); ++k) {
+    if (k == maxIdx)
+      continue;
+    constexpr double ratio = 1.5;
+    double newWeight = static_cast<double>(weights[k]) /
+                       std::pow(ratio, std::abs(maxIdx - k));
+    weights[k] = static_cast<int>(newWeight);
+  }
+
   
   if (verbose > 0) {
     double sum = 0.0;
@@ -366,7 +384,6 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
     gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
   }
 
-  nQubitsWeights = { 3, 5, 5, 3, 2, 2, 1 };
   int initialRuns = gates.size();
   for (int run = 0; run < nRuns - initialRuns; ++run) {
     float ratio = static_cast<float>(run) / (nRuns - initialRuns);
@@ -420,6 +437,8 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
 }
 
 void CPUPerformanceCache::writeResults(std::ostream& os) const {
-  for (const auto& item : items)
+  for (const auto& item : items) {
     item.write(os);
+    os << "\n";
+  }
 }

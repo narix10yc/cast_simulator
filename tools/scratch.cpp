@@ -7,7 +7,7 @@ int main(int argc, char** argv) {
   builder
         //  .disableCanonicalization()
          .disableCFO()
-         .setSizeOnlyFusion(4)
+         .setSizeOnlyFusion(7)
         //  .setNThreads(1)
         //  .setPrecision(Precision::F64)
         //  .setZeroTol(0.0)
