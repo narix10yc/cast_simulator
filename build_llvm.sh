@@ -1,5 +1,6 @@
 #!/bin/bash
 
+set -x
 set -e # exit on error
 
 # arguments
@@ -62,12 +63,13 @@ done
 # Check of argument conflicts
 if [[ $ARG_MINIMAL -eq 1 ]]; then
   if [[ $ARG_BUILD_CLANG -eq 1 ]] || [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
-  echo -e "${ERR} Cannot build both Clang and libc++ with minimal build."
+  echo -e "${ERR} Cannot build Clang or libc++ with minimal build."
   exit 1
   fi
   echo -e "${INFO} Minimal build selected. " \
           "Only building a release-version of LLVM with Native target."
   ARG_RELEASE_ONLY=1
+  ARG_NATIVE_ONLY=1
   ARG_BUILD_CLANG=0
   ARG_BUILD_LIBCXX=0
 fi
@@ -131,8 +133,8 @@ cmake -S "${ARC_LLVM_SRC_DIR}/llvm" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_ENABLE_RTTI=ON \
   "-DLLVM_TARGETS_TO_BUILD=${ARG_LLVM_TARGETS_TO_BUILD}" \
-  "${ARG_LLVM_ENABLE_PROJECTS[@]}" \
-  "${ARG_LLVM_ENABLE_RUNTIMES[@]}"
+  ${ARG_LLVM_ENABLE_PROJECTS:+${ARG_LLVM_ENABLE_PROJECTS[@]}} \
+  ${ARG_LLVM_ENABLE_RUNTIMES:+${ARG_LLVM_ENABLE_RUNTIMES[@]}}
 
 cmake --build "${CAST_LLVM_ROOT}/release-build"
 
@@ -207,8 +209,8 @@ cmake -S "${ARC_LLVM_SRC_DIR}/llvm" -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
   -DLLVM_ENABLE_RTTI=ON \
   "-DLLVM_TARGETS_TO_BUILD=${ARG_LLVM_TARGETS_TO_BUILD}" \
-  "${ARG_SET_USE_CLANG[@]}" \
-  "${ARG_SET_USE_LIBCXX[@]}"
+  ${ARG_SET_USE_CLANG:+${ARG_SET_USE_CLANG[@]}} \
+  ${ARG_SET_USE_LIBCXX:+${ARG_SET_USE_LIBCXX[@]}}
 
 cmake --build "${CAST_LLVM_ROOT}/debug-build"
 
