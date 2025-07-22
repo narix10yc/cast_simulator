@@ -40,30 +40,30 @@ static void f(const std::vector<int>& targetQubits) {
   for (size_t i = 0; i < gates.size(); i++) {
     randomizeSV();
     std::stringstream ss;
-    ss << "Apply U" << targetQubits.size() << "q at ";
-    for (size_t j = 0; j < targetQubits.size(); ++j) {
-      ss << targetQubits[j];
-      if (j < targetQubits.size() - 1) ss << ",";
-    }
-    ss << ": ";
+    // ss << "Apply U" << targetQubits.size() << "q at ";
+    // for (size_t j = 0; j < targetQubits.size(); ++j) {
+    //   ss << targetQubits[j];
+    //   if (j < targetQubits.size() - 1) ss << ",";
+    // }
+    // ss << ": ";
 
     // Log expected gate matrix
-    std::cerr << "Expected Gate Matrix for gate " << i << ":\n";
-    gates[i]->gateMatrix.printCMat(std::cerr) << "\n";
+    // std::cerr << "Expected Gate Matrix for gate " << i << ":\n";
+    // gates[i]->gateMatrix.printCMat(std::cerr) << "\n";
 
-    std::cerr << "Initial CUDA Statevector:\n";
+    // std::cerr << "Initial CUDA Statevector:\n";
     std::vector<std::complex<double>> svCUDA0_data(1 << svCUDA0.nQubits());
     cudaMemcpy(svCUDA0_data.data(), svCUDA0.dData(), svCUDA0.sizeInBytes(), cudaMemcpyDeviceToHost);
-    for (size_t j = 0; j < svCUDA0_data.size(); j++) {
-        std::cerr << "State[" << j << "] = (" << svCUDA0_data[j].real() << ", " << svCUDA0_data[j].imag() << ")\n";
-    }
+    // for (size_t j = 0; j < svCUDA0_data.size(); j++) {
+    //     std::cerr << "State[" << j << "] = (" << svCUDA0_data[j].real() << ", " << svCUDA0_data[j].imag() << ")\n";
+    // }
 
-    std::cerr << "Expected statevector indices for qubits {";
-    for (size_t j = 0; j < targetQubits.size(); ++j) {
-        std::cerr << targetQubits[j];
-        if (j < targetQubits.size() - 1) std::cerr << ", ";
-    }
-    std::cerr << "}:\n";
+    // std::cerr << "Expected statevector indices for qubits {";
+    // for (size_t j = 0; j < targetQubits.size(); ++j) {
+    //     std::cerr << targetQubits[j];
+    //     if (j < targetQubits.size() - 1) std::cerr << ", ";
+    // }
+    // std::cerr << "}:\n";
     for (int i = 0; i < (1 << targetQubits.size()); ++i) {
         uint64_t delta = 0;
         for (size_t b = 0; b < targetQubits.size(); ++b) {
@@ -71,9 +71,9 @@ static void f(const std::vector<int>& targetQubits) {
                 delta |= (1ULL << targetQubits[b]);
             }
         }
-        std::cerr << "i=" << i << ", delta=" << delta << "\n";
+        // std::cerr << "i=" << i << ", delta=" << delta << "\n";
         delta |= (1ULL << 1);
-        std::cerr << "i=" << i << ", delta (qubit 1=1)=" << delta << "\n";
+        // std::cerr << "i=" << i << ", delta (qubit 1=1)=" << delta << "\n";
     }
 
     kernelMgrCUDA.launchCUDAKernel(
@@ -81,25 +81,25 @@ static void f(const std::vector<int>& targetQubits) {
     cudaDeviceSynchronize();
 
     // Print final CUDA statevector
-    std::cerr << "Final CUDA Statevector:\n";
+    // std::cerr << "Final CUDA Statevector:\n";
     cudaMemcpy(svCUDA0_data.data(), svCUDA0.dData(), svCUDA0.sizeInBytes(), cudaMemcpyDeviceToHost);
-    for (size_t j = 0; j < svCUDA0_data.size(); j++) {
-        std::cerr << "State[" << j << "] = (" << svCUDA0_data[j].real() << ", " << svCUDA0_data[j].imag() << ")\n";
-    }
+    // for (size_t j = 0; j < svCUDA0_data.size(); j++) {
+    //     std::cerr << "State[" << j << "] = (" << svCUDA0_data[j].real() << ", " << svCUDA0_data[j].imag() << ")\n";
+    // }
 
     suite.assertClose(svCUDA0.norm(), 1.0,
         ss.str() + "CUDA SV norm equals to 1", GET_INFO());
 
     svCPU.applyGate(*gates[i]);
-    std::cerr << "Final CPU Statevector:\n";
-    for (size_t j = 0; j < (1 << svCPU.nQubits()); j++) {
-        std::cerr << "State[" << j << "] = (" << svCPU.data()[2*j] << ", " << svCPU.data()[2*j+1] << ")\n";
-    }
+    // std::cerr << "Final CPU Statevector:\n";
+    // for (size_t j = 0; j < (1 << svCPU.nQubits()); j++) {
+    //     std::cerr << "State[" << j << "] = (" << svCPU.data()[2*j] << ", " << svCPU.data()[2*j+1] << ")\n";
+    // }
 
     for (int q : targetQubits) {
       double cudaProb = svCUDA0.prob(q);
       double cpuProb = svCPU.prob(q);
-      std::cerr << "Qubit " << q << ": CUDA prob=" << cudaProb << ", CPU prob=" << cpuProb << "\n";
+      // std::cerr << "Qubit " << q << ": CUDA prob=" << cudaProb << ", CPU prob=" << cpuProb << "\n";
       suite.assertClose(cudaProb, cpuProb,
           ss.str() + "CUDA and CPU SV prob match for qubit " + std::to_string(q), GET_INFO());
     }
@@ -123,5 +123,6 @@ void test::test_cuda_gate_var() {
   // Test 5: 6-qubit system, 3-qubit gate on non-contiguous qubits {2, 4, 5}
   f<6>({2, 4, 5});
 
+  // Test 6: 10-qubit system, 4-qubit gate on non-contiguous qubits {0, 2, 3, 6}
   f<10>({0, 2, 3, 6});
 }
