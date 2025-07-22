@@ -33,6 +33,10 @@ int main() {
   }, "CUDA Codegen Test Finished!");
 
   utils::timedExecute([] {
+    test_cudaU2();
+  }, "CUDA Codegen Test Finished!");
+
+  utils::timedExecute([] {
     test_cuda_gate_var();
   }, "CUDA Codegen Test Finished!");
 

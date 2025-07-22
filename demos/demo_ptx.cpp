@@ -1,3 +1,11 @@
+#include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
+#include <algorithm>
+#include <cmath>
+#include <regex>
+
 #include "simulation/StatevectorCUDA.h"
 #include "timeit/timeit.h"
 
@@ -11,6 +19,27 @@
 namespace cl = llvm::cl;
 
 using namespace cast;
+
+static int getQubitCount(const std::string& qasm_path) {
+  const auto slash = qasm_path.find_last_of("/\\");
+  std::string name = (slash == std::string::npos)
+                        ? qasm_path
+                        : qasm_path.substr(slash + 1);
+
+  // drop the extension
+  const auto dot = name.rfind('.');
+  if (dot != std::string::npos)
+      name.erase(dot);
+
+  // regex “q<digits>…”
+  static const std::regex rx(R"(q(\d+))", std::regex::icase);
+
+  std::smatch m;
+  if (std::regex_search(name, m, rx))
+      return std::stoi(m[1].str());
+
+  return -1;
+}
 
 cl::opt<std::string>
 ArgInputFilename("i",
@@ -60,6 +89,7 @@ int main(int argc, const char** argv) {
 
   openqasm::Parser qasmParser(ArgInputFilename, 0);
   auto qasmRoot = qasmParser.parse();
+  int qubit_count = getQubitCount(ArgInputFilename);
 
   // This is temporary work-around as CircuitGraph does not allow copy yet
   CircuitGraph graphNoFuse, graphNaiveFuse, graphAdaptiveFuse, graphCudaFuse;
@@ -101,32 +131,32 @@ int main(int argc, const char** argv) {
   if (ArgRunNoFuse) {
     utils::timedExecute([&]() {
       kernelMgr.genCUDAGatesFromCircuitGraph(
-        kernelGenConfig, graphNoFuse, "graphNoFuse");
+        kernelGenConfig, graphNoFuse, "graphNoFuse", qubit_count);
     }, "Generate No-fuse Kernels");
   }
   if (ArgRunNaiveFuse) {
     utils::timedExecute([&]() {
       kernelMgr.genCUDAGatesFromCircuitGraph(
-        kernelGenConfig, graphNaiveFuse, "graphNaiveFuse");
+        kernelGenConfig, graphNaiveFuse, "graphNaiveFuse", qubit_count);
     }, "Generate Naive-fused Kernels");
   }
   if (ArgRunAdaptiveFuse && ArgModelPath != "") {
     utils::timedExecute([&]() {
       kernelMgr.genCUDAGatesFromCircuitGraph(
-        kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse");
+        kernelGenConfig, graphAdaptiveFuse, "graphAdaptiveFuse", qubit_count);
     }, "Generate Adaptive-fused Kernels");
   }
   if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
     utils::timedExecute([&]() {
       kernelMgr.genCUDAGatesFromCircuitGraph(
-        kernelGenConfig, graphCudaFuse, "graphCudaFuse");
+        kernelGenConfig, graphCudaFuse, "graphCudaFuse", qubit_count);
     }, "Generate CUDA-optimized Kernels");
   }
 
   // JIT compile kernels
   std::vector<CUDAKernelInfo*> kernelsNoFuse, kernelsNaiveFuse, kernelAdaptiveFuse, kernelCudaFuse;
   utils::timedExecute([&]() {
-    kernelMgr.emitPTX(ArgNThreads, llvm::OptimizationLevel::O1, 1);
+    kernelMgr.emitPTX(ArgNThreads, llvm::OptimizationLevel::O2, 1);
     kernelMgr.initCUJIT(ArgNThreads, 1);
     auto printStats = [&](const std::string& name, 
                          const std::vector<CUDAKernelInfo*>& kernels) {
