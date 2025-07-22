@@ -1511,7 +1511,6 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGate(
         // genMatrixVectorMultiplyFromPointer(B, config, gate->gateMatrix, gate->qubits, matBasePtr, svPtrV, scalarTy);
         genMatrixVectorMultiplyFromPointer_SharedTiled(B, config, gate->gateMatrix, gate->qubits, matBasePtr, svPtrV, scalarTy);
       }
-      // genMatrixVectorMultiplyFromPointer_SharedTiled(B, config, gate->gateMatrix, gate->qubits, matBasePtr, svPtrV, scalarTy);
       break;
     }
     case CUDAKernelGenConfig::LoadInConstMemSpace: {
