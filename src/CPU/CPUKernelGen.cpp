@@ -16,11 +16,11 @@
 
 using namespace cast;
 
-std::atomic<int> cast::CPUKernelManager::_standaloneKernelCounter = 0;
+std::atomic<int> cast::CPUKernelManager::standaloneKernelCounter_ = 0;
 
 // Top-level entry
 MaybeError<CPUKernelManager::KernelInfoPtr>
-CPUKernelManager::_genCPUGate(const CPUKernelGenConfig& config,
+CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
                               ConstQuantumGatePtr gate,
                               const std::string& funcName) {
   auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
@@ -29,7 +29,7 @@ CPUKernelManager::_genCPUGate(const CPUKernelGenConfig& config,
     // a normal gate, no noise channel
     const auto scalarGM = stdQuGate->getScalarGM();
     assert(scalarGM != nullptr && "Only supporting scalar GM for now");
-    func = _gen(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
+    func = gen_(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
   } else {
     // super op gates are treated as normal gates with twice the number of
     // qubits
@@ -41,7 +41,7 @@ CPUKernelManager::_genCPUGate(const CPUKernelGenConfig& config,
     auto nQubits = superopGate->nQubits();
     for (const auto& q : qubits)
       qubits.push_back(q + nQubits);
-    func = _gen(config, scalarGM->matrix(), qubits, funcName);
+    func = gen_(config, scalarGM->matrix(), qubits, funcName);
   }
 
   if (func == nullptr) {
@@ -69,20 +69,20 @@ CPUKernelManager::genStandaloneGate(const CPUKernelGenConfig& config,
                                     const std::string& _funcName) {
   std::string funcName(_funcName);
   if (funcName.empty())
-    funcName = "kernel_" + std::to_string(_standaloneKernelCounter++);
+    funcName = "kernel_" + std::to_string(standaloneKernelCounter_++);
   // check for name conflicts
-  for (const auto& kernel : _standaloneKernels) {
+  for (const auto& kernel : standaloneKernels_) {
     if (kernel->llvmFuncName == funcName) {
       return cast::makeError<void>("Kernel with name '" + funcName +
                                    "' already exists.");
     }
   }
 
-  auto result = _genCPUGate(config, gate, funcName);
+  auto result = genCPUGate_(config, gate, funcName);
   if (!result) {
     return cast::makeError<void>("Err: " + result.takeError());
   }
-  _standaloneKernels.emplace_back(result.takeValue());
+  standaloneKernels_.emplace_back(result.takeValue());
   return {}; // success
 }
 
@@ -92,7 +92,7 @@ CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
                                 const std::string& graphName) {
   assert(graph.checkConsistency());
 
-  if (_graphKernels.contains(graphName)) {
+  if (graphKernels_.contains(graphName)) {
     std::ostringstream oss;
     oss << "Graph with name '" << graphName
         << "' already has generated kernels. Please use a different name.";
@@ -108,7 +108,7 @@ CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
   for (const auto& gate : allGates) {
     auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    auto result = _genCPUGate(config, gate, name);
+    auto result = genCPUGate_(config, gate, name);
     if (!result) {
       std::ostringstream oss;
       oss << "Failed to generate kernel for gate " << (void*)(gate.get())
@@ -118,7 +118,7 @@ CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
     kernels.emplace_back(result.takeValue());
   }
   // Store the generated kernels in the map
-  _graphKernels[graphName] = std::move(kernels);
+  graphKernels_[graphName] = std::move(kernels);
 
   return {}; // success
 }
@@ -288,7 +288,7 @@ void debugPrintMatData(std::ostream& os,
 } // end of anonymous namespace
 
 llvm::Function*
-CPUKernelManager::_gen(const CPUKernelGenConfig& config,
+CPUKernelManager::gen_(const CPUKernelGenConfig& config,
                        const ComplexSquareMatrix& mat,
                        const QuantumGate::TargetQubitsType& qubits,
                        const std::string& funcName) {

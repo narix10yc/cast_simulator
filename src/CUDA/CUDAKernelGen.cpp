@@ -1427,8 +1427,8 @@ CUDAKernelManager::genCUDAGate(const CUDAKernelGenConfig& config,
       createNewLLVMContextModulePair(funcName + "Module");
 
   IRBuilder<> B(*llvmContextModulePair.llvmContext);
-  assert(config.precision == 32 || config.precision == 64);
-  Type* scalarTy = (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
+  assert(config.precision != Precision::Unknown);
+  Type* scalarTy = (config.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
 
   IRArgsCUDA args;
   auto* func = getFunctionDeclarationCUDA(
@@ -1442,7 +1442,7 @@ CUDAKernelManager::genCUDAGate(const CUDAKernelGenConfig& config,
 
   // Value* svPtrV = args.pSvArg;
   Value* idxStartV =
-      (config.matrixLoadMode == CUDAKernelGenConfig::LoadInConstMemSpace)
+      (config.matrixLoadMode == CUDAMatrixLoadMode::LoadInConstMemSpace)
           ? buildBitExtractOffsetConst(
                 B, counterV /*globalTid*/, gate->qubits, nQubits)
           : buildBitExtractOffset(
@@ -1508,7 +1508,7 @@ CUDAKernelManager::genCUDAGate(const CUDAKernelGenConfig& config,
   auto matData = getMatDataCUDA(B, gate->gateMatrix, config);
 
   switch (config.matrixLoadMode) {
-  case CUDAKernelGenConfig::UseMatImmValues: {
+  case CUDAMatrixLoadMode::UseMatImmValues: {
     const auto* gateCMat = gate->gateMatrix.getConstantMatrix();
     assert(gateCMat &&
            "Runtime matrix incompatible with UseMatImmValues load mode");
@@ -1880,7 +1880,7 @@ CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraphMulti(
 void CUDAKernelManager::dumpPTX(const std::string& kernelName,
                                 llvm::raw_ostream& os) {
   // First check if we have already compiled to PTX
-  for (auto& kernelInfo : _cudaKernels) {
+  for (auto& kernelInfo : standaloneKernels_) {
     if (kernelInfo.llvmFuncName == kernelName) {
       if (!kernelInfo.ptxString.empty()) {
         os << "=== PTX for kernel '" << kernelName << "' ===\n";

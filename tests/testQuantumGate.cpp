@@ -32,75 +32,40 @@ void cast::test::test_quantumGate() {
 
   gate0 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {0});
   gate1 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {1});
-  ComplexSquareMatrix matHI{// real
-                            {M_SQRT1_2,
-                             0.0,
-                             M_SQRT1_2,
-                             0.0,
-                             0.0,
-                             M_SQRT1_2,
-                             0.0,
-                             M_SQRT1_2,
-                             M_SQRT1_2,
-                             0.0,
-                             -M_SQRT1_2,
-                             0.0,
-                             0.0,
-                             M_SQRT1_2,
-                             0.0,
-                             -M_SQRT1_2},
-                            // imag
-                            {0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0}};
-
-  ComplexSquareMatrix matIH{// real
-                            {M_SQRT1_2,
-                             M_SQRT1_2,
-                             0.0,
-                             0.0,
-                             M_SQRT1_2,
-                             -M_SQRT1_2,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             M_SQRT1_2,
-                             M_SQRT1_2,
-                             0.0,
-                             0.0,
-                             M_SQRT1_2,
-                             -M_SQRT1_2},
-                            // imag
-                            {0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0,
-                             0.0}};
+  // clang-format off
+  ComplexSquareMatrix matHI{
+    // real
+    { 
+      M_SQRT1_2, 0.0, M_SQRT1_2, 0.0,
+      0.0, M_SQRT1_2, 0.0, M_SQRT1_2,
+      M_SQRT1_2, 0.0, -M_SQRT1_2, 0.0,
+      0.0, 0.0, M_SQRT1_2, 0.0, -M_SQRT1_2
+    },
+    // imag
+    {
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0
+    }
+  };
+  ComplexSquareMatrix matIH{
+    // real
+    {
+      M_SQRT1_2, M_SQRT1_2, 0.0, 0.0,
+      M_SQRT1_2,-M_SQRT1_2, 0.0, 0.0,
+      0.0, 0.0, M_SQRT1_2, M_SQRT1_2,
+      0.0, 0.0, M_SQRT1_2,-M_SQRT1_2
+    },
+    // imag
+    {
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0
+    }
+  };
+  // clang-format on
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(matHI), nullptr, {0, 1});
   check("H(1) otimes I1(1) = H(1)I1(0)", GET_INFO());
@@ -117,27 +82,42 @@ void cast::test::test_quantumGate() {
 
   check("I1 otimes H = IH", GET_INFO());
 
-  ComplexSquareMatrix mat0{// real
-                           {1.0, 2.0, 3.0, 4.0},
-                           // imag
-                           {0.0, 0.0, 0.0, 0.0}};
+  // clang-format off
+  ComplexSquareMatrix mat0{
+    // real
+    {1.0, 2.0, 3.0, 4.0},
+    // imag
+    {0.0, 0.0, 0.0, 0.0}
+  };
+  ComplexSquareMatrix mat00{
+    // real
+    {7.0, 10.0, 15.0, 22.0},
+    // imag
+    {0.0, 0.0, 0.0, 0.0}
+  };
+  ComplexSquareMatrix mat0_otimes_0{
+    // real
+    {
+      1, 2, 2, 4,
+      3, 4, 6, 8,
+      3, 6, 4, 8,
+      9, 12, 12, 16
+    },
+    // imag
+    {
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0
+    }
+  };
+  // clang-format on
   gate0 = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat0), nullptr, {0});
   gate1 = gate0;
-
-  ComplexSquareMatrix mat00{// real
-                            {7.0, 10.0, 15.0, 22.0},
-                            // imag
-                            {0.0, 0.0, 0.0, 0.0}};
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat00), nullptr, {0});
   check("Arbitrary matrix example", GET_INFO());
-
-  ComplexSquareMatrix mat0_otimes_0{
-      // real
-      {1, 2, 2, 4, 3, 4, 6, 8, 3, 6, 4, 8, 9, 12, 12, 16},
-      // imag
-      {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
   gate1 = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat0), nullptr, {1});
   gate = StandardQuantumGate::Create(

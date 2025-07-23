@@ -41,14 +41,14 @@ int cast::get_cpu_num_threads() {
 
   int nThreads = std::thread::hardware_concurrency();
   if (nThreads <= 0) {
-    std::cerr << BOLDYELLOW(
-        "[Warning]: ") "Unable to detect hardware concurrency, defaulting to 1 "
-                       "thread. "
-                       "You can set the number of threads using the "
-                       "CAST_NUM_THREADS "
-                       "environment variable or by defining "
-                       "-DCAST_NUM_THREADS=<N> "
-                       "when configuring the project.\n";
+    std::cerr << BOLDYELLOW("[Warning]: ")
+              << "Unable to detect hardware concurrency, defaulting to 1 "
+                 "thread. "
+                 "You can set the number of threads using the "
+                 "CAST_NUM_THREADS "
+                 "environment variable or by defining "
+                 "-DCAST_NUM_THREADS=<N> "
+                 "when configuring the project.\n";
     nThreads = 1;
   }
   return nThreads;

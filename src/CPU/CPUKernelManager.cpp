@@ -41,8 +41,8 @@ std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
 }
 
 std::ostream& CPUKernelManager::displayInfo(std::ostream& os) const {
-  int nKernels = _standaloneKernels.size();
-  for (const auto& [graphName, kernels] : _graphKernels)
+  int nKernels = standaloneKernels_.size();
+  for (const auto& [graphName, kernels] : graphKernels_)
     nKernels += kernels.size();
   os << CYAN("=== CPU Kernel Manager Info ===\n");
   os << "- Is JITed:          " << (isJITed() ? "Yes" : "No") << "\n"
@@ -55,9 +55,9 @@ std::ostream& CPUKernelManager::displayInfo(std::ostream& os) const {
 void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   assert(nThreads > 0);
   if (nThreads == 1) {
-    for (auto& kernel : _standaloneKernels)
+    for (auto& kernel : standaloneKernels_)
       ensureExecutable(*kernel);
-    for (auto& [graphName, kernels] : _graphKernels) {
+    for (auto& [graphName, kernels] : graphKernels_) {
       for (auto& kernel : kernels)
         ensureExecutable(*kernel);
     }
@@ -65,10 +65,10 @@ void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
 
   // multi-thread compile
   utils::TaskDispatcher dispatcher(nThreads);
-  for (auto& kernel : _standaloneKernels) {
+  for (auto& kernel : standaloneKernels_) {
     dispatcher.enqueue([this, &kernel]() { ensureExecutable(*kernel); });
   }
-  for (auto& [graphName, kernels] : _graphKernels) {
+  for (auto& [graphName, kernels] : graphKernels_) {
     for (auto& kernel : kernels) {
       dispatcher.enqueue([this, &kernel]() { ensureExecutable(*kernel); });
     }

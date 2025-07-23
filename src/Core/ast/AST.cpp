@@ -3,7 +3,6 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
-#include "cast/Legacy/CircuitGraph.h"
 #include "llvm/Support/Casting.h"
 
 using namespace cast::ast;

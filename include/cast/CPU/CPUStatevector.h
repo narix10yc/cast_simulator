@@ -3,7 +3,6 @@
 
 #include "cast/CPU/Config.h"
 #include "cast/Core/QuantumGate.h"
-#include "cast/Legacy/QuantumGate.h"
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
@@ -416,50 +415,6 @@ public:
       os << "qubit " << q << ": " << prob(q) << "\n";
     }
     return os;
-  }
-
-  CPUStatevector& applyGate(const cast::legacy::QuantumGate& gate) {
-    const auto* cMat = gate.gateMatrix.getConstantMatrix();
-    assert(cMat && "Can only apply constant gateMatrix");
-
-    const unsigned k = gate.qubits.size();
-    const unsigned K = 1 << k;
-    assert(cMat->edgeSize() == K);
-    std::vector<size_t> ampIndices(K);
-    std::vector<std::complex<ScalarType>> ampUpdated(K);
-
-    size_t pdepMaskTask = ~static_cast<size_t>(0);
-    size_t pdepMaskAmp = 0;
-    for (const auto q : gate.qubits) {
-      pdepMaskTask ^= (1ULL << q);
-      pdepMaskAmp |= (1ULL << q);
-    }
-
-    for (size_t taskId = 0; taskId < (getN() >> k); taskId++) {
-      auto pdepTaskId = utils::pdep64(taskId, pdepMaskTask);
-      for (size_t ampId = 0; ampId < K; ampId++) {
-        ampIndices[ampId] = pdepTaskId + utils::pdep64(ampId, pdepMaskAmp);
-      }
-
-      // std::cerr << "taskId = " << taskId
-      //           << " (" << utils::as0b(taskId, nQubits - k) << "):\n";
-      // utils::printVectorWithPrinter(ampIndices,
-      //   [&](size_t n, std::ostream& os) {
-      //     os << n << " (" << utils::as0b(n, nQubits) << ")";
-      //   }, std::cerr << " ampIndices: ") << "\n";
-
-      for (unsigned r = 0; r < K; r++) {
-        ampUpdated[r] = 0.0;
-        for (unsigned c = 0; c < K; c++) {
-          ampUpdated[r] += cMat->rc(r, c) * this->amp(ampIndices[c]);
-        }
-      }
-      for (unsigned r = 0; r < K; r++) {
-        this->real(ampIndices[r]) = ampUpdated[r].real();
-        this->imag(ampIndices[r]) = ampUpdated[r].imag();
-      }
-    }
-    return *this;
   }
 
   CPUStatevector& applyGate(const cast::StandardQuantumGate& stdQuGate) {

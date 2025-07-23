@@ -129,10 +129,10 @@ MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraph(
     return cast::makeError<void>(
         "Must initialize JIT session before applying CPU kernel.");
   }
-  if (!_graphKernels.contains(graphName)) {
+  if (!graphKernels_.contains(graphName)) {
     return cast::makeError<void>("Graph not found: " + graphName);
   }
-  const auto& kernels = _graphKernels.at(graphName);
+  const auto& kernels = graphKernels_.at(graphName);
   for (const auto& kernel : kernels) {
     if (kernel->executable == nullptr) {
       std::ostringstream oss;

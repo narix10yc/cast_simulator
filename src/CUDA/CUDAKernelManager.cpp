@@ -96,12 +96,12 @@ void CUDAKernelManager::emitPTX(int nThreads,
     }
   }
 
-  assert(_cudaKernels.size() == llvmContextModulePairs.size());
+  assert(standaloneKernels_.size() == llvmContextModulePairs.size());
   utils::TaskDispatcher dispatcher(nThreads);
 
-  for (unsigned i = 0; i < _cudaKernels.size(); i++) {
+  for (unsigned i = 0; i < standaloneKernels_.size(); i++) {
     dispatcher.enqueue([&, i = i]() {
-      raw_svector_ostream sstream(_cudaKernels[i].ptxString);
+      raw_svector_ostream sstream(standaloneKernels_[i].ptxString);
       legacy::PassManager passManager;
       if (createTargetMachine()->addPassesToEmitFile(
               passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
@@ -133,7 +133,7 @@ static int getFirstVisibleDevice() {
 void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   assert(jitState == JIT_PTXEmitted);
   assert(nThreads > 0);
-  auto nKernels = _cudaKernels.size();
+  auto nKernels = standaloneKernels_.size();
   if (nKernels < nThreads) {
     std::cerr << YELLOW("[Warning] ") << "Calling initCUJIT with " << nThreads
               << " threads when there are only " << nKernels
@@ -171,7 +171,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   std::vector<size_t> sharedMemValues(nKernels);
 
   for (unsigned i = 0; i < nKernels; ++i) {
-    auto& kernel = _cudaKernels[i];
+    auto& kernel = standaloneKernels_[i];
     std::string ptxString(kernel.ptxString.str());
     CUcontext* cuContextPtr = &(kernel.cuTuple.cuContext);
     CUmodule* cuModulePtr = &(kernel.cuTuple.cuModule);
@@ -199,7 +199,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
     std::cerr << "Loading PTX codes and getting CUDA functions...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
   for (unsigned i = 0; i < nKernels; ++i) {
-    _cudaKernels[i].cuTuple.sharedMemBytes = sharedMemValues[i];
+    standaloneKernels_[i].cuTuple.sharedMemBytes = sharedMemValues[i];
   }
 
   jitState = JIT_CUFunctionLoaded;

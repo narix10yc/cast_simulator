@@ -49,8 +49,7 @@ struct CPUKernelGenConfig {
 
   CPUKernelGenConfig()
       : simdWidth(get_cpu_simd_width()),
-        precision(Precision::F64) // default to double precision
-        ,
+        precision(Precision::F64),
         useFMA(true), useFMS(true), usePDEP(false), zeroTol(1e-8), oneTol(1e-8),
         matrixLoadMode(CPUMatrixLoadMode::UseMatImmValues) {}
 
@@ -66,64 +65,36 @@ struct CPUKernelGenConfig {
 
 class CPUKernelManager : public KernelManagerBase {
   using KernelInfoPtr = std::unique_ptr<CPUKernelInfo>;
-  std::vector<KernelInfoPtr> _standaloneKernels;
-  std::map<std::string, std::vector<KernelInfoPtr>> _graphKernels;
+  std::vector<KernelInfoPtr> standaloneKernels_;
+  std::map<std::string, std::vector<KernelInfoPtr>> graphKernels_;
   std::unique_ptr<llvm::orc::LLJIT> llvmJIT;
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
-  llvm::Function* _gen(const CPUKernelGenConfig& config,
+  llvm::Function* gen_(const CPUKernelGenConfig& config,
                        const ComplexSquareMatrix& matrix,
                        const QuantumGate::TargetQubitsType& qubits,
                        const std::string& funcName);
 
   // Generate a CPU kernel for the given gate. This function will check if the
-  // gate is a standard gate or a superoperator gate.
+  // gate is a standard gate or a superoperator gate, and handle accordingly.
   MaybeError<std::unique_ptr<CPUKernelInfo>>
-  _genCPUGate(const CPUKernelGenConfig& config,
+  genCPUGate_(const CPUKernelGenConfig& config,
               ConstQuantumGatePtr gate,
               const std::string& funcName);
 
-  static std::atomic<int> _standaloneKernelCounter;
+  static std::atomic<int> standaloneKernelCounter_;
 
 public:
   CPUKernelManager()
-      : KernelManagerBase(), _standaloneKernels(), llvmJIT(nullptr) {}
+      : KernelManagerBase(), standaloneKernels_(), llvmJIT(nullptr) {}
 
   std::ostream& displayInfo(std::ostream& os) const;
-
-  // Get all standalone kernels.
-  std::span<const KernelInfoPtr> getAllStandaloneKernels() const {
-    return std::span<const KernelInfoPtr>(_standaloneKernels);
-  }
-
-  // Get kernel by name. Return nullptr if not found.
-  const CPUKernelInfo* getKernelByName(const std::string& llvmFuncName) const {
-    for (const auto& kernel : _standaloneKernels) {
-      if (kernel->llvmFuncName == llvmFuncName)
-        return kernel.get();
-    }
-    for (const auto& [graphName, kernels] : _graphKernels) {
-      for (const auto& kernel : kernels) {
-        if (kernel->llvmFuncName == llvmFuncName)
-          return kernel.get();
-      }
-    }
-    return nullptr;
-  }
-
-  std::span<const KernelInfoPtr>
-  getKernelsFromGraphName(const std::string& graphName) const {
-    auto it = _graphKernels.find(graphName);
-    if (it == _graphKernels.end())
-      return {}; // empty span
-    return std::span<const KernelInfoPtr>(it->second);
-  }
 
   /// Initialize JIT session. When succeeds, \c llvmContextModulePairs
   /// will be cleared and \c llvmJIT will be non-null. This function can only be
   /// called once and cannot be undone.
-  /// \param nThreads number of threads to use.
+  /// \param nThreads Number of threads to use.
   /// \param optLevel Apply LLVM optimization passes.
   /// \param useLazyJIT If true, use lazy compilation features provided by LLVM
   /// ORC JIT engine. This means all kernels only get compiled just before being
@@ -141,6 +112,8 @@ public:
     return llvmJIT != nullptr;
   }
 
+  /* Generate Kernels */
+
   // Generate a CPU kernel for the given gate. The generated kernel will be
   // put into the standalone kernel pool. This function checks for name
   // conflicts and will not overwrite existing kernels.
@@ -150,14 +123,58 @@ public:
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
-  /// order of the gate in the circuit graph. <order> will be retrieved in
-  /// \c collectKernelsFromGraphName
+  /// order of the gate in the circuit graph.
+  // TODO: do we still need the order
   MaybeError<void> genGraphGates(const CPUKernelGenConfig& config,
                                  const ir::CircuitGraphNode& graph,
                                  const std::string& graphName);
 
-  // std::vector<CPUKernelInfo*>
-  // collectKernelsFromGraphName(const std::string& graphName);
+  /* Get Kernels */
+
+  std::span<const KernelInfoPtr> getAllStandaloneKernels() const {
+    return std::span<const KernelInfoPtr>(standaloneKernels_);
+  }
+
+  // Get kernel by name. Return nullptr if not found.
+  const CPUKernelInfo* getKernelByName(const std::string& llvmFuncName) const {
+    for (const auto& kernel : standaloneKernels_) {
+      if (kernel->llvmFuncName == llvmFuncName)
+        return kernel.get();
+    }
+    for (const auto& [graphName, kernels] : graphKernels_) {
+      for (const auto& kernel : kernels) {
+        if (kernel->llvmFuncName == llvmFuncName)
+          return kernel.get();
+      }
+    }
+    return nullptr;
+  }
+
+  std::span<const KernelInfoPtr>
+  getKernelsFromGraphName(const std::string& graphName) const {
+    auto it = graphKernels_.find(graphName);
+    if (it == graphKernels_.end())
+      return {}; // empty span
+    return std::span<const KernelInfoPtr>(it->second);
+  }
+
+  /* Apply Kernels */
+
+  MaybeError<void> applyCPUKernel(void* sv,
+                                  int nQubits,
+                                  const CPUKernelInfo& kernelInfo,
+                                  int nThreads = 1) const;
+
+  MaybeError<void> applyCPUKernel(void* sv,
+                                  int nQubits,
+                                  const std::string& llvmFuncName,
+                                  int nThreads = 1) const;
+
+  MaybeError<void> applyCPUKernelsFromGraph(void* sv,
+                                            int nQubits,
+                                            const std::string& graphName,
+                                            int nThreads = 1) const;
+
 
   void ensureExecutable(CPUKernelInfo& kernel) {
     // Note: We do not actually need the lock here
@@ -187,21 +204,6 @@ public:
   void dumpAsm(const std::string& funcName, llvm::raw_ostream& os);
 
   void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
-
-  MaybeError<void> applyCPUKernel(void* sv,
-                                  int nQubits,
-                                  const CPUKernelInfo& kernelInfo,
-                                  int nThreads = 1) const;
-
-  MaybeError<void> applyCPUKernel(void* sv,
-                                  int nQubits,
-                                  const std::string& llvmFuncName,
-                                  int nThreads = 1) const;
-
-  MaybeError<void> applyCPUKernelsFromGraph(void* sv,
-                                            int nQubits,
-                                            const std::string& graphName,
-                                            int nThreads = 1) const;
 
 }; // class CPUKernelManager
 

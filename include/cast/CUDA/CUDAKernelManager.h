@@ -7,9 +7,11 @@
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 
-#include <cuda.h>
 // TODO: We may not need cuda_runtime (also no need to link CUDA::cudart)
+#include <cuda.h>
 #include <cuda_runtime.h>
+
+#include "utils/MaybeError.h"
 
 namespace cast {
 
@@ -71,28 +73,32 @@ struct CUDAKernelGenConfig {
 };
 
 class CUDAKernelManager : public KernelManagerBase {
-  std::vector<CUDAKernelInfo> _cudaKernels;
+  using KernelInfoPtr = std::unique_ptr<CUDAKernelInfo>;
+  std::vector<KernelInfoPtr> standaloneKernels_;
+  std::map<std::string, std::vector<KernelInfoPtr>> graphKernels_;
 
   enum JITState { JIT_Uninited, JIT_PTXEmitted, JIT_CUFunctionLoaded };
   JITState jitState;
 
 public:
   CUDAKernelManager()
-      : KernelManagerBase(), _cudaKernels(), jitState(JIT_Uninited) {}
+      : KernelManagerBase(), standaloneKernels_(), jitState(JIT_Uninited) {}
 
-  std::vector<CUDAKernelInfo>& kernels() { return _cudaKernels; }
-  const std::vector<CUDAKernelInfo>& kernels() const { return _cudaKernels; }
+  MaybeError<void> genStandardaloneGate(const CUDAKernelGenConfig& config,
+                                        const QuantumGate* gate,
+                                        const std::string& funcName);
 
-  CUDAKernelManager& genCUDAGate(const CUDAKernelGenConfig& config,
-                                 const QuantumGate* gate,
-                                 const std::string& funcName);
+  // Get all standalone kernels.
+  std::span<const KernelInfoPtr> getAllStandaloneKernels() const {
+    return std::span<const KernelInfoPtr>(standaloneKernels_);
+  }
 
   void emitPTX(int nThreads = 1,
                llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
                int verbose = 0);
 
   std::string getPTXString(int idx) const {
-    return std::string(_cudaKernels[idx].ptxString.str());
+    return std::string(standaloneKernels_[idx]->ptxString.str());
   }
 
   void dumpPTX(const std::string& kernelName, llvm::raw_ostream& os);
@@ -110,9 +116,9 @@ public:
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
   ~CUDAKernelManager() {
-    for (auto& kernel : _cudaKernels) {
-      if (kernel.cuTuple.cuModule) {
-        cuModuleUnload(kernel.cuTuple.cuModule);
+    for (auto& kernel : standaloneKernels_) {
+      if (kernel->cuTuple.cuModule) {
+        cuModuleUnload(kernel->cuTuple.cuModule);
       }
     }
     for (auto& ctx : cuContexts) {
