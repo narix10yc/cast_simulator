@@ -1,6 +1,6 @@
 #include "cast/Core/AST/Parser.h"
 #include "cast/Transform/Transform.h"
-#include "cast/CPU/CPUOptimizerBuilder.h"
+#include "cast/CPU/CPUOptimizer.h"
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUStatevector.h"
 #include "tests/TestKit.h"
@@ -20,16 +20,8 @@ static void f() {
   cast::CPUKernelManager kernelMgr;
   cast::CPUKernelGenConfig kernelGenConfig(SimdWidth, cast::Precision::F64);
 
-  cast::CPUOptimizerBuilder optBuilder;
-  optBuilder.disableCFO()
-            .setSizeOnlyFusion(3)
-            .setNThreads(1)
-            .setPrecision(kernelGenConfig.precision);
-  auto optOrError = optBuilder.build();
-  if (!optOrError) {
-    suite.assertFalse(optOrError.takeError(), GET_INFO());
-  }
-  auto opt = optOrError.takeValue();
+  cast::CPUOptimizer opt;
+  opt.disableCFO().setSizeOnlyFusionConfig(3);
 
   std::cerr << "Test Dir: " << TEST_DIR << "\n";
   fs::path circuitDir = fs::path(TEST_DIR) / "circuits";
@@ -57,7 +49,7 @@ static void f() {
       kernelGenConfig, *circuitGraphs[0], "graphBeforeFusion"
     ).consumeError();
 
-    opt.run(circuit, /* verbose */ 1);
+    opt.run(circuit, nullptr);
     circuitGraphs = circuit.getAllCircuitGraphs();
 
     // generate gates after fusion
