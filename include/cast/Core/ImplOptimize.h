@@ -7,10 +7,9 @@
 #define CAST_CORE_IMPL_OPTIMIZE_H
 
 #include "cast/Core/IRNode.h"
+#include "cast/Core/FusionConfig.h"
 
 namespace cast { 
-
-struct FusionConfig;
 
 namespace impl {
 

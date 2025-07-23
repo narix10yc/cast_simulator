@@ -53,7 +53,7 @@ static void f() {
       "Expected exactly one circuit graph in the test circuit");
 
     // generate gates before fusion
-    kernelMgr.genCPUGatesFromGraph(
+    kernelMgr.genGraphGates(
       kernelGenConfig, *circuitGraphs[0], "graphBeforeFusion"
     ).consumeError();
 
@@ -61,7 +61,7 @@ static void f() {
     circuitGraphs = circuit.getAllCircuitGraphs();
 
     // generate gates after fusion
-    kernelMgr.genCPUGatesFromGraph(
+    kernelMgr.genGraphGates(
       kernelGenConfig, *circuitGraphs[0], "graphAfterFusion"
     ).consumeError();
 

@@ -104,8 +104,8 @@ public:
   std::ostream& displayInfo(std::ostream& os) const;
 
   // Get all standalone kernels.
-  const std::vector<KernelInfoPtr>& getAllStandaloneKernels() const {
-    return _standaloneKernels;
+  std::span<const KernelInfoPtr> getAllStandaloneKernels() const {
+    return std::span<const KernelInfoPtr>(_standaloneKernels);
   }
 
   // Get kernel by name. Return nullptr if not found.
@@ -121,6 +121,14 @@ public:
       }
     }
     return nullptr;
+  }
+
+  std::span<const KernelInfoPtr> getKernelsFromGraphName(
+      const std::string& graphName) const {
+    auto it = _graphKernels.find(graphName);
+    if (it == _graphKernels.end())
+      return {}; // empty span
+    return std::span<const KernelInfoPtr>(it->second);
   }
 
   /// Initialize JIT session. When succeeds, \c llvmContextModulePairs
@@ -156,7 +164,7 @@ public:
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
   /// order of the gate in the circuit graph. <order> will be retrieved in
   /// \c collectKernelsFromGraphName 
-  MaybeError<void> genCPUGatesFromGraph(
+  MaybeError<void> genGraphGates(
       const CPUKernelGenConfig& config,
       const ir::CircuitGraphNode& graph,
       const std::string& graphName);

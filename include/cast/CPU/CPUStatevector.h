@@ -228,6 +228,8 @@ private:
     return static_cast<ScalarType*>(::operator new(size, align));
   }
 public:
+  CPUStatevector() : _data(nullptr), _nQubits(0), simd_s(0) {}
+
   CPUStatevector(int nQubits, CPUSimdWidth simdWidth) {
     assert(nQubits > 0);
     _nQubits = nQubits;
@@ -517,8 +519,8 @@ using CPUStatevectorF64 = CPUStatevector<double>;
 // }
 
 template<typename ScalarType>
-ScalarType fidelity(
-    const CPUStatevector<ScalarType>& sv0, const CPUStatevector<ScalarType>& sv1) {
+ScalarType fidelity(const CPUStatevector<ScalarType>& sv0,
+                    const CPUStatevector<ScalarType>& sv1) {
   assert(sv0.nQubits() == sv1.nQubits());
   ScalarType re = 0.0, im = 0.0;
   for (size_t i = 0; i < sv0.getN(); i++) {
@@ -532,6 +534,43 @@ ScalarType fidelity(
 
 using CPUStatevectorF32 = CPUStatevector<float>;
 using CPUStatevectorF64 = CPUStatevector<double>;
+
+class CPUStatevectorWrapper {
+private:
+  std::variant<CPUStatevectorF32, CPUStatevectorF64> sv;
+public:
+  CPUStatevectorWrapper(Precision precision,
+                        int nQubits,
+                        CPUSimdWidth simdWidth) {
+    if (precision == Precision::F32)
+      sv = CPUStatevectorF32(nQubits, simdWidth);
+    else if (precision == Precision::F64)
+      sv = CPUStatevectorF64(nQubits, simdWidth);
+    else
+      assert(false && "Unsupported precision for CPUStatevectorWrapper");
+  }
+
+  void* data() {
+    return std::visit([](auto& s) { return static_cast<void*>(s.data()); }, sv);
+  }
+
+  void randomize(int nThreads = 1) {
+    std::visit([nThreads](auto& s) { s.randomize(nThreads); }, sv);
+  }
+
+  void initialize(int nThreads = 1) {
+    std::visit([nThreads](auto& s) { s.initialize(nThreads); }, sv);
+  }
+
+  size_t sizeInBytes() const {
+    return std::visit([](const auto& s) { return s.sizeInBytes(); }, sv);
+  }
+
+  int nQubits() const {
+    return std::visit([](const auto& s) { return s.nQubits(); }, sv);
+  }
+
+}; // class CPUStatevectorWrapper
 
 } // end of namespace cast
 

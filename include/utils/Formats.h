@@ -26,6 +26,8 @@ public:
   }
 };
 
+// Format time with 4 significant digits. For example, fmt_time(0.001234)
+// will print "1.234 ms".
 class fmt_time {
   double t_in_sec;
 public:
@@ -120,7 +122,6 @@ public:
     }
     return os << "]";
   }
-
 };
 
 } // namespace utils

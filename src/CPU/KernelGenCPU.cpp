@@ -86,7 +86,7 @@ MaybeError<void> CPUKernelManager::genStandaloneGate(
   return {}; // success
 }
 
-MaybeError<void> CPUKernelManager::genCPUGatesFromGraph(
+MaybeError<void> CPUKernelManager::genGraphGates(
     const CPUKernelGenConfig& config,
     const ir::CircuitGraphNode& graph,
     const std::string& graphName) {

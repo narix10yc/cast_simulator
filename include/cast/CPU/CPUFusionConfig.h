@@ -4,17 +4,35 @@
 #include "cast/Core/FusionConfig.h"
 #include "cast/CPU/CPUCostModel.h"
 
+#include "llvm/Support/Casting.h"
+
 namespace cast {
 
+// Must provide a CPUCostModel in the constructor.
 class CPUFusionConfig : public FusionConfig {
 public:
-  CPUFusionConfig() : FusionConfig(FC_CPU) {}
+  CPUFusionConfig(std::unique_ptr<CPUCostModel> cpuCostModel,
+                  int nThreads = -1, // -1 means not set
+                  Precision precision = Precision::Unknown)
+    : FusionConfig(FC_CPU) {
+    this->costModel = std::move(cpuCostModel);
+    setNThreads(nThreads);
+    setPrecision(precision);
+  }
 
-  // Set to null to accept all fusion candidates.
-  std::unique_ptr<CPUCostModel> cpuCostModel = nullptr;
+  void setNThreads(int nThreads) {
+    if (auto* cpuCostModel = 
+        llvm::dyn_cast<CPUCostModel>(costModel.get())) {
+      cpuCostModel->setQueryNThreads(nThreads);
+    }
+  }
 
-  int nThreads = 0;
-  Precision precision = Precision::Unknown;
+  void setPrecision(Precision precision) {
+    if (auto* cpuCostModel = 
+        llvm::dyn_cast<CPUCostModel>(costModel.get())) {
+      cpuCostModel->setQueryPrecision(precision);
+    }
+  }
 
   std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
 

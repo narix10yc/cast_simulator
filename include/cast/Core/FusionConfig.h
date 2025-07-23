@@ -45,7 +45,6 @@ public:
   double benefitMargin = 0.1;
 
   bool enableMultiTraverse = true;
-  bool enableFusionCFOPass = true;
 
   virtual std::ostream& displayInfo(std::ostream& os, int verbose) const = 0;
 };

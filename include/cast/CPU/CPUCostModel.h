@@ -6,6 +6,8 @@
 #include "utils/CSVParsable.h"
 #include "cast/CPU/Config.h"
 
+#include <fstream>
+
 namespace cast {
 
 class CPUKernelGenConfig;
@@ -19,20 +21,18 @@ public:
     int nThreads;
     /// memory update speed in Gigabytes per second (GiBps)
     double memUpdateSpeed;
-  public:
+
+    Item() = default;
+
     Item(int nQubits, double opCount, Precision precision,
          int nThreads, double memUpdateSpeed)
-      : nQubits(nQubits)
-      , opCount(opCount)
-      , precision(precision)
-      , nThreads(nThreads)
-      , memUpdateSpeed(memUpdateSpeed) {}
+      : nQubits(nQubits), opCount(opCount), precision(precision),
+        nThreads(nThreads), memUpdateSpeed(memUpdateSpeed) {}
 
     CSV_DATA_FIELD(nQubits, opCount, precision, nThreads, memUpdateSpeed);
   };
 
   std::vector<Item> items;
-  CPUPerformanceCache() : items() {}
 // private:
   using WeightType = std::array<int, CPU_GLOBAL_MAX_SIZE>;
   void runPreliminaryExperiments(const CPUKernelGenConfig& cpuConfig,
@@ -41,15 +41,29 @@ public:
                                  WeightType& weights,
                                  int verbose = 1);
 public:
+  CPUPerformanceCache() = default;
+
+  CPUPerformanceCache(const std::string& fileName) {
+    std::ifstream ifs(fileName);
+    if (!ifs.is_open()) {
+      assert(false && "Failed to open CPUPerformanceCache file");
+      return;
+    }
+    std::string line;
+    std::getline(ifs, line); // Read header
+    assert(line == Item::CSV_TITLE);
+
+    while (std::getline(ifs, line)) {
+      Item item;
+      item.parse(line);
+      items.push_back(std::move(item));
+    }
+  }
+
   void runExperiments(const CPUKernelGenConfig& cpuConfig,
                       int nQubits, int nThreads, int nRuns, int verbose = 1);
 
   void writeResults(std::ostream& os) const;
-  
-  static CPUPerformanceCache LoadFromCSV(const std::string& fileName);
-  
-  constexpr static const char*
-  CSV_Title = "nQubits,opCount,precision,nThreads,memSpd";
 };
 
 /// \c CPUCostModel assumes simulation time is proportional to opCount and
@@ -80,8 +94,11 @@ public:
   CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
                double zeroTol = 1e-8);
 
-  void setQueryArgs(int nThreads, Precision precision) {
+  void setQueryNThreads(int nThreads) {
     queryNThreads = nThreads;
+  }
+  
+  void setQueryPrecision(Precision precision) {
     queryPrecision = precision;
   }
 

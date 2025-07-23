@@ -17,6 +17,17 @@ double getMedian(const std::vector<double>& arr, size_t start, size_t end) {
 }
 } // namespace
 
+double timeit::once(std::function<void()> method) {
+  using Clock = std::chrono::high_resolution_clock;
+  using TimePoint = std::chrono::time_point<Clock>;
+  using Duration = std::chrono::duration<double>;
+
+  TimePoint tic = Clock::now();
+  method();
+  TimePoint toc = Clock::now();
+  return Duration(toc - tic).count();
+}
+
 void TimingResult::calcStats() {
   auto l = tArr.size();
   if (repeat == 0) {

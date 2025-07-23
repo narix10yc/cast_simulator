@@ -1,4 +1,3 @@
-#include "cast/Core/Optimize.h"
 #include "cast/Core/ImplOptimize.h"
 
 #include "utils/PrintSpan.h"
@@ -849,8 +848,6 @@ int cast::impl::applyGateFusion(ir::CircuitGraphNode& graph,
   }
   if (nFused > 0)
     graph.squeeze();
-  std::cerr << "Fused " << nFused << " gates with size " << maxCandidateSize
-            << "\n";
   return nFused;
 }
 

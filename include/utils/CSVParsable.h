@@ -101,9 +101,7 @@ template<typename Derived>
 struct CSVParsable {
   void parse(std::string_view line) {
     auto tokens = split_csv(line);
-    if (tokens.size() != Derived::num_fields) {
-      throw std::runtime_error("CSV field count mismatch");
-    }
+    assert(tokens.size() == Derived::num_fields);
 
     auto fields = static_cast<Derived*>(this)->tie_fields();
     for_each(fields, [&](auto& field, std::size_t i) {

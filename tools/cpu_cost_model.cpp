@@ -7,10 +7,6 @@
 #include <fstream>
 namespace cl = llvm::cl;
 
-#define ERR_PRECISION 1
-#define ERR_FILENAME 2
-#define ERR_FILE_IO 3
-
 cl::opt<std::string>
 ArgOutputFilename("o", cl::desc("Output file name"), cl::Required);
 
@@ -90,12 +86,12 @@ int main(int argc, char** argv) {
   if (!outFile || !inFile) {
     std::cerr << BOLDRED("[Error]: ")
               << "Unable to open file '" << ArgOutputFilename << "'.\n";
-    return ERR_FILE_IO;
+    return 1;
   }
 
   // If the file is empty (new cost model), write the CSV title
   if (inFile.peek() == std::ifstream::traits_type::eof())
-    outFile << CPUPerformanceCache::CSV_Title << "\n";
+    outFile << CPUPerformanceCache::Item::CSV_TITLE << "\n";
   inFile.close();
 
   CPUPerformanceCache cache;
@@ -107,7 +103,7 @@ int main(int argc, char** argv) {
   }
   if (ArgF64) {
     std::cerr << BOLDCYAN("[Info]: ")
-              << "Running single-precision experiments.\n";
+              << "Running double-precision experiments.\n";
     CPUKernelGenConfig cpuConfig(simdWidth, Precision::F64);
     cache.runExperiments(cpuConfig, ArgNQubits, nThreads, ArgNTests);
   }

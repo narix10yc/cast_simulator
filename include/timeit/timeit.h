@@ -9,6 +9,8 @@
 
 namespace timeit {
 
+double once(std::function<void()> method);
+
 class TimingResult {
   int repeat, replication;
 

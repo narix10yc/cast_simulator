@@ -17,7 +17,7 @@ CPUCostModel::CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
   items.reserve(32);
 
   // loop through cache and initialize this->items
-  for (const auto& cacheItem : cache->items) {
+  for (const auto& cacheItem : this->cache->items) {
     auto it = std::ranges::find_if(this->items,
       [&cacheItem](const Item& thisItem) {
       return thisItem.nQubits == cacheItem.nQubits &&
@@ -108,9 +108,10 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
   // std::cerr << YELLOW("Warning: ") << "No exact match to "
   //              "[nQubits, precision, nThreads] = ["
   //           << gateNQubits << ", " << gateOpCount << ", "
-  //           << precision << ", " << nThreads
+  //           << static_cast<int>(queryPrecision) << ", " << queryNThreads
   //           << "] found. We estimate it by ["
-  //           << bestMatchIt->nQubits << ", " << bestMatchIt->precision
+  //           << bestMatchIt->nQubits << ", "
+  //           << static_cast<int>(bestMatchIt->precision)
   //           << ", " << bestMatchIt->nThreads
   //           << "] @ " << bestMatchT0 << " s/GiB/op => "
   //              "Est. " << estT0 << " s/GiB/op.\n";
@@ -124,13 +125,12 @@ std::ostream& CPUCostModel::displayInfo(std::ostream& os, int verbose) const {
   os << "Gib Time Cap: " << this->minGibTimeCap << " per op\n";
   os << "  nQubits | Precision | nThreads | Dense MemSpd \n";
   for (int i = 0; i < nLinesToDisplay; ++i) {
-    int denseOpCount = 1ULL << (items[i].nQubits + 1);
-    double GibTimePerOpCount = items[i].getAvgGibTimePerOpCount();
-    double denseMemSpd = 1.0 / (GibTimePerOpCount * denseOpCount);
+    double opCount = static_cast<double>(1ULL << (items[i].nQubits + 2));
+    double timePerGiB = items[i].getAvgGibTimePerOpCount() * opCount;
     os << "    " << std::fixed << std::setw(2) << items[i].nQubits
        << "    |    f" << static_cast<int>(items[i].precision)
        << "    |    " << items[i].nThreads
-       << "    |    " << utils::fmt_1_to_1e3(denseMemSpd, 5)
+       << "    |    " << utils::fmt_1_to_1e3(1.0 / timePerGiB, 5)
        << "\n";
   }
   return os;
@@ -244,24 +244,8 @@ void CPUPerformanceCache::runPreliminaryExperiments(
                       0 // verbose
     ).consumeError(); // ignore possible errors
   }, "Code Generation and JIT Initialization");
-  
-  void* sv;
-  void* svData;
-  utils::timedExecute([&]() {
-    if (cpuConfig.precision == Precision::F32) {
-      auto* p = new CPUStatevectorF32(nQubits, cpuConfig.simdWidth);
-      p->randomize(nThreads);
-      sv = p;
-      svData = p->data();
-    } else {
-      assert(cpuConfig.precision == Precision::F64);
-      auto* p = new CPUStatevectorF64(nQubits, cpuConfig.simdWidth);
-      p->randomize(nThreads);
-      sv = p;
-      svData = p->data();
-    }
-  }, "Initialize statevector");
 
+  CPUStatevectorWrapper sv(cpuConfig.precision, nQubits, cpuConfig.simdWidth);
 
   timeit::Timer timer(3, /* verbose */ 0);
   timeit::TimingResult tr;
@@ -269,7 +253,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
   for (int k = 1; k <= 5; ++k) {
     tr = timer.timeit([&]() {
       kernelMgr.applyCPUKernel(
-        svData, nQubits, "gate_k" + std::to_string(k), nThreads
+        sv.data(), nQubits, "gate_k" + std::to_string(k), nThreads
       ).consumeError(); // ignore possible errors
     });
     memSpds[k-1] = 
@@ -326,13 +310,6 @@ void CPUPerformanceCache::runPreliminaryExperiments(
                 << (100.0 * static_cast<double>(weights[k-1]) / sum)
                 << "\n";
     }
-  }
-
-  if (cpuConfig.precision == Precision::F32)
-    delete static_cast<cast::CPUStatevectorF32*>(sv);
-  else {
-    assert(cpuConfig.precision == Precision::F64);
-    delete static_cast<cast::CPUStatevectorF64*>(sv);
   }
 }
 
@@ -411,7 +388,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
   timeit::Timer timer(3, /* verbose */ 0);
   timeit::TimingResult tr;
 
-  cast::CPUStatevector<double> sv(nQubits, cpuConfig.simdWidth);
+  CPUStatevectorWrapper sv(cpuConfig.precision, nQubits, cpuConfig.simdWidth);
   utils::timedExecute([&]() {
     sv.randomize(nThreads);
   }, "Initialize statevector");
@@ -425,7 +402,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
     auto memSpd = calculateMemUpdateSpeed(nQubits, kernel->precision, tr.min);
     items.emplace_back(kernel->gate->nQubits(),
                        kernel->opCount,
-                       Precision::F64,
+                       kernel->precision,
                        nThreads,
                        memSpd);
     if (verbose > 0) {

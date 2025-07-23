@@ -23,8 +23,6 @@ double SizeOnlyCostModel::computeGiBTime(const QuantumGate* gate) const {
   return 0.0;
 }
 
-
-
 template<std::size_t K>
 static inline void sampleNoReplacement(int n, std::vector<int>& holder) {
   assert(n > 0);

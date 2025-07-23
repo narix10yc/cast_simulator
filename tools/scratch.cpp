@@ -1,26 +1,10 @@
-#include "cast/CPU/CPUOptimizerBuilder.h"
+#include "cast/CPU/CPUOptimizer.h"
 
 using namespace cast;
 
 int main(int argc, char** argv) {
-  CPUOptimizerBuilder builder;
-  builder
-        //  .disableCanonicalization()
-         .disableCFO()
-         .setSizeOnlyFusion(7)
-        //  .setNThreads(1)
-        //  .setPrecision(Precision::F64)
-        //  .setZeroTol(0.0)
-        //  .setSwapTol(0.0)
-        //  .setVerbose(1);
-        ;
-
-  auto optOrErr = builder.build();
-  if (!optOrErr) {
-    std::cerr << "Failed to build optimizer: " << optOrErr.takeError() << std::endl;
-    return 1;
-  }
-  auto opt = optOrErr.takeValue();
+  CPUOptimizer opt;
+  opt.setSizeOnlyFusionConfig(5);
 
   assert(argc > 1 && "Usage: scratch <qasm_file>");
   auto circuitOrErr = cast::parseCircuitFromQASMFile(argv[1]);
@@ -30,7 +14,7 @@ int main(int argc, char** argv) {
   }
   auto circuit = circuitOrErr.takeValue();
   circuit.displayInfo(std::cerr << "Before Opt\n", 3);
-  opt.run(circuit, 1);
+  opt.run(circuit, utils::Logger(std::cerr, 1));
   circuit.displayInfo(std::cerr << "After Opt\n", 3);
 
   return 0;
