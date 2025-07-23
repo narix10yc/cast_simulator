@@ -1,15 +1,15 @@
 #ifndef CAST_ADT_COMPLEX_SQUARE_MATRIX_H
 #define CAST_ADT_COMPLEX_SQUARE_MATRIX_H
 
-#include <complex>
 #include <cassert>
-#include <cstring>
 #include <cmath>
+#include <complex>
+#include <cstring>
 
 namespace cast {
 
 /// @brief \c ComplexSquareMatrix implements basic arithmatics to complex square
-/// matrices with double precision. 
+/// matrices with double precision.
 class ComplexSquareMatrix {
   // constexpr static size_t AlignSize = 64;
 private:
@@ -26,6 +26,7 @@ private:
     delete[] _data;
     _data = nullptr;
   }
+
 public:
   ComplexSquareMatrix() : _edgeSize(0), _data(nullptr) {}
 
@@ -52,7 +53,7 @@ public:
   }
 
   ComplexSquareMatrix(ComplexSquareMatrix&& other) noexcept
-    : _edgeSize(other._edgeSize), _data(other._data) {
+      : _edgeSize(other._edgeSize), _data(other._data) {
     other._data = nullptr;
   }
 
@@ -72,31 +73,23 @@ public:
     return *this;
   }
 
-  ~ComplexSquareMatrix() {
-    freeData();
-  }
+  ~ComplexSquareMatrix() { freeData(); }
 
   size_t edgeSize() const { return _edgeSize; }
 
   // Get the size of the real (or imag) part alone.
   // Equals to edgeSize() * edgeSize()
-  size_t halfSize() const {
-    return _edgeSize * _edgeSize;
-  }
+  size_t halfSize() const { return _edgeSize * _edgeSize; }
 
   // Size of both real and imag parts. Equals to 2 * edgeSize() * edgeSize().
   // For the size of real or imag parts each, use halfSize().
-  size_t size() const {
-    return 2ULL * _edgeSize * _edgeSize;
-  }
+  size_t size() const { return 2ULL * _edgeSize * _edgeSize; }
 
   size_t sizeInBytes() const {
     return sizeof(double) * 2ULL * _edgeSize * _edgeSize;
   }
 
-  void fillZeros() {
-    std::fill(_data, _data + size(), 0.0);
-  }
+  void fillZeros() { std::fill(_data, _data + size(), 0.0); }
 
   double* data() { return _data; }
   const double* data() const { return _data; }
@@ -108,7 +101,7 @@ public:
   double* imData() { return _data + _edgeSize * _edgeSize; }
   double* imBegin() { return _data + _edgeSize * _edgeSize; }
   double* imEnd() { return _data + 2 * _edgeSize * _edgeSize; }
-  
+
   const double* reData() const { return _data; }
   const double* reBegin() const { return _data; }
   const double* reEnd() const { return _data + _edgeSize * _edgeSize; }
@@ -144,7 +137,7 @@ public:
   std::complex<double> rc(unsigned row, unsigned col) const {
     assert(row < _edgeSize && col < _edgeSize &&
            "Row or column index out of bounds");
-    return { real(row, col), imag(row, col) };
+    return {real(row, col), imag(row, col)};
   }
 
   void setRC(unsigned row, unsigned col, double re, double im) {
@@ -199,9 +192,8 @@ public:
 
 /// @brief The maximum norm of two matrices is defined as the maximum of the
 /// absolute values of the entries in A - B. That is,
-/// maximum_norm(A, B) = max_{i,j} |A_ij - B_ij|. 
-double maximum_norm(const ComplexSquareMatrix& A,
-                    const ComplexSquareMatrix& B);
+/// maximum_norm(A, B) = max_{i,j} |A_ij - B_ij|.
+double maximum_norm(const ComplexSquareMatrix& A, const ComplexSquareMatrix& B);
 
 /* Matrix-Matrix Multiplication */
 /// @brief Compute the matrix product C = AB.
@@ -215,26 +207,25 @@ bool matinv(const cast::ComplexSquareMatrix& A,
             cast::ComplexSquareMatrix& AInv);
 }; // namespace cast
 
-
 /* Overload left addition and left multiplication */
 
-inline static cast::ComplexSquareMatrix operator+(
-    double c, const cast::ComplexSquareMatrix& m) {
+inline static cast::ComplexSquareMatrix
+operator+(double c, const cast::ComplexSquareMatrix& m) {
   return m.operator+(c);
 }
 
-inline static cast::ComplexSquareMatrix operator+(
-    std::complex<double> c, const cast::ComplexSquareMatrix& m) {
+inline static cast::ComplexSquareMatrix
+operator+(std::complex<double> c, const cast::ComplexSquareMatrix& m) {
   return m.operator+(c);
 }
 
-inline static cast::ComplexSquareMatrix operator*(
-    double c, const cast::ComplexSquareMatrix& m) {
+inline static cast::ComplexSquareMatrix
+operator*(double c, const cast::ComplexSquareMatrix& m) {
   return m.operator*(c);
 }
 
-inline static cast::ComplexSquareMatrix operator*(
-    std::complex<double> c, const cast::ComplexSquareMatrix& m) {
+inline static cast::ComplexSquareMatrix
+operator*(std::complex<double> c, const cast::ComplexSquareMatrix& m) {
   return m.operator*(c);
 }
 

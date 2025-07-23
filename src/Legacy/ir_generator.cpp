@@ -28,10 +28,10 @@ Value* ParamValueFeeder::get(int v, IRBuilder<>& B, Type* Ty) {
 
 bool IRGeneratorConfig::checkConfliction(std::ostream& os) const {
   bool check = true;
-  const auto warn = [&os]() -> std::ostream&  {
+  const auto warn = [&os]() -> std::ostream& {
     return os << YELLOW_FG << BOLD << "Config warning: " << RESET;
   };
-  const auto error = [&os, &check]() -> std::ostream&  {
+  const auto error = [&os, &check]() -> std::ostream& {
     check = false;
     return os << RED_FG << BOLD << "Config error: " << RESET;
   };
@@ -54,8 +54,8 @@ bool IRGeneratorConfig::checkConfliction(std::ostream& os) const {
   return check;
 }
 
-std::ostream& IRGeneratorConfig::display(int verbose, bool title,
-                                         std::ostream& os) const {
+std::ostream&
+IRGeneratorConfig::display(int verbose, bool title, std::ostream& os) const {
   if (title)
     os << CYAN_FG << "===== IR Generator Config =====\n" << RESET;
 
@@ -95,7 +95,7 @@ void IRGenerator::loadFromFile(const std::string& fileName) {
   }
 }
 
-void IRGenerator::applyLLVMOptimization(const OptimizationLevel &level) {
+void IRGenerator::applyLLVMOptimization(const OptimizationLevel& level) {
   // These must be declared in this order so that they are destroyed in the
   // correct order due to inter-analysis-manager references.
   LoopAnalysisManager LAM;
@@ -124,8 +124,12 @@ void IRGenerator::applyLLVMOptimization(const OptimizationLevel &level) {
   MPM.run(*_module, MAM);
 }
 
-Value* IRGenerator::genMulAdd(Value* aa, Value* bb, Value* cc, int bbFlag,
-                              const Twine& bbccName, const Twine& aaName) {
+Value* IRGenerator::genMulAdd(Value* aa,
+                              Value* bb,
+                              Value* cc,
+                              int bbFlag,
+                              const Twine& bbccName,
+                              const Twine& aaName) {
   if (bbFlag == 0)
     return aa;
 
@@ -149,15 +153,19 @@ Value* IRGenerator::genMulAdd(Value* aa, Value* bb, Value* cc, int bbFlag,
 
   // new_aa = aa + bb * cc
   if (_config.useFMA)
-    return builder.CreateIntrinsic(bb->getType(), Intrinsic::fmuladd,
-                                   {bb, cc, aa}, nullptr, aaName);
+    return builder.CreateIntrinsic(
+        bb->getType(), Intrinsic::fmuladd, {bb, cc, aa}, nullptr, aaName);
   // not use FMA
   auto* bbcc = builder.CreateFMul(bb, cc, bbccName);
   return builder.CreateFAdd(aa, bbcc, aaName);
 }
 
-Value* IRGenerator::genMulSub(Value* aa, Value* bb, Value* cc, int bbFlag,
-                              const Twine& bbccName, const Twine& aaName) {
+Value* IRGenerator::genMulSub(Value* aa,
+                              Value* bb,
+                              Value* cc,
+                              int bbFlag,
+                              const Twine& bbccName,
+                              const Twine& aaName) {
   if (bbFlag == 0)
     return aa;
 
@@ -182,8 +190,8 @@ Value* IRGenerator::genMulSub(Value* aa, Value* bb, Value* cc, int bbFlag,
     return builder.CreateFMul(bb, ccNeg, aaName);
 
   if (_config.useFMS)
-    return builder.CreateIntrinsic(bb->getType(), Intrinsic::fmuladd,
-                                   {bb, ccNeg, aa}, nullptr, aaName);
+    return builder.CreateIntrinsic(
+        bb->getType(), Intrinsic::fmuladd, {bb, ccNeg, aa}, nullptr, aaName);
   // not use FMS
   auto* bbccNeg = builder.CreateFMul(bb, ccNeg, bbccName + "Neg");
   return builder.CreateFAdd(aa, bbccNeg, aaName);
@@ -220,9 +228,11 @@ std::pair<Value*, Value*> IRGenerator::genComplexMultiply(
           genFAdd(genFMul(a.first, b.second), genFMul(a.second, b.first))};
 }
 
-std::pair<Value*, Value*> IRGenerator::genComplexDotProduct(
-    const std::vector<Value*>& aRe, const std::vector<Value*>& aIm,
-    const std::vector<Value*>& bRe, const std::vector<Value*>& bIm) {
+std::pair<Value*, Value*>
+IRGenerator::genComplexDotProduct(const std::vector<Value*>& aRe,
+                                  const std::vector<Value*>& aIm,
+                                  const std::vector<Value*>& bRe,
+                                  const std::vector<Value*>& bIm) {
   auto length = aRe.size();
   assert(aRe.size() == aIm.size());
   assert(aIm.size() == bRe.size());

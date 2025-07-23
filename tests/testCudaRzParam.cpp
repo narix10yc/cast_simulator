@@ -1,70 +1,69 @@
-#include "cast/Core/KernelManager.h"
-#include "tests/TestKit.h"
 #include "cast/CPU/CPUStatevector.h"
 #include "cast/CUDA/StatevectorCUDA.h"
+#include "cast/Core/KernelManager.h"
+#include "tests/TestKit.h"
 #include <random>
 
 using namespace cast;
 using namespace cast::test;
 
 namespace {
-  legacy::GateMatrix makeRzSymbolicMatrix() {
-    legacy::GateMatrix::p_matrix_t pMat(2);
+legacy::GateMatrix makeRzSymbolicMatrix() {
+  legacy::GateMatrix::p_matrix_t pMat(2);
 
-    int var = 0; 
-    Polynomial c( Monomial::Cosine(var) );
-    Polynomial s( Monomial::Sine(var) );
+  int var = 0;
+  Polynomial c(Monomial::Cosine(var));
+  Polynomial s(Monomial::Sine(var));
 
-    Polynomial minusI( std::complex<double>(0.0, -1.0) );
-    Polynomial minusI_s = minusI * s;
+  Polynomial minusI(std::complex<double>(0.0, -1.0));
+  Polynomial minusI_s = minusI * s;
 
-    // Rz(θ) = [[ c, -i s ],
-    //          [ -i s, c ]]
-    pMat(0,0) = c;
-    pMat(0,1) = minusI_s;
-    pMat(1,0) = minusI_s;
-    pMat(1,1) = c;
+  // Rz(θ) = [[ c, -i s ],
+  //          [ -i s, c ]]
+  pMat(0, 0) = c;
+  pMat(0, 1) = minusI_s;
+  pMat(1, 0) = minusI_s;
+  pMat(1, 1) = c;
 
-    // Wrapping in a legacy::GateMatrix => isConvertibleToCMat = UnConvertible
-    // => getConstantMatrix() = null
-    legacy::GateMatrix gmat(pMat);
-    return gmat;
-  }
-
-  std::shared_ptr<legacy::QuantumGate> getRzSymbolicGate(int q) {
-    legacy::GateMatrix rzSymbolic = makeRzSymbolicMatrix();
-    legacy::QuantumGate gate(rzSymbolic, q);
-    return std::make_shared<legacy::QuantumGate>(gate);
-  }
-
-  std::vector<double> buildRzNumericMatrix(double theta) {
-    double c = std::cos(theta / 2.0);
-    double s = std::sin(theta / 2.0);
-
-    std::vector<double> mat(8);
-    mat[0] = c;    // re(0,0)
-    mat[1] = 0.0;  // im(0,0)
-    mat[2] = 0.0;  // re(0,1)
-    mat[3] = -s;   // im(0,1)
-    mat[4] = 0.0;  // re(1,0)
-    mat[5] = -s;   // im(1,0)
-    mat[6] = c;    // re(1,1)
-    mat[7] = 0.0;  // im(1,1)
-    return mat;
-  }
+  // Wrapping in a legacy::GateMatrix => isConvertibleToCMat = UnConvertible
+  // => getConstantMatrix() = null
+  legacy::GateMatrix gmat(pMat);
+  return gmat;
 }
 
-template<unsigned nQubits>
-static void f() {
-  test::TestSuite suite(
-    "Symbolic Rz param gate (CUDA) (" + std::to_string(nQubits) + " qubits)");
+std::shared_ptr<legacy::QuantumGate> getRzSymbolicGate(int q) {
+  legacy::GateMatrix rzSymbolic = makeRzSymbolicMatrix();
+  legacy::QuantumGate gate(rzSymbolic, q);
+  return std::make_shared<legacy::QuantumGate>(gate);
+}
+
+std::vector<double> buildRzNumericMatrix(double theta) {
+  double c = std::cos(theta / 2.0);
+  double s = std::sin(theta / 2.0);
+
+  std::vector<double> mat(8);
+  mat[0] = c;   // re(0,0)
+  mat[1] = 0.0; // im(0,0)
+  mat[2] = 0.0; // re(0,1)
+  mat[3] = -s;  // im(0,1)
+  mat[4] = 0.0; // re(1,0)
+  mat[5] = -s;  // im(1,0)
+  mat[6] = c;   // re(1,1)
+  mat[7] = 0.0; // im(1,1)
+  return mat;
+}
+} // namespace
+
+template <unsigned nQubits> static void f() {
+  test::TestSuite suite("Symbolic Rz param gate (CUDA) (" +
+                        std::to_string(nQubits) + " qubits)");
 
   CUDAKernelManager kernelMgrCUDA;
 
   const int nGates = 3;
   std::vector<std::shared_ptr<legacy::QuantumGate>> gates(nGates);
   for (int i = 0; i < nGates; ++i) {
-    gates[i] = getRzSymbolicGate(i);  // Rz on qubit i
+    gates[i] = getRzSymbolicGate(i); // Rz on qubit i
   }
 
   // 1: default memory space
@@ -75,8 +74,7 @@ static void f() {
 
     for (int i = 0; i < nGates; i++) {
       kernelMgrCUDA.genCUDAGate(
-          cudaConfig, gates[i],
-          "rz_param_gate_def_" + std::to_string(i));
+          cudaConfig, gates[i], "rz_param_gate_def_" + std::to_string(i));
     }
   }
 
@@ -88,13 +86,13 @@ static void f() {
 
     for (int i = 0; i < nGates; i++) {
       kernelMgrCUDA.genCUDAGate(
-          cudaConfig, gates[i],
-          "rz_param_gate_const_" + std::to_string(i));
+          cudaConfig, gates[i], "rz_param_gate_const_" + std::to_string(i));
     }
   }
 
   // Now we have 2 * nGates = 6 kernels total, can compile them all at once
-  kernelMgrCUDA.emitPTX(/*nThreads=*/2, llvm::OptimizationLevel::O1, /*verbose=*/0);
+  kernelMgrCUDA.emitPTX(
+      /*nThreads=*/2, llvm::OptimizationLevel::O1, /*verbose=*/0);
   llvm::outs() << "\n=== DUMPING PTX FOR INSPECTION ===\n";
   kernelMgrCUDA.dumpPTX("rz_param_gate_def_0", llvm::outs());
   kernelMgrCUDA.dumpPTX("rz_param_gate_const_0", llvm::outs());
@@ -108,13 +106,13 @@ static void f() {
   auto numericMat = buildRzNumericMatrix(theta);
 
   double* dMatPtr = nullptr;
-  CUDA_CALL(cudaMalloc(&dMatPtr, numericMat.size()*sizeof(double)),
+  CUDA_CALL(cudaMalloc(&dMatPtr, numericMat.size() * sizeof(double)),
             "cudaMalloc RzMatrix");
-  CUDA_CALL(cudaMemcpy(dMatPtr, numericMat.data(),
-                       numericMat.size()*sizeof(double),
+  CUDA_CALL(cudaMemcpy(dMatPtr,
+                       numericMat.data(),
+                       numericMat.size() * sizeof(double),
                        cudaMemcpyHostToDevice),
             "cudaMemcpy RzMatrix");
-
 
   // Indexes [0..2] are defaultMem, [3..5] are constMem
 
@@ -123,19 +121,18 @@ static void f() {
     // Initialize
     sv.initialize();
     suite.assertClose(sv.norm(), 1.0, "Init Norm (DefaultMem)", GET_INFO());
-    suite.assertClose(sv.prob(i), 0.0, "Init Prob("+std::to_string(i)+")", GET_INFO());
+    suite.assertClose(
+        sv.prob(i), 0.0, "Init Prob(" + std::to_string(i) + ")", GET_INFO());
 
     // launch
     kernelMgrCUDA.launchCUDAKernelParam(
-      sv.dData(),
-      sv.nQubits(),
-      kernelMgrCUDA.kernels()[i],
-      dMatPtr,
-      64
-    );
+        sv.dData(), sv.nQubits(), kernelMgrCUDA.kernels()[i], dMatPtr, 64);
 
-    suite.assertClose(sv.norm(), 1.0,
-        "After Rz("+std::to_string(i)+") param: Norm (DefaultMem)", GET_INFO());
+    suite.assertClose(sv.norm(),
+                      1.0,
+                      "After Rz(" + std::to_string(i) +
+                          ") param: Norm (DefaultMem)",
+                      GET_INFO());
   }
 
   // Test the 3 constMem kernels
@@ -146,18 +143,20 @@ static void f() {
     // re-initialize
     sv.initialize();
     suite.assertClose(sv.norm(), 1.0, "Init Norm (ConstMem)", GET_INFO());
-    suite.assertClose(sv.prob(i), 0.0, "Init Prob("+std::to_string(i)+")", GET_INFO());
+    suite.assertClose(
+        sv.prob(i), 0.0, "Init Prob(" + std::to_string(i) + ")", GET_INFO());
 
-    kernelMgrCUDA.launchCUDAKernelParam(
-      sv.dData(),
-      sv.nQubits(),
-      kernelMgrCUDA.kernels()[kernelIndex],
-      dMatPtr,
-      64
-    );
+    kernelMgrCUDA.launchCUDAKernelParam(sv.dData(),
+                                        sv.nQubits(),
+                                        kernelMgrCUDA.kernels()[kernelIndex],
+                                        dMatPtr,
+                                        64);
 
-    suite.assertClose(sv.norm(), 1.0,
-        "After Rz("+std::to_string(i)+") param: Norm (ConstMem)", GET_INFO());
+    suite.assertClose(sv.norm(),
+                      1.0,
+                      "After Rz(" + std::to_string(i) +
+                          ") param: Norm (ConstMem)",
+                      GET_INFO());
   }
 
   // 8) Cleanup

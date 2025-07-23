@@ -12,7 +12,7 @@
 #include "utils/iocolor.h"
 
 namespace cast::legacy {
-  class CircuitGraph;
+class CircuitGraph;
 }
 
 namespace cast::legacy {
@@ -39,23 +39,23 @@ enum TokenKind : int {
   tk_EqualEqual = -40,   // ==
 
   // symbols
-  tk_Comma = -104,          // ,
-  tk_Semicolon = -105,      // ;
+  tk_Comma = -104,           // ,
+  tk_Semicolon = -105,       // ;
   tk_L_RoundBracket = -106,  // (
   tk_R_RoundBracket = -107,  // )
   tk_L_SquareBracket = -108, // [
   tk_R_SquareBracket = -109, // ]
   tk_L_CurlyBracket = -112,  // {
   tk_R_CurlyBracket = -113,  // }
-  tk_SingleQuote = -114,    // '
-  tk_DoubleQuote = -115,    // "
-  tk_AtSymbol = -116,       // @
-  tk_Percent = -117,        // %
-  tk_Hash = -118,           // #
-  tk_Backslash = -119,      // '\'
-  tk_Comment = -120,        // '//'
-  tk_CommentStart = -121,   // '/*'
-  tk_CommentEnd = -122,     // '*/'
+  tk_SingleQuote = -114,     // '
+  tk_DoubleQuote = -115,     // "
+  tk_AtSymbol = -116,        // @
+  tk_Percent = -117,         // %
+  tk_Hash = -118,            // #
+  tk_Backslash = -119,       // '\'
+  tk_Comment = -120,         // '//'
+  tk_CommentStart = -121,    // '/*'
+  tk_CommentEnd = -122,      // '*/'
 
   tk_LineFeed = 10,       // '\n'
   tk_CarriageReturn = 13, // '\r'
@@ -78,7 +78,7 @@ public:
   Token(TokenKind kind, const char* memRefBegin, const char* memRefEnd)
       : kind(kind), memRefBegin(memRefBegin), memRefEnd(memRefEnd) {}
 
-  std::ostream& print(std::ostream&  = std::cerr) const;
+  std::ostream& print(std::ostream& = std::cerr) const;
 
   bool is(TokenKind k) const { return kind == k; }
   bool isNot(TokenKind k) const { return kind != k; }
@@ -114,23 +114,24 @@ public:
 class Lexer {
 private:
   /// lex a token with a single char.
-  /// After this function returns, curPtr always points to the next char after 
+  /// After this function returns, curPtr always points to the next char after
   /// \c tok
   void lexOneChar(Token& tok, TokenKind tk) {
     tok = Token(tk, curPtr, curPtr + 1);
     ++curPtr;
   }
-  
-  /// lex a token with possibly two chars. If *(curPtr + 1) matches snd, \c tok 
-  /// is assigned with TokenKind \c tk2. Otherwise, \c tok is assigned with 
+
+  /// lex a token with possibly two chars. If *(curPtr + 1) matches snd, \c tok
+  /// is assigned with TokenKind \c tk2. Otherwise, \c tok is assigned with
   /// TokenKind \c tk1.
-  /// When calling this function, curPtr should point to the first char of this 
+  /// When calling this function, curPtr should point to the first char of this
   /// token. For example, lexTwoChar(tok, '=', tk_Less, tk_LessEqual) should be
   /// called when curPtr points to '<', and it conditionally checks if curPtr+1
   /// points to '='.
-  /// After this function returns, curPtr always points to the next char after 
+  /// After this function returns, curPtr always points to the next char after
   /// \c tok
   void lexTwoChar(Token& tok, char snd, TokenKind tk1, TokenKind tk2);
+
 public:
   const char* bufferBegin;
   const char* bufferEnd;
@@ -148,13 +149,10 @@ public:
 
   Lexer& operator=(const Lexer&) = delete;
   Lexer& operator=(Lexer&&) = delete;
-  
-  ~Lexer() {
-    delete[] bufferBegin;
-  }
 
+  ~Lexer() { delete[] bufferBegin; }
 
-  /// After this function returns, curPtr always points to the next char after 
+  /// After this function returns, curPtr always points to the next char after
   /// \c tok
   void lex(Token& tok);
 
@@ -219,7 +217,7 @@ public:
     return false;
   }
 
-  /// Advance such that curToken must have \p kind. Otherwise, terminate the 
+  /// Advance such that curToken must have \p kind. Otherwise, terminate the
   /// program with error messages
   void requireCurTokenIs(TokenKind kind, const char* msg = nullptr) const {
     if (curToken.is(kind))
@@ -240,6 +238,6 @@ public:
   ast::QuantumCircuit parseQuantumCircuit();
 };
 
-} // namespace cast::parse
+} // namespace cast::legacy
 
 #endif // CAST_LEGACY_PARSER_H

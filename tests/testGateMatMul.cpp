@@ -1,6 +1,6 @@
+#include "cast/CPU/CPUStatevector.h"
 #include "cast/Legacy/QuantumGate.h"
 #include "tests/TestKit.h"
-#include "cast/CPU/CPUStatevector.h"
 
 using namespace cast;
 using namespace cast::test;
@@ -12,31 +12,31 @@ static void basics() {
   double norm;
   gate0 = legacy::QuantumGate::I1(1);
   gate1 = legacy::QuantumGate::I1(1);
-  norm = utils::maximum_norm(
-    *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
-    legacy::GateMatrix::MatrixI1_c);
+  norm =
+      utils::maximum_norm(*gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
+                          legacy::GateMatrix::MatrixI1_c);
   suite.assertClose(norm, 0.0, "I multiply by I Same Qubit", GET_INFO());
 
   gate0 = legacy::QuantumGate::I1(2);
-  norm = utils::maximum_norm(
-    *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
-    legacy::GateMatrix::MatrixI2_c);
+  norm =
+      utils::maximum_norm(*gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
+                          legacy::GateMatrix::MatrixI2_c);
   suite.assertClose(norm, 0.0, "I multiply by I Different Qubit", GET_INFO());
 
-  gate1 = legacy::QuantumGate(legacy::GateMatrix(utils::randomUnitaryMatrix(2)), 2);
-  norm = utils::maximum_norm(
-    *gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
-    *gate1.gateMatrix.getConstantMatrix());
+  gate1 =
+      legacy::QuantumGate(legacy::GateMatrix(utils::randomUnitaryMatrix(2)), 2);
+  norm =
+      utils::maximum_norm(*gate0.lmatmul(gate1).gateMatrix.getConstantMatrix(),
+                          *gate1.gateMatrix.getConstantMatrix());
   suite.assertClose(norm, 0.0, "I multiply by U Same Qubit", GET_INFO());
 
   suite.displayResult();
 }
 
-template<CPUSimdWidth SimdWidth, int nQubits>
-static void internal() {
+template <CPUSimdWidth SimdWidth, int nQubits> static void internal() {
   std::stringstream titleSS;
-  titleSS << "MatMul between Gates (s=" << SimdWidth
-          << ", nQubits=" << nQubits << ")";
+  titleSS << "MatMul between Gates (s=" << SimdWidth << ", nQubits=" << nQubits
+          << ")";
   TestSuite suite(titleSS.str());
 
   std::random_device rd;
@@ -50,7 +50,7 @@ static void internal() {
     auto gate = gate0.lmatmul(gate1);
 
     cast::CPUStatevector<double> sv0(nQubits, SimdWidth),
-                                 sv1(nQubits, SimdWidth);
+        sv1(nQubits, SimdWidth);
     sv0.randomize();
     sv1 = sv0;
 
@@ -59,10 +59,11 @@ static void internal() {
 
     std::stringstream ss;
     ss << "Apply U gate on qubits " << a << " and " << b;
-    suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Separate Norm", GET_INFO());
+    suite.assertClose(
+        sv0.norm(), 1.0, ss.str() + ": Separate Norm", GET_INFO());
     suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Joint Norm", GET_INFO());
-    suite.assertClose(fidelity(sv0, sv1), 1.0,
-      ss.str() + ": Fidelity", GET_INFO());
+    suite.assertClose(
+        fidelity(sv0, sv1), 1.0, ss.str() + ": Fidelity", GET_INFO());
   }
   suite.displayResult();
 }

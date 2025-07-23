@@ -26,6 +26,7 @@ public:
       return p;
     }
   };
+
 private:
   Entry* _data;
   size_t _edgeSize;
@@ -35,8 +36,8 @@ public:
 
   UnitaryPermutationMatrix() : _data(nullptr), _edgeSize(0) {}
   UnitaryPermutationMatrix(size_t edgeSize)
-    : _data(static_cast<Entry*>(std::malloc(edgeSize * sizeof(Entry))))
-    , _edgeSize(edgeSize) {}
+      : _data(static_cast<Entry*>(std::malloc(edgeSize * sizeof(Entry)))),
+        _edgeSize(edgeSize) {}
 
   UnitaryPermutationMatrix(std::initializer_list<Entry> data) {
     _edgeSize = data.size();
@@ -71,8 +72,8 @@ public:
     other._data = nullptr;
   }
 
-  UnitaryPermutationMatrix& operator=(
-      UnitaryPermutationMatrix&& other) noexcept {
+  UnitaryPermutationMatrix&
+  operator=(UnitaryPermutationMatrix&& other) noexcept {
     if (this == &other)
       return *this;
 
@@ -122,6 +123,6 @@ public:
   }
 };
 
-} // namespace cast
+} // namespace cast::legacy
 
 #endif // CAST_UNITARYPERMMATRIX_H

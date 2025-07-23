@@ -1,9 +1,9 @@
 #ifndef UTILS_STRINGREF_H
 #define UTILS_STRINGREF_H
 
+#include <cassert>
 #include <iostream>
 #include <string>
-#include <cassert>
 
 namespace utils {
 
@@ -12,14 +12,14 @@ namespace utils {
 class StringRef {
   const char* _bufferBegin;
   size_t _length;
+
 public:
   constexpr StringRef() : _bufferBegin(nullptr), _length(0) {}
 
   constexpr StringRef(const char* c)
-    : _bufferBegin(c), _length(std::char_traits<char>::length(c)) {}
+      : _bufferBegin(c), _length(std::char_traits<char>::length(c)) {}
 
-  constexpr StringRef(const char* c, size_t l)
-    : _bufferBegin(c), _length(l) {
+  constexpr StringRef(const char* c, size_t l) : _bufferBegin(c), _length(l) {
     assert(l <= std::char_traits<char>::length(c));
   }
 
@@ -41,9 +41,7 @@ public:
   /// compare case-insensitive
   int compare_ci(StringRef other) const;
 
-  operator std::string() const {
-    return std::string(_bufferBegin, _length);
-  }
+  operator std::string() const { return std::string(_bufferBegin, _length); }
 
   friend std::ostream& operator<<(std::ostream& os, StringRef str) {
     if (str.empty())

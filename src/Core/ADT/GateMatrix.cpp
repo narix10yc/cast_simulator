@@ -1,20 +1,21 @@
 #include "cast/ADT/GateMatrix.h"
-#include "llvm/Support/Casting.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
+#include "llvm/Support/Casting.h"
 
 #include "llvm/Support/Casting.h"
 
 using namespace cast;
 
-std::ostream& ScalarGateMatrix::displayInfo(std::ostream& os, int verbose) const {
+std::ostream& ScalarGateMatrix::displayInfo(std::ostream& os,
+                                            int verbose) const {
   os << "ScalarGateMatrix @ " << this << "\n";
   os << "- nQubits: " << _nQubits << "\n";
   return os;
 } // namespace cast
 
-ScalarGateMatrixPtr ScalarGateMatrix::U1q(
-    double theta, double phi, double lambda) {
+ScalarGateMatrixPtr
+ScalarGateMatrix::U1q(double theta, double phi, double lambda) {
   auto matrixPtr = std::make_shared<ScalarGateMatrix>(1);
   auto& matrix = matrixPtr->matrix();
 
@@ -26,7 +27,7 @@ ScalarGateMatrixPtr ScalarGateMatrix::U1q(
 
   matrix.real(1, 1) = std::cos(phi + lambda) * std::cos(theta * 0.5);
   matrix.imag(1, 0) = std::sin(phi) * std::sin(theta * 0.5);
-  
+
   matrix.real(1, 0) = std::cos(phi) * std::sin(theta * 0.5);
   matrix.imag(1, 1) = std::sin(phi + lambda) * std::cos(theta * 0.5);
   return matrixPtr;
@@ -62,8 +63,8 @@ ScalarGateMatrixPtr ScalarGateMatrix::RZ(double theta) {
   return matrixPtr;
 }
 
-UnitaryPermGateMatrixPtr UnitaryPermGateMatrix::FromGateMatrix(
-    const GateMatrix* gm, double zeroTol) {
+UnitaryPermGateMatrixPtr
+UnitaryPermGateMatrix::FromGateMatrix(const GateMatrix* gm, double zeroTol) {
   if (gm == nullptr)
     return nullptr;
   if (const auto* upGM = llvm::dyn_cast<UnitaryPermGateMatrix>(gm)) {
@@ -88,7 +89,7 @@ UnitaryPermGateMatrixPtr UnitaryPermGateMatrix::FromGateMatrix(
           // More than one non-zero entries in this row,
           // not a unitary permutation.
           return nullptr;
-        } 
+        }
         // !isZero && !hasNonZero
         hasNonZero = true;
         upGM->data()[r].index = c;
@@ -103,7 +104,7 @@ UnitaryPermGateMatrixPtr UnitaryPermGateMatrix::FromGateMatrix(
     return upGM;
   }
   assert(false &&
-    "Unsupported GateMatrix type for conversion to UnitaryPermGateMatrix");
+         "Unsupported GateMatrix type for conversion to UnitaryPermGateMatrix");
   return nullptr;
 }
 

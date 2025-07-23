@@ -38,7 +38,6 @@
 //   .benefitMargin = 0.0,
 // };
 
-
 // namespace {
 
 // using tile_iter_t = legacy::CircuitGraph::tile_iter_t;
@@ -168,7 +167,8 @@
 
 //     // candidateBlock is accepted
 //     fusedBlocks.emplace_back(candidateBlock, curIt);
-//     fusedBlock = fuseAndInsertSameRow(graph, curIt, fusedBlock, candidateBlock);
+//     fusedBlock = fuseAndInsertSameRow(graph, curIt, fusedBlock,
+//     candidateBlock);
 //   }
 
 //   assert(curIt == fusedIt);
@@ -270,4 +270,3 @@
 //     graph.squeeze();
 //   } while (nFused > 0 && ++curMaxK <= max_k);
 // }
-

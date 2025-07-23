@@ -25,13 +25,23 @@ std::ostream& BinaryOpExpr::print(std::ostream& os) const {
   lhs->print(os);
   os << " ";
   switch (op) {
-    case Add: os << "+"; break;
-    case Sub: os << "-"; break;
-    case Mul: os << "*"; break;
-    case Div: os << "/"; break;
-    case Pow: os << "**"; break;
-    default: 
-      assert(false && "Invalid operator");
+  case Add:
+    os << "+";
+    break;
+  case Sub:
+    os << "-";
+    break;
+  case Mul:
+    os << "*";
+    break;
+  case Div:
+    os << "/";
+    break;
+  case Pow:
+    os << "**";
+    break;
+  default:
+    assert(false && "Invalid operator");
   }
   rhs->print(os << " ");
   return os << ")";
@@ -40,13 +50,23 @@ std::ostream& BinaryOpExpr::print(std::ostream& os) const {
 void BinaryOpExpr::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << ": ";
   switch (op) {
-    case Add: p.os << "+"; break;
-    case Sub: p.os << "-"; break;
-    case Mul: p.os << "*"; break;
-    case Div: p.os << "/"; break;
-    case Pow: p.os << "**"; break;
-    default:
-      assert(false && "Invalid operator");
+  case Add:
+    p.os << "+";
+    break;
+  case Sub:
+    p.os << "-";
+    break;
+  case Mul:
+    p.os << "*";
+    break;
+  case Div:
+    p.os << "/";
+    break;
+  case Pow:
+    p.os << "**";
+    break;
+  default:
+    assert(false && "Invalid operator");
   }
   p.setState(indent, 2);
   p.os << "\n";

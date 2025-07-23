@@ -1,16 +1,14 @@
-#include "cast/Core/KernelManager.h"
-#include "tests/TestKit.h"
 #include "cast/CPU/CPUStatevector.h"
 #include "cast/CUDA/StatevectorCUDA.h"
+#include "cast/Core/KernelManager.h"
+#include "tests/TestKit.h"
 #include <random>
 
 using namespace cast;
 using namespace cast::test;
 
-template<unsigned nQubits>
-static void f() {
-  test::TestSuite suite(
-    "Gate U1q (" + std::to_string(nQubits) + " qubits)");
+template <unsigned nQubits> static void f() {
+  test::TestSuite suite("Gate U1q (" + std::to_string(nQubits) + " qubits)");
 
   // kernel manager must be declared before statevector due to the order they
   // are destructed.
@@ -21,23 +19,25 @@ static void f() {
   const auto randomizeSV = [&]() {
     svCUDA0.randomize();
     svCUDA1 = svCUDA0;
-    cudaMemcpy(svCPU.data(), svCUDA0.dData(), svCUDA0.sizeInBytes(),
-      cudaMemcpyDeviceToHost);
+    cudaMemcpy(svCPU.data(),
+               svCUDA0.dData(),
+               svCUDA0.sizeInBytes(),
+               cudaMemcpyDeviceToHost);
   };
 
   // generate random unitary gates
   std::vector<std::shared_ptr<legacy::QuantumGate>> gates;
   gates.reserve(nQubits);
   for (int q = 0; q < nQubits; q++) {
-    gates.emplace_back(
-      std::make_shared<legacy::QuantumGate>(legacy::QuantumGate::RandomUnitary(q)));
+    gates.emplace_back(std::make_shared<legacy::QuantumGate>(
+        legacy::QuantumGate::RandomUnitary(q)));
   }
 
   CUDAKernelGenConfig cudaGenConfig;
   cudaGenConfig.matrixLoadMode = CUDAKernelGenConfig::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
     kernelMgrCUDA.genCUDAGate(
-      cudaGenConfig, gates[q], "gateImm_" + std::to_string(q));
+        cudaGenConfig, gates[q], "gateImm_" + std::to_string(q));
   }
 
   // cudaGenConfig.forceDenseKernel = true;
@@ -57,13 +57,15 @@ static void f() {
     // auto immFuncName = "gateImm_" + std::to_string(i);
     // auto loadFuncName = "gateConstMemSpace_" + std::to_string(i);
     kernelMgrCUDA.launchCUDAKernel(
-      svCUDA0.dData(), svCUDA0.nQubits(), kernelMgrCUDA.kernels()[i]);
-    suite.assertClose(svCUDA0.norm(), 1.0,
-      ss.str() + "CUDA SV norm equals to 1", GET_INFO());
+        svCUDA0.dData(), svCUDA0.nQubits(), kernelMgrCUDA.kernels()[i]);
+    suite.assertClose(
+        svCUDA0.norm(), 1.0, ss.str() + "CUDA SV norm equals to 1", GET_INFO());
 
     svCPU.applyGate(*gates[i]);
-    suite.assertClose(svCUDA0.prob(qubit), svCPU.prob(qubit),
-      ss.str() + "CUDA and CPU SV prob match", GET_INFO());
+    suite.assertClose(svCUDA0.prob(qubit),
+                      svCPU.prob(qubit),
+                      ss.str() + "CUDA and CPU SV prob match",
+                      GET_INFO());
     // suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
     // suite.assertClose(cast::fidelity(sv0, sv2), 1.0,
     //   ss.str() + ": Imm Fidelity", GET_INFO());

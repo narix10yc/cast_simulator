@@ -10,8 +10,8 @@ using namespace cast::legacy::ast;
 
 namespace {
 
-std::ostream& printGateParameters(
-    std::ostream& os, const GateMatrix::gate_params_t &params) {
+std::ostream& printGateParameters(std::ostream& os,
+                                  const GateMatrix::gate_params_t& params) {
   const auto visitor = [&os](const utils::PODVariant<int, double>& arg) {
     if (arg.is<int>())
       os << arg.get<int>();
@@ -46,8 +46,8 @@ std::ostream& MeasureStmt::print(std::ostream& os) const {
 }
 
 std::ostream& QuantumCircuit::print(std::ostream& os) const {
-  os << "circuit<nQubits=" << nQubits
-     << ", nParams=" << nParams << "> " << name << " {\n";
+  os << "circuit<nQubits=" << nQubits << ", nParams=" << nParams << "> " << name
+     << " {\n";
   for (const auto& s : chains)
     s->print(os);
 
@@ -125,7 +125,8 @@ std::shared_ptr<QuantumGate> QuantumCircuit::gateApplyToLegacyQuantumGate(
     const auto refNumber = gaStmt.argument.get<int>();
     for (const auto& defStmt : paramDefs) {
       if (defStmt.refNumber == refNumber)
-        return std::make_shared<QuantumGate>(*defStmt.gateMatrix, gaStmt.qubits);
+        return std::make_shared<QuantumGate>(*defStmt.gateMatrix,
+                                             gaStmt.qubits);
     }
     assert(false && "Cannot find parameter def stmt");
     return nullptr;
@@ -133,12 +134,11 @@ std::shared_ptr<QuantumGate> QuantumCircuit::gateApplyToLegacyQuantumGate(
 
   if (gaStmt.argument.is<GateMatrix::gate_params_t>())
     return std::make_shared<QuantumGate>(
-      GateMatrix::FromName(
-        gaStmt.name,
-        gaStmt.argument.get<GateMatrix::gate_params_t>()),
-      gaStmt.qubits);
-  return std::make_shared<QuantumGate>(
-    GateMatrix::FromName(gaStmt.name), gaStmt.qubits);
+        GateMatrix::FromName(gaStmt.name,
+                             gaStmt.argument.get<GateMatrix::gate_params_t>()),
+        gaStmt.qubits);
+  return std::make_shared<QuantumGate>(GateMatrix::FromName(gaStmt.name),
+                                       gaStmt.qubits);
 }
 
 void QuantumCircuit::toLegacyCircuitGraph(legacy::CircuitGraph& graph) const {
@@ -156,14 +156,14 @@ void QuantumCircuit::toLegacyCircuitGraph(legacy::CircuitGraph& graph) const {
     auto quGate = gateApplyToLegacyQuantumGate(chain->gates[0]);
     for (int i = 1; i < chain->gates.size(); i++) {
       quGate = std::make_shared<QuantumGate>(
-        quGate->lmatmul(*gateApplyToLegacyQuantumGate(chain->gates[i])));
+          quGate->lmatmul(*gateApplyToLegacyQuantumGate(chain->gates[i])));
     }
     graph.appendGate(quGate);
   }
 }
 
-QuantumCircuit QuantumCircuit::FromLegacyCircuitGraph(
-    const legacy::CircuitGraph& graph) {
+QuantumCircuit
+QuantumCircuit::FromLegacyCircuitGraph(const legacy::CircuitGraph& graph) {
   const auto allBlocks = graph.getAllBlocks();
   QuantumCircuit qc;
 
@@ -173,9 +173,9 @@ QuantumCircuit QuantumCircuit::FromLegacyCircuitGraph(
     for (const auto* gateNode : gateNodes) {
       auto name = gateNode->quantumGate->getName();
       chainStmt->gates.emplace_back(
-        name,
-        GateApplyStmt::arg_t(gateNode->quantumGate->gateMatrix.gateParams),
-        gateNode->quantumGate->qubits);
+          name,
+          GateApplyStmt::arg_t(gateNode->quantumGate->gateMatrix.gateParams),
+          gateNode->quantumGate->qubits);
     }
     qc.addChainStmt(std::move(chainStmt));
   }

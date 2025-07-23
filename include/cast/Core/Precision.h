@@ -2,24 +2,23 @@
 #define CAST_CORE_PRECISION_H
 
 namespace cast {
-  enum class Precision : int {
-    F32    = 32,
-    Single = 32,
-    Float  = 32,
+enum class Precision : int {
+  F32 = 32,
+  Single = 32,
+  Float = 32,
 
-    F64    = 64,
-    Double = 64,
+  F64 = 64,
+  Double = 64,
 
-    Unknown = -1
-  };
+  Unknown = -1
+};
 } // namespace cast
 
 #include "utils/CSVParsable.h"
 
 namespace utils {
 
-template<>
-struct CSVField<cast::Precision> {
+template <> struct CSVField<cast::Precision> {
   static void parse(std::string_view token, cast::Precision& field) {
     if (token == "32")
       field = cast::Precision::F32;
@@ -34,6 +33,6 @@ struct CSVField<cast::Precision> {
   }
 };
 
-}
+} // namespace utils
 
 #endif // CAST_CORE_PRECISION_H

@@ -3,8 +3,8 @@
 using namespace cast::ast;
 
 PauliComponentStmt* Parser::parsePauliComponentStmt() {
-  assert(curToken.is(tk_Identifier) && 
-    "parsePauliComponentStmt expects to be called with an identifier");
+  assert(curToken.is(tk_Identifier) &&
+         "parsePauliComponentStmt expects to be called with an identifier");
   auto str = ctx.createIdentifier(curToken.toStringView());
   advance(tk_Identifier);
   auto* weight = parseExpr();

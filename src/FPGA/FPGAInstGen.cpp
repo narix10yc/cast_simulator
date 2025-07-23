@@ -195,8 +195,8 @@
 //   InstGenState(const CircuitGraph& graph, const FPGAInstGenConfig& config)
 //       : graph(graph), config(config),
 //         nRows(graph.tile().size()), nQubits(graph.nQubits),
-//         qubitStatuses(graph.nQubits), tileBlocks(graph.tile().size() * nQubits),
-//         unlockedRowIndices(nQubits), availables() {
+//         qubitStatuses(graph.nQubits), tileBlocks(graph.tile().size() *
+//         nQubits), unlockedRowIndices(nQubits), availables() {
 //     init(graph);
 //   }
 
@@ -212,8 +212,8 @@
 //   FPGAGateCategory getBlockKind(GateBlock* block) const {
 //     return getFPGAGateCategory(*block->quantumGate, config.tolerances);
 //   }
-//   // popBlock: pop a block from \p availables. Update \p availables accordingly.
-//   void popBlock(GateBlock* block) {
+//   // popBlock: pop a block from \p availables. Update \p availables
+//   accordingly. void popBlock(GateBlock* block) {
 //     auto it = std::find_if(availables.begin(), availables.end(),
 //                            [&block](const available_blocks_t &avail) {
 //                              return avail.block == block;
@@ -227,14 +227,16 @@
 //       const auto& qubit = data.qubit;
 
 //       GateBlock* cddBlock = nullptr;
-//       for (auto& updatedRow = ++unlockedRowIndices[qubit]; updatedRow < nRows;
+//       for (auto& updatedRow = ++unlockedRowIndices[qubit]; updatedRow <
+//       nRows;
 //            ++updatedRow) {
 //         auto idx = nQubits * updatedRow + qubit;
 //         cddBlock = tileBlocks[idx];
 //         if (cddBlock)
 //           break;
 //       }
-//       if (cddBlock && std::find(candidateBlocks.begin(), candidateBlocks.end(),
+//       if (cddBlock && std::find(candidateBlocks.begin(),
+//       candidateBlocks.end(),
 //                                 cddBlock) == candidateBlocks.end())
 //         candidateBlocks.push_back(cddBlock);
 //     }
@@ -285,7 +287,8 @@
 
 //     // off-chip
 //     for (q = 0; q < nQubits - nOnChipQubits; q++)
-//       qubitStatuses[priorities[nOnChipQubits + q]] = QubitStatus(QK_OffChip, q);
+//       qubitStatuses[priorities[nOnChipQubits + q]] = QubitStatus(QK_OffChip,
+//       q);
 //   }
 
 //   GateBlock* findBlockWithABK(available_block_kind_t abk) const {
@@ -304,7 +307,8 @@
 //     int sqGateBarrierIdx = 0; // single-qubit gate
 
 //     // This method will update vacantMemIdx = idx + 1
-//     const auto writeMemInst = [&](int idx, std::unique_ptr<MemoryInst> inst) {
+//     const auto writeMemInst = [&](int idx, std::unique_ptr<MemoryInst> inst)
+//     {
 //       if (idx < instructions.size()) {
 //         assert(instructions[idx].mInst->isNull());
 //         instructions[idx].setMInst(std::move(inst));
@@ -334,9 +338,11 @@
 //       }
 //       // shuffle swap
 //       if (qubitStatuses[nonLocalQ].kind == QK_Row)
-//         writeMemInst(insertIdx++, std::make_unique<MInstSSR>(shuffleSwapQIdx));
+//         writeMemInst(insertIdx++,
+//         std::make_unique<MInstSSR>(shuffleSwapQIdx));
 //       else
-//         writeMemInst(insertIdx++, std::make_unique<MInstSSC>(shuffleSwapQIdx));
+//         writeMemInst(insertIdx++,
+//         std::make_unique<MInstSSC>(shuffleSwapQIdx));
 
 //       // swap qubit statuses
 //       if (fullSwapQIdx != 0) {
@@ -377,7 +383,8 @@
 
 //           auto gate = b->quantumGate->lmatmul(*lastUpBlock->quantumGate);
 //           auto* node = new GateNode(
-//             std::make_shared<QuantumGate>(gate.gateMatrix, gate.qubits), graph);
+//             std::make_shared<QuantumGate>(gate.gateMatrix, gate.qubits),
+//             graph);
 //           auto* block = new GateBlock(node);
 //           instructions[vacantGateIdx - 1].setGInst(
 //               std::make_unique<GInstUP>(block, FPGAGateCategory::NonComp));
@@ -410,7 +417,8 @@
 //       assert(qubitStatuses[qubit].kind == QK_Local);
 
 //       instructions.emplace_back(nullptr,
-//                                 std::make_unique<GInstSQ>(b, getBlockKind(b)));
+//                                 std::make_unique<GInstSQ>(b,
+//                                 getBlockKind(b)));
 //       vacantGateIdx = instructions.size();
 //       sqGateBarrierIdx = vacantGateIdx;
 //     };
@@ -508,7 +516,8 @@
 //       bool nonCompFlag = false;
 //       for (const auto& avail : availables) {
 //         if (avail.blockKind.is(FPGAGateCategory::fpgaNonComp)) {
-//           // std::cerr << "Ignored block " << avail.block->id << " because it is
+//           // std::cerr << "Ignored block " << avail.block->id << " because it
+//           is
 //           // non-comp\n";
 //           popBlock(avail.block);
 //           nonCompFlag = true;

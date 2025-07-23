@@ -58,8 +58,9 @@ IRGenerator::generatePolynomial(const Polynomial& P, ParamValueFeeder& feeder) {
         expiVarV = builder.CreateFSub(expiVarV, tmp);
     }
     return genComplexMultiply(
-        resultV, {builder.CreateUnaryIntrinsic(Intrinsic::cos, expiVarV),
-                  builder.CreateUnaryIntrinsic(Intrinsic::sin, expiVarV)});
+        resultV,
+        {builder.CreateUnaryIntrinsic(Intrinsic::cos, expiVarV),
+         builder.CreateUnaryIntrinsic(Intrinsic::sin, expiVarV)});
   };
 
   if (P.monomials().empty())
@@ -74,13 +75,14 @@ IRGenerator::generatePolynomial(const Polynomial& P, ParamValueFeeder& feeder) {
   return polyV;
 }
 
-Function* IRGenerator::generatePrepareParameter(const LegacyCircuitGraph& graph) {
+Function*
+IRGenerator::generatePrepareParameter(const LegacyCircuitGraph& graph) {
   Type* scalarTy = getScalarTy();
 
   auto* funcTy = FunctionType::get(
       builder.getVoidTy(), {builder.getPtrTy(), builder.getPtrTy()}, false);
-  Function* func = Function::Create(funcTy, Function::ExternalLinkage,
-                                    "prepare_function", getModule());
+  Function* func = Function::Create(
+      funcTy, Function::ExternalLinkage, "prepare_function", getModule());
 
   auto* paramArgV = func->getArg(0);
   paramArgV->setName("param.ptr");

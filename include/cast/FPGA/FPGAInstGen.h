@@ -21,10 +21,9 @@ public:
   int getNOnChipQubits() const { return nLocalQubits + 2 * gridSize; }
 };
 
-
 // top-level function to generate FPGA instructions from an ir::CircuitGraphNode
-std::vector<Instruction> genInstruction(
-    const ir::CircuitGraphNode& graph, const FPGAInstGenConfig& config);
+std::vector<Instruction> genInstruction(const ir::CircuitGraphNode& graph,
+                                        const FPGAInstGenConfig& config);
 
 } // namespace cast::fpga
 

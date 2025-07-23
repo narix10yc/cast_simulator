@@ -27,30 +27,26 @@ CircuitStmt* Parser::parseCircuitStmt() {
         }
         attr.nQubits = curToken.toInt();
         advance(tk_Numeric);
-      }
-      else if (key == "nparams") {
+      } else if (key == "nparams") {
         if (!curToken.convertibleToInt()) {
           logErrHere("'nparams' must be an integer");
           failAndExit();
         }
         attr.nParams = curToken.toInt();
         advance(tk_Numeric);
-      }
-      else if (key == "phase") {
+      } else if (key == "phase") {
         attr.phase = parseExpr();
         if (attr.phase == nullptr) {
           logErrHere("Expect a phase expression");
           failAndExit();
         }
-      }
-      else if (key == "noise") {
+      } else if (key == "noise") {
         attr.noise = parseExpr();
         if (attr.noise == nullptr) {
           logErrHere("Expect a noise expression");
           failAndExit();
         }
-      }
-      else {
+      } else {
         logErrHere("Unknown attribute key");
         failAndExit();
       }
@@ -86,12 +82,7 @@ CircuitStmt* Parser::parseCircuitStmt() {
   // end of circuit body
 
   auto* circuit = new (ctx) CircuitStmt(
-    name,
-    nameLoc,
-    paramDecl,
-    attr,
-    ctx.createSpan(body.data(), body.size())
-  );
+      name, nameLoc, paramDecl, attr, ctx.createSpan(body.data(), body.size()));
 
   circuit->updateAttribute();
   return circuit;
@@ -140,8 +131,8 @@ std::ostream& CircuitStmt::print(std::ostream& os) const {
 
 void CircuitStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   unsigned size = body.size();
-  p.write(indent) << getKindName() << "(" << name << "): "
-                  << size << " stmts\n";
+  p.write(indent) << getKindName() << "(" << name << "): " << size
+                  << " stmts\n";
   int val = size;
   if (attr.phase != nullptr)
     val++;

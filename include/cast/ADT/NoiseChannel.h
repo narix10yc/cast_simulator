@@ -1,8 +1,8 @@
 #ifndef CAST_QUANTUM_CHANNEL_H
 #define CAST_QUANTUM_CHANNEL_H
 
-#include "cast/internal/KrausRep.h"
 #include "cast/internal/ChoiRep.h"
+#include "cast/internal/KrausRep.h"
 
 namespace cast {
 
@@ -10,7 +10,7 @@ class NoiseChannel;
 using NoiseChannelPtr = std::shared_ptr<NoiseChannel>;
 using ConstNoiseChannelPtr = std::shared_ptr<const NoiseChannel>;
 
-/// It is suggested to not copy \c NoiseChannel s directly. Use 
+/// It is suggested to not copy \c NoiseChannel s directly. Use
 /// \c std::shared_ptr instead.
 class NoiseChannel {
 public:
@@ -21,12 +21,12 @@ public:
   Representations reps;
 
   NoiseChannel(std::shared_ptr<KrausRep> krausRep)
-    : reps(std::move(krausRep), nullptr) {}
+      : reps(std::move(krausRep), nullptr) {}
 
   NoiseChannel(std::shared_ptr<ChoiRep> choiRep)
-    : reps(nullptr, std::move(choiRep)) {}
+      : reps(nullptr, std::move(choiRep)) {}
 
-  std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
+  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const;
 
   int nQubits() const;
 
@@ -42,9 +42,9 @@ public:
 /* Permute. Implemented in src/Core/Permute.cpp */
 
 /// @brief Permute the noise channel according to the given flags.
-/// Flags are specified such that newQubits[flags[i]] = oldQubits[i]. 
+/// Flags are specified such that newQubits[flags[i]] = oldQubits[i].
 NoiseChannelPtr permute(NoiseChannelPtr nc, const std::vector<int>& flags);
 
 } // namespace cast
- 
+
 #endif // CAST_QUANTUM_CHANNEL_H

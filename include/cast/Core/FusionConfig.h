@@ -10,14 +10,16 @@ namespace cast {
 class FusionConfig {
 public:
   enum FusionConfigKind {
-    FC_Base,          // Base fusion config
-    FC_SizeOnly,      // Size only fusion config
-    FC_CPU,           // CPU fusion config
-    FC_CUDA,          // CUDA fusion config
+    FC_Base,     // Base fusion config
+    FC_SizeOnly, // Size only fusion config
+    FC_CPU,      // CPU fusion config
+    FC_CUDA,     // CUDA fusion config
     FC_End
   };
+
 protected:
   FusionConfigKind _kind;
+
 public:
   explicit FusionConfig(FusionConfigKind kind) : _kind(kind) {}
 
@@ -32,14 +34,14 @@ public:
 
   // Swapping tolerance. Set to 0.0 or negative to disable.
   double swapTol = 1e-8;
-  
+
   // The range of sizes in fusion algorithms.
   // The lower limit effectively controls turning on/off agglomerative scheme
   // We pose an upper limit this because sometimes even though the cost model
   // predicts a benefit, kernel generation may be too expensive.
   int sizeMin = 2;
   int sizeMax = GLOBAL_MAX_K;
-  
+
   /// How much benefit do we recognize as significant. For example, if set to
   /// 0.1, then we accept fusion whenever costModel predicts >10% improvement
   double benefitMargin = 0.1;

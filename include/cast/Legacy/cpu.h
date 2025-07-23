@@ -39,7 +39,8 @@ public:
 
   /// @brief Generate IR
   /// @param forceInOrder: force generate IR according to block id
-  void generate(const legacy::CircuitGraph& graph, int debugLevel = 0,
+  void generate(const legacy::CircuitGraph& graph,
+                int debugLevel = 0,
                 bool forceInOrder = false);
 
   /// @brief Generate IR

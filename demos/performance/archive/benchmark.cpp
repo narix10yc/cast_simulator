@@ -1,6 +1,6 @@
+#include "cast/CPU/CPUStatevector.h"
 #include "gen_file/kernel_metadata.h"
 #include "timeit/timeit.h"
-#include "cast/CPU/CPUStatevector.h"
 #include <iomanip>
 #include <iostream>
 
@@ -21,7 +21,7 @@ using Statevector = utils::statevector::StatevectorSep<real_t>;
 
 // #include <immintrin.h>
 
-int main(int argc, char* *argv) {
+int main(int argc, char** argv) {
   Statevector sv(DEFAULT_nQubits);
   Timer timer;
   // timer.setRunTime(0.5);

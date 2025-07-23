@@ -34,7 +34,8 @@
 //   return os;
 // }
 //
-// void CodeGeneratorCPU::generate(const legacy::CircuitGraph& graph, int debugLevel,
+// void CodeGeneratorCPU::generate(const legacy::CircuitGraph& graph, int
+// debugLevel,
 //                                 bool forceInOrder) {
 //   bool isSepKernel =
 //       (config.irConfig.ampFormat == IRGeneratorConfig::SepFormat);
@@ -89,8 +90,8 @@
 //   if (config.installTimer) {
 //     kernelSS << "    tok = clock::now();\n"
 //              << "    std::cerr << "
-//                 "std::chrono::duration_cast<std::chrono::milliseconds>(tok - "
-//                 "tic).count() << \" ms: \" << data.info << \"\\n\";\n"
+//                 "std::chrono::duration_cast<std::chrono::milliseconds>(tok -
+//                 " "tic).count() << \" ms: \" << data.info << \"\\n\";\n"
 //              << "    tic = clock::now();\n";
 //   }
 //
@@ -270,8 +271,8 @@
 //   if (config.installTimer) {
 //     kernelSS << "    tok = clock::now();\n"
 //              << "    std::cerr << "
-//                 "std::chrono::duration_cast<std::chrono::milliseconds>(tok - "
-//                 "tic).count() << \" ms: \" << data.info << \"\\n\";\n"
+//                 "std::chrono::duration_cast<std::chrono::milliseconds>(tok -
+//                 " "tic).count() << \" ms: \" << data.info << \"\\n\";\n"
 //              << "    tic = clock::now();\n";
 //   }
 //
@@ -358,10 +359,12 @@
 // void writeKernelsSingleIrFile(const std::vector<GateBlock*>& allBlocks,
 //                               const std::string& dir,
 //                               const CodeGeneratorCPUConfig& config,
-//                               int blockIdx0, int blockIdx1, double* irGenTime) {
+//                               int blockIdx0, int blockIdx1, double*
+//                               irGenTime) {
 //
 //   IRGenerator irGenerator(config.irConfig,
-//                           "module_blocks" + std::to_string(blockIdx0) + "_to_" +
+//                           "module_blocks" + std::to_string(blockIdx0) +
+//                           "_to_" +
 //                               std::to_string(blockIdx1));
 //
 //   auto tic = clock::now();
@@ -376,7 +379,8 @@
 //    * irGenTime = duration.count();
 //   }
 //   std::error_code ec;
-//   std::string filename = dir + "/kernel_" + std::to_string(blockIdx0) + "_to_" +
+//   std::string filename = dir + "/kernel_" + std::to_string(blockIdx0) +
+//   "_to_" +
 //                          std::to_string(blockIdx1) + ".ll";
 //
 //   llvm::raw_fd_ostream irFile(filename, ec);
@@ -440,8 +444,8 @@
 //
 // void cast::generateCpuIrForRecompilation(const legacy::CircuitGraph& graph,
 //                                          const std::string& dir,
-//                                          const CodeGeneratorCPUConfig& config,
-//                                          int nthreads) {
+//                                          const CodeGeneratorCPUConfig&
+//                                          config, int nthreads) {
 //
 //   assert(nthreads > 0);
 //   auto allBlocks = graph.getAllBlocks();
@@ -473,7 +477,8 @@
 //                             dir + "/kernel_metadata.h", config);
 //     double irGenTime;
 //     if (config.dumpIRToMultipleFiles)
-//       writeKernelsMultipleIrFiles(allBlocks, dir, config, 0, allBlocks.size(),
+//       writeKernelsMultipleIrFiles(allBlocks, dir, config, 0,
+//       allBlocks.size(),
 //                                   &irGenTime);
 //     else
 //       writeKernelsSingleIrFile(allBlocks, dir, config, 0, allBlocks.size(),
@@ -500,13 +505,15 @@
 //                            dir, std::cref(config), blockIdx0, blockIdx1,
 //                            irGenTimes.data() + threadIdx);
 //     else
-//       threads.emplace_back(writeKernelsSingleIrFile, std::cref(allBlocks), dir,
+//       threads.emplace_back(writeKernelsSingleIrFile, std::cref(allBlocks),
+//       dir,
 //                            std::cref(config), blockIdx0, blockIdx1,
 //                            irGenTimes.data() + threadIdx);
 //   }
 //
 //   // main thread writes metadata
-//   writeMetadataHeaderFile(allBlocks, graph.nQubits, dir + "/kernel_metadata.h",
+//   writeMetadataHeaderFile(allBlocks, graph.nQubits, dir +
+//   "/kernel_metadata.h",
 //                           config);
 //
 //   for (auto& t : threads)

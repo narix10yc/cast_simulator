@@ -1,7 +1,7 @@
-#include "llvm/Support/Casting.h"
 #include "cast/Core/AST/Parser.h"
-#include <fstream>
+#include "llvm/Support/Casting.h"
 #include <cassert>
+#include <fstream>
 
 using namespace cast::ast;
 
@@ -110,8 +110,7 @@ std::complex<double> Parser::parseComplexNumber() {
 
 // Try to convert a general expression to a simple numeric expression.
 // Return nullptr if the conversion is not possible.
-SimpleNumericExpr*
-Parser::convertExprToSimpleNumeric(Expr* expr) {
+SimpleNumericExpr* Parser::convertExprToSimpleNumeric(Expr* expr) {
   if (expr == nullptr)
     return nullptr;
   // okay: SimpleNumericExpr
@@ -133,17 +132,17 @@ Parser::convertExprToSimpleNumeric(Expr* expr) {
     if (!lhs || !rhs)
       return nullptr;
     switch (e->op) {
-      case BinaryOpExpr::Add:
-        return SimpleNumericExpr::add(ctx, lhs, rhs);
-      case BinaryOpExpr::Sub:
-        return SimpleNumericExpr::sub(ctx, lhs, rhs);
-      case BinaryOpExpr::Mul:
-        return SimpleNumericExpr::mul(ctx, lhs, rhs);
-      case BinaryOpExpr::Div:
-        return SimpleNumericExpr::div(ctx, lhs, rhs);
-      default:
-        assert(false && "Illegal binary operator");
-        return nullptr;
+    case BinaryOpExpr::Add:
+      return SimpleNumericExpr::add(ctx, lhs, rhs);
+    case BinaryOpExpr::Sub:
+      return SimpleNumericExpr::sub(ctx, lhs, rhs);
+    case BinaryOpExpr::Mul:
+      return SimpleNumericExpr::mul(ctx, lhs, rhs);
+    case BinaryOpExpr::Div:
+      return SimpleNumericExpr::div(ctx, lhs, rhs);
+    default:
+      assert(false && "Illegal binary operator");
+      return nullptr;
     }
   }
 
@@ -157,7 +156,7 @@ Attribute* Parser::parseAttribute() {
   IntegerLiteral* nQubits = nullptr;
   IntegerLiteral* nParams = nullptr;
   SimpleNumericExpr* phase = nullptr;
-  
+
   advance(tk_L_SquareBracket);
   while (curToken.isNot(tk_R_SquareBracket)) {
     requireCurTokenIs(tk_Identifier, "Attribute name expected");
@@ -171,13 +170,11 @@ Attribute* Parser::parseAttribute() {
       requireCurTokenIs(tk_Numeric, "Attribute 'nqubits' must be a number");
       nQubits = new (ctx) IntegerLiteral(curToken.toInt());
       advance(tk_Numeric);
-    }
-    else if (name == "nparams") {
+    } else if (name == "nparams") {
       requireCurTokenIs(tk_Numeric, "Attribute 'nparams' must be a number");
       nParams = new (ctx) IntegerLiteral(curToken.toInt());
       advance(tk_Numeric);
-    }
-    else if (name == "phase") {
+    } else if (name == "phase") {
       auto* expr = parseExpr();
       phase = convertExprToSimpleNumeric(expr);
       std::cerr << "Successful: ";
@@ -186,8 +183,7 @@ Attribute* Parser::parseAttribute() {
         logErrHere("Attribute 'phase' must be a simple numeric expression");
         failAndExit();
       }
-    }
-    else {
+    } else {
       // other attributes
       assert(false && "Not Implemented yet");
     }
@@ -204,51 +200,50 @@ ParameterDeclExpr* Parser::parseParameterDecl() {
   std::vector<IdentifierExpr*> params;
   while (true) {
     switch (curToken.kind) {
-      case tk_R_RoundBracket: {
-        break;
-      }
-      case tk_Identifier: {
-        auto name = ctx.createIdentifier(curToken.toStringView());
-        params.push_back(new (ctx) IdentifierExpr(name));
-        advance(tk_Identifier);
-        if (curToken.is(tk_Comma))
-          advance(tk_Comma);
-        break;
-      }
-      case tk_Comma: {
-        logErrHere("Extra comma in parameter list");
-        failAndExit();
-        return nullptr;
-      }
-      default:
-        logErrHere("Expect a parameter name or ')' to end parameter list");
-        failAndExit();
+    case tk_R_RoundBracket: {
+      break;
+    }
+    case tk_Identifier: {
+      auto name = ctx.createIdentifier(curToken.toStringView());
+      params.push_back(new (ctx) IdentifierExpr(name));
+      advance(tk_Identifier);
+      if (curToken.is(tk_Comma))
+        advance(tk_Comma);
+      break;
+    }
+    case tk_Comma: {
+      logErrHere("Extra comma in parameter list");
+      failAndExit();
+      return nullptr;
+    }
+    default:
+      logErrHere("Expect a parameter name or ')' to end parameter list");
+      failAndExit();
     }
     if (curToken.is(tk_R_RoundBracket))
       break;
   }
   advance(tk_R_RoundBracket);
-  return new (ctx) ParameterDeclExpr(
-    ctx.createSpan(params.data(), params.size())
-  );
+  return new (ctx)
+      ParameterDeclExpr(ctx.createSpan(params.data(), params.size()));
 }
 
 Stmt* Parser::parseCircuitLevelStmt() {
   switch (curToken.kind) {
-    case tk_Measure: {
-      advance(tk_Measure);
-      auto* target = parseExpr();
-      assert(target != nullptr);
-      return new (ctx) MeasureStmt(target);
-    }
-    case tk_Identifier:
-      return parseGateChainStmt();
-    case tk_If:
-      return parseIfStmt();
-    case tk_Out:
-      return parseOutStmt();
-    default:
-      return nullptr;
+  case tk_Measure: {
+    advance(tk_Measure);
+    auto* target = parseExpr();
+    assert(target != nullptr);
+    return new (ctx) MeasureStmt(target);
+  }
+  case tk_Identifier:
+    return parseGateChainStmt();
+  case tk_If:
+    return parseIfStmt();
+  case tk_Out:
+    return parseOutStmt();
+  default:
+    return nullptr;
   }
 }
 
@@ -265,8 +260,7 @@ std::span<Stmt*> Parser::parseCircuitLevelStmtList() {
       stmts.push_back(s);
     }
     advance(tk_R_CurlyBracket);
-  }
-  else {
+  } else {
     auto* s = parseCircuitLevelStmt();
     if (s == nullptr) {
       logErrHere("Expect a statement");

@@ -68,18 +68,18 @@ std::string TimingResult::timeToString(double t, int n_sig_dig) {
 
   // significant digits
   int precision =
-    n_sig_dig - 1 - static_cast<int>(std::floor(std::log10(timeValue)));
+      n_sig_dig - 1 - static_cast<int>(std::floor(std::log10(timeValue)));
 
   std::ostringstream ss;
 
-  ss << std::fixed << std::setprecision(precision) << timeValue << " "
-     << unit;
+  ss << std::fixed << std::setprecision(precision) << timeValue << " " << unit;
   return ss.str();
 }
 
 std::ostream& TimingResult::display(int n_sig_dig, std::ostream& os) const {
-  os << replication << " replications (" << repeat << (repeat == 1 ? " repeat each): " : " repeats each): ")
-     << "min " << timeToString(min, n_sig_dig) << "; median "
+  os << replication << " replications (" << repeat
+     << (repeat == 1 ? " repeat each): " : " repeats each): ") << "min "
+     << timeToString(min, n_sig_dig) << "; median "
      << timeToString(med, n_sig_dig) << "\n";
   return os;
 }
@@ -97,10 +97,9 @@ std::string TimingResult::raw_string() const {
   return ss.str();
 }
 
-TimingResult Timer::timeit(
-    const std::function<void()>& method,
-    const std::function<void()>& setup,
-    const std::function<void()>& teardown) const {
+TimingResult Timer::timeit(const std::function<void()>& method,
+                           const std::function<void()>& setup,
+                           const std::function<void()>& teardown) const {
   using Clock = std::chrono::high_resolution_clock;
   using TimePoint = std::chrono::time_point<Clock>;
   using Duration = std::chrono::duration<double>;
@@ -112,8 +111,8 @@ TimingResult Timer::timeit(
   double dur;
 
   if (verbose > 0) {
-    std::cerr << "Desired warm-up/run time: "
-              << warmupTime << "/" << runTime << " s;\n";
+    std::cerr << "Desired warm-up/run time: " << warmupTime << "/" << runTime
+              << " s;\n";
     std::cerr << "Number of Replication(s): " << replication << "\n";
   }
 
@@ -160,8 +159,8 @@ TimingResult Timer::timeit(
   }
   if (verbose > 0) {
     totalT1 = Clock::now();
-    std::cerr << "Actual running time: "
-              << Duration(totalT1 - totalT0).count() << " s;\n";
+    std::cerr << "Actual running time: " << Duration(totalT1 - totalT0).count()
+              << " s;\n";
   }
 
   teardown();
@@ -169,10 +168,11 @@ TimingResult Timer::timeit(
   return TimingResult(repeat, replication, tArr);
 }
 
-TimingResult Timer::timeitFixedRepeat(
-    const std::function<void()>& method, int _repeat,
-    const std::function<void()>& setup,
-    const std::function<void()>& teardown) const {
+TimingResult
+Timer::timeitFixedRepeat(const std::function<void()>& method,
+                         int _repeat,
+                         const std::function<void()>& setup,
+                         const std::function<void()>& teardown) const {
   using Clock = std::chrono::high_resolution_clock;
   using TimePoint = std::chrono::time_point<Clock>;
   using Duration = std::chrono::duration<double>;
@@ -196,14 +196,11 @@ TimingResult Timer::timeitFixedRepeat(
   return TimingResult(_repeat, replication, tArr);
 }
 
-
-TimingResult Timer::timeitPartial(
-    const std::function<void()>& preMethod,
-    const std::function<void()>& timedMethod,
-    const std::function<void()>& postMethod,
-    const std::function<void()>& setup,
-    const std::function<void()>& teardown
-) const {
+TimingResult Timer::timeitPartial(const std::function<void()>& preMethod,
+                                  const std::function<void()>& timedMethod,
+                                  const std::function<void()>& postMethod,
+                                  const std::function<void()>& setup,
+                                  const std::function<void()>& teardown) const {
   using Clock = std::chrono::high_resolution_clock;
   using TimePoint = std::chrono::time_point<Clock>;
   using Duration = std::chrono::duration<double>;
@@ -213,12 +210,12 @@ TimingResult Timer::timeitPartial(
 
   TimePoint tic, toc;
   TimePoint totalT0, totalT1;
-  
+
   double dur = 0.0;
 
   if (verbose > 0) {
-    std::cerr << "Desired warm-up/run time: "
-              << warmupTime << "/" << runTime << " s\n";
+    std::cerr << "Desired warm-up/run time: " << warmupTime << "/" << runTime
+              << " s\n";
     std::cerr << "Number of Replication(s): " << replication << "\n";
   }
 
@@ -227,7 +224,7 @@ TimingResult Timer::timeitPartial(
   if (verbose > 0) {
     totalT0 = Clock::now();
   }
-  
+
   {
     preMethod();
     tic = Clock::now();
@@ -291,8 +288,8 @@ TimingResult Timer::timeitPartial(
 
   if (verbose > 0) {
     totalT1 = Clock::now();
-    std::cerr << "Actual running time: "
-              << Duration(totalT1 - totalT0).count() << " s\n";
+    std::cerr << "Actual running time: " << Duration(totalT1 - totalT0).count()
+              << " s\n";
   }
 
   teardown();

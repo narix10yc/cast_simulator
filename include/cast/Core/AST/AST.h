@@ -4,16 +4,16 @@
 #include "cast/Core/AST/LocationSpan.h"
 #include "cast/Core/AST/PrettyPrinter.h"
 #include "llvm/ADT/SmallVector.h"
-#include <iostream>
-#include <string>
-#include <span>
-#include <cmath>
 #include "llvm/Support/ErrorOr.h"
+#include <cmath>
+#include <iostream>
+#include <span>
+#include <string>
 
 namespace cast::legacy {
-  class CircuitGraph;
-} // namespace cast
-  
+class CircuitGraph;
+} // namespace cast::legacy
+
 namespace cast {
 namespace ast {
 class ASTContext;
@@ -23,38 +23,40 @@ public:
   /// The LLVM-style RTTI. Indentation corresponds to class hirearchy.
   enum NodeKind {
     NK_Stmt,
-      NK_Stmt_GateApply,
-      NK_Stmt_GateChain,
-      NK_Stmt_GateBlock,
-      NK_Stmt_Measure,
-      NK_Stmt_If,
-      NK_Stmt_Out,
-      NK_Stmt_Repeat,
-      NK_Stmt_Circuit,
-      NK_Stmt_PauliComponent,
-      NK_Stmt_Channel,
-      _NK_Stmt_End,
+    NK_Stmt_GateApply,
+    NK_Stmt_GateChain,
+    NK_Stmt_GateBlock,
+    NK_Stmt_Measure,
+    NK_Stmt_If,
+    NK_Stmt_Out,
+    NK_Stmt_Repeat,
+    NK_Stmt_Circuit,
+    NK_Stmt_PauliComponent,
+    NK_Stmt_Channel,
+    _NK_Stmt_End,
     NK_Expr,
-      NK_Expr_Identifier,
-      NK_Expr_ParameterDecl,
-      NK_Expr_Call,
-      NK_Expr_SimpleNumeric,
-        NK_Expr_IntegerLiteral,
-        NK_Expr_FloatingLiteral,
-        NK_Expr_FractionLiteral,
-        NK_Expr_FractionPiLiteral,
-        _NK_Expr_SimpleNumeric_End,
-      NK_Expr_Measure,
-      NK_Expr_All,
-      NK_Expr_Parameter,
-      NK_Expr_BinaryOp,
-      NK_Expr_MinusOp,
-      _NK_Expr_End,
+    NK_Expr_Identifier,
+    NK_Expr_ParameterDecl,
+    NK_Expr_Call,
+    NK_Expr_SimpleNumeric,
+    NK_Expr_IntegerLiteral,
+    NK_Expr_FloatingLiteral,
+    NK_Expr_FractionLiteral,
+    NK_Expr_FractionPiLiteral,
+    _NK_Expr_SimpleNumeric_End,
+    NK_Expr_Measure,
+    NK_Expr_All,
+    NK_Expr_Parameter,
+    NK_Expr_BinaryOp,
+    NK_Expr_MinusOp,
+    _NK_Expr_End,
     NK_Root
   };
+
 private:
   NodeKind _kind;
   static std::string _getKindName(NodeKind k);
+
 public:
   explicit Node(NodeKind kind) : _kind(kind) {}
 
@@ -65,13 +67,11 @@ public:
   virtual ~Node() = default;
 
   virtual std::ostream& print(std::ostream& os) const {
-    return os << "[Node " << getKindName()
-              << " @ " << this << "]";
+    return os << "[Node " << getKindName() << " @ " << this << "]";
   }
 
   virtual void prettyPrint(PrettyPrinter& p, int indent) const {
-    p.write(indent) << "[Node " << getKindName()
-                    << " @ " << this << "]\n";
+    p.write(indent) << "[Node " << getKindName() << " @ " << this << "]\n";
   }
 }; // class Node
 
@@ -83,9 +83,7 @@ struct Identifier {
 
   explicit Identifier(std::string_view str) : str(str) {}
 
-  bool operator==(const Identifier& other) const {
-    return str == other.str;
-  }
+  bool operator==(const Identifier& other) const { return str == other.str; }
 
   friend std::ostream& operator<<(std::ostream& os, const Identifier& id) {
     return os << id.str;
@@ -97,8 +95,7 @@ public:
   explicit Expr(NodeKind kind) : Node(kind) {}
 
   static bool classof(const Node* node) {
-    return node->getKind() >= NK_Expr && 
-           node->getKind() <= _NK_Expr_End;
+    return node->getKind() >= NK_Expr && node->getKind() <= _NK_Expr_End;
   }
 }; // class Expr
 
@@ -107,12 +104,9 @@ class IdentifierExpr : public Expr {
 public:
   Identifier name;
 
-  IdentifierExpr(Identifier name)
-    : Expr(NK_Expr_Identifier), name(name) {}
+  IdentifierExpr(Identifier name) : Expr(NK_Expr_Identifier), name(name) {}
 
-  std::ostream& print(std::ostream& os) const override {
-    return os << name;
-  }
+  std::ostream& print(std::ostream& os) const override { return os << name; }
   void prettyPrint(PrettyPrinter& p, int indent) const override {
     p.write(indent) << getKindName() << "(" << name << ")\n";
   }
@@ -126,7 +120,7 @@ class ParameterDeclExpr : public Expr {
 public:
   std::span<ast::IdentifierExpr*> parameters;
   ParameterDeclExpr(std::span<ast::IdentifierExpr*> parameters)
-    : Expr(NK_Expr_ParameterDecl), parameters(parameters) {}
+      : Expr(NK_Expr_ParameterDecl), parameters(parameters) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -141,7 +135,7 @@ public:
   std::span<Expr*> args;
 
   CallExpr(Identifier name, std::span<Expr*> args)
-    : Expr(NK_Expr_Call), name(name), args(args) {}
+      : Expr(NK_Expr_Call), name(name), args(args) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -157,12 +151,12 @@ public:
 /// design allows storing exact values of fraction-multiple of pi, such as pi/2
 /// and 2*pi/3. We also support basic arithmatics. They are useful in printing
 /// the AST.
-/// In order to convert a generic expression to a simple numeric expression, 
+/// In order to convert a generic expression to a simple numeric expression,
 /// use \c ast::reduceExprToSimpleNumeric() function.
 class SimpleNumericExpr : public Expr {
 public:
   explicit SimpleNumericExpr(NodeKind kind) : Expr(kind) {}
- 
+
   virtual double getValue() const = 0;
 
   // "-" <SimpleNumericExpr>
@@ -175,7 +169,7 @@ public:
   // <SimpleNumericExpr> "-" <SimpleNumericExpr>
   static SimpleNumericExpr*
   sub(ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs);
-  
+
   // <SimpleNumericExpr> "*" <SimpleNumericExpr>
   static SimpleNumericExpr*
   mul(ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs);
@@ -200,13 +194,11 @@ public:
   int value;
 
   IntegerLiteral(int value)
-    : SimpleNumericExpr(NK_Expr_IntegerLiteral), value(value) {}
+      : SimpleNumericExpr(NK_Expr_IntegerLiteral), value(value) {}
 
   double getValue() const override { return value; }
 
-  std::ostream& print(std::ostream& os) const override {
-    return os << value;
-  }
+  std::ostream& print(std::ostream& os) const override { return os << value; }
 
   void prettyPrint(PrettyPrinter& p, int indent) const override {
     p.write(indent) << getKindName() << "(" << value << ")\n";
@@ -222,13 +214,11 @@ public:
   double value;
 
   FloatingLiteral(double value)
-    : SimpleNumericExpr(NK_Expr_FloatingLiteral), value(value) {}
+      : SimpleNumericExpr(NK_Expr_FloatingLiteral), value(value) {}
 
   double getValue() const override { return value; }
 
-  std::ostream& print(std::ostream& os) const override {
-    return os << value;
-  }
+  std::ostream& print(std::ostream& os) const override { return os << value; }
 
   void prettyPrint(PrettyPrinter& p, int indent) const override {
     p.write(indent) << getKindName() << "(" << value << ")\n";
@@ -269,12 +259,10 @@ public:
 
   FractionPiLiteral(int numerator, int denominator);
 
-  double getValue() const override { 
-    return M_PI * n / d;
-  }
+  double getValue() const override { return M_PI * n / d; }
 
   std::ostream& print(std::ostream& os) const override;
-  
+
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_FractionPiLiteral;
   }
@@ -284,8 +272,7 @@ class MeasureExpr : public Expr {
 public:
   Expr* target;
 
-  MeasureExpr(Expr* target)
-    : Expr(NK_Expr_Measure), target(target) {}
+  MeasureExpr(Expr* target) : Expr(NK_Expr_Measure), target(target) {}
 
   std::ostream& print(std::ostream& os) const override {
     return target->print(os << "Measure ");
@@ -302,9 +289,7 @@ class AllExpr : public Expr {
 public:
   AllExpr() : Expr(NK_Expr_All) {}
 
-  std::ostream& print(std::ostream& os) const override {
-    return os << "All";
-  }
+  std::ostream& print(std::ostream& os) const override { return os << "All"; }
 
   static bool classof(const Node* node) {
     return node->getKind() == NK_Expr_All;
@@ -316,8 +301,7 @@ public:
 class ParameterExpr : public Expr {
 public:
   int index;
-  ParameterExpr(int index)
-    : Expr(NK_Expr_Parameter), index(index) {}
+  ParameterExpr(int index) : Expr(NK_Expr_Parameter), index(index) {}
 
   std::ostream& print(std::ostream& os) const override {
     return os << "#" << index;
@@ -344,7 +328,7 @@ public:
   Expr* rhs;
 
   BinaryOpExpr(BinaryOpKind op, Expr* lhs, Expr* rhs)
-    : Expr(NK_Expr_BinaryOp), op(op), lhs(lhs), rhs(rhs) {}
+      : Expr(NK_Expr_BinaryOp), op(op), lhs(lhs), rhs(rhs) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -363,8 +347,7 @@ class MinusOpExpr : public Expr {
 public:
   Expr* operand;
 
-  MinusOpExpr(Expr* operand)
-    : Expr(NK_Expr_MinusOp), operand(operand) {}
+  MinusOpExpr(Expr* operand) : Expr(NK_Expr_MinusOp), operand(operand) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -385,23 +368,22 @@ public:
   SimpleNumericExpr* phase;
 
   Attribute() : nQubits(nullptr), nParams(nullptr), phase(nullptr) {}
-  
+
   Attribute(IntegerLiteral* nQubits,
             IntegerLiteral* nParams,
             SimpleNumericExpr* phase)
-    : nQubits(nQubits), nParams(nParams), phase(phase) {}
+      : nQubits(nQubits), nParams(nParams), phase(phase) {}
 
   std::ostream& print(std::ostream& os) const;
 };
 
-// The base class for all statements. 
+// The base class for all statements.
 class Stmt : public Node {
 public:
   explicit Stmt(NodeKind kind) : Node(kind) {}
 
   static bool classof(const Node* node) {
-    return node->getKind() >= NK_Stmt &&
-           node->getKind() <= _NK_Stmt_End;
+    return node->getKind() >= NK_Stmt && node->getKind() <= _NK_Stmt_End;
   }
 }; // class Stmt
 
@@ -414,10 +396,9 @@ public:
   GateApplyStmt(Identifier name,
                 std::span<Expr*> params,
                 std::span<Expr*> qubits)
-    : Stmt(NK_Stmt_GateApply)
-    , name(name), params(params), qubits(qubits) {}
+      : Stmt(NK_Stmt_GateApply), name(name), params(params), qubits(qubits) {}
 
-  // Because we expect \c GateApplyStmt will not appear in the top-level, 
+  // Because we expect \c GateApplyStmt will not appear in the top-level,
   // \c print does not print indentation nor the final semicolon.
   std::ostream& print(std::ostream& os) const override;
 
@@ -433,7 +414,7 @@ public:
   std::span<GateApplyStmt*> gates;
 
   GateChainStmt(std::span<GateApplyStmt*> gates)
-    : Stmt(NK_Stmt_GateChain), gates(gates) {}
+      : Stmt(NK_Stmt_GateChain), gates(gates) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -448,8 +429,7 @@ class MeasureStmt : public Stmt {
 public:
   Expr* target;
 
-  MeasureStmt(Expr* target)
-    : Stmt(NK_Stmt_Measure), target(target) {}
+  MeasureStmt(Expr* target) : Stmt(NK_Stmt_Measure), target(target) {}
 
   std::ostream& print(std::ostream& os) const override {
     return target->print(os << "Measure ");
@@ -467,14 +447,14 @@ struct CircuitAttribute {
   Expr* noise;
 
   CircuitAttribute()
-    : nQubits(-1), nParams(-1), phase(nullptr), noise(nullptr) {}
+      : nQubits(-1), nParams(-1), phase(nullptr), noise(nullptr) {}
 
   CircuitAttribute(int nQubits, int nParams, Expr* phase, Expr* noise)
-    : nQubits(nQubits), nParams(nParams), phase(phase), noise(noise) {}
+      : nQubits(nQubits), nParams(nParams), phase(phase), noise(noise) {}
 
   bool isInited() const {
-    return nQubits != -1 || nParams != -1 ||
-           phase != nullptr || noise != nullptr;
+    return nQubits != -1 || nParams != -1 || phase != nullptr ||
+           noise != nullptr;
   }
 }; // struct CircuitAttribute
 
@@ -492,9 +472,8 @@ public:
               ParameterDeclExpr* paramDecl,
               CircuitAttribute attr,
               std::span<Stmt*> body)
-    : Stmt(NK_Stmt_Circuit)
-    , name(name), nameLoc(nameLoc)
-    , paramDecl(paramDecl), attr(attr), body(body) {}
+      : Stmt(NK_Stmt_Circuit), name(name), nameLoc(nameLoc),
+        paramDecl(paramDecl), attr(attr), body(body) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -513,7 +492,7 @@ public:
   Expr* weight;
 
   PauliComponentStmt(Identifier str, Expr* weight)
-    : Stmt(NK_Stmt_PauliComponent), str(str), weight(weight) {}
+      : Stmt(NK_Stmt_PauliComponent), str(str), weight(weight) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -537,9 +516,8 @@ public:
               LocationSpan nameLoc,
               ParameterDeclExpr* paramDecl,
               std::span<PauliComponentStmt*> components)
-    : Stmt(NK_Stmt_Channel)
-    , name(name), nameLoc(nameLoc)
-    , paramDecl(paramDecl), components(components) {}
+      : Stmt(NK_Stmt_Channel), name(name), nameLoc(nameLoc),
+        paramDecl(paramDecl), components(components) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -556,11 +534,9 @@ public:
   std::span<Stmt*> thenBody;
   std::span<Stmt*> elseBody;
 
-  IfStmt(Expr* condition,
-         std::span<Stmt*> thenBody,
-         std::span<Stmt*> elseBody)
-    : Stmt(NK_Stmt_If)
-    , condition(condition), thenBody(thenBody), elseBody(elseBody) {}
+  IfStmt(Expr* condition, std::span<Stmt*> thenBody, std::span<Stmt*> elseBody)
+      : Stmt(NK_Stmt_If), condition(condition), thenBody(thenBody),
+        elseBody(elseBody) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -574,8 +550,7 @@ public:
 class OutStmt : public Stmt {
 public:
   Expr* expr;
-OutStmt(Expr* expr)
-    : Stmt(NK_Stmt_Out), expr(expr) {}
+  OutStmt(Expr* expr) : Stmt(NK_Stmt_Out), expr(expr) {}
 
   std::ostream& print(std::ostream& os) const override;
 
@@ -599,9 +574,7 @@ public:
   /// If name is empty, return the first circuit found.
   CircuitStmt* lookupCircuit(const std::string& name = "");
 
-  static bool classof(const Node* node) {
-    return node->getKind() == NK_Root;
-  }
+  static bool classof(const Node* node) { return node->getKind() == NK_Root; }
 }; // class RootNode
 
 } // namespace ast

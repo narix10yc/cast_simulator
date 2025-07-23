@@ -1,8 +1,8 @@
 #include "llvm/Support/TargetSelect.h"
 
 #include "cast/CPU/CPUKernelManager.h"
-#include "utils/iocolor.h"
 #include "utils/TaskDispatcher.h"
+#include "utils/iocolor.h"
 
 #include <cassert>
 
@@ -25,12 +25,15 @@ std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
      << "One Tolerance:   " << oneTol << "\n"
      << "matrixLoadMode: ";
   switch (this->matrixLoadMode) {
-    case MatrixLoadMode::UseMatImmValues:
-      os << "UseMatImmValues\n"; break;
-    case MatrixLoadMode::StackLoadMatElems:
-      os << "StackLoadMatElems\n"; break;
-    case MatrixLoadMode::StackLoadMatVecs:
-      os << "StackLoadMatVecs\n"; break;
+  case CPUMatrixLoadMode::UseMatImmValues:
+    os << "UseMatImmValues\n";
+    break;
+  case CPUMatrixLoadMode::StackLoadMatElems:
+    os << "StackLoadMatElems\n";
+    break;
+  case CPUMatrixLoadMode::StackLoadMatVecs:
+    os << "StackLoadMatVecs\n";
+    break;
   }
 
   os << CYAN("================================\n");
@@ -63,15 +66,11 @@ void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   // multi-thread compile
   utils::TaskDispatcher dispatcher(nThreads);
   for (auto& kernel : _standaloneKernels) {
-      dispatcher.enqueue([this, &kernel]() {
-      ensureExecutable(*kernel);
-      });
+    dispatcher.enqueue([this, &kernel]() { ensureExecutable(*kernel); });
   }
   for (auto& [graphName, kernels] : _graphKernels) {
     for (auto& kernel : kernels) {
-      dispatcher.enqueue([this, &kernel]() {
-        ensureExecutable(*kernel);
-      });
+      dispatcher.enqueue([this, &kernel]() { ensureExecutable(*kernel); });
     }
   }
   if (progressBar)
@@ -79,11 +78,13 @@ void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   dispatcher.sync(progressBar);
 }
 
-MaybeError<void> CPUKernelManager::initJIT(
-    int nThreads, OptimizationLevel optLevel, bool useLazyJIT, int verbose) {
+MaybeError<void> CPUKernelManager::initJIT(int nThreads,
+                                           OptimizationLevel optLevel,
+                                           bool useLazyJIT,
+                                           int verbose) {
   if (nThreads <= 0) {
-    return cast::makeError<void>(
-      "Invalid number of threads: " + std::to_string(nThreads));
+    return cast::makeError<void>("Invalid number of threads: " +
+                                 std::to_string(nThreads));
   }
   if (isJITed()) {
     return cast::makeError<void>("JIT has already been initialized.");
@@ -103,10 +104,10 @@ MaybeError<void> CPUKernelManager::initJIT(
     auto lazyJIT = cantFail(jitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
       auto err = lazyJIT->addLazyIRModule(
-        orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
+          orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
       if (err) {
-        return cast::makeError<void>(
-            "Failed to add lazy IR module: " + llvm::toString(std::move(err)));
+        return cast::makeError<void>("Failed to add lazy IR module: " +
+                                     llvm::toString(std::move(err)));
       }
     }
     this->llvmJIT = std::move(lazyJIT);
@@ -118,10 +119,10 @@ MaybeError<void> CPUKernelManager::initJIT(
     auto eagerJIT = cantFail(eagerJitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
       auto err = eagerJIT->addIRModule(
-        orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
+          orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
       if (err) {
-        return cast::makeError<void>(
-            "Failed to add IR module: " + llvm::toString(std::move(err)));
+        return cast::makeError<void>("Failed to add IR module: " +
+                                     llvm::toString(std::move(err)));
       }
     }
     this->llvmJIT = std::move(eagerJIT);
@@ -141,8 +142,8 @@ void CPUKernelManager::dumpIR(const std::string& funcName,
       return;
     }
   }
-  std::cerr << RED("[Err] ") << "In CPUKernelManager::dumpIR: "
-            << "Function " << funcName << " not found.\n";
+  std::cerr << RED("[Err] ") << "In CPUKernelManager::dumpIR: " << "Function "
+            << funcName << " not found.\n";
 }
 
 #undef DEBUG_TYPE

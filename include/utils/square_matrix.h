@@ -10,17 +10,17 @@
 namespace utils {
 
 /// @brief square_matrix<data_t>: a simple wrapper of square matrices.
-template<typename data_t>
-class square_matrix {
+template <typename data_t> class square_matrix {
 private:
   size_t _edgeSize; // use size_t here to avoid overflow
   data_t* _data;
+
 public:
   square_matrix() = default;
 
   square_matrix(unsigned edgeSize)
-    : _edgeSize(edgeSize)
-    , _data(new data_t[static_cast<size_t>(edgeSize) * edgeSize]) {
+      : _edgeSize(edgeSize),
+        _data(new data_t[static_cast<size_t>(edgeSize) * edgeSize]) {
     assert(_data != nullptr);
   }
 
@@ -42,18 +42,17 @@ public:
   ~square_matrix() { delete[] _data; }
 
   square_matrix(const square_matrix& other)
-    : _edgeSize(other.edgeSize())
-    , _data(new data_t[other.edgeSize() * other.edgeSize()]) {
+      : _edgeSize(other.edgeSize()),
+        _data(new data_t[other.edgeSize() * other.edgeSize()]) {
     for (size_t i = 0; i < _edgeSize * _edgeSize; i++)
       _data[i] = other[i];
   }
 
   square_matrix(square_matrix&& other) noexcept
-    : _edgeSize(other.edgeSize())
-    , _data(other._data) {
+      : _edgeSize(other.edgeSize()), _data(other._data) {
     other._data = nullptr;
   }
-  
+
   square_matrix& operator=(const square_matrix& other) {
     if (this == &other)
       return *this;
@@ -125,15 +124,13 @@ public:
     assert(utils::isPermutation(flags));
     assert(1 << flags.size() == _edgeSize);
 
-    if (std::all_of(flags.begin(), flags.end(),
-        [&flags](int i) {
+    if (std::all_of(flags.begin(), flags.end(), [&flags](int i) {
           return flags[i] == i;
-        })
-      )
+        }))
       return square_matrix(*this);
 
-    const auto permuteIndex =
-      [&flags, k = flags.size()](unsigned idx) -> unsigned {
+    const auto permuteIndex = [&flags,
+                               k = flags.size()](unsigned idx) -> unsigned {
       unsigned newIdx = 0;
       for (unsigned b = 0; b < k; b++) {
         newIdx += ((idx & (1ULL << b)) >> b) << flags[b];
@@ -155,9 +152,9 @@ public:
 /// The maximum norm (sometimes infinity norm) between two matrices is defined
 /// by the largest difference in absolute values in matrix entries. That is,
 /// max_{i,j} |A_ij - B_ij|
-template<typename data_t>
-double maximum_norm(
-    const square_matrix<data_t>& m0, const square_matrix<data_t>& m1) {
+template <typename data_t>
+double maximum_norm(const square_matrix<data_t>& m0,
+                    const square_matrix<data_t>& m1) {
   assert(m0.edgeSize() == m1.edgeSize());
   double norm = 0.0;
   double tmp;
@@ -173,12 +170,12 @@ double maximum_norm(
 
 square_matrix<std::complex<double>> randomUnitaryMatrix(unsigned edgeSize);
 
-std::ostream& printComplexMatrixF64(
-    std::ostream& os,
-    const square_matrix<std::complex<double>>& matrix);
+std::ostream&
+printComplexMatrixF64(std::ostream& os,
+                      const square_matrix<std::complex<double>>& matrix);
 
-inline std::ostream& printComplexMatrixF64(
-    const square_matrix<std::complex<double>>& matrix) {
+inline std::ostream&
+printComplexMatrixF64(const square_matrix<std::complex<double>>& matrix) {
   return printComplexMatrixF64(std::cerr, matrix);
 }
 

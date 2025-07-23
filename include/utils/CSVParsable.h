@@ -2,18 +2,17 @@
 #ifndef UTILS_CSVPARSABLE_H
 #define UTILS_CSVPARSABLE_H
 
-#include <iostream>
-#include <tuple>
-#include <string_view>
-#include <sstream>
-#include <vector>
 #include <array>
+#include <iostream>
+#include <sstream>
+#include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <vector>
 
 namespace utils {
 // -------------------- CSVField Protocol --------------------
-template<typename T>
-struct CSVField {
+template <typename T> struct CSVField {
   static void parse(std::string_view token, T& field) {
     static_assert(false, "CSVField<T>::parse must be specialized for type T");
   }
@@ -24,41 +23,31 @@ struct CSVField {
 };
 
 // Specializations for common types
-template<>
-struct CSVField<int> {
+template <> struct CSVField<int> {
   static void parse(std::string_view token, int& field) {
     field = std::stoi(std::string(token));
   }
 
-  static void write(std::ostream& os, const int& value) {
-    os << value;
-  }
+  static void write(std::ostream& os, const int& value) { os << value; }
 };
 
-template<>
-struct CSVField<double> {
+template <> struct CSVField<double> {
   static void parse(std::string_view token, double& field) {
     field = std::stod(std::string(token));
   }
 
-  static void write(std::ostream& os, const double& value) {
-    os << value;
-  }
+  static void write(std::ostream& os, const double& value) { os << value; }
 };
 
-template<>
-struct CSVField<std::string> {
+template <> struct CSVField<std::string> {
   static void parse(std::string_view token, std::string& field) {
     field = std::string(token);
   }
 
-  static void write(std::ostream& os, const std::string& value) {
-    os << value;
-  }
+  static void write(std::ostream& os, const std::string& value) { os << value; }
 };
 
-template<>
-struct CSVField<std::string_view> {
+template <> struct CSVField<std::string_view> {
   static void parse(std::string_view token, std::string_view& field) {
     field = token;
   }
@@ -83,13 +72,12 @@ inline std::vector<std::string_view> split_csv(std::string_view line) {
 }
 
 // -------------------- Tuple Iteration --------------------
-template<typename Tuple, typename Func, std::size_t... Is>
+template <typename Tuple, typename Func, std::size_t... Is>
 void for_each(Tuple&& t, Func&& f, std::index_sequence<Is...>) {
   (f(std::get<Is>(t), Is), ...); // Fold expression
 }
 
-template<typename Tuple, typename Func>
-void for_each(Tuple&& t, Func&& f) {
+template <typename Tuple, typename Func> void for_each(Tuple&& t, Func&& f) {
   constexpr auto size = std::tuple_size<std::decay_t<Tuple>>::value;
   for_each(std::forward<Tuple>(t),
            std::forward<Func>(f),
@@ -97,8 +85,7 @@ void for_each(Tuple&& t, Func&& f) {
 }
 
 // -------------------- Base Class --------------------
-template<typename Derived>
-struct CSVParsable {
+template <typename Derived> struct CSVParsable {
   void parse(std::string_view line) {
     auto tokens = split_csv(line);
     assert(tokens.size() == Derived::num_fields);
@@ -140,7 +127,7 @@ consteval std::string_view trim(std::string_view str) {
 }
 
 // Main consteval function to clean CSV title
-template<std::size_t N>
+template <std::size_t N>
 consteval auto clean_csv_title(const char (&input)[N]) {
   std::array<char, N> out{};
   std::size_t out_i = 0;
@@ -156,7 +143,8 @@ consteval auto clean_csv_title(const char (&input)[N]) {
       if (input[i] == ',') {
         out[out_i++] = ',';
         token_start = i + 1;
-      } else break;
+      } else
+        break;
     }
   }
 
@@ -166,14 +154,15 @@ consteval auto clean_csv_title(const char (&input)[N]) {
 
 #define CSV_STRINGIFY(...) #__VA_ARGS__
 
-#define CSV_DATA_FIELD(...) \
-  auto tie_fields() { return std::tie(__VA_ARGS__); } \
-  auto tie_fields() const { return std::tie(__VA_ARGS__); } \
-  static constexpr size_t num_fields = \
-    std::tuple_size<decltype(std::tie(__VA_ARGS__))>::value; \
-  static constexpr auto CSV_TITLE_STORAGE = utils::clean_csv_title(CSV_STRINGIFY(__VA_ARGS__)); \
+#define CSV_DATA_FIELD(...)                                                    \
+  auto tie_fields() { return std::tie(__VA_ARGS__); }                          \
+  auto tie_fields() const { return std::tie(__VA_ARGS__); }                    \
+  static constexpr size_t num_fields =                                         \
+      std::tuple_size<decltype(std::tie(__VA_ARGS__))>::value;                 \
+  static constexpr auto CSV_TITLE_STORAGE =                                    \
+      utils::clean_csv_title(CSV_STRINGIFY(__VA_ARGS__));                      \
   static constexpr std::string_view CSV_TITLE{CSV_TITLE_STORAGE.data()};
-    
+
 } // end namespace utils
 
 #endif // UTILS_CSVPARSABLE_H

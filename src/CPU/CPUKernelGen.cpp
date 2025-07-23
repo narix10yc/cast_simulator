@@ -1,12 +1,12 @@
 #include "llvm/IR/IntrinsicsX86.h"
 
-#include "cast/Core/KernelGenInternal.h"
 #include "cast/CPU/CPUKernelManager.h"
+#include "cast/Core/KernelGenInternal.h"
 
+#include "utils/Formats.h"
+#include "utils/PrintSpan.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
-#include "utils/PrintSpan.h"
-#include "utils/Formats.h"
 
 #include <cmath>
 
@@ -19,10 +19,10 @@ using namespace cast;
 std::atomic<int> cast::CPUKernelManager::_standaloneKernelCounter = 0;
 
 // Top-level entry
-MaybeError<CPUKernelManager::KernelInfoPtr> CPUKernelManager::_genCPUGate(
-    const CPUKernelGenConfig& config, 
-    ConstQuantumGatePtr gate,
-    const std::string& funcName) {
+MaybeError<CPUKernelManager::KernelInfoPtr>
+CPUKernelManager::_genCPUGate(const CPUKernelGenConfig& config,
+                              ConstQuantumGatePtr gate,
+                              const std::string& funcName) {
   auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
   llvm::Function* func = nullptr;
   if (stdQuGate != nullptr && stdQuGate->noiseChannel() == nullptr) {
@@ -30,9 +30,8 @@ MaybeError<CPUKernelManager::KernelInfoPtr> CPUKernelManager::_genCPUGate(
     const auto scalarGM = stdQuGate->getScalarGM();
     assert(scalarGM != nullptr && "Only supporting scalar GM for now");
     func = _gen(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
-  }
-  else {
-    // super op gates are treated as normal gates with twice the number of 
+  } else {
+    // super op gates are treated as normal gates with twice the number of
     // qubits
     auto superopGate = gate->getSuperopGate();
     assert(superopGate != nullptr && "Superop gate should not be null");
@@ -53,28 +52,29 @@ MaybeError<CPUKernelManager::KernelInfoPtr> CPUKernelManager::_genCPUGate(
   }
 
   return std::make_unique<CPUKernelInfo>(
-    std::function<CPU_KERNEL_TYPE>(), // empty executable
-    config.precision,
-    func->getName().str(),
-    config.matrixLoadMode,
-    gate,
-    config.simdWidth,
-    gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol used in sigMat
+      std::function<CPU_KERNEL_TYPE>(), // empty executable
+      config.precision,
+      func->getName().str(),
+      config.matrixLoadMode,
+      gate,
+      config.simdWidth,
+      gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol
+                                    // used in sigMat
   );
 }
 
-MaybeError<void> CPUKernelManager::genStandaloneGate(
-    const CPUKernelGenConfig& config,
-    ConstQuantumGatePtr gate,
-    const std::string& _funcName) {
+MaybeError<void>
+CPUKernelManager::genStandaloneGate(const CPUKernelGenConfig& config,
+                                    ConstQuantumGatePtr gate,
+                                    const std::string& _funcName) {
   std::string funcName(_funcName);
   if (funcName.empty())
     funcName = "kernel_" + std::to_string(_standaloneKernelCounter++);
   // check for name conflicts
   for (const auto& kernel : _standaloneKernels) {
     if (kernel->llvmFuncName == funcName) {
-      return cast::makeError<void>(
-          "Kernel with name '" + funcName + "' already exists.");
+      return cast::makeError<void>("Kernel with name '" + funcName +
+                                   "' already exists.");
     }
   }
 
@@ -86,10 +86,10 @@ MaybeError<void> CPUKernelManager::genStandaloneGate(
   return {}; // success
 }
 
-MaybeError<void> CPUKernelManager::genGraphGates(
-    const CPUKernelGenConfig& config,
-    const ir::CircuitGraphNode& graph,
-    const std::string& graphName) {
+MaybeError<void>
+CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
+                                const ir::CircuitGraphNode& graph,
+                                const std::string& graphName) {
   assert(graph.checkConsistency());
 
   if (_graphKernels.contains(graphName)) {
@@ -111,8 +111,8 @@ MaybeError<void> CPUKernelManager::genGraphGates(
     auto result = _genCPUGate(config, gate, name);
     if (!result) {
       std::ostringstream oss;
-      oss << "Failed to generate kernel for gate "
-          << (void*)(gate.get()) << ": " << result.takeError() << "\n";
+      oss << "Failed to generate kernel for gate " << (void*)(gate.get())
+          << ": " << result.takeError() << "\n";
       return cast::makeError<void>(oss.str());
     }
     kernels.emplace_back(result.takeValue());
@@ -126,11 +126,12 @@ MaybeError<void> CPUKernelManager::genGraphGates(
 namespace {
 
 struct CPUArgs {
-  llvm::Value* pSvArg;       // ptr to statevector
-  llvm::Value* ctrBeginArg;  // counter begin
-  llvm::Value* ctrEndArg;    // counter end
-  llvm::Value* pMatArg;      // ptr to matrix
+  llvm::Value* pSvArg;      // ptr to statevector
+  llvm::Value* ctrBeginArg; // counter begin
+  llvm::Value* ctrEndArg;   // counter end
+  llvm::Value* pMatArg;     // ptr to matrix
 };
+
 struct IRMatData {
   llvm::Value* reElmVal; // element of the real entry
   llvm::Value* imElmVal; // element of the imag entry
@@ -141,18 +142,16 @@ struct IRMatData {
 
   // Default constructor needed here
   IRMatData()
-    : reElmVal(nullptr), imElmVal(nullptr),
-      reVecVal(nullptr), imVecVal(nullptr),
-      reFlag(SK_Unknown), imFlag(SK_Unknown) {}
+      : reElmVal(nullptr), imElmVal(nullptr), reVecVal(nullptr),
+        imVecVal(nullptr), reFlag(SK_Unknown), imFlag(SK_Unknown) {}
 }; // IRMatData
 
-/// @brief This function must be called after function declaration and that the 
-/// IRBuilder is set to the entry block. 
-std::vector<IRMatData> initMatrixData(
-    llvm::IRBuilder<>& B,
-    const CPUKernelGenConfig& config,
-    const ComplexSquareMatrix& mat,
-    llvm::Value* pMatArg) {
+/// @brief This function must be called after function declaration and that the
+/// IRBuilder is set to the entry block.
+std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
+                                      const CPUKernelGenConfig& config,
+                                      const ComplexSquareMatrix& mat,
+                                      llvm::Value* pMatArg) {
   const unsigned K = mat.edgeSize();
   const unsigned KK = K * K;
 
@@ -196,11 +195,11 @@ std::vector<IRMatData> initMatrixData(
   // Step 2: set the values, either as imm values (llvm::Constant) or as
   // run-time loaded values
   assert(config.precision != Precision::Unknown);
-  auto* ty = (config.precision == Precision::F32) ? B.getFloatTy()
-                                                  : B.getDoubleTy();
+  auto* ty =
+      (config.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
   auto ec = llvm::ElementCount::getFixed(1 << config.get_simd_s());
   switch (config.matrixLoadMode) {
-  case MatrixLoadMode::UseMatImmValues: {
+  case CPUMatrixLoadMode::UseMatImmValues: {
     for (unsigned i = 0; i < KK; ++i) {
       // We only initialize the values for general entries. Values in other
       // cases (SK_Zero, SK_One, SK_MinusOne) are left as null. This is okay as
@@ -220,7 +219,7 @@ std::vector<IRMatData> initMatrixData(
     }
     break;
   }
-  case MatrixLoadMode::StackLoadMatElems: {
+  case CPUMatrixLoadMode::StackLoadMatElems: {
     // In StackLoadMatElems mode, the matrix elements are assumed to alternate
     // between one real and one imag value. That is, real[0], imag[0], real[1],
     // imag[1], ..., real[K*K-1], imag[K*K-1].
@@ -228,19 +227,17 @@ std::vector<IRMatData> initMatrixData(
       auto& d = matData[i];
       if (d.reFlag == SK_General) {
         auto* ptrV = B.CreateConstGEP1_32(
-          ty, pMatArg, 2 * i, "re.mat.elem." + llvm::Twine(i));
-        d.reElmVal = B.CreateLoad(
-          ty, ptrV, "re.mat.elem." + llvm::Twine(i));
+            ty, pMatArg, 2 * i, "re.mat.elem." + llvm::Twine(i));
+        d.reElmVal = B.CreateLoad(ty, ptrV, "re.mat.elem." + llvm::Twine(i));
         d.reVecVal = B.CreateVectorSplat(
-          ec, d.reElmVal, "re.mat.vec." + std::to_string(i));
+            ec, d.reElmVal, "re.mat.vec." + std::to_string(i));
       }
       if (d.imFlag == SK_General) {
         auto* ptrV = B.CreateConstGEP1_32(
-          ty, pMatArg, 2 * i + 1, "im.mat.elem." + llvm::Twine(i));
-        d.imElmVal = B.CreateLoad(
-          ty, ptrV, "im.mat.elem." + llvm::Twine(i));
+            ty, pMatArg, 2 * i + 1, "im.mat.elem." + llvm::Twine(i));
+        d.imElmVal = B.CreateLoad(ty, ptrV, "im.mat.elem." + llvm::Twine(i));
         d.imVecVal = B.CreateVectorSplat(
-          ec, d.imElmVal, "im.mat.vec." + std::to_string(i));
+            ec, d.imElmVal, "im.mat.vec." + std::to_string(i));
       }
     }
     break;
@@ -256,11 +253,16 @@ std::vector<IRMatData> initMatrixData(
 
 char flagToChar(ScalarKind flag) {
   switch (flag) {
-    case SK_General:  return 'X';
-    case SK_Zero:     return '0';
-    case SK_One:      return '+';
-    case SK_MinusOne: return '-';
-    default:          return '?';
+  case SK_General:
+    return 'X';
+  case SK_Zero:
+    return '0';
+  case SK_One:
+    return '+';
+  case SK_MinusOne:
+    return '-';
+  default:
+    return '?';
   }
 }
 
@@ -285,11 +287,11 @@ void debugPrintMatData(std::ostream& os,
 
 } // end of anonymous namespace
 
-llvm::Function* CPUKernelManager::_gen(
-    const CPUKernelGenConfig& config,
-    const ComplexSquareMatrix& mat,
-    const QuantumGate::TargetQubitsType& qubits,
-    const std::string& funcName) {
+llvm::Function*
+CPUKernelManager::_gen(const CPUKernelGenConfig& config,
+                       const ComplexSquareMatrix& mat,
+                       const QuantumGate::TargetQubitsType& qubits,
+                       const std::string& funcName) {
   const unsigned s = config.get_simd_s();
   const unsigned S = 1ULL << s;
   const unsigned k = qubits.size();
@@ -298,14 +300,14 @@ llvm::Function* CPUKernelManager::_gen(
   assert(K == mat.edgeSize() && "matrix size mismatch");
 
   auto& llvmContextModulePair =
-    createNewLLVMContextModulePair(funcName + "Module");
+      createNewLLVMContextModulePair(funcName + "Module");
   auto& llvmContext = *llvmContextModulePair.llvmContext;
   auto& llvmModule = *llvmContextModulePair.llvmModule;
 
   llvm::IRBuilder<> B(llvmContext);
   assert(config.precision != Precision::Unknown);
-  auto* scalarTy = (config.precision == Precision::F32) ? B.getFloatTy()
-                                                        : B.getDoubleTy();
+  auto* scalarTy =
+      (config.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
 
   // Create function declaration
   CPUArgs args;
@@ -313,13 +315,11 @@ llvm::Function* CPUKernelManager::_gen(
   llvm::BasicBlock *entryBB, *loopBB, *loopBodyBB, *retBB;
   { // start of function declaration
     auto* funcTy = llvm::FunctionType::get(
-      /* return type */ B.getVoidTy(),
-      /* arg type */ { B.getPtrTy() },
-      /* isVarArg */ false
-    );
+        /* return type */ B.getVoidTy(),
+        /* arg type */ {B.getPtrTy()},
+        /* isVarArg */ false);
     func = llvm::Function::Create(
-      funcTy, llvm::Function::ExternalLinkage, funcName, llvmModule
-    );
+        funcTy, llvm::Function::ExternalLinkage, funcName, llvmModule);
     entryBB = llvm::BasicBlock::Create(B.getContext(), "entry", func);
     loopBB = llvm::BasicBlock::Create(B.getContext(), "loop", func);
     loopBodyBB = llvm::BasicBlock::Create(B.getContext(), "loop.body", func);
@@ -365,8 +365,8 @@ llvm::Function* CPUKernelManager::_gen(
       ++q;
     }
     while (qubitsIt != qubitsEnd) {
-        hiBits.push_back(*qubitsIt);
-        ++qubitsIt;
+      hiBits.push_back(*qubitsIt);
+      ++qubitsIt;
     }
 
     for (auto& b : loBits) {
@@ -395,15 +395,14 @@ llvm::Function* CPUKernelManager::_gen(
   const unsigned HK = 1 << hk;
 
   // debug print qubit splits
-  LLVM_DEBUG(
-    std::cerr << CYAN("-- qubit split done\n");
-    utils::printArray(std::cerr << "- lower bits:  ", loBits) << "\n";
-    utils::printArray(std::cerr << "- higher bits: ", hiBits) << "\n";
-    utils::printArray(std::cerr << "- simd bits:   ", simdBits) << "\n";
-    std::cerr << "- reImBit (simd_s): " << s << "\n";
-    std::cerr << "- sepBit:           " << sepBit << "\n";
-    std::cerr << "- vecSize:          " << vecSize << "\n";
-  );
+  LLVM_DEBUG(std::cerr << CYAN("-- qubit split done\n");
+             utils::printArray(std::cerr << "- lower bits:  ", loBits) << "\n";
+             utils::printArray(std::cerr << "- higher bits: ", hiBits) << "\n";
+             utils::printArray(std::cerr << "- simd bits:   ", simdBits)
+             << "\n";
+             std::cerr << "- reImBit (simd_s): " << s << "\n";
+             std::cerr << "- sepBit:           " << sepBit << "\n";
+             std::cerr << "- vecSize:          " << vecSize << "\n";);
 
   // entryBB->print(llvm::errs());
 
@@ -441,17 +440,13 @@ llvm::Function* CPUKernelManager::_gen(
       tmpCounterV = B.CreateAnd(taskIdV, mask, "tmp.taskid");
       tmpCounterV = B.CreateShl(tmpCounterV, (qIdx - 1), "tmp.taskid");
       idxStartV = B.CreateAdd(idxStartV, tmpCounterV, "tmp.idx.begin");
-      LLVM_DEBUG(
-        std::cerr << "  (taskID & " << utils::fmt_0b(mask, highestQ) << ") << "
-                  << (qIdx - 1) << "\n";
-      );
+      LLVM_DEBUG(std::cerr << "  (taskID & " << utils::fmt_0b(mask, highestQ)
+                           << ") << " << (qIdx - 1) << "\n";);
       mask = 0ULL;
     }
     mask = ~((1ULL << (highestQ - sepBit - hk + 1)) - 1);
-    LLVM_DEBUG(
-      std::cerr << "  (taskID & " << utils::fmt_0b(mask, 16) << ") << "
-                << hk << "\n";
-    );
+    LLVM_DEBUG(std::cerr << "  (taskID & " << utils::fmt_0b(mask, 16) << ") << "
+                         << hk << "\n";);
 
     tmpCounterV = B.CreateAnd(taskIdV, mask, "tmp.taskid");
     tmpCounterV = B.CreateShl(tmpCounterV, hk, "tmp.taskid");
@@ -493,16 +488,16 @@ llvm::Function* CPUKernelManager::_gen(
         imSplitMasks[li * S + si] = reSplitMasks[li * S + si] | (1 << s);
       }
     }
-    LLVM_DEBUG(
-      std::cerr << "- reSplitMasks: [";
-      for (const auto& e : reSplitMasks)
-        std::cerr << utils::fmt_0b(e, sepBit + 1) << ",";
-      std::cerr << "]\n";
-      std::cerr << "- imSplitMasks: [";
-      for (const auto& e : imSplitMasks)
-        std::cerr << utils::fmt_0b(e, sepBit + 1) << ",";
-      std::cerr << "]\n";
-    );
+    LLVM_DEBUG(std::cerr << "- reSplitMasks: [";
+               for (const auto& e
+                    : reSplitMasks) std::cerr
+               << utils::fmt_0b(e, sepBit + 1) << ",";
+               std::cerr << "]\n";
+               std::cerr << "- imSplitMasks: [";
+               for (const auto& e
+                    : imSplitMasks) std::cerr
+               << utils::fmt_0b(e, sepBit + 1) << ",";
+               std::cerr << "]\n";);
   } // end init [re/im]SplitMasks
 
   // load vectors
@@ -521,22 +516,23 @@ llvm::Function* CPUKernelManager::_gen(
     }
     idxShift >>= sepBit;
     LLVM_DEBUG(
-      std::cerr << "hi = " << hi << ": idxShift = "
-                << utils::fmt_0b(idxShift, hiBits.empty() ? 1 : hiBits.back())
-                << "\n";
-    );
+        std::cerr << "hi = " << hi << ": idxShift = "
+                  << utils::fmt_0b(idxShift, hiBits.empty() ? 1 : hiBits.back())
+                  << "\n";);
     pSvs[hi] = B.CreateConstGEP1_64(
-      vecType, ptrSvBeginV, idxShift, "ptr.sv.hi." + std::to_string(hi));
-    auto* ampFull = B.CreateLoad(
-      vecType, pSvs[hi], "sv.full.hi." + std::to_string(hi));
+        vecType, ptrSvBeginV, idxShift, "ptr.sv.hi." + std::to_string(hi));
+    auto* ampFull =
+        B.CreateLoad(vecType, pSvs[hi], "sv.full.hi." + std::to_string(hi));
 
     for (unsigned li = 0; li < LK; li++) {
       reAmps[hi * LK + li] = B.CreateShuffleVector(
-        ampFull, llvm::ArrayRef<int>(reSplitMasks.data() + li * S, S),
-        "re." + std::to_string(hi) + "." + std::to_string(li));
+          ampFull,
+          llvm::ArrayRef<int>(reSplitMasks.data() + li * S, S),
+          "re." + std::to_string(hi) + "." + std::to_string(li));
       imAmps[hi * LK + li] = B.CreateShuffleVector(
-        ampFull, llvm::ArrayRef<int>(imSplitMasks.data() + li * S, S),
-        "im." + std::to_string(hi) + "." + std::to_string(li));
+          ampFull,
+          llvm::ArrayRef<int>(imSplitMasks.data() + li * S, S),
+          "im." + std::to_string(hi) + "." + std::to_string(li));
     }
   }
 
@@ -545,91 +541,91 @@ llvm::Function* CPUKernelManager::_gen(
   std::vector<int> reimMergeMask;
   reimMergeMask.reserve(vecSize);
   {
-  int idxL, idxR;
-  unsigned lCached; // length of cached array
-  std::vector<int> arr0(LK * S), arr1(LK * S), arr2(LK * S);
-  std::vector<int>& cacheLHS = arr0, &cacheRHS = arr1, &cacheCombined = arr2;
-  std::memcpy(arr0.data(), reSplitMasks.data(),     S * sizeof(int));
-  std::memcpy(arr1.data(), reSplitMasks.data() + S, S * sizeof(int));
-  int roundIdx = 0;
-  while (roundIdx < lk) {
-    LLVM_DEBUG(
-      std::cerr << "Round " << roundIdx << ": ";
-      utils::printArray(std::cerr, llvm::ArrayRef(cacheLHS)) << " and ";
-      utils::printArray(std::cerr, llvm::ArrayRef(cacheRHS)) << "\n";
-    );
+    int idxL, idxR;
+    unsigned lCached; // length of cached array
+    std::vector<int> arr0(LK * S), arr1(LK * S), arr2(LK * S);
+    std::vector<int>&cacheLHS = arr0, &cacheRHS = arr1, &cacheCombined = arr2;
+    std::memcpy(arr0.data(), reSplitMasks.data(), S * sizeof(int));
+    std::memcpy(arr1.data(), reSplitMasks.data() + S, S * sizeof(int));
+    int roundIdx = 0;
+    while (roundIdx < lk) {
+      LLVM_DEBUG(
+          std::cerr << "Round " << roundIdx << ": ";
+          utils::printArray(std::cerr, llvm::ArrayRef(cacheLHS)) << " and ";
+          utils::printArray(std::cerr, llvm::ArrayRef(cacheRHS)) << "\n";);
 
-    lCached = S << roundIdx;
-    mergeMasks.emplace_back(lCached << 1);
-    auto& mask = mergeMasks.back();
-    
-    idxL = 0; idxR = 0;
-    for (int idxCombined = 0; idxCombined < (lCached << 1); idxCombined++) {
-      if (idxL == lCached) {
-        // append cacheRHS[idxR:] to cacheCombined
-        while (idxR < lCached) {
-          mask[idxCombined] = idxR + lCached;
-          cacheCombined[idxCombined++] = cacheRHS[idxR++];
+      lCached = S << roundIdx;
+      mergeMasks.emplace_back(lCached << 1);
+      auto& mask = mergeMasks.back();
+
+      idxL = 0;
+      idxR = 0;
+      for (int idxCombined = 0; idxCombined < (lCached << 1); idxCombined++) {
+        if (idxL == lCached) {
+          // append cacheRHS[idxR:] to cacheCombined
+          while (idxR < lCached) {
+            mask[idxCombined] = idxR + lCached;
+            cacheCombined[idxCombined++] = cacheRHS[idxR++];
+          }
+          break;
         }
-        break;
-      }
-      if (idxR == lCached) {
-        // append cacheLHS[idxL:] to cacheCombined
-        while (idxL < lCached) {
+        if (idxR == lCached) {
+          // append cacheLHS[idxL:] to cacheCombined
+          while (idxL < lCached) {
+            mask[idxCombined] = idxL;
+            cacheCombined[idxCombined++] = cacheLHS[idxL++];
+          }
+          break;
+        }
+        if (cacheLHS[idxL] < cacheRHS[idxR]) {
           mask[idxCombined] = idxL;
-          cacheCombined[idxCombined++] = cacheLHS[idxL++];
+          cacheCombined[idxCombined] = cacheLHS[idxL];
+          ++idxL;
+        } else {
+          mask[idxCombined] = idxR + lCached;
+          cacheCombined[idxCombined] = cacheRHS[idxR];
+          ++idxR;
         }
+      }
+      LLVM_DEBUG(
+          utils::printArray(std::cerr << "  Cache Combined: ",
+                            llvm::ArrayRef(cacheCombined))
+              << "\n";
+          utils::printArray(std::cerr << "  Mask: ", llvm::ArrayRef(mask))
+          << "\n";);
+      // rotate the assignments of
+      // (cacheLHS, cacheRHS, cacheCombined) with (arr0, arr1, arr2)
+      if (++roundIdx == lk)
         break;
+      cacheLHS = cacheCombined;
+      if (cacheLHS == arr2) {
+        cacheRHS = arr0;
+        cacheCombined = arr1;
+      } else if (cacheLHS == arr1) {
+        cacheRHS = arr2;
+        cacheCombined = arr0;
+      } else {
+        assert(cacheLHS == arr0);
+        cacheRHS = arr1;
+        cacheCombined = arr2;
       }
-      if (cacheLHS[idxL] < cacheRHS[idxR]) {
-        mask[idxCombined] = idxL;
-        cacheCombined[idxCombined] = cacheLHS[idxL];
-        ++idxL;
+      for (int i = 0; i < (lCached << 1); i++) {
+        assert((cacheLHS[i] & (1 << loBits[roundIdx])) == 0);
+        cacheRHS[i] = cacheLHS[i] | (1 << loBits[roundIdx]);
       }
-      else {
-        mask[idxCombined] = idxR + lCached;
-        cacheCombined[idxCombined] = cacheRHS[idxR];
-        ++idxR;
-      }
-    }
-    LLVM_DEBUG(
-      utils::printArray(std::cerr << "  Cache Combined: ", llvm::ArrayRef(cacheCombined)) << "\n";
-      utils::printArray(std::cerr << "  Mask: ", llvm::ArrayRef(mask)) << "\n";
-    );
-    // rotate the assignments of
-    // (cacheLHS, cacheRHS, cacheCombined) with (arr0, arr1, arr2)
-    if (++roundIdx == lk)
-      break;
-    cacheLHS = cacheCombined;
-    if (cacheLHS == arr2) {
-      cacheRHS = arr0;
-      cacheCombined = arr1;
-    } else if (cacheLHS == arr1) {
-      cacheRHS = arr2;
-      cacheCombined = arr0;
-    } else {
-      assert(cacheLHS == arr0);
-      cacheRHS = arr1;
-      cacheCombined = arr2;
-    }
-    for (int i = 0; i < (lCached << 1); i++) {
-      assert((cacheLHS[i] & (1 << loBits[roundIdx])) == 0);
-      cacheRHS[i] = cacheLHS[i] | (1 << loBits[roundIdx]);
-    }
-  } // end while
+    } // end while
 
-  // init reimMergeMask
-  for (int pairIdx = 0; pairIdx < (vecSize >> s >> 1); pairIdx++) {
-    for (int i = 0; i < S; i++)
-      reimMergeMask.push_back(S * pairIdx + i);
-    for (int i = 0; i < S; i++)
-      reimMergeMask.push_back(S * pairIdx + i + (vecSize >> 1));
-  }
-  LLVM_DEBUG(
-    utils::printArray(
-      std::cerr << "reimMergeMask: ",llvm::ArrayRef(reimMergeMask)) << "\n";
-    std::cerr << CYAN("- Merged masks initiated\n");
-  );
+    // init reimMergeMask
+    for (int pairIdx = 0; pairIdx < (vecSize >> s >> 1); pairIdx++) {
+      for (int i = 0; i < S; i++)
+        reimMergeMask.push_back(S * pairIdx + i);
+      for (int i = 0; i < S; i++)
+        reimMergeMask.push_back(S * pairIdx + i + (vecSize >> 1));
+    }
+    LLVM_DEBUG(utils::printArray(std::cerr << "reimMergeMask: ",
+                                 llvm::ArrayRef(reimMergeMask))
+                   << "\n";
+               std::cerr << CYAN("- Merged masks initiated\n"););
   }
 
   std::vector<llvm::Value*> updatedReAmps(LK);
@@ -641,28 +637,40 @@ llvm::Function* CPUKernelManager::_gen(
     for (auto& v : updatedImAmps)
       v = nullptr;
     for (unsigned li = 0; li < LK; li++) {
-      unsigned r = hi * LK + li; // row
+      unsigned r = hi * LK + li;         // row
       for (unsigned c = 0; c < K; c++) { // column
         // updatedReAmps = sum of reAmps * reMats - imAmps * imMats
         const auto& matrixEntry = matData[r * K + c];
-        updatedReAmps[li] = internal::genMulAdd(B,
-          matrixEntry.reVecVal, reAmps[c], updatedReAmps[li],
-          matrixEntry.reFlag, 
-          "new.re." + std::to_string(hi) + "." + std::to_string(li) + ".");
-        updatedReAmps[li] = internal::genNegMulAdd(B,
-          matrixEntry.imVecVal, imAmps[c], updatedReAmps[li],
-          matrixEntry.imFlag, 
-          "new.re." + std::to_string(hi) + "." + std::to_string(li) + ".");
+        updatedReAmps[li] = internal::genMulAdd(
+            B,
+            matrixEntry.reVecVal,
+            reAmps[c],
+            updatedReAmps[li],
+            matrixEntry.reFlag,
+            "new.re." + std::to_string(hi) + "." + std::to_string(li) + ".");
+        updatedReAmps[li] = internal::genNegMulAdd(
+            B,
+            matrixEntry.imVecVal,
+            imAmps[c],
+            updatedReAmps[li],
+            matrixEntry.imFlag,
+            "new.re." + std::to_string(hi) + "." + std::to_string(li) + ".");
 
         // updatedImAmps = sum of reAmps * imMats + imAmps * reMats
-        updatedImAmps[li] = internal::genMulAdd(B,
-          matrixEntry.reVecVal, imAmps[c], updatedImAmps[li],
-          matrixEntry.reFlag, 
-          "new.im." + std::to_string(hi) + "." + std::to_string(li) + ".");
-        updatedImAmps[li] = internal::genMulAdd(B,
-          matrixEntry.imVecVal, reAmps[c], updatedImAmps[li],
-          matrixEntry.imFlag, 
-          "new.im." + std::to_string(hi) + "." + std::to_string(li) + ".");
+        updatedImAmps[li] = internal::genMulAdd(
+            B,
+            matrixEntry.reVecVal,
+            imAmps[c],
+            updatedImAmps[li],
+            matrixEntry.reFlag,
+            "new.im." + std::to_string(hi) + "." + std::to_string(li) + ".");
+        updatedImAmps[li] = internal::genMulAdd(
+            B,
+            matrixEntry.imVecVal,
+            reAmps[c],
+            updatedImAmps[li],
+            matrixEntry.imFlag,
+            "new.im." + std::to_string(hi) + "." + std::to_string(li) + ".");
       }
     }
 
@@ -674,21 +682,24 @@ llvm::Function* CPUKernelManager::_gen(
       bool valid = true;
       for (auto& v : updatedReAmps) {
         if (v == nullptr) {
-          v = llvm::ConstantAggregateZero::get(llvm::VectorType::get(scalarTy, S, false));
+          v = llvm::ConstantAggregateZero::get(
+              llvm::VectorType::get(scalarTy, S, false));
           valid = false;
         }
       }
       for (auto& v : updatedImAmps) {
         if (v == nullptr) {
-          v = llvm::ConstantAggregateZero::get(llvm::VectorType::get(scalarTy, S, false));
+          v = llvm::ConstantAggregateZero::get(
+              llvm::VectorType::get(scalarTy, S, false));
           valid = false;
         }
       }
       if (!valid) {
         std::cerr << BOLDYELLOW("Warning: ")
                   << "Updated amplitudes are left in invalid states after "
-        "matrix-vector multiplication. This could mean the input matrix is "
-        "invalid (some rows are full of zeros).\n";
+                     "matrix-vector multiplication. This could mean the input "
+                     "matrix is "
+                     "invalid (some rows are full of zeros).\n";
       }
     }
 
@@ -703,25 +714,29 @@ llvm::Function* CPUKernelManager::_gen(
       for (unsigned pairIdx = 0; pairIdx < (LK >> mergeIdx >> 1); pairIdx++) {
         unsigned idxL = pairIdx << mergeIdx << 1;
         unsigned idxR = idxL | (1 << mergeIdx);
-        LLVM_DEBUG(
-          std::cerr
-            << "(mergeIdx, pairIdx) = ("
-            << mergeIdx << ", " << pairIdx << "): (idxL, idxR) = ("
-            << idxL << ", " << idxR << ")\n";
-        );
-        updatedReAmps[idxL] = B.CreateShuffleVector(
-          updatedReAmps[idxL], updatedReAmps[idxR], mergeMasks[mergeIdx],
-          "re.merged." + std::to_string(mergeIdx) + "." + std::to_string(pairIdx));
-        updatedImAmps[idxL] = B.CreateShuffleVector(
-          updatedImAmps[idxL], updatedImAmps[idxR], mergeMasks[mergeIdx],
-          "im.merged." + std::to_string(mergeIdx) + "." + std::to_string(pairIdx));
+        LLVM_DEBUG(std::cerr << "(mergeIdx, pairIdx) = (" << mergeIdx << ", "
+                             << pairIdx << "): (idxL, idxR) = (" << idxL << ", "
+                             << idxR << ")\n";);
+        updatedReAmps[idxL] =
+            B.CreateShuffleVector(updatedReAmps[idxL],
+                                  updatedReAmps[idxR],
+                                  mergeMasks[mergeIdx],
+                                  "re.merged." + std::to_string(mergeIdx) +
+                                      "." + std::to_string(pairIdx));
+        updatedImAmps[idxL] =
+            B.CreateShuffleVector(updatedImAmps[idxL],
+                                  updatedImAmps[idxR],
+                                  mergeMasks[mergeIdx],
+                                  "im.merged." + std::to_string(mergeIdx) +
+                                      "." + std::to_string(pairIdx));
       }
     }
 
     // store
-    auto* merged = B.CreateShuffleVector(
-      updatedReAmps[0], updatedImAmps[0], reimMergeMask,
-      "amp.merged.hi." + std::to_string(hi));
+    auto* merged = B.CreateShuffleVector(updatedReAmps[0],
+                                         updatedImAmps[0],
+                                         reimMergeMask,
+                                         "amp.merged.hi." + std::to_string(hi));
     B.CreateStore(merged, pSvs[hi]);
   }
 
@@ -734,7 +749,7 @@ llvm::Function* CPUKernelManager::_gen(
 
   B.SetInsertPoint(retBB);
   B.CreateRetVoid();
-  
+
   // func->print(llvm::errs());
   return func;
 }

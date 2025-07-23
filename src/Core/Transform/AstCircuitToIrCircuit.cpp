@@ -1,26 +1,26 @@
 #include "cast/Transform/Transform.h"
-#include "llvm/Support/Casting.h"
 #include "utils/iocolor.h"
+#include "llvm/Support/Casting.h"
 
 using namespace cast;
 using namespace cast;
 
 // forward declaration
-static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
-    ast::IfStmt* astIf, ast::ASTContext& astCtx);
+static std::unique_ptr<ir::IfMeasureNode>
+convertIfMeasure(ast::IfStmt* astIf, ast::ASTContext& astCtx);
 
 /// @brief Convert a span of AST statements to IR statements. Returns the number
 /// of statements converted. The IR statements are appended to the provided
-/// vector \c irStmts. 
-static int convertSpanOfStmts(
-    std::span<ast::Stmt*> astStmts, ast::ASTContext& astCtx,
-    ir::CompoundNode& irCompoundNode) {
+/// vector \c irStmts.
+static int convertSpanOfStmts(std::span<ast::Stmt*> astStmts,
+                              ast::ASTContext& astCtx,
+                              ir::CompoundNode& irCompoundNode) {
   if (astStmts.empty())
     return 0;
 
   const auto initialSize = irCompoundNode.size();
   std::unique_ptr<ir::CircuitGraphNode> irCircuitGraphNode =
-    std::make_unique<ir::CircuitGraphNode>();
+      std::make_unique<ir::CircuitGraphNode>();
 
   const auto cutCircuitGraphNode = [&]() {
     assert(irCircuitGraphNode != nullptr);
@@ -65,8 +65,7 @@ static int convertSpanOfStmts(
       appendGateToCircuitGraphNode(astGate);
       continue;
     }
-    std::cerr << YELLOW("Warning: ")
-              << "In converting AST to IR, "
+    std::cerr << YELLOW("Warning: ") << "In converting AST to IR, "
               << "skipped unsupported statement type: " << (*it)->getKindName()
               << "\n";
   }
@@ -75,16 +74,15 @@ static int convertSpanOfStmts(
   return irCompoundNode.size() - initialSize;
 }
 
-static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
-    ast::IfStmt* astIf, ast::ASTContext& astCtx) {
-  auto* astMeasureExpr = 
-    llvm::dyn_cast<ast::MeasureExpr>(astIf->condition);
+static std::unique_ptr<ir::IfMeasureNode>
+convertIfMeasure(ast::IfStmt* astIf, ast::ASTContext& astCtx) {
+  auto* astMeasureExpr = llvm::dyn_cast<ast::MeasureExpr>(astIf->condition);
   if (astMeasureExpr == nullptr) {
     std::cerr << "Error: If condition must be a measure expression\n";
     return nullptr;
   }
   auto* astTargetQubitExpr =
-    llvm::dyn_cast<ast::IntegerLiteral>(astMeasureExpr->target);
+      llvm::dyn_cast<ast::IntegerLiteral>(astMeasureExpr->target);
   if (astTargetQubitExpr == nullptr) {
     std::cerr << "Error: Measure target must be an integer literal\n";
     return nullptr;
@@ -96,8 +94,9 @@ static std::unique_ptr<ir::IfMeasureNode> convertIfMeasure(
   return std::unique_ptr<ir::IfMeasureNode>(irNode);
 }
 
-std::unique_ptr<ir::CircuitNode> transform::cvtAstCircuitToIrCircuit(
-    const ast::CircuitStmt& astCircuit, ast::ASTContext& astCtx) {
+std::unique_ptr<ir::CircuitNode>
+transform::cvtAstCircuitToIrCircuit(const ast::CircuitStmt& astCircuit,
+                                    ast::ASTContext& astCtx) {
   auto* irCircuit = new ir::CircuitNode(std::string(astCircuit.name.str));
   auto nCvted = convertSpanOfStmts(astCircuit.body, astCtx, irCircuit->body);
 

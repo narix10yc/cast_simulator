@@ -1,11 +1,11 @@
 #ifndef UTILS_FORMATS_H
 #define UTILS_FORMATS_H
 
-#include <iostream>
-#include <iomanip>
-#include <cstdlib>
-#include <span>
 #include <cassert>
+#include <cstdlib>
+#include <iomanip>
+#include <iostream>
+#include <span>
 
 namespace utils {
 
@@ -14,6 +14,7 @@ namespace utils {
 class fmt_0b {
   uint64_t v;
   int nbits;
+
 public:
   fmt_0b(uint64_t v, int nbits) : v(v), nbits(nbits) {
     assert(nbits >= 0 && nbits <= 64);
@@ -30,6 +31,7 @@ public:
 // will print "1.234 ms".
 class fmt_time {
   double t_in_sec;
+
 public:
   explicit fmt_time(double t_in_sec) : t_in_sec(t_in_sec) {
     assert(t_in_sec >= 0.0);
@@ -40,44 +42,41 @@ public:
     if (fmt.t_in_sec >= 1e3)
       return os << static_cast<unsigned>(fmt.t_in_sec) << " s";
     if (fmt.t_in_sec >= 1e2)
-      return os << std::fixed << std::setprecision(1)
-                << fmt.t_in_sec << " s";
+      return os << std::fixed << std::setprecision(1) << fmt.t_in_sec << " s";
     if (fmt.t_in_sec >= 1e1)
-      return os << std::fixed << std::setprecision(2)
-                << fmt.t_in_sec << " s";
+      return os << std::fixed << std::setprecision(2) << fmt.t_in_sec << " s";
     if (fmt.t_in_sec >= 1.0)
-      return os << std::fixed << std::setprecision(3)
-                << fmt.t_in_sec << " s";
+      return os << std::fixed << std::setprecision(3) << fmt.t_in_sec << " s";
     // milliseconds
     if (fmt.t_in_sec >= 1e-1)
-      return os << std::fixed << std::setprecision(1)
-                << 1e3 * fmt.t_in_sec << " ms";
+      return os << std::fixed << std::setprecision(1) << 1e3 * fmt.t_in_sec
+                << " ms";
     if (fmt.t_in_sec >= 1e-2)
-      return os << std::fixed << std::setprecision(2)
-                << 1e3 * fmt.t_in_sec << " ms";
+      return os << std::fixed << std::setprecision(2) << 1e3 * fmt.t_in_sec
+                << " ms";
     if (fmt.t_in_sec >= 1e-3)
-      return os << std::fixed << std::setprecision(3)
-                << 1e3 * fmt.t_in_sec << " ms";
+      return os << std::fixed << std::setprecision(3) << 1e3 * fmt.t_in_sec
+                << " ms";
     // microseconds
     if (fmt.t_in_sec >= 1e-4)
-      return os << std::fixed << std::setprecision(1)
-                << 1e6 * fmt.t_in_sec << " us";
+      return os << std::fixed << std::setprecision(1) << 1e6 * fmt.t_in_sec
+                << " us";
     if (fmt.t_in_sec >= 1e-5)
-      return os << std::fixed << std::setprecision(2)
-                << 1e6 * fmt.t_in_sec << " us";
+      return os << std::fixed << std::setprecision(2) << 1e6 * fmt.t_in_sec
+                << " us";
     if (fmt.t_in_sec >= 1e-6)
-      return os << std::fixed << std::setprecision(3)
-                << 1e6 * fmt.t_in_sec << " us";
+      return os << std::fixed << std::setprecision(3) << 1e6 * fmt.t_in_sec
+                << " us";
     // nanoseconds
     if (fmt.t_in_sec >= 1e-7)
-      return os << std::fixed << std::setprecision(1)
-                << 1e9 * fmt.t_in_sec << " ns";
+      return os << std::fixed << std::setprecision(1) << 1e9 * fmt.t_in_sec
+                << " ns";
     if (fmt.t_in_sec >= 1e-8)
-      return os << std::fixed << std::setprecision(2)
-                << 1e9 * fmt.t_in_sec << " ns";
+      return os << std::fixed << std::setprecision(2) << 1e9 * fmt.t_in_sec
+                << " ns";
     if (fmt.t_in_sec >= 1e-9)
-      return os << std::fixed << std::setprecision(3)
-                << 1e9 * fmt.t_in_sec << " ns";
+      return os << std::fixed << std::setprecision(3) << 1e9 * fmt.t_in_sec
+                << " ns";
     return os << "< 1.0 ns";
   }
 };
@@ -88,7 +87,8 @@ class fmt_1_to_1e3 {
 
 public:
   explicit fmt_1_to_1e3(double n, int width) : number(n), width(width) {
-    assert(n >= 0.0 && "fmt_1_to_1e3: Currently only supporting positive numbers");
+    assert(n >= 0.0 &&
+           "fmt_1_to_1e3: Currently only supporting positive numbers");
     assert(width >= 4);
     // assert(n >= 1.0 && n <= 1e3);
   }
@@ -102,10 +102,10 @@ public:
   }
 };
 
-template<typename T>
-class fmt_span {
+template <typename T> class fmt_span {
   std::span<T> s;
   char separator;
+
 public:
   fmt_span(std::span<T> s, char separator = ',') : s(s), separator(separator) {}
 

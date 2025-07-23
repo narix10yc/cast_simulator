@@ -1,8 +1,8 @@
 #ifndef CAST_CORE_OPTIMIZER_H
 #define CAST_CORE_OPTIMIZER_H
 
-#include "cast/Core/IRNode.h"
 #include "cast/Core/FusionConfig.h"
+#include "cast/Core/IRNode.h"
 #include "utils/Logger.h"
 
 namespace cast {
@@ -26,7 +26,7 @@ public:
 void applyCanonicalizationPass(ir::CircuitNode& circuit, double swapTol);
 
 void applyGateFusionPass(ir::CircuitNode& circuit, const FusionConfig* config);
-                        
-} // namespace cast::ir
+
+} // namespace cast
 
 #endif // CAST_CORE_OPTIMIZER_H

@@ -1,8 +1,8 @@
 #ifndef CAST_LEGACY_CIRCUIT_GRAPH_H
 #define CAST_LEGACY_CIRCUIT_GRAPH_H
 
-#include "cast/Legacy/QuantumGate.h"
 #include "cast/Legacy/CircuitGraphContext.h"
+#include "cast/Legacy/QuantumGate.h"
 #include "utils/List.h"
 
 #include "llvm/ADT/SmallVector.h"
@@ -131,6 +131,7 @@ public:
 class CircuitGraph {
 private:
   std::unique_ptr<CircuitGraphContext> _context;
+
 public:
   using row_t = std::array<GateBlock*, 42>;
   using tile_t = utils::List<row_t>;
@@ -144,11 +145,12 @@ public:
 
 private:
   tile_t _tile;
+
 public:
   int nQubits;
 
   CircuitGraph()
-  : _context(std::make_unique<CircuitGraphContext>()), _tile(), nQubits(0) {
+      : _context(std::make_unique<CircuitGraphContext>()), _tile(), nQubits(0) {
     _tile.emplace_back();
   }
 
@@ -160,8 +162,9 @@ public:
   static void QFTCircuit(int nQubits, CircuitGraph& graph);
   static CircuitGraph ALACircuit(int nQubits, int nrounds);
 
-  static CircuitGraph GetTestCircuit(
-    const legacy::GateMatrix& gateMatrix, int nQubits, int nrounds);
+  static CircuitGraph GetTestCircuit(const legacy::GateMatrix& gateMatrix,
+                                     int nQubits,
+                                     int nrounds);
 
   tile_t& tile() { return _tile; }
   const tile_t& tile() const { return _tile; }
@@ -173,12 +176,11 @@ public:
 
   // CircuitGraphContext& getContext() { return _context; }
 
-  template<typename... Args>
-  GateNode* acquireGateNodeForward(Args&&... args) {
+  template <typename... Args> GateNode* acquireGateNodeForward(Args&&... args) {
     return _context->gateNodePool.acquire(std::forward<Args>(args)...);
   }
 
-  template<typename... Args>
+  template <typename... Args>
   GateBlock* acquireGateBlockForward(Args&&... args) {
     return _context->gateBlockPool.acquire(std::forward<Args>(args)...);
   }
@@ -272,12 +274,12 @@ public:
   /// @param verbose If > 1, also print the address of each row in front
   std::ostream& print(std::ostream& os = std::cerr, int verbose = 1) const;
 
-  std::ostream& displayInfo(
-    std::ostream& os = std::cerr, int verbose = 1) const;
+  std::ostream& displayInfo(std::ostream& os = std::cerr,
+                            int verbose = 1) const;
 
   void deepCopy(CircuitGraph& other) const;
 };
 
-}; // namespace cast
+}; // namespace cast::legacy
 
 #endif // CAST_LEGACY_CIRCUIT_GRAPH_H

@@ -34,8 +34,8 @@ enum class TokenTy : int {
   GreaterEqual = -36,
   LessEqual = -37,
 
-  Comma = -104,          // ,
-  Semicolon = -105,      // ;
+  Comma = -104,           // ,
+  Semicolon = -105,       // ;
   L_RoundBracket = -106,  // (
   R_RoundBracket = -107,  // )
   L_SquareBracket = -108, // [
@@ -44,8 +44,8 @@ enum class TokenTy : int {
   R_AngleBracket = -111,  // >
   L_CurlyBracket = -112,  // {
   R_CurlyBracket = -113,  // }
-  SingleQuote = -114,    // '
-  DoubleQuote = -115,    // "
+  SingleQuote = -114,     // '
+  DoubleQuote = -115,     // "
 
   LineFeed = 10,       // '\n'
   CarriageReturn = 13, // '\r'

@@ -34,13 +34,16 @@ static void terminateDisplayHelp() {
 }
 
 static void warnTooManyHyphens(int nHyphens, StringRef name) {
-  std::cerr << BOLDYELLOW("[Warning] ") << "Argument '" << name << "' "
-            "is prefixed by " << nHyphens << " (> 2) hyphens.\n";
+  std::cerr << BOLDYELLOW("[Warning] ") << "Argument '" << name
+            << "' "
+               "is prefixed by "
+            << nHyphens << " (> 2) hyphens.\n";
 }
 
 static void warnEqualSignInPrefixArg(char prefix) {
-  std::cerr << BOLDYELLOW("[Warning] ") << "Prefix argument '" << prefix << "' "
-            "should not be followed by '='.\n";
+  std::cerr << BOLDYELLOW("[Warning] ") << "Prefix argument '" << prefix
+            << "' "
+               "should not be followed by '='.\n";
 }
 
 [[noreturn]]
@@ -59,8 +62,9 @@ static void terminateLeadingEqualSign(StringRef clValue) {
 
 [[noreturn]]
 static void terminateNoProvidingRequiredValue(StringRef name) {
-  std::cerr << BOLDRED("[Error] ") << "Argument '" << name << "' "
-            "requires a value, but is not provided.\n";
+  std::cerr << BOLDRED("[Error] ") << "Argument '" << name
+            << "' "
+               "requires a value, but is not provided.\n";
   std::exit(1);
 }
 
@@ -83,7 +87,7 @@ static void terminateUnknownArgument(StringRef arg) {
   std::cerr << BOLDRED("[Error] ") << "Unknown argument '" << arg << "'. ";
   int minDist = 100;
   StringRef bestMatchArg;
-  for (const auto* a: ArgumentRegistry::arguments()) {
+  for (const auto* a : ArgumentRegistry::arguments()) {
     StringRef candidateArg(a->getName());
     auto candidateDist = levenshteinDistance(candidateArg, arg);
     if (candidateDist < minDist) {
@@ -99,21 +103,20 @@ static void terminateUnknownArgument(StringRef arg) {
 }
 
 [[noreturn]]
-static void terminateSpaceAfterEqualSign(
-    StringRef clName, StringRef clValue) {
+static void terminateSpaceAfterEqualSign(StringRef clName, StringRef clValue) {
   std::cerr << BOLDRED("[Error] ") << "Argument-value pair '" << clName << "= "
             << clValue << "' should not have space after the '=' sign.\n";
   std::exit(1);
 }
 
 namespace {
-  struct ArgContainer {
-    ArgumentBase* arg;
-    int nOccurrence;
+struct ArgContainer {
+  ArgumentBase* arg;
+  int nOccurrence;
 
-    explicit ArgContainer(ArgumentBase* a) : arg(a), nOccurrence(0) {}
-  };
-}
+  explicit ArgContainer(ArgumentBase* a) : arg(a), nOccurrence(0) {}
+};
+} // namespace
 
 static void maybeTerminateNonMatchOccurrence(const ArgContainer& argContainer) {
   if (argContainer.arg == nullptr)
@@ -122,8 +125,8 @@ static void maybeTerminateNonMatchOccurrence(const ArgContainer& argContainer) {
   switch (argContainer.arg->getOccurrenceFormat()) {
   case cl::OccurExactlyOnce: {
     if (argContainer.nOccurrence != 1) {
-      std::cerr << BOLDRED("[Error] ")
-                << "Argument '" << argContainer.arg->getName()
+      std::cerr << BOLDRED("[Error] ") << "Argument '"
+                << argContainer.arg->getName()
                 << "' needs to be specified exactly once, but it was ";
       if (argContainer.nOccurrence == 0)
         std::cerr << "not specified.\n";
@@ -135,8 +138,8 @@ static void maybeTerminateNonMatchOccurrence(const ArgContainer& argContainer) {
   }
   case cl::OccurAtLeastOnce: {
     if (argContainer.nOccurrence == 0) {
-      std::cerr << BOLDRED("[Error] ")
-                << "Argument '" << argContainer.arg->getName()
+      std::cerr << BOLDRED("[Error] ") << "Argument '"
+                << argContainer.arg->getName()
                 << "' should be specified at least once.\n";
       std::exit(1);
     }
@@ -144,8 +147,8 @@ static void maybeTerminateNonMatchOccurrence(const ArgContainer& argContainer) {
   }
   case cl::OccurAtMostOnce: {
     if (argContainer.nOccurrence > 1) {
-      std::cerr << BOLDRED("[Error] ")
-                << "Argument '" << argContainer.arg->getName()
+      std::cerr << BOLDRED("[Error] ") << "Argument '"
+                << argContainer.arg->getName()
                 << "' should be specified at most once, but was specified "
                 << argContainer.nOccurrence << " times.\n";
       std::exit(1);
@@ -164,34 +167,34 @@ void cl::ParseCommandLineArguments(int argc, char** argv) {
   ArgContainer positionalArgContainer(nullptr);
   for (auto* a : ArgumentRegistry::arguments()) {
     switch (a->getArgFormat()) {
-      case AF_Positional: {
-        assert(positionalArgContainer.arg == nullptr &&
-          "At most one positional arg is allowed");
-        positionalArgContainer.arg = a;
-        break;
-      }
-      case AF_Prefix: {
-        prefixArgs.emplace_back(a);
-        assert(a->getName().length() == 1 &&
-          "Prefix arguments must have name with length 1");
-        #ifdef DISALLOW_LOWERCASE_PREFIX_ARGUMENT_NAMES
-          assert(*a->getName().begin() >= 'A' && *a->getName().begin() <= 'Z' &&
-           "Prefix argument names must be a single upper-case letter. "
-           "To disable this, undef DISALLOW_LOWERCASE_PREFIX_ARGUMENT_NAMES "
-           "immediately after including Commandline.h and re-compile. "
-           "(Unexpected parsing results may happen if this lower-case letter "
-           "collides with other argument names.)");
-        #endif
-        break;
-      }
-      default:
-        nonPrefixArgs.emplace_back(a);
+    case AF_Positional: {
+      assert(positionalArgContainer.arg == nullptr &&
+             "At most one positional arg is allowed");
+      positionalArgContainer.arg = a;
+      break;
+    }
+    case AF_Prefix: {
+      prefixArgs.emplace_back(a);
+      assert(a->getName().length() == 1 &&
+             "Prefix arguments must have name with length 1");
+#ifdef DISALLOW_LOWERCASE_PREFIX_ARGUMENT_NAMES
+      assert(*a->getName().begin() >= 'A' && *a->getName().begin() <= 'Z' &&
+             "Prefix argument names must be a single upper-case letter. "
+             "To disable this, undef DISALLOW_LOWERCASE_PREFIX_ARGUMENT_NAMES "
+             "immediately after including Commandline.h and re-compile. "
+             "(Unexpected parsing results may happen if this lower-case letter "
+             "collides with other argument names.)");
+#endif
+      break;
+    }
+    default:
+      nonPrefixArgs.emplace_back(a);
     }
   }
 
   const auto matchPrefixArg = [&](char prefix) -> ArgContainer* {
     for (auto& c : prefixArgs) {
-    if (*c.arg->getName().begin() == prefix)
+      if (*c.arg->getName().begin() == prefix)
         return &c;
     }
     return nullptr;
@@ -205,11 +208,11 @@ void cl::ParseCommandLineArguments(int argc, char** argv) {
     return nullptr;
   };
 
-  const auto parseAndRecordOccurrence =
-    [&](ArgContainer& arg, StringRef clValue) {
-      if (arg.arg->parseValue(clValue))
-        terminateFailToParseArgument(arg.arg->getName(), clValue);
-      arg.nOccurrence++;
+  const auto parseAndRecordOccurrence = [&](ArgContainer& arg,
+                                            StringRef clValue) {
+    if (arg.arg->parseValue(clValue))
+      terminateFailToParseArgument(arg.arg->getName(), clValue);
+    arg.nOccurrence++;
   };
 
   int i = 1;
@@ -261,22 +264,22 @@ void cl::ParseCommandLineArguments(int argc, char** argv) {
       clValue.increment();
     clName = StringRef(clInput.begin(), clValue.begin() - clInput.begin());
     assert(!clName.empty() &&
-      "Name should not be empty. "
-      "It should be checked by 'terminateLeadingEqualSign'");
+           "Name should not be empty. "
+           "It should be checked by 'terminateLeadingEqualSign'");
     if (!clValue.empty()) {
       assert(*clValue.begin() == '=');
       clValue.increment(); // go past the '=' sign
       if (clValue.empty()) {
-        terminateSpaceAfterEqualSign(clName, (i < argc) ? argv[i+1] : "");
+        terminateSpaceAfterEqualSign(clName, (i < argc) ? argv[i + 1] : "");
         // terminated
       }
     }
 
-    /* If the user defines an arg 'output-dir' and a prefix arg 'o', then 
+    /* If the user defines an arg 'output-dir' and a prefix arg 'o', then
      * '-output-dir=my/dir' should be parsed as (output-dir, my/dir) instead of
      * (o, utput-dir=my/dir).
      * So the above name-value split will handle this case correctly.
-     * On the other hand, if 'output-dir' is not defined, we should use 
+     * On the other hand, if 'output-dir' is not defined, we should use
      * (o, utput-dir=my/dir) instead. We handle it in the following.
      */
     ArgContainer* argContainer = nullptr;
@@ -339,7 +342,7 @@ void cl::ParseCommandLineArguments(int argc, char** argv) {
 void cl::DisplayArguments() {
   std::cerr << "----------------- " << ArgumentRegistry::arguments().size()
             << " Arguments -----------------\n";
-  for (const auto* a: ArgumentRegistry::arguments()) {
+  for (const auto* a : ArgumentRegistry::arguments()) {
     auto argName = a->getName();
     std::cerr << argName << ": ";
     if (argName.length() < 30)
@@ -350,50 +353,47 @@ void cl::DisplayArguments() {
   std::cerr << "--------------- End of Arguments ---------------\n";
 }
 
-void cl::DisplayHelp() {
-  std::cerr << "<-help>\n";
-}
+void cl::DisplayHelp() { std::cerr << "<-help>\n"; }
 
 void cl::unregisterAllArguments() {
-  for (const auto* a: ArgumentRegistry::arguments())
+  for (const auto* a : ArgumentRegistry::arguments())
     delete a;
   ArgumentRegistry::arguments().clear();
 }
 
-template<>
-bool cl::ArgumentParser<std::string>::operator()(
-    StringRef clValue, std::string& valueToWriteOn) {
-      valueToWriteOn = static_cast<std::string>(clValue);
+template <>
+bool cl::ArgumentParser<std::string>::operator()(StringRef clValue,
+                                                 std::string& valueToWriteOn) {
+  valueToWriteOn = static_cast<std::string>(clValue);
   return false;
 }
 
-template<>
-bool cl::ArgumentParser<int>::operator()(
-    StringRef clValue, int& valueToWriteOn) {
+template <>
+bool cl::ArgumentParser<int>::operator()(StringRef clValue,
+                                         int& valueToWriteOn) {
   valueToWriteOn = std::stoi(static_cast<std::string>(clValue));
   return false;
 }
 
-template<>
-bool cl::ArgumentParser<double>::operator()(
-    StringRef clValue, double& valueToWriteOn) {
+template <>
+bool cl::ArgumentParser<double>::operator()(StringRef clValue,
+                                            double& valueToWriteOn) {
   valueToWriteOn = std::stod(static_cast<std::string>(clValue));
   return false;
 }
 
-template<>
-bool cl::ArgumentParser<bool>::operator()(
-    StringRef clValue, bool& valueToWriteOn) {
+template <>
+bool cl::ArgumentParser<bool>::operator()(StringRef clValue,
+                                          bool& valueToWriteOn) {
   if (clValue.compare("0") == 0 || clValue.compare_ci("false") == 0 ||
       clValue.compare_ci("off") == 0) {
     valueToWriteOn = false;
     return false;
   }
-  if (clValue.empty() || clValue.compare("1") == 0 || 
+  if (clValue.empty() || clValue.compare("1") == 0 ||
       clValue.compare_ci("true") == 0 || clValue.compare_ci("on") == 0) {
     valueToWriteOn = true;
     return false;
   }
   return true;
 }
-

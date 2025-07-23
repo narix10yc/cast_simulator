@@ -247,8 +247,10 @@ VariableSumNode& VariableSumNode::simplify(
     const std::vector<std::pair<int, double>>& varValues) {
   std::vector<int> updatedVars;
   for (const int var : vars) {
-    auto it = std::ranges::find_if(varValues,
-      [var](const std::pair<int, double>& p) { return p.first == var; });
+    auto it =
+        std::ranges::find_if(varValues, [var](const std::pair<int, double>& p) {
+          return p.first == var;
+        });
     if (it == varValues.cend())
       updatedVars.push_back(var);
     else
@@ -269,7 +271,7 @@ VariableSumNode& VariableSumNode::simplify(
   return *this;
 }
 
-Monomial& 
+Monomial&
 Monomial::simplify(const std::vector<std::pair<int, double>>& varValues) {
   if (coef == std::complex<double>(0.0, 0.0)) {
     _mulTerms.clear();
@@ -292,10 +294,9 @@ Monomial::simplify(const std::vector<std::pair<int, double>>& varValues) {
     auto it = varValues.cbegin();
     while (true) {
       if (it->first == E.var) {
-        coef *= std::complex<double>(
-          std::cos(it->second),
-          (E.isPlus) ? std::sin(it->second)
-            : -std::sin(it->second));
+        coef *= std::complex<double>(std::cos(it->second),
+                                     (E.isPlus) ? std::sin(it->second)
+                                                : -std::sin(it->second));
         return true;
       }
       if (++it == varValues.cend())
@@ -312,7 +313,7 @@ Polynomial& Polynomial::removeSmallMonomials(double thres) {
   return *this;
 }
 
-Polynomial& 
+Polynomial&
 Polynomial::simplifySelf(const std::vector<std::pair<int, double>>& varValues) {
   if (varValues.empty())
     return *this;
@@ -321,12 +322,12 @@ Polynomial::simplifySelf(const std::vector<std::pair<int, double>>& varValues) {
 
   std::complex<double> cons(0.0, 0.0);
   std::erase_if(_monomials, [&cons](const Monomial& M) {
-      if (M.isConstant()) {
-        cons += M.coef;
-        return true;
-      }
-      return false;
-    });
+    if (M.isConstant()) {
+      cons += M.coef;
+      return true;
+    }
+    return false;
+  });
 
   if (cons != std::complex<double>(0.0, 0.0))
     return (*this) += Monomial::Constant(cons);

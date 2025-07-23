@@ -8,7 +8,7 @@
 #include <memory>
 
 namespace cast::legacy {
-  class CircuitGraph;
+class CircuitGraph;
 }
 namespace openqasm::ast {
 
@@ -139,7 +139,8 @@ class BinaryExpr : public Expression {
   std::unique_ptr<Expression> lhs, rhs;
 
 public:
-  BinaryExpr(BinaryOp op, std::unique_ptr<Expression> lhs,
+  BinaryExpr(BinaryOp op,
+             std::unique_ptr<Expression> lhs,
              std::unique_ptr<Expression> rhs)
       : op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
 

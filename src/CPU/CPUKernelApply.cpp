@@ -5,7 +5,8 @@ using namespace cast;
 
 // Allocates memory for the gate matrix to be used in invoking CPU kernels
 // @return a pointer to the allocated memory. Remember to free it after use.
-static void* mallocGatePointer(const cast::QuantumGate* gate, Precision precision) {
+static void* mallocGatePointer(const cast::QuantumGate* gate,
+                               Precision precision) {
   void* p = nullptr;
   auto* standardQuGate = llvm::dyn_cast<cast::StandardQuantumGate>(gate);
   if (standardQuGate != nullptr) {
@@ -37,8 +38,7 @@ static void* mallocGatePointer(const cast::QuantumGate* gate, Precision precisio
         }
       }
     }
-  }
-  else {
+  } else {
     assert(false && "Only StandardQuantumGate is supported for now");
   }
 
@@ -46,15 +46,16 @@ static void* mallocGatePointer(const cast::QuantumGate* gate, Precision precisio
   return p;
 }
 
-MaybeError<void> CPUKernelManager::applyCPUKernel(
-    void* sv, int nQubits, const CPUKernelInfo& kernel, int nThreads) const {
+MaybeError<void> CPUKernelManager::applyCPUKernel(void* sv,
+                                                  int nQubits,
+                                                  const CPUKernelInfo& kernel,
+                                                  int nThreads) const {
   if (!isJITed()) {
     return cast::makeError<void>(
-      "Must initialize JIT session before applying CPU kernel.");
+        "Must initialize JIT session before applying CPU kernel.");
   }
   if (kernel.executable == nullptr) {
-    return cast::makeError<void>(
-      "Kernel executable not available.");
+    return cast::makeError<void>("Kernel executable not available.");
   }
   int simd_s = cast::get_simd_s(kernel.simdWidth, kernel.precision);
   int tmp = nQubits - kernel.gate->nQubits() - simd_s;
@@ -67,10 +68,11 @@ MaybeError<void> CPUKernelManager::applyCPUKernel(
   }
   uint64_t nTasks = 1ULL << tmp;
   void* pMat = nullptr;
-  if (kernel.matrixLoadMode == MatrixLoadMode::StackLoadMatElems) {
+  if (kernel.matrixLoadMode == CPUMatrixLoadMode::StackLoadMatElems) {
     pMat = mallocGatePointer(kernel.gate.get(), kernel.precision);
     if (pMat == nullptr) {
-      return cast::makeError<void>("Failed to allocate memory for gate matrix.");
+      return cast::makeError<void>(
+          "Failed to allocate memory for gate matrix.");
     }
   }
 
@@ -87,10 +89,10 @@ MaybeError<void> CPUKernelManager::applyCPUKernel(
   void** argvs[nThreads];
   for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx) {
     argvs[tIdx] = new void*[4];
-    argvs[tIdx][0] = sv; // state vector
-    argvs[tIdx][1] = &(taskIds[tIdx]); // taskID begin
+    argvs[tIdx][0] = sv;                   // state vector
+    argvs[tIdx][1] = &(taskIds[tIdx]);     // taskID begin
     argvs[tIdx][2] = &(taskIds[tIdx + 1]); // taskID end
-    argvs[tIdx][3] = pMat; // matrix pointer
+    argvs[tIdx][3] = pMat;                 // matrix pointer
   }
 
   for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)
@@ -105,10 +107,11 @@ MaybeError<void> CPUKernelManager::applyCPUKernel(
   return {}; // success
 }
 
-MaybeError<void> CPUKernelManager::applyCPUKernel(
-    void* sv, int nQubits,
-    const std::string& llvmFuncName,
-    int nThreads) const {
+MaybeError<void>
+CPUKernelManager::applyCPUKernel(void* sv,
+                                 int nQubits,
+                                 const std::string& llvmFuncName,
+                                 int nThreads) const {
   const auto* kernel = getKernelByName(llvmFuncName);
   if (kernel == nullptr) {
     return cast::makeError<void>("Kernel not found: " + llvmFuncName);
@@ -124,7 +127,7 @@ MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraph(
     void* sv, int nQubits, const std::string& graphName, int nThreads) const {
   if (!isJITed()) {
     return cast::makeError<void>(
-      "Must initialize JIT session before applying CPU kernel.");
+        "Must initialize JIT session before applying CPU kernel.");
   }
   if (!_graphKernels.contains(graphName)) {
     return cast::makeError<void>("Graph not found: " + graphName);
@@ -151,12 +154,12 @@ MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraph(
   return {}; // success
 }
 
-
 // std::vector<CPUKernelInfo*>
 // CPUKernelManager::collectCPUKernelsFromLegacyCircuitGraph(
 //     const std::string& graphName) {
 //   assert(isJITed() && "Must initialize JIT session "
-//                       "before calling KernelManager::collectCPUGraphKernels");
+//                       "before calling
+//                       KernelManager::collectCPUGraphKernels");
 //   std::vector<CPUKernelInfo*> kernelInfos;
 //   const auto mangledName = internal::mangleGraphName(graphName);
 //   for (auto& kernel : _kernels) {
@@ -167,4 +170,3 @@ MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraph(
 //   }
 //   return kernelInfos;
 // }
-

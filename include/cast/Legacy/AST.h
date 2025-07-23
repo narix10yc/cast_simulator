@@ -4,7 +4,7 @@
 #include "cast/Legacy/QuantumGate.h"
 
 namespace cast::legacy {
-  class CircuitGraph;
+class CircuitGraph;
 }
 
 namespace cast::legacy::ast {
@@ -17,8 +17,10 @@ public:
     SK_GateApply,
     SK_GateChain,
   };
+
 private:
   StatementKind _kind;
+
 public:
   Statement(StatementKind kind) : _kind(kind) {}
 
@@ -37,10 +39,10 @@ public:
   explicit MeasureStmt(int q) : Statement(SK_Measure), qubits({q}) {}
 
   MeasureStmt(std::initializer_list<int> qubits)
-    : Statement(SK_Measure), qubits(qubits) {}
+      : Statement(SK_Measure), qubits(qubits) {}
 
   explicit MeasureStmt(const llvm::SmallVector<int>& qubits)
-    : Statement(SK_Measure), qubits(qubits) {}
+      : Statement(SK_Measure), qubits(qubits) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
@@ -52,9 +54,8 @@ public:
   std::unique_ptr<GateMatrix> gateMatrix;
 
   ParameterDefStmt(int refNumber, std::unique_ptr<GateMatrix> gateMatrix)
-    : Statement(SK_ParamDef)
-    , refNumber(refNumber)
-    , gateMatrix(std::move(gateMatrix)) {}
+      : Statement(SK_ParamDef), refNumber(refNumber),
+        gateMatrix(std::move(gateMatrix)) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
@@ -67,15 +68,13 @@ public:
   llvm::SmallVector<int> qubits;
 
   GateApplyStmt(const std::string& name, const llvm::SmallVector<int>& qubits)
-    : Statement(SK_GateApply), name(name), argument(), qubits(qubits) {}
+      : Statement(SK_GateApply), name(name), argument(), qubits(qubits) {}
 
-  GateApplyStmt(
-      const std::string& name, const arg_t& paramRefOrMatrix,
-      const llvm::SmallVector<int>& qubits)
-    : Statement(SK_GateApply)
-    , name(name)
-    , argument(paramRefOrMatrix)
-    , qubits(qubits) {}
+  GateApplyStmt(const std::string& name,
+                const arg_t& paramRefOrMatrix,
+                const llvm::SmallVector<int>& qubits)
+      : Statement(SK_GateApply), name(name), argument(paramRefOrMatrix),
+        qubits(qubits) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
@@ -113,10 +112,10 @@ public:
 
   // legacy::CircuitGraph forbids copy and moves.
   void toLegacyCircuitGraph(CircuitGraph&) const;
-  
+
   static QuantumCircuit FromLegacyCircuitGraph(const CircuitGraph&);
 };
 
-} // namespace cast::ast
+} // namespace cast::legacy::ast
 
 #endif // CAST_LEGACY_AST_H

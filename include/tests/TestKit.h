@@ -16,10 +16,10 @@ class TestSuite {
     std::string info;
     std::string reason;
 
-    FailedInstance(
-      const std::string& title, const std::string& info,
-      const std::string& reason)
-      : title(title), info(info), reason(reason) {}
+    FailedInstance(const std::string& title,
+                   const std::string& info,
+                   const std::string& reason)
+        : title(title), info(info), reason(reason) {}
   }; // struct FailedInstance
 public:
   std::string name;
@@ -27,14 +27,15 @@ public:
   std::vector<FailedInstance> failures;
 
   TestSuite(const std::string& name = "Test Suite")
-    : name(name), nTests(0), failures() {}
+      : name(name), nTests(0), failures() {}
 
   bool displayResult() const;
 
-  template<typename T>
-  void assertEqual(
-      const T& a, const T& b,
-      const std::string& title, const std::string& info) {
+  template <typename T>
+  void assertEqual(const T& a,
+                   const T& b,
+                   const std::string& title,
+                   const std::string& info) {
     ++nTests;
     if (a == b)
       return;
@@ -43,29 +44,43 @@ public:
 
   void assertFalse(const std::string& title, const std::string& info);
 
-  void assertClose(
-      float a, float b,
-      const std::string& title, const std::string& info, float tol=1e-4);
+  void assertClose(float a,
+                   float b,
+                   const std::string& title,
+                   const std::string& info,
+                   float tol = 1e-4);
 
-  void assertClose(
-      double a, double b,
-      const std::string& title, const std::string& info, double tol=1e-8);
+  void assertClose(double a,
+                   double b,
+                   const std::string& title,
+                   const std::string& info,
+                   double tol = 1e-8);
 
-  void assertAllClose(
-      const std::vector<double>& aVec, const std::vector<double>& bVec,
-      const std::string& title, const std::string& info, double tol=1e-8);
+  void assertAllClose(const std::vector<double>& aVec,
+                      const std::vector<double>& bVec,
+                      const std::string& title,
+                      const std::string& info,
+                      double tol = 1e-8);
 
-  void assertAllClose(
-      const std::vector<float>& aVec, const std::vector<float>& bVec,
-      const std::string& title, const std::string& info, float tol=1e-4);
+  void assertAllClose(const std::vector<float>& aVec,
+                      const std::vector<float>& bVec,
+                      const std::string& title,
+                      const std::string& info,
+                      float tol = 1e-4);
 
-  void assertAllClose(
-      const double* aArr, const double* bArr, size_t length,
-      const std::string& title, const std::string& info, double tol=1e-8);
-  
-  void assertAllClose(
-      const float* aArr, const float* bArr, size_t length,
-      const std::string& title, const std::string& info, float tol=1e-4);
+  void assertAllClose(const double* aArr,
+                      const double* bArr,
+                      size_t length,
+                      const std::string& title,
+                      const std::string& info,
+                      double tol = 1e-8);
+
+  void assertAllClose(const float* aArr,
+                      const float* bArr,
+                      size_t length,
+                      const std::string& title,
+                      const std::string& info,
+                      float tol = 1e-4);
 };
 
 void test_complexSquareMatrix();

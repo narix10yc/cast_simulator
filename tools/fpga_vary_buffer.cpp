@@ -1,7 +1,7 @@
-#include "cast/Legacy/Parser.h"
+#include "cast/Fusion.h"
 #include "cast/Legacy/CircuitGraph.h"
 #include "cast/Legacy/FPGAInst.h"
-#include "cast/Fusion.h"
+#include "cast/Legacy/Parser.h"
 
 #include "openqasm/parser.h"
 
@@ -136,7 +136,7 @@ void runExperiment(std::function<legacy::CircuitGraph()> f) {
   using clock = std::chrono::high_resolution_clock;
   auto tic = clock::now();
   auto tok = clock::now();
-  auto log = [&]() -> std::ostream&  {
+  auto log = [&]() -> std::ostream& {
     const auto t_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(tok - tic)
             .count();

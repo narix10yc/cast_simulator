@@ -22,7 +22,8 @@ int main() {
 
   // CPUStatevector<float> sv(12, kernelGenConfig.simd_s);
   // sv.randomize();
-  // kernelManager.applyCPUKernelMultithread(sv.data(), sv.nQubits(), "my_gate", 8);
+  // kernelManager.applyCPUKernelMultithread(sv.data(), sv.nQubits(), "my_gate",
+  // 8);
 
   return 0;
 }

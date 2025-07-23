@@ -1,6 +1,6 @@
+#include "cast/CPU/CPUStatevector.h"
 #include "gen_file.h"
 #include "timeit/timeit.h"
-#include "cast/CPU/CPUStatevector.h"
 #include <iomanip>
 #include <iostream>
 
@@ -19,7 +19,7 @@ using Statevector = utils::statevector::StatevectorAlt<real_t, S_VALUE>;
 using Statevector = utils::statevector::StatevectorSep<real_t>;
 #endif
 
-int main(int argc, char* *argv) {
+int main(int argc, char** argv) {
   assert(argc > 1);
   unsigned targetQ = std::stoi(argv[1]);
 
@@ -68,8 +68,8 @@ int main(int argc, char* *argv) {
 #ifdef USING_ALT_KERNEL
     _metaData[targetQ].func(sv.data, 0ULL, idxMax, _metaData[targetQ].mPtr);
 #else
-    _metaData[targetQ].func(sv.real, sv.imag, 0ULL, idxMax,
-                            _metaData[targetQ].mPtr);
+    _metaData[targetQ].func(
+        sv.real, sv.imag, 0ULL, idxMax, _metaData[targetQ].mPtr);
 #endif
   });
   rst.display();

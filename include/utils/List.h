@@ -8,8 +8,7 @@
 namespace utils {
 
 /// A double-linked list template
-template<typename T>
-class List {
+template <typename T> class List {
 public:
   struct Node {
     T data;
@@ -17,10 +16,10 @@ public:
     Node* next;
   }; // Node
 private:
-  template<typename _Iter, typename _Data>
-  class IteratorBase {
+  template <typename _Iter, typename _Data> class IteratorBase {
     const _Iter* asIter() const { return static_cast<const _Iter*>(this); }
     _Iter* asIter() { return static_cast<_Iter*>(this); }
+
   public:
     _Data& operator*() const {
       assert(asIter()->current != nullptr);
@@ -88,6 +87,7 @@ private:
   class Iterator : public IteratorBase<Iterator, T> {
     Node* current;
     friend class IteratorBase<Iterator, T>;
+
   public:
     Iterator() : current(nullptr) {}
     explicit Iterator(Node* node) : current(node) {}
@@ -100,6 +100,7 @@ private:
   class ConstIterator : public IteratorBase<ConstIterator, const T> {
     Node* current;
     friend class IteratorBase<ConstIterator, const T>;
+
   public:
     explicit ConstIterator(Node* node) : current(node) {}
     ConstIterator(const Iterator& iter) : current(iter.raw_ptr()) {}
@@ -112,15 +113,14 @@ private:
   Node* _head;
   Node* _tail;
   size_t _size;
+
 public:
   using iterator = Iterator;
   using const_iterator = ConstIterator;
 
   List() : _head(nullptr), _tail(nullptr), _size(0) {}
 
-  ~List() {
-    clear();
-  }
+  ~List() { clear(); }
 
   List(const List& other) {
     for (const auto& data : other)
@@ -128,7 +128,7 @@ public:
   }
 
   List(List&& other) noexcept
-    : _head(other._head), _tail(other._tail), _size(other._size) {
+      : _head(other._head), _tail(other._tail), _size(other._size) {
     other._head = nullptr;
     other._tail = nullptr;
   }
@@ -141,7 +141,7 @@ public:
     return *this;
   }
 
-  List& operator=(List&& other) noexcept{
+  List& operator=(List&& other) noexcept {
     if (this == &other)
       return *this;
     this->~List();
@@ -177,8 +177,7 @@ public:
   }
 
   /// construct and insert an element to the front of the list
-  template<typename... Args>
-  void emplace_front(Args&&... args) {
+  template <typename... Args> void emplace_front(Args&&... args) {
     ++_size;
     Node* node = static_cast<Node*>(::operator new(sizeof(Node)));
     new (&node->data) T(std::forward<Args>(args)...); // placement new
@@ -192,8 +191,7 @@ public:
   }
 
   /// construct and insert an element to the back of the list
-  template<typename... Args>
-  void emplace_back(Args&&... args) {
+  template <typename... Args> void emplace_back(Args&&... args) {
     ++_size;
     Node* node = static_cast<Node*>(::operator new(sizeof(Node)));
     new (&node->data) T(std::forward<Args>(args)...); // placement new
@@ -203,8 +201,7 @@ public:
       assert(_tail == nullptr);
       assert(_size == 1);
       _head = node;
-    }
-    else
+    } else
       _tail->next = node;
     _tail = node;
   }
@@ -222,8 +219,7 @@ public:
     if (_head == nullptr) {
       assert(empty());
       _tail = nullptr;
-    }
-    else
+    } else
       _head->prev = nullptr;
   }
 
@@ -240,8 +236,7 @@ public:
     if (_tail == nullptr) {
       assert(empty());
       _head = nullptr;
-    }
-    else
+    } else
       _tail->next = nullptr;
   }
 
@@ -275,8 +270,7 @@ public:
 
   /// Before:  At - At.next
   /// After:   At - Node - At.next
-  template<typename... Args>
-  Node* emplace_insert(Node* at, Args&&... args) {
+  template <typename... Args> Node* emplace_insert(Node* at, Args&&... args) {
     assert(at != nullptr && "Cannot insert at NULL");
     ++_size;
     Node* node = static_cast<Node*>(::operator new(sizeof(Node)));
@@ -289,7 +283,7 @@ public:
     return node;
   }
 
-  template<typename... Args>
+  template <typename... Args>
   iterator emplace_insert(const_iterator it, Args&&... args) {
     return iterator(emplace_insert(it.raw_ptr(), std::forward<Args>(args)...));
   }
@@ -313,10 +307,7 @@ public:
     return tmp;
   }
 
-  iterator erase(const_iterator it) {
-    return iterator(erase(it.raw_ptr()));
-  }
-
+  iterator erase(const_iterator it) { return iterator(erase(it.raw_ptr())); }
 };
 
 } // namespace utils

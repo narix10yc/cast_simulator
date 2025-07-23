@@ -5,10 +5,10 @@
 
 #include "cast/ADT/GateMatrix.h"
 
+#include <cassert>
+#include <iostream>
 #include <memory>
 #include <vector>
-#include <iostream>
-#include <cassert>
 
 namespace cast {
 
@@ -16,11 +16,9 @@ class KrausRep {
 private:
   int _nQubits;
   std::vector<ScalarGateMatrix> _ops;
-public:
 
-  KrausRep(int nQubits) : _nQubits(nQubits), _ops() {
-    assert(nQubits > 0);
-  }
+public:
+  KrausRep(int nQubits) : _nQubits(nQubits), _ops() { assert(nQubits > 0); }
 
   const ScalarGateMatrix& operator[](size_t idx) const {
     assert(idx < nKraus());
@@ -37,16 +35,14 @@ public:
   const std::vector<ScalarGateMatrix>& getOps() const { return _ops; }
   std::vector<ScalarGateMatrix>& getOps() { return _ops; }
 
-  void addMatrix(const ScalarGateMatrix& matrix) {
-    _ops.push_back(matrix);
-  }
-  
+  void addMatrix(const ScalarGateMatrix& matrix) { _ops.push_back(matrix); }
+
   void addMatrix(ScalarGateMatrix&& matrix) {
     _ops.push_back(std::move(matrix));
   }
 
   size_t nKraus() const { return _ops.size(); }
-  
+
   std::ostream& display(std::ostream& os) const;
 
 }; // class KrausFormat

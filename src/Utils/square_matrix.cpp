@@ -14,7 +14,7 @@ utils::randomUnitaryMatrix(unsigned edgeSize) {
   square_matrix<std::complex<double>> matrix(edgeSize);
   for (unsigned r = 0; r < edgeSize; r++) {
     for (unsigned c = 0; c < edgeSize; c++)
-      matrix(r, c) = { dist(gen), dist(gen) };
+      matrix(r, c) = {dist(gen), dist(gen)};
 
     // project
     for (unsigned rr = 0; rr < r; rr++) {
@@ -22,7 +22,8 @@ utils::randomUnitaryMatrix(unsigned edgeSize) {
       // subtract row r by coef * row rr
       for (unsigned cc = 0; cc < edgeSize; cc++)
         matrix(r, cc) -= coef * matrix(rr, cc);
-      assert(std::abs(utils::inner_product(matrix.row(r), matrix.row(rr), edgeSize)) < 1e-8);
+      assert(std::abs(utils::inner_product(
+                 matrix.row(r), matrix.row(rr), edgeSize)) < 1e-8);
     }
 
     // normalize

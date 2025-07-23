@@ -109,10 +109,9 @@ public:
   std::vector<int> flags;
 
   MInstEXT(std::initializer_list<int> flags)
-    : MemoryInst(MOp_EXT), flags(flags) {}
+      : MemoryInst(MOp_EXT), flags(flags) {}
 
-  MInstEXT(const std::vector<int>& flags)
-    : MemoryInst(MOp_EXT), flags(flags) {}
+  MInstEXT(const std::vector<int>& flags) : MemoryInst(MOp_EXT), flags(flags) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
@@ -120,6 +119,7 @@ public:
 class GateInst {
 private:
   GInstKind gKind;
+
 public:
   ConstQuantumGatePtr gate;
   FPGAGateCategory blockKind;
@@ -127,7 +127,9 @@ public:
   GateInst(GInstKind gKind)
       : gKind(gKind), gate(nullptr), blockKind(FPGAGateCategory::General) {}
 
-  GateInst(GInstKind gKind, ConstQuantumGatePtr gate, FPGAGateCategory blockKind)
+  GateInst(GInstKind gKind,
+           ConstQuantumGatePtr gate,
+           FPGAGateCategory blockKind)
       : gKind(gKind), gate(gate), blockKind(blockKind) {}
 
   virtual ~GateInst() = default;
@@ -152,7 +154,7 @@ public:
 class GInstSQ : public GateInst {
 public:
   GInstSQ(ConstQuantumGatePtr gate, FPGAGateCategory blockKind)
-    : GateInst(GOp_SQ, gate, blockKind) {}
+      : GateInst(GOp_SQ, gate, blockKind) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
@@ -161,7 +163,7 @@ public:
 class GInstUP : public GateInst {
 public:
   GInstUP(ConstQuantumGatePtr gate, FPGAGateCategory blockKind)
-    : GateInst(GOp_UP, gate, blockKind) {}
+      : GateInst(GOp_UP, gate, blockKind) {}
 
   std::ostream& print(std::ostream& os) const override;
 };
@@ -186,6 +188,7 @@ public:
 private:
   std::unique_ptr<MemoryInst> _mInst;
   std::unique_ptr<GateInst> _gInst;
+
 public:
   Instruction(std::unique_ptr<MemoryInst> _mInst,
               std::unique_ptr<GateInst> _gInst) {
@@ -217,7 +220,7 @@ public:
   }
 
   /// @brief Set the gate instruction.
-  /// @param inst Gate instruction. Could be nullptr, in which case it will be 
+  /// @param inst Gate instruction. Could be nullptr, in which case it will be
   /// set to a GInstNUL.
   void setGInst(std::unique_ptr<GateInst> inst) {
     if (inst) {

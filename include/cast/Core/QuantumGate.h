@@ -3,9 +3,9 @@
 
 #include "cast/ADT/GateMatrix.h"
 #include "cast/ADT/NoiseChannel.h"
-#include <vector>
-#include <cassert>
 #include <algorithm>
+#include <cassert>
+#include <vector>
 
 namespace cast {
 
@@ -30,14 +30,18 @@ public:
     QG_Superop,  // Superoperator quantum gate
     QG_End,
   };
+
 private:
   QuantumGateKind _kind;
+
 public:
   QuantumGateKind kind() const { return _kind; }
   using TargetQubitsType = std::vector<int>;
+
 protected:
   // qubits are sorted in ascending order
   TargetQubitsType _qubits;
+
 public:
   explicit QuantumGate(QuantumGateKind kind) : _kind(kind) {}
   virtual ~QuantumGate() = default;
@@ -55,9 +59,7 @@ public:
 
   // The inverse of this quantum gate. Return nullptr if the inverse cannot be
   // found.
-  virtual QuantumGatePtr inverse() const {
-    return nullptr;
-  }
+  virtual QuantumGatePtr inverse() const { return nullptr; }
 
   virtual SuperopQuantumGatePtr getSuperopGate() const {
     assert(false && "QuantumGate::getSuperopGate called from base class");
@@ -68,15 +70,13 @@ public:
     return os << "QuantumGate::displayInfo() not implemented";
   }
 
-  virtual void dumpInfo() const {
-    displayInfo(std::cerr, 3);
-  }
+  virtual void dumpInfo() const { displayInfo(std::cerr, 3); }
 
 }; // class QuantumGate
 
 /// @brief StandardQuantumGate consists of a GateMatrix and a NoiseChannel.
 /// GateMatrix could be parametrized.
-/// We take the convention that noise comes `after` the gate operation. For 
+/// We take the convention that noise comes `after` the gate operation. For
 /// example, if the noise channel has Kraus set {E_k}, and the gate is U, then
 /// the composite channel has Kraus set {E_k U}.
 /// TODO: do we want to support parametrized noise channel fusion?
@@ -84,6 +84,7 @@ class StandardQuantumGate : public QuantumGate {
 private:
   GateMatrixPtr _gateMatrix;
   NoiseChannelPtr _noiseChannel;
+
 public:
   StandardQuantumGate(GateMatrixPtr gateMatrix,
                       NoiseChannelPtr noiseChannel,
@@ -120,30 +121,29 @@ public:
                                        NoiseChannelPtr noiseChannel,
                                        const TargetQubitsType& qubits) {
     return std::make_shared<StandardQuantumGate>(
-      gateMatrix, noiseChannel, qubits);
+        gateMatrix, noiseChannel, qubits);
   }
 
-  template<typename... Ints>
+  template <typename... Ints>
   static StandardQuantumGatePtr RandomUnitary(Ints... qubits) {
     static_assert((std::is_integral_v<Ints> && ...));
     constexpr auto nQubits = sizeof...(Ints);
     TargetQubitsType qubitsCopy{qubits...};
     std::ranges::sort(qubitsCopy);
-    return StandardQuantumGate::Create(
-      ScalarGateMatrix::RandomUnitary(nQubits),
-      nullptr, // No noise channel
-      qubitsCopy);
+    return StandardQuantumGate::Create(ScalarGateMatrix::RandomUnitary(nQubits),
+                                       nullptr, // No noise channel
+                                       qubitsCopy);
   }
 
-  // @brief RandomUnitary generates a random unitary gate on the specified 
+  // @brief RandomUnitary generates a random unitary gate on the specified
   // qubits. Only gate matrix is set, and no noise channel is applied.
   static StandardQuantumGatePtr RandomUnitary(const TargetQubitsType& qubits) {
     auto qubitsCopy = qubits;
     std::ranges::sort(qubitsCopy);
     return StandardQuantumGate::Create(
-      ScalarGateMatrix::RandomUnitary(qubitsCopy.size()),
-      nullptr, // No noise channel
-      qubitsCopy);
+        ScalarGateMatrix::RandomUnitary(qubitsCopy.size()),
+        nullptr, // No noise channel
+        qubitsCopy);
   }
 
   // Get a single-qubit identity gate on qubit q.
@@ -165,6 +165,7 @@ public:
 class SuperopQuantumGate : public QuantumGate {
 private:
   ScalarGateMatrixPtr _superopMatrix;
+
 public:
   SuperopQuantumGate(ScalarGateMatrixPtr superopMatrix,
                      const TargetQubitsType& qubits);

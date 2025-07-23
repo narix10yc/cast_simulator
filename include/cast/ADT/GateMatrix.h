@@ -17,13 +17,13 @@ using ConstScalarGateMatrixPtr = std::shared_ptr<const ScalarGateMatrix>;
 
 class UnitaryPermGateMatrix;
 using UnitaryPermGateMatrixPtr = std::shared_ptr<UnitaryPermGateMatrix>;
-using ConstUnitaryPermGateMatrixPtr = 
-  std::shared_ptr<const UnitaryPermGateMatrix>;
+using ConstUnitaryPermGateMatrixPtr =
+    std::shared_ptr<const UnitaryPermGateMatrix>;
 
 class ParametrizedGateMatrix;
 using ParametrizedGateMatrixPtr = std::shared_ptr<ParametrizedGateMatrix>;
-using ConstParametrizedGateMatrixPtr = 
-  std::shared_ptr<const ParametrizedGateMatrix>;
+using ConstParametrizedGateMatrixPtr =
+    std::shared_ptr<const ParametrizedGateMatrix>;
 
 /// @brief \c GateMatrix is a base class for all gate matrices.
 /// It knows the number of qubits, but not which qubits.
@@ -32,34 +32,36 @@ class GateMatrix {
 public:
   enum GateMatrixKind {
     GM_Base,
-    GM_Scalar, // Scalar matrix
-    GM_UnitaryPerm, // Unitary permutation matrix
+    GM_Scalar,       // Scalar matrix
+    GM_UnitaryPerm,  // Unitary permutation matrix
     GM_Parametrized, // Parametrized matrix
     GM_End,
   };
+
 protected:
   GateMatrixKind _kind;
   int _nQubits;
+
 public:
-  GateMatrix(GateMatrixKind kind, int nQubits) 
-    : _kind(kind), _nQubits(nQubits) {}
+  GateMatrix(GateMatrixKind kind, int nQubits)
+      : _kind(kind), _nQubits(nQubits) {}
 
   virtual ~GateMatrix() = default;
 
   GateMatrixKind kind() const { return _kind; }
-  
+
   int nQubits() const { return _nQubits; }
 
   /// Compute the gate matrix of a subsystem.
-  /// @param mask A bitmask indicating which qubits to keep. For example, a 
-  /// mask of 0b011 means to keep the least significant 2 qubits by partial 
+  /// @param mask A bitmask indicating which qubits to keep. For example, a
+  /// mask of 0b011 means to keep the least significant 2 qubits by partial
   /// tracing away the more significant qubits.
   virtual GateMatrixPtr subsystem(uint32_t mask) const {
     assert(false && "Not implemented yet (called from base class)");
     return nullptr;
   }
 
-  virtual std::ostream& displayInfo(std::ostream& os, int verbose=1) const {
+  virtual std::ostream& displayInfo(std::ostream& os, int verbose = 1) const {
     assert(false && "Not implemented yet (called from base class)");
     return os;
   }
@@ -70,34 +72,35 @@ public:
 }; // class GateMatrix
 
 /// @brief \c ScalarGateMatrix is a wrapper around \c ComplexSquareMatrix whose
-/// edgeSize is always a power-of-2. 
+/// edgeSize is always a power-of-2.
 class ScalarGateMatrix : public GateMatrix {
 private:
   ComplexSquareMatrix _matrix;
+
 public:
   ScalarGateMatrix(int nQubits)
-    : GateMatrix(GM_Scalar, nQubits), _matrix(1ULL << nQubits) {}
+      : GateMatrix(GM_Scalar, nQubits), _matrix(1ULL << nQubits) {}
 
   ScalarGateMatrix(const ComplexSquareMatrix& matrix)
-    : GateMatrix(GM_Scalar, std::log2(matrix.edgeSize())), _matrix(matrix) {
+      : GateMatrix(GM_Scalar, std::log2(matrix.edgeSize())), _matrix(matrix) {
     assert(_nQubits > 0 && 1ULL << _nQubits == matrix.edgeSize() &&
            "Matrix size must be a power of 2");
   }
 
   ScalarGateMatrix(ComplexSquareMatrix&& matrix)
-    : GateMatrix(GM_Scalar, std::log2(matrix.edgeSize()))
-    , _matrix(std::move(matrix)) {
+      : GateMatrix(GM_Scalar, std::log2(matrix.edgeSize())),
+        _matrix(std::move(matrix)) {
     assert(_nQubits > 0 && 1ULL << _nQubits == matrix.edgeSize() &&
            "Matrix size must be a power of 2");
   }
 
   ScalarGateMatrix(const ScalarGateMatrix& other)
-    : GateMatrix(GM_Scalar, other._nQubits), _matrix(other._matrix) {}
+      : GateMatrix(GM_Scalar, other._nQubits), _matrix(other._matrix) {}
 
   ScalarGateMatrix(ScalarGateMatrix&& other) noexcept
-    : GateMatrix(GM_Scalar, other._nQubits)
-    , _matrix(std::move(other._matrix)) {
-    other._nQubits = 0; 
+      : GateMatrix(GM_Scalar, other._nQubits),
+        _matrix(std::move(other._matrix)) {
+    other._nQubits = 0;
   }
 
   ScalarGateMatrix& operator=(const ScalarGateMatrix& other) {
@@ -121,15 +124,13 @@ public:
 
   GateMatrixPtr subsystem(uint32_t mask) const override;
 
-  std::ostream& displayInfo(std::ostream& os, int verbose=1) const override;
+  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
 
-  static bool classof(const GateMatrix* gm) {
-    return gm->kind() == GM_Scalar;
-  }
+  static bool classof(const GateMatrix* gm) { return gm->kind() == GM_Scalar; }
 
   static ScalarGateMatrixPtr RandomUnitary(int nQubits) {
     return std::make_shared<ScalarGateMatrix>(
-      ComplexSquareMatrix::RandomUnitary(1ULL << nQubits));
+        ComplexSquareMatrix::RandomUnitary(1ULL << nQubits));
   }
 
   static ScalarGateMatrixPtr I1() {
@@ -167,7 +168,7 @@ public:
   // [cos(theta/2), -sin(theta/2),
   //  sin(theta/2),  cos(theta/2) ]
   static ScalarGateMatrixPtr RY(double theta);
-  
+
   // [exp(-i * theta/2),                0,
   //                  0, exp(i * theta/2) ]
   static ScalarGateMatrixPtr RZ(double theta);
@@ -175,7 +176,7 @@ public:
   static ScalarGateMatrixPtr CX() {
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::CX());
   }
-  
+
   static ScalarGateMatrixPtr CP(double phi) {
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::CP(phi));
   }
@@ -189,27 +190,29 @@ private:
   };
 
   // array of index-phase pairs. For unitary permutation matrices, there is only
-  // one non-zero entry in each row and column. Each non-zero entry is in the 
+  // one non-zero entry in each row and column. Each non-zero entry is in the
   // complex unit circle, i.e., has a normed phase in [-pi, pi). \c _data
   // stores where the non-zero entries are, and their phases. For example,
-  // Matrix[r, c] = 
+  // Matrix[r, c] =
   //  exp(i * _data[r].phase) if _data[r].index == c;
   //                        0 if _data[r].index != c.
   // The phase is a output of std::atan2(im, re), with range (-pi, pi].
   IndexPhasePair* _data;
+
 public:
   explicit UnitaryPermGateMatrix(int nQubits)
-    : GateMatrix(GM_UnitaryPerm, nQubits)
-    , _data(new IndexPhasePair[1ULL << nQubits]) {}
+      : GateMatrix(GM_UnitaryPerm, nQubits),
+        _data(new IndexPhasePair[1ULL << nQubits]) {}
 
   UnitaryPermGateMatrix(const UnitaryPermGateMatrix& other)
-    : GateMatrix(GM_UnitaryPerm, other._nQubits) {
+      : GateMatrix(GM_UnitaryPerm, other._nQubits) {
     _data = new IndexPhasePair[1ULL << _nQubits];
-    std::memcpy(_data, other._data, sizeof(IndexPhasePair) * (1ULL << _nQubits));
+    std::memcpy(
+        _data, other._data, sizeof(IndexPhasePair) * (1ULL << _nQubits));
   }
 
   UnitaryPermGateMatrix(UnitaryPermGateMatrix&& other) noexcept
-    : GateMatrix(GM_UnitaryPerm, other._nQubits), _data(other._data) {
+      : GateMatrix(GM_UnitaryPerm, other._nQubits), _data(other._data) {
     other._data = nullptr;
   }
 
@@ -244,8 +247,7 @@ public:
 
 class ParametrizedGateMatrix : public GateMatrix {
 public:
-  ParametrizedGateMatrix(int nQubits)
-    : GateMatrix(GM_Parametrized, nQubits) {}
+  ParametrizedGateMatrix(int nQubits) : GateMatrix(GM_Parametrized, nQubits) {}
 
   static bool classof(const GateMatrix* gm) {
     return gm->kind() == GM_Parametrized;
@@ -260,83 +262,76 @@ GateMatrixPtr permute(GateMatrixPtr gm, const std::vector<int>& flags);
 
 /* Arithmatic Operator Overloading */
 
-inline ScalarGateMatrix operator+(
-    const ScalarGateMatrix& lhs, const ScalarGateMatrix& rhs) {
+inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs,
+                                  const ScalarGateMatrix& rhs) {
   assert(lhs.nQubits() == rhs.nQubits());
   return ScalarGateMatrix(lhs.matrix() + rhs.matrix());
 }
 
-inline ScalarGateMatrix operator+(
-    const ScalarGateMatrix& lhs, double c) {
+inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs, double c) {
   return ScalarGateMatrix(lhs.matrix() + c);
 }
 
-inline ScalarGateMatrix operator+(
-    double lhs, const ScalarGateMatrix& rhs) {
+inline ScalarGateMatrix operator+(double lhs, const ScalarGateMatrix& rhs) {
   return ScalarGateMatrix(lhs + rhs.matrix());
 }
 
-inline ScalarGateMatrix operator+(
-    const ScalarGateMatrix& lhs, std::complex<double> c) {
+inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs,
+                                  std::complex<double> c) {
   return ScalarGateMatrix(lhs.matrix() + c);
 }
 
-inline ScalarGateMatrix operator+(
-    std::complex<double> c, const ScalarGateMatrix& rhs) {
+inline ScalarGateMatrix operator+(std::complex<double> c,
+                                  const ScalarGateMatrix& rhs) {
   return ScalarGateMatrix(c + rhs.matrix());
 }
 
-inline ScalarGateMatrix& operator+=(
-    ScalarGateMatrix& lhs, const ScalarGateMatrix& rhs) {
+inline ScalarGateMatrix& operator+=(ScalarGateMatrix& lhs,
+                                    const ScalarGateMatrix& rhs) {
   assert(lhs.nQubits() == rhs.nQubits());
   lhs.matrix() += rhs.matrix();
   return lhs;
 }
 
-inline ScalarGateMatrix& operator+=(
-    ScalarGateMatrix& lhs, double rhs) {
+inline ScalarGateMatrix& operator+=(ScalarGateMatrix& lhs, double rhs) {
   lhs.matrix() += rhs;
   return lhs;
 }
 
-inline ScalarGateMatrix& operator+=(
-    ScalarGateMatrix& lhs, std::complex<double> c) {
+inline ScalarGateMatrix& operator+=(ScalarGateMatrix& lhs,
+                                    std::complex<double> c) {
   lhs.matrix() += c;
   return lhs;
 }
 
-inline ScalarGateMatrix operator*(
-    const ScalarGateMatrix& lhs, double c) {
+inline ScalarGateMatrix operator*(const ScalarGateMatrix& lhs, double c) {
   return ScalarGateMatrix(lhs.matrix() * c);
 }
 
-inline ScalarGateMatrix operator*(
-    double c, const ScalarGateMatrix& rhs) {
+inline ScalarGateMatrix operator*(double c, const ScalarGateMatrix& rhs) {
   return ScalarGateMatrix(c * rhs.matrix());
 }
 
-inline ScalarGateMatrix operator*(
-    const ScalarGateMatrix& lhs, std::complex<double> c) {
+inline ScalarGateMatrix operator*(const ScalarGateMatrix& lhs,
+                                  std::complex<double> c) {
   return ScalarGateMatrix(lhs.matrix() * c);
 }
 
-inline ScalarGateMatrix operator*(
-    std::complex<double> c, const ScalarGateMatrix& rhs) {
+inline ScalarGateMatrix operator*(std::complex<double> c,
+                                  const ScalarGateMatrix& rhs) {
   return ScalarGateMatrix(c * rhs.matrix());
 }
 
-inline ScalarGateMatrix& operator*=(
-    ScalarGateMatrix& lhs, double c) {
+inline ScalarGateMatrix& operator*=(ScalarGateMatrix& lhs, double c) {
   lhs.matrix() *= c;
   return lhs;
 }
 
-inline ScalarGateMatrix& operator*=(
-    ScalarGateMatrix& lhs, std::complex<double> c) {
+inline ScalarGateMatrix& operator*=(ScalarGateMatrix& lhs,
+                                    std::complex<double> c) {
   lhs.matrix() *= c;
   return lhs;
 }
-
 
 }; // namespace cast
 

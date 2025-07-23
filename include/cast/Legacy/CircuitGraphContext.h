@@ -20,6 +20,6 @@ public:
   CircuitGraphContext() = default;
 };
 
-} // namespace cast
+} // namespace cast::legacy
 
 #endif // CAST_LEGACY_CIRCUITGRAPH_CONTEXT_H

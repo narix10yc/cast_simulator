@@ -8,9 +8,10 @@ namespace cast {
 struct LocationSpan {
   const char* begin;
   const char* end;
-  
-  LocationSpan(const char* begin, const char* end)
-    : begin(begin), end(end) { assert(begin <= end); }
+
+  LocationSpan(const char* begin, const char* end) : begin(begin), end(end) {
+    assert(begin <= end);
+  }
 }; // sturct LocationSpan
 
 }; // namespace cast

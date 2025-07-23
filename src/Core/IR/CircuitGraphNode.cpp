@@ -1,8 +1,8 @@
 #include "cast/Core/IRNode.h"
 #include "utils/iocolor.h"
 
-#include <set>
 #include <iomanip>
+#include <set>
 
 using namespace cast;
 using namespace cast::ir;
@@ -26,17 +26,23 @@ static bool checkConsistency_rowSize(const CircuitGraphNode& graph) {
   for (; it != end; ++it) {
     ++row;
     if (it->size() < graph.nQubits()) {
-      std::cerr << BOLDRED("Err: ") << "In checkConsistency_rowSize(): "
-        "The size of row " << row << " is too small: "
-        "size = " << it->size()
-        << " while graph nQubits is " << graph.nQubits() << "\n";
+      std::cerr << BOLDRED("Err: ")
+                << "In checkConsistency_rowSize(): "
+                   "The size of row "
+                << row
+                << " is too small: "
+                   "size = "
+                << it->size() << " while graph nQubits is " << graph.nQubits()
+                << "\n";
       return false;
     }
     for (int q = graph.nQubits(); q < it->size(); ++q) {
       if ((*it)[q] != nullptr) {
-        std::cerr << BOLDRED("Err: ") << "In checkConsistency_rowSize(): "
-          "Row " << row << " has a gate at qubit " << q
-          << ", but nQubits is " << graph.nQubits() << "\n";
+        std::cerr << BOLDRED("Err: ")
+                  << "In checkConsistency_rowSize(): "
+                     "Row "
+                  << row << " has a gate at qubit " << q << ", but nQubits is "
+                  << graph.nQubits() << "\n";
         return false;
       }
     }
@@ -54,24 +60,30 @@ static bool checkConsistency_gateMap(const CircuitGraphNode& graph) {
   std::set<int> gateIds;
   for (const auto& [gatePtr, id] : graph.gateMap()) {
     if (gatePtr == nullptr) {
-      std::cerr << BOLDRED("Err: ") << "In checkConsistency_gateMap(): "
-        "Gate in gateMap is null.\n";
+      std::cerr << BOLDRED("Err: ")
+                << "In checkConsistency_gateMap(): "
+                   "Gate in gateMap is null.\n";
       return false;
     }
     if (id < 0) {
-      std::cerr << BOLDRED("Err: ") << "In checkConsistency_gateMap(): "
-        "Negative gate id found: " << id << "\n";
+      std::cerr << BOLDRED("Err: ")
+                << "In checkConsistency_gateMap(): "
+                   "Negative gate id found: "
+                << id << "\n";
       return false;
     }
     if (!gatePtrs.insert(gatePtr.get()).second) {
-      std::cerr << BOLDRED("Err: ") << "In checkConsistency_gateMap(): "
-        "Duplicate gate pointer found in gateMap: "
-        << (void*)(gatePtr.get()) << "\n";
+      std::cerr << BOLDRED("Err: ")
+                << "In checkConsistency_gateMap(): "
+                   "Duplicate gate pointer found in gateMap: "
+                << (void*)(gatePtr.get()) << "\n";
       return false;
     }
     if (!gateIds.insert(id).second) {
-      std::cerr << BOLDRED("Err: ") << "In checkConsistency_gateMap(): "
-        "Duplicate gate id found in gateMap: " << id << "\n";
+      std::cerr << BOLDRED("Err: ")
+                << "In checkConsistency_gateMap(): "
+                   "Duplicate gate id found in gateMap: "
+                << id << "\n";
       return false;
     }
   }
@@ -105,18 +117,21 @@ static bool checkConsistency_gateMemory(const CircuitGraphNode& graph) {
         }
       }
       if (gateId == -1) {
-        std::cerr << BOLDRED("Err: ") << "In checkConsistency_gateMemory(): "
-          "Gate @ " << (void*)gate
-          << " in row " << rowNumber << "is not found in gateMap.\n";
+        std::cerr << BOLDRED("Err: ")
+                  << "In checkConsistency_gateMemory(): "
+                     "Gate @ "
+                  << (void*)gate << " in row " << rowNumber
+                  << "is not found in gateMap.\n";
         return false;
       }
     }
   }
   // Check if all gates in gateMap are present in the tile
   if (gatesInTile.size() != graph.gateMap().size()) {
-    std::cerr << BOLDRED("Err: ") << "In checkConsistency_gateMemory(): "
-      "Mismatch in the sizes of gates in the tile and gateMap: "
-      << gatesInTile.size() << " vs " << graph.gateMap().size() << "\n";
+    std::cerr << BOLDRED("Err: ")
+              << "In checkConsistency_gateMemory(): "
+                 "Mismatch in the sizes of gates in the tile and gateMap: "
+              << gatesInTile.size() << " vs " << graph.gateMap().size() << "\n";
     return false;
   }
   return true;
@@ -124,8 +139,7 @@ static bool checkConsistency_gateMemory(const CircuitGraphNode& graph) {
 
 bool CircuitGraphNode::checkConsistency() const {
   // Check all rows have the same size.
-  return checkConsistency_rowSize(*this) && 
-         checkConsistency_gateMap(*this) &&
+  return checkConsistency_rowSize(*this) && checkConsistency_gateMap(*this) &&
          checkConsistency_gateMemory(*this);
 }
 
@@ -143,7 +157,7 @@ void CircuitGraphNode::resizeRowsIfNeeded(int newNQubits) {
 //   // add gate to gateMap
 //   auto [gateMapIt, inserted] = _gateMap.insert({gate, _gateMapId++});
 //   assert(inserted && "Gate already exists");
-  
+
 //   auto rowIt = --_tile.end();
 //   if (rowIt == _tile.end() || !isRowVacant(rowIt, gate->qubits())) {
 //     // insert a new row if either tile is empty or the last row is not vacant
@@ -258,8 +272,9 @@ bool CircuitGraphNode::isRowVacant(
   return true;
 }
 
-void CircuitGraphNode::fuseAndInsertSameRow(
-    row_iterator rowIt, int q0, int q1) {
+void CircuitGraphNode::fuseAndInsertSameRow(row_iterator rowIt,
+                                            int q0,
+                                            int q1) {
   assert(rowIt != tile_end());
   auto* gate0 = (*rowIt)[q0];
   assert(gate0 != nullptr);
@@ -286,8 +301,9 @@ CircuitGraphNode::fuseAndInsertDiffRow(row_iterator rowItL, int qubit) {
 }
 
 CircuitGraphNode::row_iterator
-CircuitGraphNode::replaceGatesOnConsecutiveRowsWith(
-    QuantumGatePtr gate, row_iterator rowItL, int qubit) {
+CircuitGraphNode::replaceGatesOnConsecutiveRowsWith(QuantumGatePtr gate,
+                                                    row_iterator rowItL,
+                                                    int qubit) {
   auto rowItR = std::next(rowItL);
   assert(rowItL != tile_end() && rowItR != tile_end());
   removeGate(rowItL, qubit);
@@ -327,8 +343,7 @@ QuantumGatePtr CircuitGraphNode::lookup(QuantumGate* gate) const {
 void CircuitGraphNode::squeeze(row_iterator beginIt) {
   assert(beginIt != tile_end() && "beginIt cannot be the end iterator");
   // first step: relocate gates to the top
-  for (auto rowIt = std::next(beginIt), end = tile_end();
-       rowIt != end;
+  for (auto rowIt = std::next(beginIt), end = tile_end(); rowIt != end;
        ++rowIt) {
     for (int q = 0; q < _nQubits; ++q) {
       auto* gate = (*rowIt)[q];
@@ -386,8 +401,8 @@ void CircuitGraphNode::squeeze(row_iterator beginIt) {
   }
 }
 
-static void push_back_if_not_in(
-    std::vector<QuantumGate*>& gates, QuantumGate* gate) {
+static void push_back_if_not_in(std::vector<QuantumGate*>& gates,
+                                QuantumGate* gate) {
   if (gate != nullptr &&
       std::find(gates.begin(), gates.end(), gate) == gates.end()) {
     gates.push_back(gate);
@@ -409,8 +424,8 @@ std::vector<QuantumGate*> CircuitGraphNode::getAllGates() const {
   return gates;
 }
 
-static void push_back_if_not_in(
-    std::vector<QuantumGatePtr>& gates, QuantumGatePtr gate) {
+static void push_back_if_not_in(std::vector<QuantumGatePtr>& gates,
+                                QuantumGatePtr gate) {
   if (gate != nullptr &&
       std::find(gates.begin(), gates.end(), gate) == gates.end()) {
     gates.push_back(gate);
@@ -433,24 +448,25 @@ std::vector<QuantumGatePtr> CircuitGraphNode::getAllGatesShared() const {
 }
 
 std::ostream& CircuitGraphNode::print(std::ostream& os, int indent) const {
-  return writeIndent(os, indent)
-    << "cast.circuit_graph [@" << this
-    << ", " << _gateMap.size() << " gates]\n";
+  return writeIndent(os, indent) << "cast.circuit_graph [@" << this << ", "
+                                 << _gateMap.size() << " gates]\n";
 }
 
-std::ostream& CircuitGraphNode::displayInfo(std::ostream& os, int verbose) const {
+std::ostream& CircuitGraphNode::displayInfo(std::ostream& os,
+                                            int verbose) const {
   os << BOLDCYAN("=== Info of CircuitGraph @ " << this << " === ")
      << "(Verbose " << verbose << ")\n";
   os << CYAN("- nQubits:       ") << _nQubits << "\n";
   os << CYAN("- Num Gates:      ") << _gateMap.size() << "\n";
   os << CYAN("- Num Rows:       ") << _tile.size() << "\n";
-  
+
   os << BOLDCYAN("====================================") << "\n";
   return os;
 }
 
-std::ostream& CircuitGraphNode::impl_visualize(
-    std::ostream& os, int width, int n_qubits) const {
+std::ostream& CircuitGraphNode::impl_visualize(std::ostream& os,
+                                               int width,
+                                               int n_qubits) const {
   assert(n_qubits >= _nQubits &&
          "n_qubits cannot be less than the true number of qubits");
   if (_tile.empty())
@@ -492,7 +508,8 @@ void CircuitGraphNode::dump_visualize() const {
     std::cerr << "Row @ " << (void*)(&row) << ": ";
     for (unsigned q = 0; q < _nQubits; ++q) {
       if (const auto* gate = row[q]; gate != nullptr)
-        std::cerr << std::setw(width) << std::setfill('0') << gateId(gate) << " ";
+        std::cerr << std::setw(width) << std::setfill('0') << gateId(gate)
+                  << " ";
       else
         std::cerr << vbar;
     }

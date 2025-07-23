@@ -1,15 +1,15 @@
 #ifndef CAST_CPU_CPU_DENSITY_MATRIX_H
 #define CAST_CPU_CPU_DENSITY_MATRIX_H
 
-#include <cstring>
 #include "cast/CPU/CPUStatevector.h"
+#include <cstring>
 
 namespace cast {
 
 // This is almost the same as CPUStatevector with twice the number of qubits
-template<typename ScalarType>
-class CPUDensityMatrix {
+template <typename ScalarType> class CPUDensityMatrix {
   CPUStatevector<ScalarType> sv;
+
 public:
   CPUDensityMatrix(int nQubits, int simd_s) : sv(2 * nQubits, simd_s) {}
 
@@ -17,7 +17,7 @@ public:
 
   void initialize() { sv.initialize(); }
 
-  void randomize(int nThreads=1) { sv.randomize(nThreads); }
+  void randomize(int nThreads = 1) { sv.randomize(nThreads); }
 
   void* data() { return sv.data(); }
 
@@ -42,6 +42,6 @@ public:
 // extern template class CPUDensityMatrix<float>;
 // extern template class CPUDensityMatrix<double>;
 
-} // namespace utils
+} // namespace cast
 
 #endif // CAST_CPU_CPU_DENSITY_MATRIX_H

@@ -20,7 +20,7 @@ void QuantumGate::sortQubits() {
   for (unsigned i = 0; i < nQubits; i++)
     indices[i] = i;
 
-  std::ranges::sort(indices,[&qubits = this->qubits](int i, int j) {
+  std::ranges::sort(indices, [&qubits = this->qubits](int i, int j) {
     return qubits[i] < qubits[j];
   });
 
@@ -175,8 +175,8 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
   // const matrix
   const GateMatrix::c_matrix_t* aCMat;
   const GateMatrix::c_matrix_t* bCMat;
-  if ((aCMat = other.gateMatrix.getConstantMatrix())
-      && (bCMat = gateMatrix.getConstantMatrix())) {
+  if ((aCMat = other.gateMatrix.getConstantMatrix()) &&
+      (bCMat = gateMatrix.getConstantMatrix())) {
     GateMatrix::c_matrix_t cCMat(1 << cnQubits);
     // main loop
     for (uint64_t i = 0ULL; i < (1ULL << (2 * cnQubits)); i++) {
@@ -205,8 +205,9 @@ QuantumGate QuantumGate::lmatmul(const QuantumGate& other) const {
             bIdx += bSharedQubitShifts[bit];
           }
         }
-        // std::cerr << "  aIdx = " << aIdx << ": " << aCMat->data()[aIdx] << ";"
-                  // << "  bIdx = " << bIdx << ": " << bCMat->data()[bIdx] << "\n";
+        // std::cerr << "  aIdx = " << aIdx << ": " << aCMat->data()[aIdx] <<
+        // ";"
+        // << "  bIdx = " << bIdx << ": " << bCMat->data()[bIdx] << "\n";
         cCMat[i] += aCMat->data()[aIdx] * bCMat->data()[bIdx];
       }
     }
@@ -273,7 +274,8 @@ double QuantumGate::opCount(double zeroTol) const {
 
   if (const auto* cMat = gateMatrix.getConstantMatrix())
     return opCount_c(*cMat, zeroTol) * std::pow(2.0, -nQubits());
-  return opCount_p(gateMatrix.getParametrizedMatrix(), zeroTol) * std::pow(2.0, -nQubits());
+  return opCount_p(gateMatrix.getParametrizedMatrix(), zeroTol) *
+         std::pow(2.0, -nQubits());
 
   assert(false && "opCount only implemented for c and p matrices");
 
@@ -312,8 +314,9 @@ double QuantumGate::opCount(double zeroTol) const {
 //         return flag;
 //     };
 
-//     auto* p = std::get_if<legacy::GateMatrix::c_matrix_t>(&gateMatrix._matrix);
-//     if (p == nullptr)
+//     auto* p =
+//     std::get_if<legacy::GateMatrix::c_matrix_t>(&gateMatrix._matrix); if (p
+//     == nullptr)
 //         return false;
 //     bool flag = false;
 //     for (auto& data : p->data) {

@@ -4,15 +4,15 @@
 
 using namespace utils;
 
-template<typename ScalarType>
-__global__ void multiplyByConstantKernel(
-    ScalarType* dArr, ScalarType c, size_t size) {
+template <typename ScalarType>
+__global__ void
+multiplyByConstantKernel(ScalarType* dArr, ScalarType c, size_t size) {
   size_t idx = threadIdx.x + blockIdx.x * blockDim.x;
   if (idx < size)
     dArr[idx] *= c;
 }
 
-template<typename ScalarType>
+template <typename ScalarType>
 void utils::internal::HelperCUDAKernels<ScalarType>::multiplyByConstant(
     ScalarType* dArr, ScalarType c, size_t size) {
   size_t blockSize = 256;
@@ -20,9 +20,11 @@ void utils::internal::HelperCUDAKernels<ScalarType>::multiplyByConstant(
   multiplyByConstantKernel<ScalarType><<<numBlocks, blockSize>>>(dArr, c, size);
 }
 
-template<typename ScalarType>
-__global__ void initGaussianKernel(
-    ScalarType* dArr, size_t size, ScalarType mean, ScalarType stddev) {
+template <typename ScalarType>
+__global__ void initGaussianKernel(ScalarType* dArr,
+                                   size_t size,
+                                   ScalarType mean,
+                                   ScalarType stddev) {
   size_t idx = threadIdx.x + (size_t)(blockIdx.x) * blockDim.x;
   if (idx < size) {
     curandState state;
@@ -31,18 +33,19 @@ __global__ void initGaussianKernel(
   }
 }
 
-template<typename ScalarType>
+template <typename ScalarType>
 void utils::internal::HelperCUDAKernels<ScalarType>::randomizeStatevector(
     ScalarType* dArr, size_t size) {
   size_t blockSize = 256;
   size_t numBlocks = (size + blockSize - 1) / blockSize;
   initGaussianKernel<ScalarType>
-    <<<numBlocks, blockSize>>>(dArr, size, 0.0, 1.0);
+      <<<numBlocks, blockSize>>>(dArr, size, 0.0, 1.0);
 }
 
-template<typename ScalarType, unsigned blockSize>
-__global__ void sumOfSquaredReductionKernel(
-    const ScalarType* dArr, ScalarType* dOut, size_t size) {
+template <typename ScalarType, unsigned blockSize>
+__global__ void sumOfSquaredReductionKernel(const ScalarType* dArr,
+                                            ScalarType* dOut,
+                                            size_t size) {
   static_assert(blockSize == 32 || blockSize == 64 || blockSize == 128 ||
                 blockSize == 256 || blockSize == 512);
   __shared__ ScalarType shared[blockSize];
@@ -51,11 +54,11 @@ __global__ void sumOfSquaredReductionKernel(
 
   size_t i0 = (2ULL * bid) * blockSize + tid;
   size_t i1 = i0 + blockSize;
-  shared[tid] = (i0 < size ? dArr[i0] * dArr[i0] : 0) + 
+  shared[tid] = (i0 < size ? dArr[i0] * dArr[i0] : 0) +
                 (i1 < size ? dArr[i1] * dArr[i1] : 0);
   __syncthreads();
 
-  // Reduction in shared memory. The loop here sums the blockSize elements in 
+  // Reduction in shared memory. The loop here sums the blockSize elements in
   // \c shared into shared[0].
   if constexpr (blockSize >= 512) {
     if (tid < 256)
@@ -86,7 +89,7 @@ __global__ void sumOfSquaredReductionKernel(
     dOut[bid] = shared[0];
 }
 
-template<typename ScalarType>
+template <typename ScalarType>
 ScalarType utils::internal::HelperCUDAKernels<ScalarType>::reduceSquared(
     const ScalarType* dArr, size_t size) {
   constexpr unsigned blockSize = 128;
@@ -99,11 +102,13 @@ ScalarType utils::internal::HelperCUDAKernels<ScalarType>::reduceSquared(
 
   // launch kernel
   sumOfSquaredReductionKernel<ScalarType, blockSize>
-  <<<gridSize, blockSize>>>(dArr, dIntermediate, size);
+      <<<gridSize, blockSize>>>(dArr, dIntermediate, size);
 
   // final reduction on the host
-  cudaMemcpy(hIntermediate, dIntermediate,
-    gridSize * sizeof(ScalarType), cudaMemcpyDeviceToHost);
+  cudaMemcpy(hIntermediate,
+             dIntermediate,
+             gridSize * sizeof(ScalarType),
+             cudaMemcpyDeviceToHost);
   ScalarType sum = 0;
   for (unsigned i = 0; i < gridSize; ++i)
     sum += hIntermediate[i];
@@ -113,9 +118,11 @@ ScalarType utils::internal::HelperCUDAKernels<ScalarType>::reduceSquared(
   return sum;
 }
 
-template<typename ScalarType, unsigned blockSize>
-__global__ void sumOfSquaredOmittingBitReductionKernel(
-    const ScalarType* dArr, ScalarType* dOut, size_t size, int bit) {
+template <typename ScalarType, unsigned blockSize>
+__global__ void sumOfSquaredOmittingBitReductionKernel(const ScalarType* dArr,
+                                                       ScalarType* dOut,
+                                                       size_t size,
+                                                       int bit) {
   static_assert(blockSize == 32 || blockSize == 64 || blockSize == 128 ||
                 blockSize == 256 || blockSize == 512);
   __shared__ ScalarType shared[blockSize];
@@ -128,11 +135,11 @@ __global__ void sumOfSquaredOmittingBitReductionKernel(
   size_t mask = (1ULL << bit) - 1;
   i0 = ((i0 & ~mask) << 1) | (i0 & mask);
   i1 = ((i1 & ~mask) << 1) | (i1 & mask);
-  shared[tid] = (i0 < size ? dArr[i0] * dArr[i0] : 0) + 
+  shared[tid] = (i0 < size ? dArr[i0] * dArr[i0] : 0) +
                 (i1 < size ? dArr[i1] * dArr[i1] : 0);
   __syncthreads();
 
-  // Reduction in shared memory. The loop here sums the blockSize elements in 
+  // Reduction in shared memory. The loop here sums the blockSize elements in
   // \c shared into shared[0].
   if constexpr (blockSize >= 512) {
     if (tid < 256)
@@ -163,7 +170,7 @@ __global__ void sumOfSquaredOmittingBitReductionKernel(
     dOut[bid] = shared[0];
 }
 
-template<typename ScalarType>
+template <typename ScalarType>
 ScalarType
 utils::internal::HelperCUDAKernels<ScalarType>::reduceSquaredOmittingBit(
     const ScalarType* dArr, size_t size, int bit) {
@@ -177,11 +184,13 @@ utils::internal::HelperCUDAKernels<ScalarType>::reduceSquaredOmittingBit(
 
   // launch kernel
   sumOfSquaredOmittingBitReductionKernel<ScalarType, blockSize>
-  <<<gridSize, blockSize>>>(dArr, dIntermediate, size, bit);
+      <<<gridSize, blockSize>>>(dArr, dIntermediate, size, bit);
 
   // final reduction on the host
-  cudaMemcpy(hIntermediate, dIntermediate,
-    gridSize * sizeof(ScalarType), cudaMemcpyDeviceToHost);
+  cudaMemcpy(hIntermediate,
+             dIntermediate,
+             gridSize * sizeof(ScalarType),
+             cudaMemcpyDeviceToHost);
   ScalarType sum = 0;
   for (unsigned i = 0; i < gridSize; ++i)
     sum += hIntermediate[i];
@@ -192,6 +201,6 @@ utils::internal::HelperCUDAKernels<ScalarType>::reduceSquaredOmittingBit(
 }
 
 namespace utils::internal {
-  template struct HelperCUDAKernels<float>;
-  template struct HelperCUDAKernels<double>;
-}
+template struct HelperCUDAKernels<float>;
+template struct HelperCUDAKernels<double>;
+} // namespace utils::internal

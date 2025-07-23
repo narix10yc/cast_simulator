@@ -81,7 +81,7 @@ Expr* Parser::parsePrimaryExpr() {
     advance(tk_Numeric);
     return new (ctx) ParameterExpr(index);
   }
-  // Paranthesis 
+  // Paranthesis
   case tk_L_RoundBracket: {
     advance(tk_L_RoundBracket);
     auto* expr = parseExpr();

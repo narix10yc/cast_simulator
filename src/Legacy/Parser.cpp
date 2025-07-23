@@ -1,5 +1,5 @@
-#include "cast/Legacy/AST.h"
 #include "cast/Legacy/Parser.h"
+#include "cast/Legacy/AST.h"
 #include "cast/Legacy/CircuitGraph.h"
 
 #include "utils/iocolor.h"
@@ -71,8 +71,7 @@ void Parser::printLocation(std::ostream& os) const {
   auto lineInfo = lexer.getCurLineInfo();
   os << std::setw(5) << std::setfill(' ') << lineInfo.line << " | ";
   os.write(lineInfo.memRefBegin, lineInfo.memRefEnd - lineInfo.memRefBegin);
-  os << "      | "
-     << std::string(curToken.memRefBegin - lexer.lineBegin,' ')
+  os << "      | " << std::string(curToken.memRefBegin - lexer.lineBegin, ' ')
      << BOLDGREEN(std::string(curToken.length(), '^') << "\n");
 }
 
@@ -279,7 +278,7 @@ Lexer::LineInfo Lexer::getCurLineInfo() const {
     if (*lineEnd++ == '\n')
       break;
   }
-  return { .line = line, .memRefBegin = lineBegin, .memRefEnd = lineEnd };
+  return {.line = line, .memRefBegin = lineBegin, .memRefEnd = lineEnd};
 }
 
 std::complex<double> Parser::parseComplexNumber() {
@@ -399,8 +398,7 @@ GateChainStmt Parser::parseGateChain() {
       return stmt;
     if (optionalAdvance(tk_AtSymbol))
       continue;
-    logErr() << "Unexpected token '"
-             << getNameOfTokenKind(curToken.kind)
+    logErr() << "Unexpected token '" << getNameOfTokenKind(curToken.kind)
              << "' Did you forget ';'?\n";
     return stmt;
   }
@@ -409,7 +407,7 @@ GateChainStmt Parser::parseGateChain() {
 QuantumCircuit Parser::parseQuantumCircuit() {
   if (curToken.isNot(tk_Identifier) || curToken.toStringView() != "circuit") {
     printLocation(
-      logErr() << "Expect 'circuit' keyword in parsing QuantumCircuit\n");
+        logErr() << "Expect 'circuit' keyword in parsing QuantumCircuit\n");
     failAndExit();
   }
   advance(tk_Identifier);

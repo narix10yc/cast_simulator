@@ -14,7 +14,7 @@
 //   legacy::GateMatrix makeRzSymbolicMatrix() {
 //     legacy::GateMatrix::p_matrix_t pMat(2);
 
-//     int var = 0; 
+//     int var = 0;
 //     Polynomial c( Monomial::Cosine(var) );
 //     Polynomial s( Monomial::Sine(var) );
 
@@ -28,7 +28,8 @@
 //     pMat(1,0) = minusI_s;
 //     pMat(1,1) = c;
 
-//     // Wrapping in a legacy::GateMatrix => isConvertibleToCMat = UnConvertible
+//     // Wrapping in a legacy::GateMatrix => isConvertibleToCMat =
+//     UnConvertible
 //     // => getConstantMatrix() = null
 //     legacy::GateMatrix gmat(pMat);
 //     return gmat;
@@ -65,17 +66,20 @@
 
 // template<unsigned simd_s>
 // static void f() {
-//     test::TestSuite suite("Symbolic Rz param gates (s = " + std::to_string(simd_s) + ")");
+//     test::TestSuite suite("Symbolic Rz param gates (s = " +
+//     std::to_string(simd_s) + ")");
 
 //     CPUKernelManager cpuKernelMgr;
 //     CPUKernelGenConfig cpuConfig;
 //     cpuConfig.simd_s = simd_s;
 //     cpuConfig.matrixLoadMode = CPUKernelGenConfig::StackLoadMatElems;
 
-//     cpuKernelMgr.genCPUGate(cpuConfig, getRzSymbolicGate(0), "gate_rz_0_param");
-//     cpuKernelMgr.genCPUGate(cpuConfig, getRzSymbolicGate(1), "gate_rz_1_param");
-//     cpuKernelMgr.genCPUGate(cpuConfig, getRzSymbolicGate(2), "gate_rz_2_param");
-//     cpuKernelMgr.genCPUGate(cpuConfig, getRzSymbolicGate(3), "gate_rz_3_param");
+//     cpuKernelMgr.genCPUGate(cpuConfig, getRzSymbolicGate(0),
+//     "gate_rz_0_param"); cpuKernelMgr.genCPUGate(cpuConfig,
+//     getRzSymbolicGate(1), "gate_rz_1_param");
+//     cpuKernelMgr.genCPUGate(cpuConfig, getRzSymbolicGate(2),
+//     "gate_rz_2_param"); cpuKernelMgr.genCPUGate(cpuConfig,
+//     getRzSymbolicGate(3), "gate_rz_3_param");
 
 //     // cpuKernelMgr.dumpIR("gate_rz_0_param", llvm::outs());
 

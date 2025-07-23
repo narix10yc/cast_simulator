@@ -1,10 +1,10 @@
+#include "cast/CPU/CPUStatevector.h"
 #include "gen_file.h"
 #include "timeit/timeit.h"
 #include "utils/iocolor.h"
-#include "cast/CPU/CPUStatevector.h"
+#include <cast/simulate.h>
 #include <iomanip>
 #include <iostream>
-#include <cast/simulate.h>
 
 #ifdef USING_F32
 using real_t = float;
@@ -18,7 +18,7 @@ using namespace cast::simulate;
 using namespace utils::statevector;
 using namespace cast;
 
-int main(int argc, char* *argv) {
+int main(int argc, char** argv) {
   assert(argc > 1);
   unsigned targetQ = std::stoi(argv[1]);
 
@@ -60,8 +60,8 @@ int main(int argc, char* *argv) {
 #ifdef USING_ALT_KERNEL
   _metaData[targetQ].func(sv_test.data, 0, idxMax, _metaData[targetQ].mPtr);
 #else
-  _metaData[targetQ].func(sv_test.real, sv_test.imag, 0, idxMax,
-                          _metaData[targetQ].mPtr);
+  _metaData[targetQ].func(
+      sv_test.real, sv_test.imag, 0, idxMax, _metaData[targetQ].mPtr);
 #endif
 
   // sv_test.print(std::cerr) << "\n";

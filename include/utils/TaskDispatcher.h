@@ -2,10 +2,10 @@
 #define UTILS_TASKDISPATCHER_H
 
 #include <cassert>
-#include <queue>
-#include <functional>
-#include <thread>
 #include <condition_variable>
+#include <functional>
+#include <queue>
+#include <thread>
 
 namespace utils {
 
@@ -22,6 +22,7 @@ class TaskDispatcher {
   std::atomic<bool> stopFlag;
 
   void workerThread();
+
 public:
   TaskDispatcher(int nWorkers);
 
@@ -55,4 +56,3 @@ public:
 } // namespace utils
 
 #endif // UTILS_TASKDISPATCHER_H
- 

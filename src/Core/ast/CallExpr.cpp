@@ -6,13 +6,13 @@ using namespace cast::ast;
 std::ostream& CallExpr::print(std::ostream& os) const {
   os << name << "(";
   utils::printSpanWithPrinterNoBracket(
-    os, args, [](std::ostream& os, Expr* arg) { arg->print(os); });
+      os, args, [](std::ostream& os, Expr* arg) { arg->print(os); });
   return os << ")";
 }
 
 void CallExpr::prettyPrint(PrettyPrinter& p, int indent) const {
-  p.write(indent) << getKindName() << ": " << name << ", "
-                  << args.size() << " args\n";
+  p.write(indent) << getKindName() << ": " << name << ", " << args.size()
+                  << " args\n";
   p.setState(indent, args.size());
   for (const auto* arg : args)
     arg->prettyPrint(p, indent + 1);

@@ -1,5 +1,5 @@
-#include "cast/FPGA/FPGAGateCategory.h"
 #include "cast/FPGA/FPGAFusion.h"
+#include "cast/FPGA/FPGAGateCategory.h"
 
 using namespace cast::fpga;
 
@@ -18,9 +18,8 @@ const FPGAGateCategory FPGAGateCategory::NonComp(
 const FPGAGateCategory FPGAGateCategory::RealOnly(
     static_cast<unsigned>(FPGAGateCategory::fpgaRealOnly));
 
-const FPGAFusionConfig FPGAFusionConfig::Default {
-  .maxUnitaryPermutationSize = 5,
-  .ignoreSingleQubitNonCompGates = true,
-  .multiTraverse = true,
-  .tolerance = 1e-8
-};
+const FPGAFusionConfig FPGAFusionConfig::Default{
+    .maxUnitaryPermutationSize = 5,
+    .ignoreSingleQubitNonCompGates = true,
+    .multiTraverse = true,
+    .tolerance = 1e-8};

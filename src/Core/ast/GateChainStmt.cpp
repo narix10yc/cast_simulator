@@ -18,9 +18,7 @@ GateChainStmt* Parser::parseGateChainStmt() {
   }
   advance(tk_Semicolon);
 
-  return new (ctx) GateChainStmt(
-    ctx.createSpan(gates.data(), gates.size())
-  );
+  return new (ctx) GateChainStmt(ctx.createSpan(gates.data(), gates.size()));
 }
 
 std::ostream& GateChainStmt::print(std::ostream& os) const {

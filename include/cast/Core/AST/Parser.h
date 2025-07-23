@@ -1,8 +1,8 @@
 #ifndef CAST_DRAFT_PARSER_H
 #define CAST_DRAFT_PARSER_H
 
-#include "cast/Core/AST/ASTContext.h"
 #include "cast/Core/AST/AST.h"
+#include "cast/Core/AST/ASTContext.h"
 #include "cast/Core/AST/Lexer.h"
 #include "utils/iocolor.h"
 #include <complex>
@@ -34,7 +34,7 @@ class Parser {
 
   std::complex<double> parseComplexNumber();
 
-  // Parse attributes assocated with a statement. When invoked, it checks if 
+  // Parse attributes assocated with a statement. When invoked, it checks if
   // curToken is '<', and if so, parse attribute list (ended with '>').
   // Otherwise it returns nullptr.
   ast::Attribute* parseAttribute();
@@ -46,7 +46,7 @@ class Parser {
 
   // Used in \c parsePrimaryStmt, triggered by when \c curToken is an identfier
   ast::Expr* parseIdentifierOrCallExpr();
-  
+
   // CircuitStmt is a top-level statement. Should only be called when curToken
   // is 'Circuit'. Never returns nullptr.
   ast::CircuitStmt* parseCircuitStmt();
@@ -79,7 +79,7 @@ class Parser {
   // Parse a PauliComponentStmt. Should not be called when curToken is an
   // identifier. Never returns nullptr.
   ast::PauliComponentStmt* parsePauliComponentStmt();
-  
+
   // Possibly returns nullptr
   ast::Expr* parseExpr(int precedence = 0);
 
@@ -90,9 +90,7 @@ class Parser {
   // Return nullptr if the conversion is not possible.
   ast::SimpleNumericExpr* convertExprToSimpleNumeric(ast::Expr* expr);
 
-  void pushScope() {
-    currentScope = new Scope(currentScope);
-  }
+  void pushScope() { currentScope = new Scope(currentScope); }
 
   void popScope() {
     assert(currentScope && "Trying to pop a null scope");
@@ -105,10 +103,8 @@ class Parser {
 
   ast::Node* lookup(ast::Identifier name);
 
-  std::ostream& err() const {
-    return std::cerr << BOLDRED("Parser Error: ");
-  }
-  
+  std::ostream& err() const { return std::cerr << BOLDRED("Parser Error: "); }
+
   // A convenience function to print error message followed by line info.
   void logErrHere(const char* msg) const {
     err() << msg << "\n";
@@ -140,16 +136,18 @@ class Parser {
     return false;
   }
 
-  /// Assert curToken must have \p kind. Otherwise, terminate the 
+  /// Assert curToken must have \p kind. Otherwise, terminate the
   /// program with error messages
   void requireCurTokenIs(TokenKind kind, const char* msg = nullptr) const;
+
 public:
-  Parser(ASTContext& ctx)
-    : ctx(ctx), lexer(), currentScope(nullptr) {
+  Parser(ASTContext& ctx) : ctx(ctx), lexer(), currentScope(nullptr) {
     if (!ctx.hasSource()) {
-      std::cerr << BOLDRED("[Error] ") << "ASTContext object has no source "
-        "loaded. Call ASTContext::loadFromFile or ASTContext::loadRawBuffer "
-        "before constructing the parser.\n";
+      std::cerr << BOLDRED("[Error] ")
+                << "ASTContext object has no source "
+                   "loaded. Call ASTContext::loadFromFile or "
+                   "ASTContext::loadRawBuffer "
+                   "before constructing the parser.\n";
       std::exit(1);
     }
     lexer.curPtr = ctx.sourceManager.bufferBegin;
@@ -157,7 +155,7 @@ public:
     lexer.lex(curToken);
     lexer.lex(nextToken);
   }
-  
+
   Parser(const Parser&) = delete;
   Parser& operator=(const Parser&) = delete;
   Parser(Parser&&) = delete;

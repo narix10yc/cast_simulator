@@ -1,10 +1,10 @@
 #ifndef CAST_CPU_CPUCOSTMODEL_H
 #define CAST_CPU_CPUCOSTMODEL_H
 
+#include "cast/CPU/Config.h"
 #include "cast/Core/CostModel.h"
 #include "cast/Core/Precision.h"
 #include "utils/CSVParsable.h"
-#include "cast/CPU/Config.h"
 
 #include <fstream>
 
@@ -24,22 +24,26 @@ public:
 
     Item() = default;
 
-    Item(int nQubits, double opCount, Precision precision,
-         int nThreads, double memUpdateSpeed)
-      : nQubits(nQubits), opCount(opCount), precision(precision),
-        nThreads(nThreads), memUpdateSpeed(memUpdateSpeed) {}
+    Item(int nQubits,
+         double opCount,
+         Precision precision,
+         int nThreads,
+         double memUpdateSpeed)
+        : nQubits(nQubits), opCount(opCount), precision(precision),
+          nThreads(nThreads), memUpdateSpeed(memUpdateSpeed) {}
 
     CSV_DATA_FIELD(nQubits, opCount, precision, nThreads, memUpdateSpeed);
   };
 
   std::vector<Item> items;
-// private:
+  // private:
   using WeightType = std::array<int, CPU_GLOBAL_MAX_SIZE>;
   void runPreliminaryExperiments(const CPUKernelGenConfig& cpuConfig,
                                  int nQubits,
                                  int nThreads,
                                  WeightType& weights,
                                  int verbose = 1);
+
 public:
   CPUPerformanceCache() = default;
 
@@ -61,7 +65,10 @@ public:
   }
 
   void runExperiments(const CPUKernelGenConfig& cpuConfig,
-                      int nQubits, int nThreads, int nRuns, int verbose = 1);
+                      int nQubits,
+                      int nThreads,
+                      int nRuns,
+                      int verbose = 1);
 
   void writeResults(std::ostream& os) const;
 };
@@ -90,22 +97,19 @@ class CPUCostModel : public CostModel {
 
   int queryNThreads = -1; // -1 means not set
   Precision queryPrecision = Precision::Unknown;
+
 public:
   CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
                double zeroTol = 1e-8);
 
-  void setQueryNThreads(int nThreads) {
-    queryNThreads = nThreads;
-  }
-  
-  void setQueryPrecision(Precision precision) {
-    queryPrecision = precision;
-  }
+  void setQueryNThreads(int nThreads) { queryNThreads = nThreads; }
+
+  void setQueryPrecision(Precision precision) { queryPrecision = precision; }
 
   double computeGiBTime(const QuantumGate* gate) const override;
 
   std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
-  
+
   static bool classof(const CostModel* model) {
     return model->getKind() == CM_CPU;
   }

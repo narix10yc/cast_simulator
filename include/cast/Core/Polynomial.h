@@ -23,10 +23,10 @@ public:
   std::vector<int> vars;
   Operator op;
 
-  VariableSumNode(
-      std::initializer_list<int> variables = {},
-      double constant = 0.0, Operator op = None)
-    : constant(constant), vars(), op(op) {
+  VariableSumNode(std::initializer_list<int> variables = {},
+                  double constant = 0.0,
+                  Operator op = None)
+      : constant(constant), vars(), op(op) {
     for (const auto& v : variables)
       addVar(v);
   }
@@ -44,8 +44,8 @@ public:
     return VariableSumNode({var}, constant, SinOp);
   }
 
-  static VariableSumNode Sine(
-      std::initializer_list<int> vars, double constant = 0.0) {
+  static VariableSumNode Sine(std::initializer_list<int> vars,
+                              double constant = 0.0) {
     return VariableSumNode(vars, constant, SinOp);
   }
 
@@ -61,9 +61,9 @@ public:
   bool operator==(const VariableSumNode&) const;
   bool operator!=(const VariableSumNode&) const;
 
-  std::ostream& print(std::ostream& ) const override;
+  std::ostream& print(std::ostream&) const override;
 
-  VariableSumNode& 
+  VariableSumNode&
   simplify(const std::vector<std::pair<int, double>>& varValues);
 };
 
@@ -169,7 +169,7 @@ public:
       return;
     }
     auto it = std::upper_bound(
-      _expiVars.begin(), _expiVars.end(), ExpiVar(E.var, true));
+        _expiVars.begin(), _expiVars.end(), ExpiVar(E.var, true));
     --it;
     if (it->var == E.var && (it->isPlus ^ E.isPlus)) {
       _expiVars.erase(it);
@@ -195,7 +195,7 @@ public:
 
   Monomial operator*(const Monomial& M) const { return Monomial(*this) *= M; }
 
-  std::ostream& print(std::ostream& ) const override;
+  std::ostream& print(std::ostream&) const override;
 
   Monomial& simplify(const std::vector<std::pair<int, double>>& varValues);
 };
@@ -241,14 +241,14 @@ public:
     return {false, {0.0, 0.0}};
   }
 
-  std::ostream& print(std::ostream& ) const override;
+  std::ostream& print(std::ostream&) const override;
 
   /// @brief Remove Monomials whose coefficient is less than a given threshold
   /// @return updated* this
   Polynomial& removeSmallMonomials(double thres = 1e-8);
 
-  Polynomial& simplifySelf(
-    const std::vector<std::pair<int, double>>& varValues = {});
+  Polynomial&
+  simplifySelf(const std::vector<std::pair<int, double>>& varValues = {});
 
   Polynomial& operator+=(const Monomial&);
 

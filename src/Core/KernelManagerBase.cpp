@@ -15,8 +15,7 @@ std::string cast::internal::mangleGraphName(const std::string& graphName) {
   return "G" + std::to_string(graphName.length()) + graphName;
 }
 
-std::string
-cast::internal::demangleGraphName(const std::string& mangledName) {
+std::string cast::internal::demangleGraphName(const std::string& mangledName) {
   const auto* p = mangledName.data();
   const auto* e = mangledName.data() + mangledName.size();
   assert(p != e);
@@ -30,7 +29,7 @@ cast::internal::demangleGraphName(const std::string& mangledName) {
   }
   auto l = std::stoi(std::string(p0, p));
   assert(p + l <= e);
-  return std::string(p, p+l);
+  return std::string(p, p + l);
 }
 
 KernelManagerBase::ContextModulePair&
@@ -38,12 +37,13 @@ KernelManagerBase::createNewLLVMContextModulePair(const std::string& name) {
   std::lock_guard<std::mutex> lock(mtx);
   auto ctx = std::make_unique<llvm::LLVMContext>();
   llvmContextModulePairs.emplace_back(
-    std::move(ctx), std::make_unique<llvm::Module>(name, *ctx));
+      std::move(ctx), std::make_unique<llvm::Module>(name, *ctx));
   return llvmContextModulePairs.back();
 }
 
-void KernelManagerBase::applyLLVMOptimization(
-    int nThreads, OptimizationLevel optLevel, bool progressBar) {
+void KernelManagerBase::applyLLVMOptimization(int nThreads,
+                                              OptimizationLevel optLevel,
+                                              bool progressBar) {
   assert(nThreads > 0);
   if (optLevel == OptimizationLevel::O0)
     return;

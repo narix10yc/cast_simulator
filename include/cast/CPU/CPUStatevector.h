@@ -1,31 +1,28 @@
 #ifndef CAST_CPU_CPU_STATEVECTOR_H
 #define CAST_CPU_CPU_STATEVECTOR_H
 
-#include "cast/Legacy/QuantumGate.h"
-#include "cast/Core/QuantumGate.h"
 #include "cast/CPU/Config.h"
+#include "cast/Core/QuantumGate.h"
+#include "cast/Legacy/QuantumGate.h"
+#include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
-#include "utils/TaskDispatcher.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
+#include <cstdlib>
 #include <iostream>
 #include <random>
 #include <thread>
-#include <algorithm>
-#include <cstdlib>
 
 namespace cast {
 
-template<typename ScalarType>
-class StatevectorSep;
+template <typename ScalarType> class StatevectorSep;
 
-template<typename ScalarType>
-class CPUStatevector;
+template <typename ScalarType> class CPUStatevector;
 
-template<typename ScalarType>
-class StatevectorSep {
+template <typename ScalarType> class StatevectorSep {
 public:
   int nQubits;
   uint64_t N;
@@ -98,7 +95,7 @@ public:
   // void copyValueFrom(const StatevectorAlt<ScalarType>&);
 
   ScalarType normSquared(int nthreads = 1) const {
-    const auto f = [&](uint64_t i0, uint64_t i1, ScalarType &rst) {
+    const auto f = [&](uint64_t i0, uint64_t i1, ScalarType& rst) {
       ScalarType sum = 0.0;
       for (uint64_t i = i0; i < i1; i++) {
         sum += real[i] * real[i];
@@ -205,7 +202,6 @@ public:
   }
 };
 
-
 /// @brief CPUStatevector stores statevector in a single array with alternating
 /// real and imaginary parts. The alternating pattern is controlled by
 /// \p simd_s. More precisely, the memory is stored as an iteration of $2^s$
@@ -213,8 +209,7 @@ public:
 /// For example,
 /// memory index: 000 001 010 011 100 101 110 111
 /// amplitudes:   r00 r01 i00 i01 r10 r11 i10 i11
-template<typename ScalarType>
-class CPUStatevector {
+template <typename ScalarType> class CPUStatevector {
 private:
   ScalarType* _data;
   int _nQubits;
@@ -224,37 +219,52 @@ private:
   [[nodiscard]] inline ScalarType* allocate() {
     const size_t size = sizeInBytes();
     const auto align =
-      static_cast<std::align_val_t>(std::min<size_t>(size, 64));
+        static_cast<std::align_val_t>(std::min<size_t>(size, 64));
     return static_cast<ScalarType*>(::operator new(size, align));
   }
+
 public:
   CPUStatevector() : _data(nullptr), _nQubits(0), simd_s(0) {}
 
   CPUStatevector(int nQubits, CPUSimdWidth simdWidth) {
     assert(nQubits > 0);
     _nQubits = nQubits;
-    
+
     // initialize _data
     _data = allocate();
 
     // initialize simd_s
     if constexpr (std::is_same_v<ScalarType, float>) {
       switch (simdWidth) {
-        case CPUSimdWidth::W128: simd_s = 2; break; // 4 elements
-        case CPUSimdWidth::W256: simd_s = 3; break; // 8 elements
-        case CPUSimdWidth::W512: simd_s = 4; break; // 16 elements
-        default: assert(false && "Unsupported SIMD Width for float");
+      case CPUSimdWidth::W128:
+        simd_s = 2;
+        break; // 4 elements
+      case CPUSimdWidth::W256:
+        simd_s = 3;
+        break; // 8 elements
+      case CPUSimdWidth::W512:
+        simd_s = 4;
+        break; // 16 elements
+      default:
+        assert(false && "Unsupported SIMD Width for float");
       }
     } else if constexpr (std::is_same_v<ScalarType, double>) {
       switch (simdWidth) {
-        case CPUSimdWidth::W128: simd_s = 1; break; // 2 elements
-        case CPUSimdWidth::W256: simd_s = 2; break; // 4 elements
-        case CPUSimdWidth::W512: simd_s = 3; break; // 8 elements
-        default: assert(false && "Unsupported SIMD Width for double");
+      case CPUSimdWidth::W128:
+        simd_s = 1;
+        break; // 2 elements
+      case CPUSimdWidth::W256:
+        simd_s = 2;
+        break; // 4 elements
+      case CPUSimdWidth::W512:
+        simd_s = 3;
+        break; // 8 elements
+      default:
+        assert(false && "Unsupported SIMD Width for double");
       }
     } else {
       static_assert(std::is_same_v<ScalarType, float> ||
-                    std::is_same_v<ScalarType, double>,
+                        std::is_same_v<ScalarType, double>,
                     "Unsupported ScalarType for CPUStatevector");
     }
   }
@@ -371,7 +381,7 @@ public:
 
   std::complex<ScalarType> amp(size_t idx) const {
     size_t tmp = utils::insertZeroToBit(idx, simd_s);
-    return { _data[tmp], _data[tmp | (1 << simd_s)] };
+    return {_data[tmp], _data[tmp | (1 << simd_s)]};
   }
 
   std::ostream& print(std::ostream& os = std::cerr) const {
@@ -494,7 +504,7 @@ public:
         this->imag(ampIndices[r]) = ampUpdated[r].imag();
       }
     }
-    return *this; 
+    return *this;
   }
 
 }; // class CPUStatevector
@@ -507,7 +517,8 @@ using CPUStatevectorF64 = CPUStatevector<double>;
 
 // template<typename ScalarType>
 // ScalarType fidelity(
-//     const StatevectorSep<ScalarType>& sv1, const StatevectorSep<ScalarType>& sv2) {
+//     const StatevectorSep<ScalarType>& sv1, const StatevectorSep<ScalarType>&
+//     sv2) {
 //   assert(sv1.nQubits == sv2.nQubits);
 
 //   ScalarType re = 0.0, im = 0.0;
@@ -518,7 +529,7 @@ using CPUStatevectorF64 = CPUStatevector<double>;
 //   return re * re + im * im;
 // }
 
-template<typename ScalarType>
+template <typename ScalarType>
 ScalarType fidelity(const CPUStatevector<ScalarType>& sv0,
                     const CPUStatevector<ScalarType>& sv1) {
   assert(sv0.nQubits() == sv1.nQubits());
@@ -538,6 +549,7 @@ using CPUStatevectorF64 = CPUStatevector<double>;
 class CPUStatevectorWrapper {
 private:
   std::variant<CPUStatevectorF32, CPUStatevectorF64> sv;
+
 public:
   CPUStatevectorWrapper(Precision precision,
                         int nQubits,

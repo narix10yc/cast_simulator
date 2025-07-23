@@ -7,10 +7,10 @@
 
 namespace utils {
 
-template<is_pod T, size_t N>
-class PODArray {
+template <is_pod T, size_t N> class PODArray {
   static_assert(N > 0, "N must be positive");
   T _data[N];
+
 public:
   PODArray() = default;
   ~PODArray() = default;
@@ -32,9 +32,14 @@ public:
   static constexpr size_t size() { return N; }
   static constexpr bool empty() { return N == 0; }
 
-  T& operator[](size_t idx) { assert(idx < N); return _data[idx]; }
-  const T& operator[](size_t idx) const { assert(idx < N); return _data[idx]; }
-
+  T& operator[](size_t idx) {
+    assert(idx < N);
+    return _data[idx];
+  }
+  const T& operator[](size_t idx) const {
+    assert(idx < N);
+    return _data[idx];
+  }
 };
 
 } // namespace utils

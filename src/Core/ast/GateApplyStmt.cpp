@@ -8,7 +8,7 @@ GateApplyStmt* Parser::parseGateApplyStmt() {
          "parseGateApplyStmt expects to be called with an identifier");
   auto name = ctx.createIdentifier(curToken.toStringView());
   advance(tk_Identifier);
-  
+
   llvm::SmallVector<Expr*> params;
   llvm::SmallVector<Expr*> qubits;
   // gate parameters
@@ -30,7 +30,7 @@ GateApplyStmt* Parser::parseGateApplyStmt() {
     }
     advance(tk_R_RoundBracket);
   }
-  
+
   // target qubits
   while (true) {
     auto* expr = parseExpr();
@@ -44,11 +44,9 @@ GateApplyStmt* Parser::parseGateApplyStmt() {
     }
   }
 
-  return new (ctx) GateApplyStmt(
-    name,
-    ctx.createSpan(params.data(), params.size()),
-    ctx.createSpan(qubits.data(), qubits.size())
-  );
+  return new (ctx) GateApplyStmt(name,
+                                 ctx.createSpan(params.data(), params.size()),
+                                 ctx.createSpan(qubits.data(), qubits.size()));
 }
 
 std::ostream& GateApplyStmt::print(std::ostream& os) const {
@@ -69,8 +67,8 @@ std::ostream& GateApplyStmt::print(std::ostream& os) const {
 }
 
 void GateApplyStmt::prettyPrint(PrettyPrinter& p, int indent) const {
-  p.write(indent) << getKindName() << "(" << name << "): "
-                  << qubits.size() << " qubits\n";
+  p.write(indent) << getKindName() << "(" << name << "): " << qubits.size()
+                  << " qubits\n";
   p.setState(indent, qubits.size());
   for (size_t i = 0; i < qubits.size(); ++i)
     qubits[i]->prettyPrint(p, indent + 1);

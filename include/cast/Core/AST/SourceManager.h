@@ -30,7 +30,7 @@ public:
 
   // return true on error
   bool loadFromFile(const char* filename);
-  
+
   // return true on error
   bool loadRawBuffer(const char* buffer, size_t size);
 

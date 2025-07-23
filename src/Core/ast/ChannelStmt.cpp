@@ -28,7 +28,7 @@ ChannelStmt* Parser::parseChannelStmt() {
   requireCurTokenIs(tk_R_CurlyBracket, "Expect '}' to end channel body");
   advance(tk_R_CurlyBracket);
   return new (ctx) ChannelStmt(
-    name, nameLoc, paramDecl, ctx.createSpan(body.data(), body.size()));
+      name, nameLoc, paramDecl, ctx.createSpan(body.data(), body.size()));
 }
 
 std::ostream& ChannelStmt::print(std::ostream& os) const {

@@ -1,7 +1,7 @@
 #include "cast/Core/QuantumGate.h"
+#include "utils/PrintSpan.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
-#include "utils/PrintSpan.h"
 #include "llvm/Support/Casting.h"
 
 using namespace cast;
@@ -18,7 +18,7 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
   const int bnQubits = bQubits.size();
 
   struct TargetQubitsInfo {
-    int q; // the qubit
+    int q;    // the qubit
     int aIdx; // index in aQubits, -1 if not in aQubits
     int bIdx; // index in bQubits, -1 if not in bQubits
   };
@@ -102,16 +102,15 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
   // std::cerr << "contraction width = " << contractionWidth << "\n";
   // std::cerr << RESET;
 
-
-  const auto matmulComplexSquareMatrix = [&, cnQubits=cnQubits](
-      const ComplexSquareMatrix& matA,
-      const ComplexSquareMatrix& matB,
-      ComplexSquareMatrix& matC) -> void {
+  const auto matmulComplexSquareMatrix =
+      [&, cnQubits = cnQubits](const ComplexSquareMatrix& matA,
+                               const ComplexSquareMatrix& matB,
+                               ComplexSquareMatrix& matC) -> void {
     for (uint64_t cIdx = 0ULL; cIdx < matC.halfSize(); ++cIdx) {
       uint64_t aIdxBegin =
-        utils::pext64(cIdx, aPextMask, 2 * cnQubits) & aZeroingMask;
+          utils::pext64(cIdx, aPextMask, 2 * cnQubits) & aZeroingMask;
       uint64_t bIdxBegin =
-        utils::pext64(cIdx, bPextMask, 2 * cnQubits) & bZeroingMask;
+          utils::pext64(cIdx, bPextMask, 2 * cnQubits) & bZeroingMask;
 
       // std::cerr << "Ready to update cmat[" << i
       //           << " (" << utils::as0b(i, 2 * cnQubits) << ")]\n"
@@ -136,8 +135,9 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
             bIdx += bSharedQubitShifts[bit];
           }
         }
-        // std::cerr << "  aIdx = " << aIdx << ": " << aCMat->data()[aIdx] << ";"
-                  // << "  bIdx = " << bIdx << ": " << bCMat->data()[bIdx] << "\n";
+        // std::cerr << "  aIdx = " << aIdx << ": " << aCMat->data()[aIdx] <<
+        // ";"
+        // << "  bIdx = " << bIdx << ": " << bCMat->data()[bIdx] << "\n";
         matC.reData()[cIdx] += matA.reData()[aIdx] * matB.reData()[bIdx] -
                                matA.imData()[aIdx] * matB.imData()[bIdx];
         matC.imData()[cIdx] += matA.reData()[aIdx] * matB.imData()[bIdx] +
@@ -157,12 +157,11 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
     const ComplexSquareMatrix& bCMat = bScalarGM->matrix();
     ComplexSquareMatrix cCMat(1ULL << cnQubits);
     matmulComplexSquareMatrix(aCMat, bCMat, cCMat);
-    
+
     return StandardQuantumGate::Create(
-      std::make_shared<ScalarGateMatrix>(std::move(cCMat)),
-      NoiseChannelPtr(nullptr), // No noise channel for now
-      cQubits
-    );
+        std::make_shared<ScalarGateMatrix>(std::move(cCMat)),
+        NoiseChannelPtr(nullptr), // No noise channel for now
+        cQubits);
   }
   assert(false && "Only implemented matmul for StandardQuantumGate now");
   return nullptr;
@@ -180,9 +179,9 @@ SuperopQuantumGatePtr StandardQuantumGate::getSuperopGate() const {
   }
 
   assert(_noiseChannel->reps.krausRep != nullptr &&
-        "We must have KrausRep to compute superoperator matrix");
+         "We must have KrausRep to compute superoperator matrix");
   const auto& krausOps = _noiseChannel->reps.krausRep->getOps();
-  // If the gate matrix and every Kraus operator are N * N, then the 
+  // If the gate matrix and every Kraus operator are N * N, then the
   // superoperator matrix is (N ** 2) * (N ** 2).
   const size_t N = 1ULL << nQubits();
   auto superopGateGM = std::make_shared<ScalarGateMatrix>(nQubits() * 2);
@@ -195,40 +194,43 @@ SuperopQuantumGatePtr StandardQuantumGate::getSuperopGate() const {
 
     // compute the tensor product F_K.conj() \otimes F_k
     for (size_t r = 0; r < N; ++r) {
-    for (size_t c = 0; c < N; ++c) {
-    for (size_t rr = 0; rr < N; ++rr) {
-    for (size_t cc = 0; cc < N; ++cc) {
-      size_t row = r * N + rr;
-      size_t col = c * N + cc;
-      // (re(r, c) - i * im(r, c)) * (re(rr, cc) + i * im(rr, cc))
-      // real part is re(r, c) * re(rr, cc) + im(r, c) * im(rr, cc)
-      // imag part is re(r, c) * im(rr, cc) - im(r, c) * re(rr, cc)
-      superOpM.real(row, col) +=
-        newKrausOpM.real(r, c) * newKrausOpM.real(rr, cc) +
-        newKrausOpM.imag(r, c) * newKrausOpM.imag(rr, cc);
-      superOpM.imag(row, col) +=
-        newKrausOpM.real(r, c) * newKrausOpM.imag(rr, cc) -
-        newKrausOpM.imag(r, c) * newKrausOpM.real(rr, cc);
-    } } } }
+      for (size_t c = 0; c < N; ++c) {
+        for (size_t rr = 0; rr < N; ++rr) {
+          for (size_t cc = 0; cc < N; ++cc) {
+            size_t row = r * N + rr;
+            size_t col = c * N + cc;
+            // (re(r, c) - i * im(r, c)) * (re(rr, cc) + i * im(rr, cc))
+            // real part is re(r, c) * re(rr, cc) + im(r, c) * im(rr, cc)
+            // imag part is re(r, c) * im(rr, cc) - im(r, c) * re(rr, cc)
+            superOpM.real(row, col) +=
+                newKrausOpM.real(r, c) * newKrausOpM.real(rr, cc) +
+                newKrausOpM.imag(r, c) * newKrausOpM.imag(rr, cc);
+            superOpM.imag(row, col) +=
+                newKrausOpM.real(r, c) * newKrausOpM.imag(rr, cc) -
+                newKrausOpM.imag(r, c) * newKrausOpM.real(rr, cc);
+          }
+        }
+      }
+    }
   }
   return SuperopQuantumGate::Create(superopGateGM, qubits());
 }
 
 /**** op count *****/
 namespace {
-  size_t countNonZeroElems(const ScalarGateMatrix& matrix, double zeroTol) {
-    if (zeroTol <= 0.0)
-      return matrix.matrix().size();
-      
-    size_t count = 0;
-    size_t len = matrix.matrix().size();
-    const auto* data = matrix.matrix().data();
-    for (size_t i = 0; i < len; ++i) {
-      if (std::abs(data[i]) > zeroTol)
-        ++count;
-    }
-    return count;
+size_t countNonZeroElems(const ScalarGateMatrix& matrix, double zeroTol) {
+  if (zeroTol <= 0.0)
+    return matrix.matrix().size();
+
+  size_t count = 0;
+  size_t len = matrix.matrix().size();
+  const auto* data = matrix.matrix().data();
+  for (size_t i = 0; i < len; ++i) {
+    if (std::abs(data[i]) > zeroTol)
+      ++count;
   }
+  return count;
+}
 } // anonymous namespace
 
 double StandardQuantumGate::opCount(double zeroTol) const {
@@ -239,7 +241,7 @@ double StandardQuantumGate::opCount(double zeroTol) const {
     double count = static_cast<double>(countNonZeroElems(*scalarGM, zeroTol));
     return count * std::pow<double>(2.0, 1 - nQubits());
   }
-  
+
   // If there is a noise channel, we need to compute the superoperator matrix
   // and count the non-zero elements in it.
   auto superopGate = getSuperopGate();
@@ -249,9 +251,9 @@ double StandardQuantumGate::opCount(double zeroTol) const {
 
 double SuperopQuantumGate::opCount(double zeroTol) const {
   assert(_superopMatrix != nullptr && "Superop matrix is null");
-  double count = static_cast<double>(
-    countNonZeroElems(*_superopMatrix, zeroTol));
-  
+  double count =
+      static_cast<double>(countNonZeroElems(*_superopMatrix, zeroTol));
+
   // superop matrices are treated as 2n-qubit gates
   return count * std::pow<double>(2.0, 1 - 2 * nQubits());
 }
@@ -268,10 +270,9 @@ QuantumGatePtr StandardQuantumGate::inverse() const {
   if (!cast::matinv(scalarGM->matrix(), matinv))
     return nullptr;
   return StandardQuantumGate::Create(
-    std::make_shared<ScalarGateMatrix>(std::move(matinv)),
-    nullptr, // No noise channel
-    qubits()
-  );
+      std::make_shared<ScalarGateMatrix>(std::move(matinv)),
+      nullptr, // No noise channel
+      qubits());
 }
 
 /**** is commuting ****/
@@ -306,5 +307,3 @@ bool cast::isCommuting(const QuantumGate* gateA,
   auto diff = cast::maximum_norm(scalarGM_AB->matrix(), scalarGM_BA->matrix());
   return diff <= tol;
 }
-
-

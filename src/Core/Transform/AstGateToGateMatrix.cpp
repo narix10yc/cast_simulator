@@ -3,8 +3,8 @@
 using namespace cast;
 using namespace cast;
 
-GateMatrixPtr transform::cvtAstGateToGateMatrix(
-    ast::GateApplyStmt* astGate, ast::ASTContext& astCtx) {
+GateMatrixPtr transform::cvtAstGateToGateMatrix(ast::GateApplyStmt* astGate,
+                                                ast::ASTContext& astCtx) {
   std::string name(astGate->name.str);
 
   // TODO: use astCtx to print error messages
@@ -57,8 +57,8 @@ GateMatrixPtr transform::cvtAstGateToGateMatrix(
     auto* lambda = ast::reduceExprToSimpleNumeric(astCtx, astGate->params[2]);
     assert(theta != nullptr && phi != nullptr && lambda != nullptr &&
            "Only supporting scalar values for now");
-    return ScalarGateMatrix::U1q(theta->getValue(), phi->getValue(),
-                                 lambda->getValue());
+    return ScalarGateMatrix::U1q(
+        theta->getValue(), phi->getValue(), lambda->getValue());
   }
 
   // Two qubit gates
@@ -74,8 +74,10 @@ GateMatrixPtr transform::cvtAstGateToGateMatrix(
     return ScalarGateMatrix::CP(phi->getValue());
   }
 
-  std::cerr << BOLDRED("Err: ") << "In converting AST Gate to GateMatrix: "
-    "Not implemented or unsupported gate: " << name << "\n";
+  std::cerr << BOLDRED("Err: ")
+            << "In converting AST Gate to GateMatrix: "
+               "Not implemented or unsupported gate: "
+            << name << "\n";
   assert(false && "Not implemented or unsupported gate");
   return nullptr;
 }

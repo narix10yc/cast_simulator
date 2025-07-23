@@ -2,9 +2,7 @@
 
 using namespace cast::ast;
 
-int MinusOpExpr::getPrecedence() {
-  return 30;
-}
+int MinusOpExpr::getPrecedence() { return 30; }
 
 std::ostream& MinusOpExpr::print(std::ostream& os) const {
   os << "-";

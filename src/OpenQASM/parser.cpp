@@ -141,9 +141,9 @@ std::unique_ptr<ast::GateApplyStmt> Parser::parseGateApplyStmt() {
       stmt->addParameter(std::move(param));
     }
   }
-  logDebug(2, "GateApplyStmt " + stmt->name + ": " +
-                  std::to_string(stmt->parameters.size()) +
-                  " parameters parsed");
+  logDebug(2,
+           "GateApplyStmt " + stmt->name + ": " +
+               std::to_string(stmt->parameters.size()) + " parameters parsed");
 
   logDebug(1, "Current Token: " + tokenTypetoString(curToken.type));
   while (true) {

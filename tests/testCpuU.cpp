@@ -5,13 +5,11 @@
 
 using namespace cast;
 
-template<CPUSimdWidth SimdWidth, unsigned nQubits>
-static void internal_U1q() {
-  test::TestSuite suite(
-    "Gate U1q (s=" + std::to_string(SimdWidth) +
-    ", n=" + std::to_string(nQubits) + ")");
-  cast::CPUStatevector<double>
-    sv0(nQubits, SimdWidth), sv1(nQubits, SimdWidth), sv2(nQubits, SimdWidth);
+template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
+  test::TestSuite suite("Gate U1q (s=" + std::to_string(SimdWidth) +
+                        ", n=" + std::to_string(nQubits) + ")");
+  cast::CPUStatevector<double> sv0(nQubits, SimdWidth), sv1(nQubits, SimdWidth),
+      sv2(nQubits, SimdWidth);
 
   const auto randomizeSV = [&sv0, &sv1, &sv2]() {
     sv0.randomize();
@@ -29,20 +27,20 @@ static void internal_U1q() {
   }
 
   CPUKernelGenConfig cpuConfig(SimdWidth, Precision::F64);
-  cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
+  cpuConfig.matrixLoadMode = CPUMatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
-    kernelMgr.genStandaloneGate(
-      cpuConfig, gates[q], "gateImm_" + std::to_string(q)
-    ).consumeError(); // ignore possible errors
+    kernelMgr
+        .genStandaloneGate(cpuConfig, gates[q], "gateImm_" + std::to_string(q))
+        .consumeError(); // ignore possible errors
   }
 
   cpuConfig.zeroTol = 0.0;
   cpuConfig.oneTol = 0.0;
-  cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
+  cpuConfig.matrixLoadMode = CPUMatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++) {
-    kernelMgr.genStandaloneGate(
-      cpuConfig, gates[q], "gateLoad_" + std::to_string(q)
-    ).consumeError(); // ignore possible errors
+    kernelMgr
+        .genStandaloneGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q))
+        .consumeError(); // ignore possible errors
   }
 
   kernelMgr.initJIT().consumeError(); // ignore possible errors
@@ -56,28 +54,28 @@ static void internal_U1q() {
     const auto* loadKernel = kernelMgr.getKernelByName(loadFuncName);
     assert(immKernel);
     assert(loadKernel);
-    kernelMgr.applyCPUKernel(
-      sv0.data(), sv0.nQubits(), *immKernel).consumeError();
-    kernelMgr.applyCPUKernel(
-      sv1.data(), sv1.nQubits(), *loadKernel).consumeError();
+    kernelMgr.applyCPUKernel(sv0.data(), sv0.nQubits(), *immKernel)
+        .consumeError();
+    kernelMgr.applyCPUKernel(sv1.data(), sv1.nQubits(), *loadKernel)
+        .consumeError();
     sv2.applyGate(*gates[i]);
     suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
     suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
-    suite.assertClose(cast::fidelity(sv0, sv2), 1.0,
-      ss.str() + ": Imm Fidelity", GET_INFO());
-    suite.assertClose(cast::fidelity(sv1, sv2), 1.0,
-      ss.str() + ": Load Fidelity", GET_INFO());
+    suite.assertClose(
+        cast::fidelity(sv0, sv2), 1.0, ss.str() + ": Imm Fidelity", GET_INFO());
+    suite.assertClose(cast::fidelity(sv1, sv2),
+                      1.0,
+                      ss.str() + ": Load Fidelity",
+                      GET_INFO());
   }
   suite.displayResult();
 }
 
-template<CPUSimdWidth SimdWidth, unsigned nQubits>
-static void internal_U2q() {
-  test::TestSuite suite(
-    "Gate U2q (s=" + std::to_string(SimdWidth) +
-    ", n=" + std::to_string(nQubits) + ")");
-  cast::CPUStatevector<double>
-    sv0(nQubits, SimdWidth), sv1(nQubits, SimdWidth), sv2(nQubits, SimdWidth);
+template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U2q() {
+  test::TestSuite suite("Gate U2q (s=" + std::to_string(SimdWidth) +
+                        ", n=" + std::to_string(nQubits) + ")");
+  cast::CPUStatevector<double> sv0(nQubits, SimdWidth), sv1(nQubits, SimdWidth),
+      sv2(nQubits, SimdWidth);
 
   const auto randomizeSV = [&sv0, &sv1, &sv2]() {
     sv0.randomize();
@@ -94,24 +92,26 @@ static void internal_U2q() {
   for (unsigned i = 0; i < nQubits; i++) {
     int a, b;
     a = d(gen);
-    do { b = d(gen); } while (b == a);
+    do {
+      b = d(gen);
+    } while (b == a);
     gates.emplace_back(StandardQuantumGate::RandomUnitary({a, b}));
   }
 
   CPUKernelGenConfig cpuConfig(SimdWidth, Precision::F64);
-  cpuConfig.matrixLoadMode = MatrixLoadMode::UseMatImmValues;
+  cpuConfig.matrixLoadMode = CPUMatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
-    kernelMgr.genStandaloneGate(
-      cpuConfig, gates[q], "gateImm_" + std::to_string(q)
-    ).consumeError(); // ignore possible errors
+    kernelMgr
+        .genStandaloneGate(cpuConfig, gates[q], "gateImm_" + std::to_string(q))
+        .consumeError(); // ignore possible errors
   }
   cpuConfig.zeroTol = 0.0;
   cpuConfig.oneTol = 0.0;
-  cpuConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
+  cpuConfig.matrixLoadMode = CPUMatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++) {
-    kernelMgr.genStandaloneGate(
-      cpuConfig, gates[q], "gateLoad_" + std::to_string(q)
-    ).consumeError(); // ignore possible errors
+    kernelMgr
+        .genStandaloneGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q))
+        .consumeError(); // ignore possible errors
   }
 
   kernelMgr.initJIT().consumeError(); // ignore possible errors
@@ -127,17 +127,19 @@ static void internal_U2q() {
     const auto* loadKernel = kernelMgr.getKernelByName(loadFuncName);
     assert(immKernel);
     assert(loadKernel);
-    kernelMgr.applyCPUKernel(
-      sv0.data(), sv0.nQubits(), *immKernel).consumeError();
-    kernelMgr.applyCPUKernel(
-      sv1.data(), sv1.nQubits(), *loadKernel).consumeError();
+    kernelMgr.applyCPUKernel(sv0.data(), sv0.nQubits(), *immKernel)
+        .consumeError();
+    kernelMgr.applyCPUKernel(sv1.data(), sv1.nQubits(), *loadKernel)
+        .consumeError();
     sv2.applyGate(*gates[i]);
     suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
     suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
-    suite.assertClose(cast::fidelity(sv0, sv2), 1.0,
-      ss.str() + ": Imm Fidelity", GET_INFO());
-    suite.assertClose(cast::fidelity(sv1, sv2), 1.0,
-      ss.str() + ": Load Fidelity", GET_INFO());
+    suite.assertClose(
+        cast::fidelity(sv0, sv2), 1.0, ss.str() + ": Imm Fidelity", GET_INFO());
+    suite.assertClose(cast::fidelity(sv1, sv2),
+                      1.0,
+                      ss.str() + ": Load Fidelity",
+                      GET_INFO());
   }
 
   suite.displayResult();

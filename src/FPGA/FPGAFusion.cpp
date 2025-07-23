@@ -1,6 +1,6 @@
 #include "cast/FPGA/FPGAFusion.h"
-#include "utils/utils.h"
 #include "utils/iocolor.h"
+#include "utils/utils.h"
 
 using namespace cast;
 using namespace cast::fpga;
@@ -9,9 +9,9 @@ namespace {
 
 // Compute a candidate gate for fusion.
 // @return nullptr if fusion is not possible.
-QuantumGatePtr computeCandidate(
-    const FPGAFusionConfig& config,
-    const QuantumGate* lhs, const QuantumGate* rhs) {
+QuantumGatePtr computeCandidate(const FPGAFusionConfig& config,
+                                const QuantumGate* lhs,
+                                const QuantumGate* rhs) {
   if (lhs == nullptr || rhs == nullptr)
     return nullptr;
   if (lhs == rhs)
@@ -79,10 +79,10 @@ QuantumGatePtr computeCandidate(
 
 using row_iterator = ir::CircuitGraphNode::row_iterator;
 
-QuantumGatePtr tryCrossWireFuse(
-    ir::CircuitGraphNode& graph,
-    row_iterator rowItL, int q,
-    const FPGAFusionConfig& config) {
+QuantumGatePtr tryCrossWireFuse(ir::CircuitGraphNode& graph,
+                                row_iterator rowItL,
+                                int q,
+                                const FPGAFusionConfig& config) {
   assert(rowItL != graph.tile_end());
   const auto rowItR = std::next(rowItL);
   if (rowItR == graph.tile_end())
@@ -104,10 +104,10 @@ QuantumGatePtr tryCrossWireFuse(
   return cddGate;
 }
 
-QuantumGatePtr trySameWireFuse(
-    ir::CircuitGraphNode& graph,
-    row_iterator rowIt, int q,
-    const FPGAFusionConfig& config) {
+QuantumGatePtr trySameWireFuse(ir::CircuitGraphNode& graph,
+                               row_iterator rowIt,
+                               int q,
+                               const FPGAFusionConfig& config) {
   auto* gate0 = (*rowIt)[q];
   if (gate0 == nullptr)
     return nullptr;
@@ -127,10 +127,10 @@ QuantumGatePtr trySameWireFuse(
 }
 } // anonymous namespace
 
-void cast::fpga::applyFPGAGateFusion(
-    ir::CircuitGraphNode& graph, const FPGAFusionConfig& config) {
+void cast::fpga::applyFPGAGateFusion(ir::CircuitGraphNode& graph,
+                                     const FPGAFusionConfig& config) {
   // if (graph.tile().size() < 2)
-    // return;
+  // return;
 
   const auto nQubits = graph.nQubits();
   bool hasChange = true;

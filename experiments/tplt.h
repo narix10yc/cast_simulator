@@ -5,9 +5,9 @@
 
 namespace tplt {
 
-template<typename real_t>
-void applySingleQubit(real_t* real, real_t* imag, const real_t* mat,
-                      size_t nQubits, size_t k) {
+template <typename real_t>
+void applySingleQubit(
+    real_t* real, real_t* imag, const real_t* mat, size_t nQubits, size_t k) {
   size_t K = 1ULL << k;
   size_t N = 1ULL << nQubits;
   real_t x_real, x_imag, y_real, y_imag;
@@ -30,9 +30,9 @@ void applySingleQubit(real_t* real, real_t* imag, const real_t* mat,
   }
 }
 
-template<typename real_t>
-void applySingleQubitQuEST(real_t* real, real_t* imag, const real_t* mat,
-                           size_t nQubits, size_t k) {
+template <typename real_t>
+void applySingleQubitQuEST(
+    real_t* real, real_t* imag, const real_t* mat, size_t nQubits, size_t k) {
   size_t K = 1ULL << k;
   size_t sizeBlock = 2 * K;
   size_t N = 1ULL << nQubits;
@@ -55,8 +55,10 @@ void applySingleQubitQuEST(real_t* real, real_t* imag, const real_t* mat,
   }
 }
 
-template<typename real_t, size_t k>
-void applySingleQubitTemplate(real_t* real, real_t* imag, const real_t* mat,
+template <typename real_t, size_t k>
+void applySingleQubitTemplate(real_t* real,
+                              real_t* imag,
+                              const real_t* mat,
                               size_t nQubits) {
   size_t K = 1ULL << k;
   size_t N = 1ULL << nQubits;
@@ -80,43 +82,106 @@ void applySingleQubitTemplate(real_t* real, real_t* imag, const real_t* mat,
   }
 }
 
-template<typename real_t>
-void applySingleQubitTemplateSwitch(real_t* real, real_t* imag,
-                                    const real_t* mat, size_t nQubits,
-                                    size_t k) {
+template <typename real_t>
+void applySingleQubitTemplateSwitch(
+    real_t* real, real_t* imag, const real_t* mat, size_t nQubits, size_t k) {
   switch (k) {
-    case 0: applySingleQubitTemplate<real_t, 0>(real, imag, mat, nQubits); break;
-    case 1: applySingleQubitTemplate<real_t, 1>(real, imag, mat, nQubits); break;
-    case 2: applySingleQubitTemplate<real_t, 2>(real, imag, mat, nQubits); break;
-    case 3: applySingleQubitTemplate<real_t, 3>(real, imag, mat, nQubits); break;
-    case 4: applySingleQubitTemplate<real_t, 4>(real, imag, mat, nQubits); break;
-    case 5: applySingleQubitTemplate<real_t, 5>(real, imag, mat, nQubits); break;
-    case 6: applySingleQubitTemplate<real_t, 6>(real, imag, mat, nQubits); break;
-    case 7: applySingleQubitTemplate<real_t, 7>(real, imag, mat, nQubits); break;
-    case 8: applySingleQubitTemplate<real_t, 8>(real, imag, mat, nQubits); break;
-    case 9: applySingleQubitTemplate<real_t, 9>(real, imag, mat, nQubits); break;
-    case 10: applySingleQubitTemplate<real_t, 10>(real, imag, mat, nQubits); break;
-    case 11: applySingleQubitTemplate<real_t, 11>(real, imag, mat, nQubits); break;
-    case 12: applySingleQubitTemplate<real_t, 12>(real, imag, mat, nQubits); break;
-    case 13: applySingleQubitTemplate<real_t, 13>(real, imag, mat, nQubits); break;
-    case 14: applySingleQubitTemplate<real_t, 14>(real, imag, mat, nQubits); break;
-    case 15: applySingleQubitTemplate<real_t, 15>(real, imag, mat, nQubits); break;
-    case 16: applySingleQubitTemplate<real_t, 16>(real, imag, mat, nQubits); break;
-    case 17: applySingleQubitTemplate<real_t, 17>(real, imag, mat, nQubits); break;
-    case 18: applySingleQubitTemplate<real_t, 18>(real, imag, mat, nQubits); break;
-    case 19: applySingleQubitTemplate<real_t, 19>(real, imag, mat, nQubits); break;
-    case 20: applySingleQubitTemplate<real_t, 20>(real, imag, mat, nQubits); break;
-    case 21: applySingleQubitTemplate<real_t, 21>(real, imag, mat, nQubits); break;
-    case 22: applySingleQubitTemplate<real_t, 22>(real, imag, mat, nQubits); break;
-    case 23: applySingleQubitTemplate<real_t, 23>(real, imag, mat, nQubits); break;
-    case 24: applySingleQubitTemplate<real_t, 24>(real, imag, mat, nQubits); break;
-    case 25: applySingleQubitTemplate<real_t, 25>(real, imag, mat, nQubits); break;
-    case 26: applySingleQubitTemplate<real_t, 26>(real, imag, mat, nQubits); break;
-    case 27: applySingleQubitTemplate<real_t, 27>(real, imag, mat, nQubits); break;
-    case 28: applySingleQubitTemplate<real_t, 28>(real, imag, mat, nQubits); break;
-    case 29: applySingleQubitTemplate<real_t, 29>(real, imag, mat, nQubits); break;
-    case 30: applySingleQubitTemplate<real_t, 30>(real, imag, mat, nQubits); break;
-    default: applySingleQubit(real, imag, mat, nQubits, k); break;
+  case 0:
+    applySingleQubitTemplate<real_t, 0>(real, imag, mat, nQubits);
+    break;
+  case 1:
+    applySingleQubitTemplate<real_t, 1>(real, imag, mat, nQubits);
+    break;
+  case 2:
+    applySingleQubitTemplate<real_t, 2>(real, imag, mat, nQubits);
+    break;
+  case 3:
+    applySingleQubitTemplate<real_t, 3>(real, imag, mat, nQubits);
+    break;
+  case 4:
+    applySingleQubitTemplate<real_t, 4>(real, imag, mat, nQubits);
+    break;
+  case 5:
+    applySingleQubitTemplate<real_t, 5>(real, imag, mat, nQubits);
+    break;
+  case 6:
+    applySingleQubitTemplate<real_t, 6>(real, imag, mat, nQubits);
+    break;
+  case 7:
+    applySingleQubitTemplate<real_t, 7>(real, imag, mat, nQubits);
+    break;
+  case 8:
+    applySingleQubitTemplate<real_t, 8>(real, imag, mat, nQubits);
+    break;
+  case 9:
+    applySingleQubitTemplate<real_t, 9>(real, imag, mat, nQubits);
+    break;
+  case 10:
+    applySingleQubitTemplate<real_t, 10>(real, imag, mat, nQubits);
+    break;
+  case 11:
+    applySingleQubitTemplate<real_t, 11>(real, imag, mat, nQubits);
+    break;
+  case 12:
+    applySingleQubitTemplate<real_t, 12>(real, imag, mat, nQubits);
+    break;
+  case 13:
+    applySingleQubitTemplate<real_t, 13>(real, imag, mat, nQubits);
+    break;
+  case 14:
+    applySingleQubitTemplate<real_t, 14>(real, imag, mat, nQubits);
+    break;
+  case 15:
+    applySingleQubitTemplate<real_t, 15>(real, imag, mat, nQubits);
+    break;
+  case 16:
+    applySingleQubitTemplate<real_t, 16>(real, imag, mat, nQubits);
+    break;
+  case 17:
+    applySingleQubitTemplate<real_t, 17>(real, imag, mat, nQubits);
+    break;
+  case 18:
+    applySingleQubitTemplate<real_t, 18>(real, imag, mat, nQubits);
+    break;
+  case 19:
+    applySingleQubitTemplate<real_t, 19>(real, imag, mat, nQubits);
+    break;
+  case 20:
+    applySingleQubitTemplate<real_t, 20>(real, imag, mat, nQubits);
+    break;
+  case 21:
+    applySingleQubitTemplate<real_t, 21>(real, imag, mat, nQubits);
+    break;
+  case 22:
+    applySingleQubitTemplate<real_t, 22>(real, imag, mat, nQubits);
+    break;
+  case 23:
+    applySingleQubitTemplate<real_t, 23>(real, imag, mat, nQubits);
+    break;
+  case 24:
+    applySingleQubitTemplate<real_t, 24>(real, imag, mat, nQubits);
+    break;
+  case 25:
+    applySingleQubitTemplate<real_t, 25>(real, imag, mat, nQubits);
+    break;
+  case 26:
+    applySingleQubitTemplate<real_t, 26>(real, imag, mat, nQubits);
+    break;
+  case 27:
+    applySingleQubitTemplate<real_t, 27>(real, imag, mat, nQubits);
+    break;
+  case 28:
+    applySingleQubitTemplate<real_t, 28>(real, imag, mat, nQubits);
+    break;
+  case 29:
+    applySingleQubitTemplate<real_t, 29>(real, imag, mat, nQubits);
+    break;
+  case 30:
+    applySingleQubitTemplate<real_t, 30>(real, imag, mat, nQubits);
+    break;
+  default:
+    applySingleQubit(real, imag, mat, nQubits, k);
+    break;
   }
 }
 

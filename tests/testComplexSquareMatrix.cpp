@@ -1,5 +1,5 @@
-#include "tests/TestKit.h"
 #include "cast/ADT/ComplexSquareMatrix.h"
+#include "tests/TestKit.h"
 
 using namespace cast;
 
@@ -20,23 +20,24 @@ void test::test_complexSquareMatrix() {
 
   cast::matmul(matZ, matZ, matResult);
   suite.assertClose(maximum_norm(matResult, matI), 0.0, "ZZ == I", GET_INFO());
-                    
+
   auto mat_iZ = matZ * std::complex<double>(0, 1);
   cast::matmul(matX, matY, matResult);
-  suite.assertClose(maximum_norm(matResult, mat_iZ), 0.0,
-                    "XY == iZ", GET_INFO());
+  suite.assertClose(
+      maximum_norm(matResult, mat_iZ), 0.0, "XY == iZ", GET_INFO());
 
   auto matA = ComplexSquareMatrix::RandomUnitary(4);
   ComplexSquareMatrix matAInv;
   auto rst = cast::matinv(matA, matAInv);
   if (!rst) {
     suite.assertEqual(1, 0, "Matrix inversion failed", GET_INFO());
-  }
-  else {
+  } else {
     ComplexSquareMatrix matAAInv;
     cast::matmul(matA, matAInv, matAAInv);
     suite.assertClose(maximum_norm(matAAInv, ComplexSquareMatrix::eye(4)),
-                      0.0, "A * AInv == I", GET_INFO());
+                      0.0,
+                      "A * AInv == I",
+                      GET_INFO());
   }
 
   suite.displayResult();

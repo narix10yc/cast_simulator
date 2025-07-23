@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <fstream>
 #include <cstring>
+#include <fstream>
 
 using namespace cast::ast;
 
@@ -23,7 +23,7 @@ bool SourceManager::loadFromFile(const char* fileName) {
   bufferEnd = bufferBegin + l;
   file.read(const_cast<char*>(bufferBegin), l);
   file.close();
-  
+
   // Initialize line table
   lineTable.push_back(bufferBegin);
   for (const char* ptr = bufferBegin; ptr < bufferEnd; ++ptr) {
@@ -49,8 +49,8 @@ bool SourceManager::loadRawBuffer(const char* buffer, size_t size) {
   return false;
 }
 
-std::ostream& SourceManager::printLineInfo(
-    std::ostream& os, LocationSpan loc) const {
+std::ostream& SourceManager::printLineInfo(std::ostream& os,
+                                           LocationSpan loc) const {
   auto findLine = [this](const char* ptr) {
     return --std::upper_bound(lineTable.begin(), lineTable.end(), ptr);
   };
@@ -68,17 +68,14 @@ std::ostream& SourceManager::printLineInfo(
   assert(endColNumber >= 0);
 
   if (beginLineNumber != endLineNumber) {
-    return os << "Lines spanning "
-              << beginLineNumber << ":" << beginColNumber
-              << " to "
-              << endLineNumber << ":" << endColNumber << "\n";
+    return os << "Lines spanning " << beginLineNumber << ":" << beginColNumber
+              << " to " << endLineNumber << ":" << endColNumber << "\n";
   }
 
   os << beginLineNumber << ": ";
   os.write(*beginLineIt, *(std::next(beginLineIt)) - *beginLineIt);
   os << std::string(beginColNumber + std::log10(beginLineNumber) + 3, ' ')
-      << BOLDGREEN(std::string(endColNumber - beginColNumber, '^'))
-      << "\n";
+     << BOLDGREEN(std::string(endColNumber - beginColNumber, '^')) << "\n";
 
   os << "\n";
   return os;

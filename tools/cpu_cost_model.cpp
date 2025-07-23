@@ -8,42 +8,38 @@
 namespace cl = llvm::cl;
 
 cl::opt<std::string>
-ArgOutputFilename("o", cl::desc("Output file name"), cl::Required);
+    ArgOutputFilename("o", cl::desc("Output file name"), cl::Required);
 
 cl::opt<bool>
-ArgF32("f32", cl::desc("Enable single-precision"), cl::init(false));
+    ArgF32("f32", cl::desc("Enable single-precision"), cl::init(false));
 
 cl::opt<bool>
-ArgF64("f64", cl::desc("Enable double-precision"), cl::init(true));
+    ArgF64("f64", cl::desc("Enable double-precision"), cl::init(true));
+
+cl::opt<int> ArgNQubits("nqubits", cl::desc("Number of qubits"), cl::init(28));
 
 cl::opt<int>
-ArgNQubits("nqubits", cl::desc("Number of qubits"), cl::init(28));
-
-cl::opt<int>
-ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
+    ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
 
 cl::opt<bool>
-ArgOverwriteMode("overwrite",
-  cl::desc("Overwrite the output file with new results"),
-  cl::init(false));
+    ArgOverwriteMode("overwrite",
+                     cl::desc("Overwrite the output file with new results"),
+                     cl::init(false));
+
+cl::opt<int> ArgSimdWidth("simd-width", cl::desc("simd width"), cl::init(0));
 
 cl::opt<int>
-ArgSimdWidth("simd-width", cl::desc("simd width"), cl::init(0));
-
-cl::opt<int>
-ArgNTests("N", cl::desc("Number of tests"), cl::Prefix, cl::Required);
+    ArgNTests("N", cl::desc("Number of tests"), cl::Prefix, cl::Required);
 
 using namespace cast;
 
-void unwrapArguments(int& nQubits,
-                     int& nThreads,
-                     CPUSimdWidth& simdWidth) {
+void unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
   nQubits = ArgNQubits;
   if (ArgNThreads <= 0)
     nThreads = cast::get_cpu_num_threads();
   else
     nThreads = ArgNThreads;
-  
+
   if (ArgSimdWidth == 128)
     simdWidth = CPUSimdWidth::W128;
   else if (ArgSimdWidth == 256)
@@ -84,8 +80,8 @@ int main(int argc, char** argv) {
 
   inFile.open(ArgOutputFilename, std::ios::in);
   if (!outFile || !inFile) {
-    std::cerr << BOLDRED("[Error]: ")
-              << "Unable to open file '" << ArgOutputFilename << "'.\n";
+    std::cerr << BOLDRED("[Error]: ") << "Unable to open file '"
+              << ArgOutputFilename << "'.\n";
     return 1;
   }
 
@@ -112,4 +108,3 @@ int main(int argc, char** argv) {
   outFile.close();
   return 0;
 }
-

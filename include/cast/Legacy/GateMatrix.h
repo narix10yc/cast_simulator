@@ -1,11 +1,11 @@
 #ifndef CAST_LEGACY_GATE_MATRIX_H
 #define CAST_LEGACY_GATE_MATRIX_H
 
-#include "cast/Legacy/UnitaryPermMatrix.h"
-#include "cast/Core/ScalarKind.h"
-#include "utils/square_matrix.h"
-#include "utils/PODVariant.h"
 #include "cast/Core/Polynomial.h"
+#include "cast/Core/ScalarKind.h"
+#include "cast/Legacy/UnitaryPermMatrix.h"
+#include "utils/PODVariant.h"
+#include "utils/square_matrix.h"
 
 namespace cast::legacy {
 
@@ -77,9 +77,9 @@ private:
     sig_matrix_t sigMat;
 
     Cache()
-      : isConvertibleToUpMat(Unknown), upMat(), isConvertibleToCMat(Unknown),
-        cMat(), isConvertibleToPMat(Unknown), pMat(), sigZeroTol(-1.0),
-        sigOneTol(-1.0), sigMat() {}
+        : isConvertibleToUpMat(Unknown), upMat(), isConvertibleToCMat(Unknown),
+          cMat(), isConvertibleToPMat(Unknown), pMat(), sigZeroTol(-1.0),
+          sigOneTol(-1.0), sigMat() {}
   };
 
   mutable Cache cache;
@@ -102,12 +102,13 @@ public:
   explicit GateMatrix(const c_matrix_t& upMat);
   explicit GateMatrix(const p_matrix_t& upMat);
 
-  static GateMatrix FromName(
-      const std::string& name, const gate_params_t& params = {});
+  static GateMatrix FromName(const std::string& name,
+                             const gate_params_t& params = {});
 
   void permuteSelf(const llvm::SmallVector<int>& flags);
 
-  // get cached unitary perm matrix object associated with this legacy::GateMatrix
+  // get cached unitary perm matrix object associated with this
+  // legacy::GateMatrix
   const up_matrix_t* getUnitaryPermMatrix(double tolerance = 0.0) const {
     if (cache.isConvertibleToUpMat == Unknown)
       computeAndCacheUpMat(tolerance);
@@ -141,7 +142,8 @@ public:
     return &cache.cMat;
   }
 
-  // get cached parametrized matrix object associated with this legacy::GateMatrix
+  // get cached parametrized matrix object associated with this
+  // legacy::GateMatrix
   const p_matrix_t& getParametrizedMatrix() const {
     if (cache.isConvertibleToPMat == Unknown)
       computeAndCachePMat();
@@ -233,6 +235,6 @@ public:
 // An easy name for gate matrix pointer type
 using gmp_t = std::shared_ptr<GateMatrix>;
 
-} // namespace cast
+} // namespace cast::legacy
 
 #endif // CAST_LEGACY_GATE_MATRIX_H

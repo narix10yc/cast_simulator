@@ -1,5 +1,5 @@
-#include "cast/FPGA/FPGAInst.h"
 #include "cast/FPGA/FPGAFusion.h"
+#include "cast/FPGA/FPGAInst.h"
 
 #include "openqasm/parser.h"
 #include "utils/CommandLine.h"
@@ -10,30 +10,26 @@
 namespace cl = utils::cl;
 using namespace cast;
 
-static auto&
-ArgInputFileName = cl::registerArgument<std::string>("i")
-  .desc("Input file name")
-  .setArgumentPositional();
+static auto& ArgInputFileName = cl::registerArgument<std::string>("i")
+                                    .desc("Input file name")
+                                    .setArgumentPositional();
 
-static auto&
-ArgOutputFilename = cl::registerArgument<std::string>("o")
-  .desc("Output file name (end with .csv)")
-  .setOccurExactlyOnce();
+static auto& ArgOutputFilename = cl::registerArgument<std::string>("o")
+                                     .desc("Output file name (end with .csv)")
+                                     .setOccurExactlyOnce();
 
-static auto&
-ArgForceFilename = cl::registerArgument<bool>("force-name")
-  .desc("Force output filename (possibly not ending with '.csv')")
-  .init(false);
+static auto& ArgForceFilename =
+    cl::registerArgument<bool>("force-name")
+        .desc("Force output filename (possibly not ending with '.csv')")
+        .init(false);
 
-static auto&
-ArgOverwriteMode = cl::registerArgument<bool>("overwrite")
-  .desc("Overwrite the output file with new results")
-  .init(false);
+static auto& ArgOverwriteMode =
+    cl::registerArgument<bool>("overwrite")
+        .desc("Overwrite the output file with new results")
+        .init(false);
 
-static auto&
-ArgRecursiveMode = cl::registerArgument<bool>("r")
-  .desc("Recursive mode")
-  .init(false);
+static auto& ArgRecursiveMode =
+    cl::registerArgument<bool>("r").desc("Recursive mode").init(false);
 
 struct InstStatistics {
   int nNonExtMemInst = 0, nExtMemInst = 0, nSqGateInst = 0, nUpGateInst = 0;
@@ -42,14 +38,16 @@ struct InstStatistics {
     int nGateInst = nSqGateInst + nUpGateInst;
     int nMemInst = nNonExtMemInst + nExtMemInst;
     return os << BOLDCYAN("====== Instruction Statistics: =======\n"
-          "Num Instructions: " << nGateInst + nMemInst << "\n")
-      << "  - num gate instructions:   " << nGateInst << "\n"
-      << "    - num SQ gate instructions: " << nSqGateInst << "\n"
-      << "    - num UP gate instructions: " << nUpGateInst << "\n"
-      << "  - num memory instructions: " << nMemInst << "\n"
-      << "    - num EXT mem instructions:     " << nExtMemInst << "\n"
-      << "    - num non-EXT mem instructions: " << nNonExtMemInst << "\n"
-      << " ----------------------------------- \n";
+                          "Num Instructions: "
+                          << nGateInst + nMemInst << "\n")
+              << "  - num gate instructions:   " << nGateInst << "\n"
+              << "    - num SQ gate instructions: " << nSqGateInst << "\n"
+              << "    - num UP gate instructions: " << nUpGateInst << "\n"
+              << "  - num memory instructions: " << nMemInst << "\n"
+              << "    - num EXT mem instructions:     " << nExtMemInst << "\n"
+              << "    - num non-EXT mem instructions: " << nNonExtMemInst
+              << "\n"
+              << " ----------------------------------- \n";
   }
 };
 
@@ -60,24 +58,25 @@ struct InstCycleStatistics {
 
   std::ostream& print(std::ostream& os) {
     return os << BOLDCYAN("====== Cycle Statistics: =======\n")
-      << "  - nTwiceExtMemTime: " << nTwiceExtMem << "\n"
-      << "  - nExtMemTime:      " << nExtMem << "\n"
-      << "  - nNonExtMemTime:   " << nNonExtMem << "\n"
-      << "  - nGeneralSQGate:   " << nGeneralSQGate << "\n"
-      << "  - nRealOnlySQGate:  " << nRealOnlySQGate << "\n"
-      << "  - nUPGate:          " << nUPGate << "\n"
-      << " ----------------------------------- \n";
+              << "  - nTwiceExtMemTime: " << nTwiceExtMem << "\n"
+              << "  - nExtMemTime:      " << nExtMem << "\n"
+              << "  - nNonExtMemTime:   " << nNonExtMem << "\n"
+              << "  - nGeneralSQGate:   " << nGeneralSQGate << "\n"
+              << "  - nRealOnlySQGate:  " << nRealOnlySQGate << "\n"
+              << "  - nUPGate:          " << nUPGate << "\n"
+              << " ----------------------------------- \n";
   }
 };
 
 std::ostream& writCSVLine(std::ostream& os,
-    const InstStatistics& instStats, const InstCycleStatistics& cycleStats) {
+                          const InstStatistics& instStats,
+                          const InstCycleStatistics& cycleStats) {
   return os << instStats.nSqGateInst << "," << instStats.nUpGateInst << ","
-    << instStats.nExtMemInst << "," << instStats.nNonExtMemInst << ","
-    << cycleStats.nTwiceExtMem << "," << cycleStats.nExtMem << ","
-    << cycleStats.nNonExtMem << "," << cycleStats.nGeneralSQGate << ","
-    << cycleStats.nRealOnlySQGate << "," << cycleStats.nUPGate << ","
-    << cycleStats.nOverlappingInst;
+            << instStats.nExtMemInst << "," << instStats.nNonExtMemInst << ","
+            << cycleStats.nTwiceExtMem << "," << cycleStats.nExtMem << ","
+            << cycleStats.nNonExtMem << "," << cycleStats.nGeneralSQGate << ","
+            << cycleStats.nRealOnlySQGate << "," << cycleStats.nUPGate << ","
+            << cycleStats.nOverlappingInst;
 }
 
 InstStatistics getInstStatistics(const std::vector<fpga::Instruction>& insts) {
@@ -86,7 +85,7 @@ InstStatistics getInstStatistics(const std::vector<fpga::Instruction>& insts) {
     if (inst._gInst->getKind() == GOp_SQ)
       stats.nSqGateInst++;
     else if (inst._gInst->getKind() == GOp_UP)
-    stats.nUpGateInst++;
+      stats.nUpGateInst++;
     if (!inst._mInst->isNull()) {
       if (inst._mInst->getKind() == MOp_EXT)
         stats.nExtMemInst++;
@@ -97,10 +96,10 @@ InstStatistics getInstStatistics(const std::vector<fpga::Instruction>& insts) {
   return stats;
 }
 
-InstCycleStatistics getCycleStatistics(
-    const std::vector<fpga::Instruction>& insts,
-    const FPGACostConfig& costConfig,
-    bool additionalExtMemOp) {
+InstCycleStatistics
+getCycleStatistics(const std::vector<fpga::Instruction>& insts,
+                   const FPGACostConfig& costConfig,
+                   bool additionalExtMemOp) {
   InstCycleStatistics stats;
   for (const auto& inst : insts) {
     // inst.print(std::cerr);
@@ -158,9 +157,9 @@ int costKindToNumNormalizedCycle(Instruction::CostKind kind) {
   }
 }
 
-void runExperiment(
-    std::function<void(legacy::CircuitGraph&)> f,
-    std::ostream& os, const std::string& circuitName) {
+void runExperiment(std::function<void(legacy::CircuitGraph&)> f,
+                   std::ostream& os,
+                   const std::string& circuitName) {
   int nLocalQubits = 14;
   int gridSize = 4;
   int nOnChipQubits = nLocalQubits + 2 * gridSize;
@@ -227,13 +226,15 @@ void runExperiment(
     auto tBegin = std::chrono::high_resolution_clock::now();
     auto instructions = fpga::genInstruction(graph, instGenConfig);
     auto tEnd = std::chrono::high_resolution_clock::now();
-    auto tInSec = std::chrono::duration_cast<std::chrono::duration<double>>(
-      tEnd - tBegin).count();
-    
+    auto tInSec =
+        std::chrono::duration_cast<std::chrono::duration<double>>(tEnd - tBegin)
+            .count();
+
     auto instStats = getInstStatistics(instructions);
     auto cycleStats = getCycleStatistics(
-      instructions, costConfig, graph.nQubits > nOnChipQubits);
-    writCSVLine(os, instStats, cycleStats) << "," << std::scientific << tInSec << "\n";
+        instructions, costConfig, graph.nQubits > nOnChipQubits);
+    writCSVLine(os, instStats, cycleStats)
+        << "," << std::scientific << tInSec << "\n";
   };
 
   legacy::CircuitGraph tmpGraph;
@@ -250,23 +251,23 @@ void runExperiment(
   }
 
   // fusion, instGen, gateValueTolerance
-  os << circuitName << "-up8," << nQubits << "," << nGates
-     << "," << opCount << "," << opCountMax << ",true,true,true,";
+  os << circuitName << "-up8," << nQubits << "," << nGates << "," << opCount
+     << "," << opCountMax << ",true,true,true,";
   run(instGen11ConfigUp8);
-  os << circuitName << "," << nQubits << "," << nGates
-     << "," << opCount << "," << opCountMax << ",true,true,true,";
+  os << circuitName << "," << nQubits << "," << nGates << "," << opCount << ","
+     << opCountMax << ",true,true,true,";
   run(instGen11Config);
-  os << circuitName << "," << nQubits << "," << nGates
-     << "," << opCount << "," << opCountMax << ",true,false,true,";
+  os << circuitName << "," << nQubits << "," << nGates << "," << opCount << ","
+     << opCountMax << ",true,false,true,";
   run(instGen10Config);
-  os << circuitName << "," << nQubits << "," << nGates
-     << "," << opCount << "," << opCountMax << ",false,true,true,";
+  os << circuitName << "," << nQubits << "," << nGates << "," << opCount << ","
+     << opCountMax << ",false,true,true,";
   run(instGen01Config);
-  os << circuitName << "," << nQubits << "," << nGates
-     << "," << opCount << "," << opCountMax << ",false,false,true,";
+  os << circuitName << "," << nQubits << "," << nGates << "," << opCount << ","
+     << opCountMax << ",false,false,true,";
   run(instGen00Config);
-  os << circuitName << "," << nQubits << "," << nGates
-     << "," << opCount << "," << opCountMax << ",false,false,false,";
+  os << circuitName << "," << nQubits << "," << nGates << "," << opCount << ","
+     << opCountMax << ",false,false,false,";
   run(instGenBadConfig);
 }
 
@@ -287,25 +288,30 @@ void checkOutputFileName() {
 void processQFT(std::ofstream& oFile, int nQubits) {
   std::string circuit = "QFT-" + std::to_string(nQubits);
   std::cerr << "Processing " << circuit << "\n";
-  runExperiment([nQubits](legacy::CircuitGraph& graph) {
-    legacy::CircuitGraph::QFTCircuit(nQubits, graph);
-  }, oFile, circuit);
+  runExperiment(
+      [nQubits](legacy::CircuitGraph& graph) {
+        legacy::CircuitGraph::QFTCircuit(nQubits, graph);
+      },
+      oFile,
+      circuit);
 }
 
 void processFile(const std::filesystem::path& path, std::ofstream& oFile) {
   std::cerr << "Processing " << path << "\n";
   if (path.extension() != ".qasm") {
-    std::cerr << BOLDYELLOW("[Warning]: ")
-              << "Ignored " << path
+    std::cerr << BOLDYELLOW("[Warning]: ") << "Ignored " << path
               << " because its name does not end with '.qasm'.\n";
     return;
   }
 
-  runExperiment([path](legacy::CircuitGraph& graph) {
-    openqasm::Parser qasmParser(path.string(), -1);
-    qasmParser.parse()->toCircuitGraph(graph);
-    // CircuitGraph::QFTCircuit(32, graph);
-  }, oFile, path.filename().stem().string());
+  runExperiment(
+      [path](legacy::CircuitGraph& graph) {
+        openqasm::Parser qasmParser(path.string(), -1);
+        qasmParser.parse()->toCircuitGraph(graph);
+        // CircuitGraph::QFTCircuit(32, graph);
+      },
+      oFile,
+      path.filename().stem().string());
 }
 
 void openCSVToWriteOn(std::ofstream& oFile) {
@@ -318,17 +324,18 @@ void openCSVToWriteOn(std::ofstream& oFile) {
   std::ifstream iFile(ArgOutputFilename);
 
   if (!oFile || !iFile) {
-    std::cerr << BOLDRED("[Error]: ")
-              << "Unable to open file '" << ArgOutputFilename << "'.\n";
+    std::cerr << BOLDRED("[Error]: ") << "Unable to open file '"
+              << ArgOutputFilename << "'.\n";
     std::exit(1);
   }
   if (iFile.peek() == std::ifstream::traits_type::eof()) {
     oFile << "circuit,nQubits,nGates,opCount,opCountMax,"
-      << "fusionOpt,instGenOpt,gateValueToleranceOpt,"
-      << "nSqGateInst,nUpGateInst,nExtMemInst,nNonExtMemInst,"
-      << "nTwiceExtMemTime,nExtMemTime,nNonExtMemTime,"
-      << "nGeneralSQGateTime,nRealOnlySQGateTime,nUPGateTime,nOverlappingInstTime,"
-      << "instGenTime\n";
+          << "fusionOpt,instGenOpt,gateValueToleranceOpt,"
+          << "nSqGateInst,nUpGateInst,nExtMemInst,nNonExtMemInst,"
+          << "nTwiceExtMemTime,nExtMemTime,nNonExtMemTime,"
+          << "nGeneralSQGateTime,nRealOnlySQGateTime,nUPGateTime,"
+             "nOverlappingInstTime,"
+          << "instGenTime\n";
   }
   iFile.close();
 }

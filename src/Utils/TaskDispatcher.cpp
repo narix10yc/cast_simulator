@@ -1,10 +1,10 @@
 #include "utils/TaskDispatcher.h"
 
+#include "utils/iocolor.h"
+#include "utils/utils.h"
+#include <condition_variable>
 #include <iostream>
 #include <mutex>
-#include <condition_variable>
-#include "utils/utils.h"
-#include "utils/iocolor.h"
 
 using namespace utils;
 
@@ -27,9 +27,7 @@ void TaskDispatcher::workerThread() {
     std::function<void()> task;
     {
       std::unique_lock lock(mtx);
-      cv.wait(lock, [this]() {
-        return stopFlag || !tasks.empty();
-      });
+      cv.wait(lock, [this]() { return stopFlag || !tasks.empty(); });
 
       if (stopFlag && tasks.empty()) {
         return;
@@ -50,13 +48,11 @@ void TaskDispatcher::workerThread() {
 }
 
 TaskDispatcher::TaskDispatcher(int nWorkers)
-  : tasks(), workers(), mtx(), cv()
-  , syncCV(), nTotalTasks(0), nActiveWorkers(0), stopFlag(false) {
+    : tasks(), workers(), mtx(), cv(), syncCV(), nTotalTasks(0),
+      nActiveWorkers(0), stopFlag(false) {
   workers.reserve(nWorkers);
   for (int i = 0; i < nWorkers; ++i) {
-    workers.emplace_back([this]() {
-      workerThread();
-    });
+    workers.emplace_back([this]() { workerThread(); });
   }
 }
 

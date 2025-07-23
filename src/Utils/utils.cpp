@@ -92,14 +92,12 @@ void utils::timedExecute(std::function<void()> f, const char* msg) {
   const auto tok = clock::now();
   const auto t_in_sec =
       std::chrono::duration_cast<std::chrono::microseconds>(tok - tic).count();
-  std::cerr << "-- ("
-            << fmt_time(static_cast<double>(t_in_sec) * 1e-6)
-            << ") " << msg << "\n";
+  std::cerr << "-- (" << fmt_time(static_cast<double>(t_in_sec) * 1e-6) << ") "
+            << msg << "\n";
 }
 
-std::ostream& utils::print_complex(std::ostream& os,
-                                   std::complex<double> c,
-                                   int precision) {
+std::ostream&
+utils::print_complex(std::ostream& os, std::complex<double> c, int precision) {
   const double thres = 0.5 * std::pow(0.1, precision);
   if (c.real() >= -thres)
     os << " ";
@@ -117,19 +115,16 @@ std::ostream& utils::print_complex(std::ostream& os,
   return os << "i";
 }
 
-std::complex<double> utils::inner_product(
-    const std::complex<double>* aArr,
-    const std::complex<double>* bArr,
-    size_t length) {
+std::complex<double> utils::inner_product(const std::complex<double>* aArr,
+                                          const std::complex<double>* bArr,
+                                          size_t length) {
   std::complex<double> s = 0.0;
   for (size_t i = 0; i < length; ++i) {
     // (ar - i ai) * (br + i bi) = (ar*br + ai*bi) + i * (ar*bi - ai*br)
-    s.real(
-      s.real() + aArr[i].real() * bArr[i].real() +
-      aArr[i].imag() * bArr[i].imag());
-    s.imag(
-      s.imag() + aArr[i].real() * bArr[i].imag() -
-      aArr[i].imag() * bArr[i].real());
+    s.real(s.real() + aArr[i].real() * bArr[i].real() +
+           aArr[i].imag() * bArr[i].imag());
+    s.imag(s.imag() + aArr[i].real() * bArr[i].imag() -
+           aArr[i].imag() * bArr[i].real());
   }
   return s;
 }

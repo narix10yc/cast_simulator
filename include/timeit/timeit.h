@@ -19,8 +19,8 @@ public:
   double min, med, q1, q3;
   int n_sig_dig = 4;
   TimingResult()
-  : repeat(0), replication(0), tArr(), min(0), med(0), q1(0), q3(0) {}
-  
+      : repeat(0), replication(0), tArr(), min(0), med(0), q1(0), q3(0) {}
+
   TimingResult(int repeat, int replication, const std::vector<double>& tArr)
       : repeat(repeat), replication(replication), tArr(tArr) {
     assert(repeat >= 1);
@@ -63,26 +63,25 @@ public:
     replication = r;
   }
 
-  TimingResult timeit(
-      const std::function<void()>& method,
-      const std::function<void()>& setup,
-      const std::function<void()>& teardown) const;
+  TimingResult timeit(const std::function<void()>& method,
+                      const std::function<void()>& setup,
+                      const std::function<void()>& teardown) const;
 
   TimingResult timeit(const std::function<void()>& method) const {
     return timeit(method, []() {}, []() {});
   }
 
   TimingResult timeitFixedRepeat(
-      const std::function<void()>& method, int _repeat,
+      const std::function<void()>& method,
+      int _repeat,
       const std::function<void()>& setup = []() {},
       const std::function<void()>& teardown = []() {}) const;
-  
-  TimingResult timeitPartial(
-    const std::function<void()>& preMethod,
-    const std::function<void()>& timedMethod,
-    const std::function<void()>& postMethod,
-    const std::function<void()>& setup,
-    const std::function<void()>& teardown) const;
+
+  TimingResult timeitPartial(const std::function<void()>& preMethod,
+                             const std::function<void()>& timedMethod,
+                             const std::function<void()>& postMethod,
+                             const std::function<void()>& setup,
+                             const std::function<void()>& teardown) const;
 };
 
 } // namespace timeit

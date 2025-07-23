@@ -1,6 +1,6 @@
+#include "cast/CPU/CPUStatevector.h"
 #include "gen_file.h"
 #include "timeit/timeit.h"
-#include "cast/CPU/CPUStatevector.h"
 #include <iomanip>
 #include <iostream>
 
@@ -15,14 +15,14 @@ using real_t = double;
 #endif
 using namespace timeit;
 
-int main(int argc, char* *argv) {
-  real_t* real, *imag;
+int main(int argc, char** argv) {
+  real_t *real, *imag;
   Timer timer;
   timer.setRunTime(0.5);
   // timer.setReplication(3);
   TimingResult rst;
-  real = (real_t*)std::aligned_alloc(64, 2 * (1ULL << DEFAULT_nQubits)*
-                                              sizeof(real_t));
+  real = (real_t*)std::aligned_alloc(
+      64, 2 * (1ULL << DEFAULT_nQubits) * sizeof(real_t));
   imag = real + (1ULL << DEFAULT_nQubits);
 
 #ifdef MULTI_THREAD_SIMULATION_KERNEL

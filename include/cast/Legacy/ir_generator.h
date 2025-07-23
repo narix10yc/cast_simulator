@@ -54,7 +54,8 @@ struct IRGeneratorConfig {
 
   bool checkConfliction(std::ostream& os) const;
 
-  std::ostream& display(int verbose = 1, bool title = true,
+  std::ostream& display(int verbose = 1,
+                        bool title = true,
                         std::ostream& os = std::cerr) const;
 };
 
@@ -135,17 +136,23 @@ public:
   /// @param aa can be nullptr. In such case, new_aa will be assigned to bb * cc
   /// @param bbFlag special values are +1, -1, or 0
   /// @return aa + bb * cc. Possible nullptr, when aa is nullptr and bbFlag = 0
-  llvm::Value* genMulAdd(llvm::Value* aa, llvm::Value* bb, llvm::Value* cc,
-                         int bbFlag, const llvm::Twine& bbccName = "",
+  llvm::Value* genMulAdd(llvm::Value* aa,
+                         llvm::Value* bb,
+                         llvm::Value* cc,
+                         int bbFlag,
+                         const llvm::Twine& bbccName = "",
                          const llvm::Twine& aaName = "");
 
   /// @brief Generate the IR that applies new_aa = aa - bb * cc
-  /// @param aa can be nullptr. In such case, new_aa will be assigned to -bb* 
+  /// @param aa can be nullptr. In such case, new_aa will be assigned to -bb*
   /// cc
   /// @param bbFlag special values are +1, -1, or 0
   /// @return aa - bb * cc. Possible nullptr, when aa is nullptr and bbFlag = 0
-  llvm::Value* genMulSub(llvm::Value* aa, llvm::Value* bb, llvm::Value* cc,
-                         int bbFlag, const llvm::Twine& bbccName = "",
+  llvm::Value* genMulSub(llvm::Value* aa,
+                         llvm::Value* bb,
+                         llvm::Value* cc,
+                         int bbFlag,
+                         const llvm::Twine& bbccName = "",
                          const llvm::Twine& aaName = "");
 
   // fadd, accepting nullable inputs
@@ -156,7 +163,7 @@ public:
   llvm::Value* genFMul(llvm::Value* a, llvm::Value* b);
 
   std::pair<llvm::Value*, llvm::Value*>
-  genComplexMultiply(const std::pair<llvm::Value*, llvm::Value*>& ,
+  genComplexMultiply(const std::pair<llvm::Value*, llvm::Value*>&,
                      const std::pair<llvm::Value*, llvm::Value*>&);
 
   std::pair<llvm::Value*, llvm::Value*>
@@ -180,11 +187,12 @@ public:
 
   std::pair<llvm::Value*, llvm::Value*>
   generatePolynomial(const cast::Polynomial& polynomial,
-                     ParamValueFeeder &feeder);
+                     ParamValueFeeder& feeder);
 
   // Generate a function that prepares matrices in simulation.
   // @return A function void(void* param, void* matrix).
-  llvm::Function* generatePrepareParameter(const cast::legacy::CircuitGraph& graph);
+  llvm::Function*
+  generatePrepareParameter(const cast::legacy::CircuitGraph& graph);
 };
 
 } // namespace simulation

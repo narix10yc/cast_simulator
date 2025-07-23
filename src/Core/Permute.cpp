@@ -37,8 +37,8 @@ static unsigned permIdx(unsigned idx, const std::vector<int>& flags) {
   return newIdx;
 }
 
-static ScalarGateMatrixPtr permuteSGateMatrix(
-    const ScalarGateMatrix* sMat, const std::vector<int>& flags) {
+static ScalarGateMatrixPtr permuteSGateMatrix(const ScalarGateMatrix* sMat,
+                                              const std::vector<int>& flags) {
   assert(sMat != nullptr);
   assert(isPermutation(flags));
   assert(sMat->nQubits() == flags.size());
@@ -48,23 +48,25 @@ static ScalarGateMatrixPtr permuteSGateMatrix(
   for (unsigned r = 0; r < edgeSize; ++r) {
     for (unsigned c = 0; c < edgeSize; ++c) {
       matrix->matrix().real(permIdx(r, flags), permIdx(c, flags)) =
-        sMat->matrix().real(r, c);
+          sMat->matrix().real(r, c);
       matrix->matrix().imag(permIdx(r, flags), permIdx(c, flags)) =
-        sMat->matrix().imag(r, c);
+          sMat->matrix().imag(r, c);
     }
   }
 
   return matrix;
 }
 
-static UnitaryPermGateMatrixPtr permuteUPGateMatrix(
-    UnitaryPermGateMatrix* uMat, const std::vector<int>& flags) {
+static UnitaryPermGateMatrixPtr
+permuteUPGateMatrix(UnitaryPermGateMatrix* uMat,
+                    const std::vector<int>& flags) {
   assert(false && "Not implemented");
   return nullptr;
 }
 
-static ParametrizedGateMatrixPtr permutePGateMatrix(
-    ParametrizedGateMatrix* pMat, const std::vector<int>& flags) {
+static ParametrizedGateMatrixPtr
+permutePGateMatrix(ParametrizedGateMatrix* pMat,
+                   const std::vector<int>& flags) {
   assert(false && "Not implemented");
   return nullptr;
 }
@@ -88,10 +90,10 @@ GateMatrixPtr cast::permute(GateMatrixPtr gm, const std::vector<int>& flags) {
   return nullptr;
 }
 
-NoiseChannelPtr cast::permute(
-    NoiseChannelPtr nc, const std::vector<int>& flags) {
+NoiseChannelPtr cast::permute(NoiseChannelPtr nc,
+                              const std::vector<int>& flags) {
   assert(isPermutation(flags) && "Flags must be a permutation");
-  
+
   if (nc == nullptr)
     return nullptr;
   assert(nc->nQubits() == flags.size());

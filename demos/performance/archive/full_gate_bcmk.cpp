@@ -1,6 +1,6 @@
+#include "cast/CPU/CPUStatevector.h"
 #include "gen_file.h"
 #include "timeit/timeit.h"
-#include "cast/CPU/CPUStatevector.h"
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -16,11 +16,11 @@ using real_t = double;
 #endif
 using namespace timeit;
 
-int main(int argc, char* *argv) {
+int main(int argc, char** argv) {
   assert(argc > 1);
   const std::string test_name = argv[1];
 
-  real_t* real, *imag;
+  real_t *real, *imag;
   Timer timer;
   timer.setRunTime(0.5);
   // timer.setReplication(3);
@@ -38,8 +38,8 @@ int main(int argc, char* *argv) {
       timer.setReplication(3);
     uint64_t idxMax = 1ULL << (nQubits - SIMD_S - _metaData[0].nQubits);
 
-    real = (real_t*)std::aligned_alloc(64,
-                                        2 * (1ULL << nQubits) * sizeof(real_t));
+    real =
+        (real_t*)std::aligned_alloc(64, 2 * (1ULL << nQubits) * sizeof(real_t));
     imag = real + (1ULL << nQubits);
 
     rst = timer.timeit([&]() {

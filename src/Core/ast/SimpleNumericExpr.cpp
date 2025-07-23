@@ -2,29 +2,29 @@
 #include "cast/Core/AST/ASTContext.h"
 #include "llvm/Support/Casting.h"
 
-#include <tuple>
 #include <numeric> // for std::gcd
+#include <tuple>
 
 using namespace cast::ast;
 
 namespace {
-  struct Fraction {
-    int n;
-    int d;
-  };
+struct Fraction {
+  int n;
+  int d;
+};
 
-  Fraction simplifyFraction(int n, int d) {
-    assert(d != 0 && "Denominator must not be zero");
-    if (n == 0)
-      return {0, 1};
-    if (d < 0) {
-      n = -n;
-      d = -d;
-    }
-    auto g = std::gcd(n, d);
-    return {n, d};
+Fraction simplifyFraction(int n, int d) {
+  assert(d != 0 && "Denominator must not be zero");
+  if (n == 0)
+    return {0, 1};
+  if (d < 0) {
+    n = -n;
+    d = -d;
   }
+  auto g = std::gcd(n, d);
+  return {n, d};
 }
+} // namespace
 
 FractionLiteral::FractionLiteral(int numerator, int denominator)
     : SimpleNumericExpr(NK_Expr_FractionLiteral) {
@@ -51,10 +51,13 @@ std::ostream& FractionLiteral::print(std::ostream& os) const {
 
 std::ostream& FractionPiLiteral::print(std::ostream& os) const {
   assert(d > 0 && "Denominator must be positive");
-  if (n == 1) {}
-  else if (n == -1) { os << "-"; }
-  else { os << n << "*"; }
-  
+  if (n == 1) {
+  } else if (n == -1) {
+    os << "-";
+  } else {
+    os << n << "*";
+  }
+
   os << "Pi";
 
   if (d != 1)
@@ -65,8 +68,8 @@ std::ostream& FractionPiLiteral::print(std::ostream& os) const {
 
 /* Arithmatics */
 
-SimpleNumericExpr* SimpleNumericExpr::neg(
-    ASTContext& ctx, SimpleNumericExpr* operand) {
+SimpleNumericExpr* SimpleNumericExpr::neg(ASTContext& ctx,
+                                          SimpleNumericExpr* operand) {
   assert(operand && "Operand cannot be null");
   if (auto* e = llvm::dyn_cast<IntegerLiteral>(operand))
     return new (ctx) IntegerLiteral(-e->value);
@@ -80,8 +83,9 @@ SimpleNumericExpr* SimpleNumericExpr::neg(
   return nullptr;
 }
 
-SimpleNumericExpr* SimpleNumericExpr::add(
-    ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs) {
+SimpleNumericExpr* SimpleNumericExpr::add(ASTContext& ctx,
+                                          SimpleNumericExpr* lhs,
+                                          SimpleNumericExpr* rhs) {
   assert(lhs && rhs && "Operands cannot be null");
   if (auto* L = llvm::dyn_cast<IntegerLiteral>(lhs)) {
     // okay: int + int
@@ -89,37 +93,31 @@ SimpleNumericExpr* SimpleNumericExpr::add(
       return new (ctx) IntegerLiteral(L->value + R->value);
     // okay: int + fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->value * R->d + R->n,
-          R->d);
+      return new (ctx) FractionLiteral(L->value * R->d + R->n, R->d);
   }
   if (auto* L = llvm::dyn_cast<FractionLiteral>(lhs)) {
     // okay: fraction + int
     if (auto* R = llvm::dyn_cast<IntegerLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->n + R->value * L->d,
-          L->d);
+      return new (ctx) FractionLiteral(L->n + R->value * L->d, L->d);
     // okay: fraction + fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->n * R->d + R->n * L->d,
-          L->d * R->d);
+      return new (ctx) FractionLiteral(L->n * R->d + R->n * L->d, L->d * R->d);
   }
 
   // okay: fractionPi + fractionPi
   if (auto* L = llvm::dyn_cast<FractionPiLiteral>(lhs)) {
     if (auto* R = llvm::dyn_cast<FractionPiLiteral>(rhs))
-      return new (ctx) FractionPiLiteral(
-          L->n * R->d + R->n * L->d,
-          L->d * R->d);
+      return new (ctx)
+          FractionPiLiteral(L->n * R->d + R->n * L->d, L->d * R->d);
   }
 
   // otherwise, use floating point
   return new (ctx) FloatingLiteral(lhs->getValue() + rhs->getValue());
 }
 
-SimpleNumericExpr* SimpleNumericExpr::sub(
-    ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs) {
+SimpleNumericExpr* SimpleNumericExpr::sub(ASTContext& ctx,
+                                          SimpleNumericExpr* lhs,
+                                          SimpleNumericExpr* rhs) {
   assert(lhs && rhs && "Operands cannot be null");
   if (auto* L = llvm::dyn_cast<IntegerLiteral>(lhs)) {
     // okay: int - int
@@ -127,37 +125,31 @@ SimpleNumericExpr* SimpleNumericExpr::sub(
       return new (ctx) IntegerLiteral(L->value - R->value);
     // okay: int - fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->value * R->d - R->n,
-          R->d);
+      return new (ctx) FractionLiteral(L->value * R->d - R->n, R->d);
   }
   if (auto* L = llvm::dyn_cast<FractionLiteral>(lhs)) {
     // okay: fraction - int
     if (auto* R = llvm::dyn_cast<IntegerLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->n - R->value * L->d,
-          L->d);
+      return new (ctx) FractionLiteral(L->n - R->value * L->d, L->d);
     // okay: fraction - fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->n * R->d - R->n * L->d,
-          L->d * R->d);
+      return new (ctx) FractionLiteral(L->n * R->d - R->n * L->d, L->d * R->d);
   }
 
   // okay: fractionPi - fractionPi
   if (auto* L = llvm::dyn_cast<FractionPiLiteral>(lhs)) {
     if (auto* R = llvm::dyn_cast<FractionPiLiteral>(rhs))
-      return new (ctx) FractionPiLiteral(
-          L->n * R->d - R->n * L->d,
-          L->d * R->d);
+      return new (ctx)
+          FractionPiLiteral(L->n * R->d - R->n * L->d, L->d * R->d);
   }
 
   // otherwise, use floating point
   return new (ctx) FloatingLiteral(lhs->getValue() - rhs->getValue());
 }
 
-SimpleNumericExpr* SimpleNumericExpr::mul(
-    ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs) {
+SimpleNumericExpr* SimpleNumericExpr::mul(ASTContext& ctx,
+                                          SimpleNumericExpr* lhs,
+                                          SimpleNumericExpr* rhs) {
   assert(lhs && rhs && "Operands cannot be null");
   if (auto* L = llvm::dyn_cast<IntegerLiteral>(lhs)) {
     // okay: int * int
@@ -165,52 +157,39 @@ SimpleNumericExpr* SimpleNumericExpr::mul(
       return new (ctx) IntegerLiteral(L->value * R->value);
     // okay: int * fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->value * R->n,
-          R->d);
+      return new (ctx) FractionLiteral(L->value * R->n, R->d);
     // okay: int * fractionPi
     if (auto* R = llvm::dyn_cast<FractionPiLiteral>(rhs))
-      return new (ctx) FractionPiLiteral(
-          L->value * R->n,
-          R->d);
+      return new (ctx) FractionPiLiteral(L->value * R->n, R->d);
   }
   if (auto* L = llvm::dyn_cast<FractionLiteral>(lhs)) {
     // okay: fraction * int
     if (auto* R = llvm::dyn_cast<IntegerLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->n * R->value,
-          L->d);
+      return new (ctx) FractionLiteral(L->n * R->value, L->d);
     // okay: fraction * fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->n * R->n,
-          L->d * R->d);
+      return new (ctx) FractionLiteral(L->n * R->n, L->d * R->d);
     // okay: fraction * fractionPi
     if (auto* R = llvm::dyn_cast<FractionPiLiteral>(rhs))
-      return new (ctx) FractionPiLiteral(
-          L->n * R->n,
-          L->d * R->d);
+      return new (ctx) FractionPiLiteral(L->n * R->n, L->d * R->d);
   }
 
   if (auto* L = llvm::dyn_cast<FractionPiLiteral>(lhs)) {
     // okay: fractionPi * int
     if (auto* R = llvm::dyn_cast<IntegerLiteral>(rhs))
-      return new (ctx) FractionPiLiteral(
-          L->n * R->value,
-          L->d);
+      return new (ctx) FractionPiLiteral(L->n * R->value, L->d);
     // okay: fractionPi * fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionPiLiteral(
-          L->n * R->n,
-          L->d * R->d);
+      return new (ctx) FractionPiLiteral(L->n * R->n, L->d * R->d);
   }
 
   // otherwise, use floating point
   return new (ctx) FloatingLiteral(lhs->getValue() * rhs->getValue());
 }
 
-SimpleNumericExpr* SimpleNumericExpr::div(
-    ASTContext& ctx, SimpleNumericExpr* lhs, SimpleNumericExpr* rhs) {
+SimpleNumericExpr* SimpleNumericExpr::div(ASTContext& ctx,
+                                          SimpleNumericExpr* lhs,
+                                          SimpleNumericExpr* rhs) {
   assert(lhs && rhs && "Operands cannot be null");
   if (auto* L = llvm::dyn_cast<IntegerLiteral>(lhs)) {
     // okay: int / int
@@ -218,37 +197,29 @@ SimpleNumericExpr* SimpleNumericExpr::div(
       return new (ctx) FractionLiteral(L->value, R->value);
     // okay: int / fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->value * R->d,
-          R->n);
+      return new (ctx) FractionLiteral(L->value * R->d, R->n);
   }
   if (auto* L = llvm::dyn_cast<FractionLiteral>(lhs)) {
     // okay: fraction / int
     if (auto* R = llvm::dyn_cast<IntegerLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->n,
-          L->d * R->value);
+      return new (ctx) FractionLiteral(L->n, L->d * R->value);
     // okay: fraction / fraction
     if (auto* R = llvm::dyn_cast<FractionLiteral>(rhs))
-      return new (ctx) FractionLiteral(
-          L->n * R->d,
-          L->d * R->n);
+      return new (ctx) FractionLiteral(L->n * R->d, L->d * R->n);
   }
 
   // okay: fractionPi / int
   if (auto* L = llvm::dyn_cast<FractionPiLiteral>(lhs)) {
     if (auto* R = llvm::dyn_cast<IntegerLiteral>(rhs))
-      return new (ctx) FractionPiLiteral(
-          L->n,
-          L->d * R->value);
+      return new (ctx) FractionPiLiteral(L->n, L->d * R->value);
   }
 
   // otherwise, use floating point
   return new (ctx) FloatingLiteral(lhs->getValue() / rhs->getValue());
 }
 
-SimpleNumericExpr* cast::ast::reduceExprToSimpleNumeric(
-    ASTContext& ctx, Expr* expr) {
+SimpleNumericExpr* cast::ast::reduceExprToSimpleNumeric(ASTContext& ctx,
+                                                        Expr* expr) {
   if (expr == nullptr)
     return nullptr;
   if (auto* e = llvm::dyn_cast<SimpleNumericExpr>(expr))
@@ -265,17 +236,17 @@ SimpleNumericExpr* cast::ast::reduceExprToSimpleNumeric(
     if (lhs == nullptr || rhs == nullptr)
       return nullptr;
     switch (e->op) {
-      case BinaryOpExpr::Add:
-        return SimpleNumericExpr::add(ctx, lhs, rhs);
-      case BinaryOpExpr::Sub:
-        return SimpleNumericExpr::sub(ctx, lhs, rhs);
-      case BinaryOpExpr::Mul:
-        return SimpleNumericExpr::mul(ctx, lhs, rhs);
-      case BinaryOpExpr::Div:
-        return SimpleNumericExpr::div(ctx, lhs, rhs);
-      default:
-        assert(false && "Invalid state");
-        break;
+    case BinaryOpExpr::Add:
+      return SimpleNumericExpr::add(ctx, lhs, rhs);
+    case BinaryOpExpr::Sub:
+      return SimpleNumericExpr::sub(ctx, lhs, rhs);
+    case BinaryOpExpr::Mul:
+      return SimpleNumericExpr::mul(ctx, lhs, rhs);
+    case BinaryOpExpr::Div:
+      return SimpleNumericExpr::div(ctx, lhs, rhs);
+    default:
+      assert(false && "Invalid state");
+      break;
     }
   }
   return nullptr;

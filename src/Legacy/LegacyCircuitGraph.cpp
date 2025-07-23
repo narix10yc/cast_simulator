@@ -3,11 +3,11 @@
 #include "utils/utils.h"
 
 #include <chrono>
+#include <deque>
 #include <iomanip>
 #include <map>
 #include <numeric>
 #include <thread>
-#include <deque>
 
 using namespace IOColor;
 using namespace cast::legacy;
@@ -16,9 +16,8 @@ using namespace cast::legacy;
 int CircuitGraphContext::GateNodeCount = 0;
 int CircuitGraphContext::GateBlockCount = 0;
 
-GateNode::GateNode(
-    std::shared_ptr<QuantumGate> gate, const CircuitGraph& graph)
-  : id(CircuitGraphContext::GateNodeCount++), quantumGate(gate) {
+GateNode::GateNode(std::shared_ptr<QuantumGate> gate, const CircuitGraph& graph)
+    : id(CircuitGraphContext::GateNodeCount++), quantumGate(gate) {
   connections.reserve(quantumGate->nQubits());
   for (const auto q : quantumGate->qubits) {
     connections.emplace_back(q, nullptr, nullptr);
@@ -34,11 +33,11 @@ GateNode::GateNode(
 }
 
 GateBlock::GateBlock()
-  : id(CircuitGraphContext::GateBlockCount++), quantumGate(nullptr) {
-}
+    : id(CircuitGraphContext::GateBlockCount++), quantumGate(nullptr) {}
 
 GateBlock::GateBlock(GateNode* gateNode)
-  : id(CircuitGraphContext::GateBlockCount++), quantumGate(gateNode->quantumGate) {
+    : id(CircuitGraphContext::GateBlockCount++),
+      quantumGate(gateNode->quantumGate) {
   wires.reserve(quantumGate->nQubits());
   for (const auto& data : gateNode->connections)
     wires.emplace_back(data.qubit, gateNode, gateNode);
@@ -67,8 +66,8 @@ void CircuitGraph::QFTCircuit(int nQubits, CircuitGraph& graph) {
     graph.appendGate(std::make_shared<QuantumGate>(QuantumGate::H(q)));
     for (int l = q + 1; l < nQubits; ++l) {
       double angle = M_PI_2 * std::pow(2.0, q - l);
-      graph.appendGate(std::make_shared<QuantumGate>(QuantumGate(
-        GateMatrix::FromName("cp", {angle}), {q, l})));
+      graph.appendGate(std::make_shared<QuantumGate>(
+          QuantumGate(GateMatrix::FromName("cp", {angle}), {q, l})));
     }
   }
 }
@@ -94,10 +93,10 @@ void CircuitGraph::QFTCircuit(int nQubits, CircuitGraph& graph) {
 //   return graph;
 // }
 
-GateBlock* CircuitGraph::acquireGateBlock(
-    GateBlock* lhsBlock, GateBlock* rhsBlock) {
+GateBlock* CircuitGraph::acquireGateBlock(GateBlock* lhsBlock,
+                                          GateBlock* rhsBlock) {
   auto quantumGate = std::make_shared<QuantumGate>(
-    lhsBlock->quantumGate->lmatmul(*rhsBlock->quantumGate));
+      lhsBlock->quantumGate->lmatmul(*rhsBlock->quantumGate));
 
   auto* gateBlock = _context->gateBlockPool.acquire();
   gateBlock->quantumGate = quantumGate;
@@ -119,10 +118,11 @@ GateBlock* CircuitGraph::acquireGateBlock(
   return gateBlock;
 }
 
-CircuitGraph::tile_iter_t CircuitGraph::insertBlock(
-    tile_iter_t it, GateBlock* block) {
+CircuitGraph::tile_iter_t CircuitGraph::insertBlock(tile_iter_t it,
+                                                    GateBlock* block) {
 
-  // print(std::cerr << "About to insertBlock " << block->id << "\n", 2) << "\n";
+  // print(std::cerr << "About to insertBlock " << block->id << "\n", 2) <<
+  // "\n";
   assert(it != nullptr);
   assert(block != nullptr);
 
@@ -159,8 +159,7 @@ CircuitGraph::tile_iter_t CircuitGraph::insertBlock(
   return it;
 }
 
-void CircuitGraph::appendGate(
-    std::shared_ptr<QuantumGate> quantumGate) {
+void CircuitGraph::appendGate(std::shared_ptr<QuantumGate> quantumGate) {
   assert(quantumGate != nullptr);
   // update nQubits
   for (const auto& q : quantumGate->qubits) {
@@ -195,8 +194,8 @@ std::vector<GateBlock*> CircuitGraph::getAllBlocks() const {
   return allBlocks;
 }
 
-CircuitGraph::list_node_t*
-CircuitGraph::repositionBlockUpward(list_node_t* ln, int q) {
+CircuitGraph::list_node_t* CircuitGraph::repositionBlockUpward(list_node_t* ln,
+                                                               int q) {
   assert(ln != nullptr);
   auto* block = ln->data[q];
   assert(block && "Cannot reposition a null block");
@@ -341,7 +340,8 @@ std::ostream& CircuitGraph::print(std::ostream& os, int verbose) const {
 //   return sizes;
 // }
 //
-// std::vector<std::vector<int>> CircuitGraph::getBlockOpCountHistogram() const {
+// std::vector<std::vector<int>> CircuitGraph::getBlockOpCountHistogram() const
+// {
 //   const auto allBlocks = getAllBlocks();
 //   int largestSize = 0;
 //   for (const auto* b : allBlocks) {
@@ -365,7 +365,8 @@ std::ostream& CircuitGraph::print(std::ostream& os, int verbose) const {
 //   return hist;
 // }
 //
-// std::ostream& CircuitGraph::displayInfo(std::ostream& os, int verbose) const {
+// std::ostream& CircuitGraph::displayInfo(std::ostream& os, int verbose) const
+// {
 //   os << CYAN_FG << "=== CircuitGraph Info (verbose " << verbose << ") ===\n"
 //      << RESET;
 //

@@ -36,8 +36,8 @@ Parser::parseExprRHS(BinaryOp lhsBinop,
   BinaryOp binop = curToken.toBinaryOp();
   if (binop == BinaryOp::None) {
     logDebug(3, "Expression: No more binop, return");
-    auto ret = std::make_unique<ast::BinaryExpr>(lhsBinop, std::move(lhs),
-                                                 std::move(rhs));
+    auto ret = std::make_unique<ast::BinaryExpr>(
+        lhsBinop, std::move(lhs), std::move(rhs));
     return ret;
   }
 
@@ -45,11 +45,11 @@ Parser::parseExprRHS(BinaryOp lhsBinop,
   nextToken(); // eat the binop
   if (getBinopPrecedence(binop) > getBinopPrecedence(lhsBinop)) {
     auto newRHS = parseExprRHS(binop, std::move(rhs));
-    return std::make_unique<ast::BinaryExpr>(lhsBinop, std::move(lhs),
-                                             std::move(newRHS));
+    return std::make_unique<ast::BinaryExpr>(
+        lhsBinop, std::move(lhs), std::move(newRHS));
   } else {
-    auto newLHS = std::make_unique<ast::BinaryExpr>(lhsBinop, std::move(lhs),
-                                                    std::move(rhs));
+    auto newLHS = std::make_unique<ast::BinaryExpr>(
+        lhsBinop, std::move(lhs), std::move(rhs));
     return parseExprRHS(binop, std::move(newLHS));
   }
 }

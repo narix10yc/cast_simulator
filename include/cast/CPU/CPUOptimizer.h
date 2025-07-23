@@ -1,8 +1,8 @@
 #ifndef CAST_CPU_CPUOPTIMIZER_H
 #define CAST_CPU_CPUOPTIMIZER_H
 
-#include "cast/Core/Optimizer.h"
 #include "cast/CPU/CPUFusionConfig.h"
+#include "cast/Core/Optimizer.h"
 #include "utils/MaybeError.h"
 
 #include "llvm/Support/Casting.h"
@@ -17,9 +17,9 @@ class CPUOptimizer : public Optimizer {
   bool enableCanonicalization_ = true;
   bool enableFusion_ = true;
   bool enableCFO_ = true;
+
 public:
-  CPUOptimizer() 
-    : fusionConfig(std::make_unique<SizeOnlyFusionConfig>(3)) {}
+  CPUOptimizer() : fusionConfig(std::make_unique<SizeOnlyFusionConfig>(3)) {}
 
   CPUOptimizer& setSizeOnlyFusionConfig(int size) {
     fusionConfig = std::make_unique<SizeOnlyFusionConfig>(size);
@@ -33,8 +33,8 @@ public:
 
   // Only meaningful for CPUFusionConfig
   CPUOptimizer& setNThreads(int nThreads) {
-    if (auto* cpuFusionConfig = 
-        llvm::dyn_cast<CPUFusionConfig>(fusionConfig.get())) {
+    if (auto* cpuFusionConfig =
+            llvm::dyn_cast<CPUFusionConfig>(fusionConfig.get())) {
       cpuFusionConfig->setNThreads(nThreads);
     }
     return *this;
@@ -42,8 +42,8 @@ public:
 
   // Only meaningful for CPUFusionConfig
   CPUOptimizer& setPrecision(Precision precision) {
-    if (auto* cpuFusionConfig = 
-        llvm::dyn_cast<CPUFusionConfig>(fusionConfig.get())) {
+    if (auto* cpuFusionConfig =
+            llvm::dyn_cast<CPUFusionConfig>(fusionConfig.get())) {
       cpuFusionConfig->setPrecision(precision);
     }
     return *this;

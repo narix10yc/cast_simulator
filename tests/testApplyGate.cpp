@@ -1,12 +1,11 @@
+#include "cast/CPU/CPUStatevector.h"
 #include "cast/Legacy/QuantumGate.h"
 #include "tests/TestKit.h"
-#include "cast/CPU/CPUStatevector.h"
 
 using namespace cast;
 using namespace utils;
 
-template<CPUSimdWidth SimdWidth, unsigned nQubits>
-static void internal_U1q() {
+template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
   std::stringstream ss;
   ss << "applyGate U1q (s=" << SimdWidth << ", nQubits=" << nQubits << ")";
   test::TestSuite suite(ss.str());
@@ -16,8 +15,10 @@ static void internal_U1q() {
   for (int q = 0; q < nQubits; q++)
     sv.applyGate(legacy::QuantumGate::H(q));
   for (int q = 0; q < nQubits; q++) {
-    suite.assertClose(sv.prob(q), 0.5,
-      "Apply round H: Prob at qubit " + std::to_string(q), GET_INFO());
+    suite.assertClose(sv.prob(q),
+                      0.5,
+                      "Apply round H: Prob at qubit " + std::to_string(q),
+                      GET_INFO());
   }
 
   sv.randomize();
@@ -26,14 +27,15 @@ static void internal_U1q() {
   // phase gates do not change probabilities
   for (int q = 0; q < nQubits; q++) {
     double pBefore = sv.prob(q);
-    auto gate0 = legacy::QuantumGate(legacy::GateMatrix::FromName("p", {0.14}), q);
-    auto gate1 = legacy::QuantumGate(legacy::GateMatrix::FromName("p", {0.41}), (q+1) % nQubits);
+    auto gate0 =
+        legacy::QuantumGate(legacy::GateMatrix::FromName("p", {0.14}), q);
+    auto gate1 = legacy::QuantumGate(legacy::GateMatrix::FromName("p", {0.41}),
+                                     (q + 1) % nQubits);
     auto gate = gate0.lmatmul(gate1);
 
     sv.applyGate(gate);
     std::stringstream ss;
-    ss << "Phase gate at qubits "
-       << q << " " << ((q+1) % nQubits);
+    ss << "Phase gate at qubits " << q << " " << ((q + 1) % nQubits);
     suite.assertClose(sv.norm(), 1.0, ss.str() + ": Norm", GET_INFO());
     suite.assertClose(pBefore, sv.prob(q), ss.str() + ": Prob", GET_INFO());
   }

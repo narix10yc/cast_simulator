@@ -45,9 +45,9 @@ std::string tokenTypetoString(TokenTy ty) {
     return "*";
   case TokenTy::Div:
     return "/";
-  case TokenTy::Greater:  
+  case TokenTy::Greater:
     return ">";
-  case TokenTy::Less: 
+  case TokenTy::Less:
     return "<";
   case TokenTy::LineFeed:
     return "\\n";

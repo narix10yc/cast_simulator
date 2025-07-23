@@ -58,8 +58,8 @@ int absorbSingleQubitGate(ir::CircuitGraphNode& graph,
                           int qubit) {
   assert(it != graph.tile_end());
   auto* gate = (*it)[qubit];
-  assert(gate != nullptr && gate->nQubits() == 1 && 
-        "We expect a single-qubit gate when calling absorbSingleQubitGate");
+  assert(gate != nullptr && gate->nQubits() == 1 &&
+         "We expect a single-qubit gate when calling absorbSingleQubitGate");
 
   // Try to fuse it with gates in next rows
   auto end = graph.tile_end();
@@ -68,7 +68,7 @@ int absorbSingleQubitGate(ir::CircuitGraphNode& graph,
     auto* nextGate = (*curIt)[qubit];
     if (nextGate == nullptr)
       continue;
-    
+
     // fuse them together
     auto fusedGate = cast::matmul(nextGate, gate);
     assert(fusedGate != nullptr);
@@ -105,7 +105,7 @@ int absorbSingleQubitGate(ir::CircuitGraphNode& graph,
 
 // We expect gateA, gateG, and gateH are on three consecutive rows with at least
 // one shared target qubit. This function checks if it might be beneficial to
-// swap gateG and gateH, so that we can fuse gateA with the gateH. That is, 
+// swap gateG and gateH, so that we can fuse gateA with the gateH. That is,
 // instead of doing HGA, we do GHA, with HA fused together.
 // When gateG and gateH are already very large, checking their commutation
 // may be super expensive. We skip the check if the product gateG * gateH would
@@ -133,7 +133,7 @@ bool swapIfPossible(ir::CircuitGraphNode& graph,
 
   if (getKAfterFusion(gateA, gateH) > maxCandidateSize)
     return false; // resulting gate would be too large
-  
+
   std::vector<QuantumGate*> checkedGates;
 
   for (auto q : gateH->qubits()) {
@@ -230,18 +230,15 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
       if (checkFuseable(candidateGate) == false) {
         assert(std::next(prodIt) == curIt);
         bool swapped = swapIfPossible(
-          graph, prodIt, q, maxCandidateSize, GLOBAL_MAX_K, config->swapTol
-        );
+            graph, prodIt, q, maxCandidateSize, GLOBAL_MAX_K, config->swapTol);
         if (!swapped)
           continue;
         // swapping triggered, so we can use the swapped gate
         curIt = std::next(prodIt);
         candidateGate = (*curIt)[q];
-        LLVM_DEBUG(
-          std::cerr << "Swapping triggered. Fusing "
-                    << graph.gateId(prodGate) << " with "
-                    << graph.gateId((*curIt)[q]) << "\n";
-        );
+        LLVM_DEBUG(std::cerr << "Swapping triggered. Fusing "
+                             << graph.gateId(prodGate) << " with "
+                             << graph.gateId((*curIt)[q]) << "\n";);
       }
       // candidateGate is accepted
       fusedGates.emplace_back(graph.lookup(candidateGate), curIt);
@@ -277,19 +274,18 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
   //   productGate, config->precision, config->nThreads);
 
   double benefit = oldTime / (newTime + 1e-10) - 1.0;
-  LLVM_DEBUG(
-    utils::printSpanWithPrinter(std::cerr,
-      std::span(fusedGates.data(), fusedGates.size()),
-      [&graph](std::ostream& os, const TentativeFusedItem& item) {
-        os << graph.gateId(item.gate)
-           << "(nQubits=" << item.gate->nQubits()
-           << ", opCount=" << item.gate->opCount(1e-8) << ")";
-      });
-    std::cerr << " => " << graph.gateId(prodGate)
-              << "(nQubits=" << prodGate->nQubits()
-              << ", opCount=" << prodGate->opCount(1e-8) << "). "
-              << "Benefit = " << benefit << "; ";
-  );
+  LLVM_DEBUG(utils::printSpanWithPrinter(
+                 std::cerr,
+                 std::span(fusedGates.data(), fusedGates.size()),
+                 [&graph](std::ostream& os, const TentativeFusedItem& item) {
+                   os << graph.gateId(item.gate)
+                      << "(nQubits=" << item.gate->nQubits()
+                      << ", opCount=" << item.gate->opCount(1e-8) << ")";
+                 });
+             std::cerr << " => " << graph.gateId(prodGate)
+                       << "(nQubits=" << prodGate->nQubits()
+                       << ", opCount=" << prodGate->opCount(1e-8) << "). "
+                       << "Benefit = " << benefit << "; ";);
 
   // not enough benefit, undo this fusion
   if (benefit < config->benefitMargin) {
@@ -321,7 +317,8 @@ int cast::impl::applySizeOnlyFusion(ir::CircuitGraphNode& graph,
   return nFused;
 }
 
-int cast::impl::applySizeTwoFusion(ir::CircuitGraphNode& graph, double swapTol) {
+int cast::impl::applySizeTwoFusion(ir::CircuitGraphNode& graph,
+                                   double swapTol) {
   // Step 1: absorb single-qubit gates
   // When step 1 finishes, all single-qubit gates should be absorbed. The only
   // exception is when there is precisely one single-qubit gate in a qubit wire.
@@ -390,7 +387,7 @@ using namespace cast::ir;
 
 CircuitGraphNode*
 getOrAppendCGNodeToCompoundNodeFront(CompoundNode& compoundNode) {
-  if (!compoundNode.empty() && 
+  if (!compoundNode.empty() &&
       llvm::isa<CircuitGraphNode>(compoundNode.nodes[0].get())) {
     return llvm::cast<CircuitGraphNode>(compoundNode.nodes[0].get());
   }
@@ -400,7 +397,7 @@ getOrAppendCGNodeToCompoundNodeFront(CompoundNode& compoundNode) {
 
 CircuitGraphNode*
 getOrAppendCGNodeToCompoundNodeBack(CompoundNode& compoundNode) {
-  if (!compoundNode.empty() && 
+  if (!compoundNode.empty() &&
       llvm::isa<CircuitGraphNode>(compoundNode.nodes.back().get())) {
     return llvm::cast<CircuitGraphNode>(compoundNode.nodes.back().get());
   }
@@ -413,26 +410,25 @@ getOrAppendCGNodeToCompoundNodeBack(CompoundNode& compoundNode) {
 // Therefore, it can only handle up to 64 qubits.
 class FlagArray {
   uint64_t flags;
+
 public:
   // initialize: [0, nQubits) bits are set to 0 (not checked)
   // other bits are set to 1 (checked).
   FlagArray(int nQubits) : flags(~((1ULL << nQubits) - 1)) {
     assert(nQubits < 64 && "nQubits should be less than 64");
   }
-  
+
   void setCheck(int q) {
     assert(q >= 0 && q < 64 && "q should be in [0, 64)");
     flags |= (1ULL << q);
   }
-  
+
   void setNotCheck(int q) {
     assert(q >= 0 && q < 64 && "q should be in [0, 64)");
     flags &= ~(1ULL << q);
-  }  
-
-  bool allChecked() const {
-    return flags == ~(static_cast<uint64_t>(0));
   }
+
+  bool allChecked() const { return flags == ~(static_cast<uint64_t>(0)); }
 
   // Possibly return -1 if all qubits are checked.
   int getFirstUnchecked() const {
@@ -456,15 +452,13 @@ public:
     return !isChecked(q);
   }
 
-  bool operator[](int q) const {
-    return isChecked(q);
-  }
+  bool operator[](int q) const { return isChecked(q); }
 };
 
 // Check if the gate commutes with the measurement on measureQubit.
 // This function currently does not consider all cases. If it returns true,
 // then commutation is guaranteed. The converse is not true.
-// The tolerance must be set to a positive value. Users are advised to check 
+// The tolerance must be set to a positive value. Users are advised to check
 // the tolerance before calling this function (for example, to disable
 // swapping analysis).
 bool isCommutingWithMeasurement(const QuantumGate* gate,
@@ -478,57 +472,52 @@ bool isCommutingWithMeasurement(const QuantumGate* gate,
     return true;
 
   switch (gate->nQubits()) {
-    case 0:
-      // this should never be reached
-      assert(false && "Gate targets is empty");
-      return true;
-    case 1:
-      // unless gate is the identity
-      return false;
-    case 2: {
-      auto stdQuGate = llvm::dyn_cast<StandardQuantumGate>(gate);
-      if (stdQuGate == nullptr)
-        return false; // cannot determine commutativity; not supported yet
-      auto scalarGM = stdQuGate->getScalarGM();
-      if (scalarGM == nullptr)
-        return false; // cannot determine commutativity; not supported yet
-      const auto& m = scalarGM->matrix();
-      if (measureQubit == qubits[0]) {
-        // is everything all close to zero?
-        bool b = m.real(0, 1) < tol && m.real(0, 3) < tol &&
-                 m.real(1, 0) < tol && m.real(1, 2) < tol &&
-                 m.real(2, 1) < tol && m.real(2, 3) < tol &&
-                 m.real(3, 0) < tol && m.real(3, 2) < tol && 
-                 m.imag(0, 1) < tol && m.imag(0, 3) < tol &&
-                 m.imag(1, 0) < tol && m.imag(1, 2) < tol &&
-                 m.imag(2, 1) < tol && m.imag(2, 3) < tol &&
-                 m.imag(3, 0) < tol && m.imag(3, 2) < tol;
-        return b;
-      } 
-      // else
-      assert(measureQubit == qubits[1]);
-      bool b = m.real(0, 2) < tol && m.real(0, 3) < tol &&
-               m.real(1, 2) < tol && m.real(1, 3) < tol &&
-               m.real(2, 0) < tol && m.real(2, 1) < tol &&
-               m.real(3, 0) < tol && m.real(3, 1) < tol &&
-               m.imag(0, 2) < tol && m.imag(0, 3) < tol &&
-               m.imag(1, 2) < tol && m.imag(1, 3) < tol &&
-               m.imag(2, 0) < tol && m.imag(2, 1) < tol &&
-               m.imag(3, 0) < tol && m.imag(3, 1) < tol;
+  case 0:
+    // this should never be reached
+    assert(false && "Gate targets is empty");
+    return true;
+  case 1:
+    // unless gate is the identity
+    return false;
+  case 2: {
+    auto stdQuGate = llvm::dyn_cast<StandardQuantumGate>(gate);
+    if (stdQuGate == nullptr)
+      return false; // cannot determine commutativity; not supported yet
+    auto scalarGM = stdQuGate->getScalarGM();
+    if (scalarGM == nullptr)
+      return false; // cannot determine commutativity; not supported yet
+    const auto& m = scalarGM->matrix();
+    if (measureQubit == qubits[0]) {
+      // is everything all close to zero?
+      bool b = m.real(0, 1) < tol && m.real(0, 3) < tol && m.real(1, 0) < tol &&
+               m.real(1, 2) < tol && m.real(2, 1) < tol && m.real(2, 3) < tol &&
+               m.real(3, 0) < tol && m.real(3, 2) < tol && m.imag(0, 1) < tol &&
+               m.imag(0, 3) < tol && m.imag(1, 0) < tol && m.imag(1, 2) < tol &&
+               m.imag(2, 1) < tol && m.imag(2, 3) < tol && m.imag(3, 0) < tol &&
+               m.imag(3, 2) < tol;
       return b;
     }
-    default:
-      // We could use cast::isCommuting() to check if gate commutes with |0><0|
-      // and |1><1|
-      return false;
+    // else
+    assert(measureQubit == qubits[1]);
+    bool b = m.real(0, 2) < tol && m.real(0, 3) < tol && m.real(1, 2) < tol &&
+             m.real(1, 3) < tol && m.real(2, 0) < tol && m.real(2, 1) < tol &&
+             m.real(3, 0) < tol && m.real(3, 1) < tol && m.imag(0, 2) < tol &&
+             m.imag(0, 3) < tol && m.imag(1, 2) < tol && m.imag(1, 3) < tol &&
+             m.imag(2, 0) < tol && m.imag(2, 1) < tol && m.imag(3, 0) < tol &&
+             m.imag(3, 1) < tol;
+    return b;
+  }
+  default:
+    // We could use cast::isCommuting() to check if gate commutes with |0><0|
+    // and |1><1|
+    return false;
   }
 }
 
 // returns true if the pass takes effect
-// move single-qubit gates not on the measurement wire at the bottom of the 
+// move single-qubit gates not on the measurement wire at the bottom of the
 // prior circuit graph node to the top of the if node
-bool applyPriorIfPass(CircuitGraphNode* priorCGNode,
-                      IfMeasureNode* ifNode) {
+bool applyPriorIfPass(CircuitGraphNode* priorCGNode, IfMeasureNode* ifNode) {
   assert(priorCGNode != nullptr);
   assert(ifNode != nullptr);
   bool hasEffect = false;
@@ -563,10 +552,9 @@ bool applyPriorIfPass(CircuitGraphNode* priorCGNode,
 }
 
 // returns true if the pass takes effect
-// move all single-qubit gates at the top of the join circuit graph node to 
+// move all single-qubit gates at the top of the join circuit graph node to
 // the bottom of the if node
-bool applyIfJoinPass(IfMeasureNode* ifNode,
-                     CircuitGraphNode* joinCGNode) {
+bool applyIfJoinPass(IfMeasureNode* ifNode, CircuitGraphNode* joinCGNode) {
   assert(joinCGNode != nullptr);
   assert(ifNode != nullptr);
   bool hasEffect = false;
@@ -626,29 +614,9 @@ std::vector<QuantumGatePtr> collectCommutingGatesWithMeasurement(
 
     bool accept = true;
     switch (gate->nQubits()) {
-      case 1: {
-        if (q == measureQubit) {
-          // swapTol <= 0.0 means we disable the swapping analysis
-          if (swapTol <= 0.0 ||
-              !isCommutingWithMeasurement(gate.get(), measureQubit, swapTol)) {
-            accept = false;
-            break;
-          }
-          accept = true;
-          break;
-        }
-        // else: q is not the measurement qubit
-        accept = true;
-        break;
-      }
-      case 2: {
-        int q0 = gate->qubits()[0];
-        int q1 = gate->qubits()[1];
-        if (q0 != measureQubit && q1 != measureQubit) {
-          accept = true;
-          break;
-        }
-        // else: one of the qubits is the measurement qubit
+    case 1: {
+      if (q == measureQubit) {
+        // swapTol <= 0.0 means we disable the swapping analysis
         if (swapTol <= 0.0 ||
             !isCommutingWithMeasurement(gate.get(), measureQubit, swapTol)) {
           accept = false;
@@ -657,10 +625,30 @@ std::vector<QuantumGatePtr> collectCommutingGatesWithMeasurement(
         accept = true;
         break;
       }
-      default: {
-        assert(false && "Unreachable");
+      // else: q is not the measurement qubit
+      accept = true;
+      break;
+    }
+    case 2: {
+      int q0 = gate->qubits()[0];
+      int q1 = gate->qubits()[1];
+      if (q0 != measureQubit && q1 != measureQubit) {
+        accept = true;
         break;
       }
+      // else: one of the qubits is the measurement qubit
+      if (swapTol <= 0.0 ||
+          !isCommutingWithMeasurement(gate.get(), measureQubit, swapTol)) {
+        accept = false;
+        break;
+      }
+      accept = true;
+      break;
+    }
+    default: {
+      assert(false && "Unreachable");
+      break;
+    }
     } // end of switch
 
     if (accept) {
@@ -670,18 +658,18 @@ std::vector<QuantumGatePtr> collectCommutingGatesWithMeasurement(
       // gate is not accepted. Mark the corresponding wires as checked (i.e.
       // disallow further gates to commute)
       switch (gate->nQubits()) {
-        case 1:
-          flags.setCheck(q);
-          break;
-        case 2: {
-          flags.setCheck(gate->qubits()[0]);
-          flags.setCheck(gate->qubits()[1]);
-          break;
-        }
-        default: {
-          assert(false && "Unreachable");
-          break;
-        }
+      case 1:
+        flags.setCheck(q);
+        break;
+      case 2: {
+        flags.setCheck(gate->qubits()[0]);
+        flags.setCheck(gate->qubits()[1]);
+        break;
+      }
+      default: {
+        assert(false && "Unreachable");
+        break;
+      }
       } // end of switch
     } // end of if-else
 
@@ -690,7 +678,7 @@ std::vector<QuantumGatePtr> collectCommutingGatesWithMeasurement(
 }
 
 int applyFusionCFOPass_PriorIf(CircuitGraphNode* priorCGNode,
-                               IfMeasureNode* ifNode, 
+                               IfMeasureNode* ifNode,
                                const FusionConfig* config,
                                int maxCandidateSize) {
   assert(priorCGNode != nullptr);
@@ -701,10 +689,10 @@ int applyFusionCFOPass_PriorIf(CircuitGraphNode* priorCGNode,
 
   auto thenCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->thenBody);
   auto elseCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->elseBody);
-  
+
   auto freeGates = collectCommutingGatesWithMeasurement(
-    *priorCGNode, ifNode->qubit, config->swapTol);
-      
+      *priorCGNode, ifNode->qubit, config->swapTol);
+
   int nFused = 0;
   int i;
   int size = freeGates.size();
@@ -728,9 +716,10 @@ int applyFusionCFOPass_PriorIf(CircuitGraphNode* priorCGNode,
     bool progress = (thenFused > 0 || elseFused > 0);
     if (thenFused > 0) {
       nFused += thenFused;
-      thenCGNode->squeeze(); 
+      thenCGNode->squeeze();
     }
-    if (elseFused > 0) {;
+    if (elseFused > 0) {
+      ;
       nFused += elseFused;
       elseCGNode->squeeze();
     }
@@ -756,7 +745,7 @@ int applyFusionCFOPass_PriorIf(CircuitGraphNode* priorCGNode,
   return nFused;
 }
 
-int applyFusionCFOPass_IfJoin(IfMeasureNode* ifNode, 
+int applyFusionCFOPass_IfJoin(IfMeasureNode* ifNode,
                               CircuitGraphNode* joinCGNode,
                               const FusionConfig* config,
                               int maxCandidateSize) {
@@ -788,7 +777,7 @@ int applyFusionCFOPass_IfJoin(IfMeasureNode* ifNode,
 
     // Move the gate from the join block to the if block
     auto gate = joinCGNode->lookup((*joinCGNode->tile_begin())[q]);
-    // TODO: check eligibility 
+    // TODO: check eligibility
     if (gate == nullptr) {
       // remove the qubit from the mask
       thenMask.setCheck(q);
@@ -801,11 +790,11 @@ int applyFusionCFOPass_IfJoin(IfMeasureNode* ifNode,
     int thenFused = 0, elseFused = 0;
     if (thenRowIt != thenCGNode->tile_begin()) {
       thenFused = cast::impl::startFusion(
-        *thenCGNode, config, maxCandidateSize, std::prev(thenRowIt), q);
+          *thenCGNode, config, maxCandidateSize, std::prev(thenRowIt), q);
     }
     if (elseRowIt != elseCGNode->tile_begin()) {
       elseFused = cast::impl::startFusion(
-        *elseCGNode, config, maxCandidateSize, std::prev(elseRowIt), q);
+          *elseCGNode, config, maxCandidateSize, std::prev(elseRowIt), q);
     }
     if (thenFused > 0 || elseFused > 0) {
       nFused += thenFused;
@@ -835,8 +824,8 @@ int applyFusionCFOPass_IfJoin(IfMeasureNode* ifNode,
 } // end of anonymous namespace
 
 int cast::impl::applyGateFusion(ir::CircuitGraphNode& graph,
-                                 const FusionConfig* config,
-                                 int maxCandidateSize) {
+                                const FusionConfig* config,
+                                int maxCandidateSize) {
   int nFused = 0;
   auto it = graph.tile_begin();
   // we need to query graph.tile_end() every time, because impl::startFusion
@@ -867,13 +856,12 @@ int cast::impl::applyCFOFusion(ir::CircuitNode& circuit,
     if (auto* priorCGNode = llvm::dyn_cast<CircuitGraphNode>(prevIt->get())) {
       if (auto* ifNode = llvm::dyn_cast<IfMeasureNode>(curIt->get())) {
         nFused += applyFusionCFOPass_PriorIf(
-          priorCGNode, ifNode, config, maxCandidateSize);
+            priorCGNode, ifNode, config, maxCandidateSize);
       }
-    }
-    else if (auto* ifNode = llvm::dyn_cast<IfMeasureNode>(prevIt->get())) {
+    } else if (auto* ifNode = llvm::dyn_cast<IfMeasureNode>(prevIt->get())) {
       if (auto* joinCGNode = llvm::dyn_cast<CircuitGraphNode>(curIt->get())) {
         nFused += applyFusionCFOPass_IfJoin(
-          ifNode, joinCGNode, config, maxCandidateSize);
+            ifNode, joinCGNode, config, maxCandidateSize);
       }
     }
   } // end of while loop

@@ -1,54 +1,21 @@
----
-Language: Cpp
 BasedOnStyle: LLVM
-AlignConsecutiveAssignments: false
-AlignConsecutiveDeclarations: false
-AlignOperands: true
-AlignTrailingComments: false
-AlwaysBreakTemplateDeclarations: Yes
-BraceWrapping: 
-  AfterCaseLabel: false
-  AfterClass: false
-  AfterControlStatement: false
-  AfterEnum: false
-  AfterFunction: false
-  AfterNamespace: false
-  AfterStruct: false
-  AfterUnion: false
-  AfterExternBlock: false
-  BeforeCatch: false
-  BeforeElse: false
-  BeforeLambdaBody: false
-  BeforeWhile: false
-  SplitEmptyFunction: true
-  SplitEmptyRecord: true
-  SplitEmptyNamespace: true
-BreakBeforeBraces: Custom
-BreakConstructorInitializers: AfterColon
-BreakConstructorInitializersBeforeComma: false
-ColumnLimit: 120
-ConstructorInitializerAllOnOneLineOrOnePerLine: false
-IncludeCategories: 
-  - Regex: '^<.*'
-    Priority: 1
-  - Regex: '^".*'
-    Priority: 2
-  - Regex: '.*'
-    Priority: 3
-IncludeIsMainRegex: '([-_](test|unittest))?$'
-IndentCaseLabels: true
-InsertNewlineAtEOF: true
-MacroBlockBegin: ''
-MacroBlockEnd: ''
-MaxEmptyLinesToKeep: 2
-NamespaceIndentation: All
-PointerAlignment: Left
-SpaceAfterCStyleCast: true
-SpaceAfterTemplateKeyword: false
-SpaceInEmptyParentheses: false
-SpacesInAngles: false
-SpacesInConditionalStatement: false
-SpacesInCStyleCastParentheses: false
-SpacesInParentheses: false
+
+# === Indentation and Spacing ===
+IndentWidth: 2
 TabWidth: 2
-...
+UseTab: Never
+
+# === Line Length ===
+ColumnLimit: 80
+
+# === Pointer and Reference Alignment ===
+DerivePointerAlignment: false
+PointerAlignment: Left        # 'Type* var' instead of 'Type *var'
+SpaceBeforeParens: ControlStatements
+
+# - Variables start with lowercase letters
+
+# === Misc ===
+BinPackArguments: false
+BinPackParameters: false
+AlignAfterOpenBracket: Align

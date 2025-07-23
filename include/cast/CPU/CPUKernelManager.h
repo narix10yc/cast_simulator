@@ -1,18 +1,18 @@
 #ifndef CAST_CPU_KERNEL_MANAGER_CPU_H
 #define CAST_CPU_KERNEL_MANAGER_CPU_H
 
+#include "cast/CPU/Config.h"
+#include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
-#include "cast/Core/IRNode.h"
-#include "cast/CPU/Config.h"
 #include "utils/MaybeError.h"
 
 #define CPU_KERNEL_TYPE void(void*)
 
 namespace cast {
 
-enum class MatrixLoadMode { 
-  // UseMatImmValues: Use immediate values for matrix elements. In the IR, 
+enum class CPUMatrixLoadMode {
+  // UseMatImmValues: Use immediate values for matrix elements. In the IR,
   // these elements will be LLVM Constants, which are hardcoded in the
   // assembly.
   UseMatImmValues,
@@ -29,7 +29,7 @@ struct CPUKernelInfo {
   std::function<CPU_KERNEL_TYPE> executable;
   Precision precision;
   std::string llvmFuncName;
-  MatrixLoadMode matrixLoadMode;
+  CPUMatrixLoadMode matrixLoadMode;
   ConstQuantumGatePtr gate;
   // extra information
   CPUSimdWidth simdWidth;
@@ -45,31 +45,21 @@ struct CPUKernelGenConfig {
   bool usePDEP;
   double zeroTol;
   double oneTol;
-  MatrixLoadMode matrixLoadMode;
+  CPUMatrixLoadMode matrixLoadMode;
 
   CPUKernelGenConfig()
-    : simdWidth(get_cpu_simd_width())
-    , precision(Precision::F64) // default to double precision
-    , useFMA(true)
-    , useFMS(true)
-    , usePDEP(false)
-    , zeroTol(1e-8)
-    , oneTol(1e-8)
-    , matrixLoadMode(MatrixLoadMode::UseMatImmValues) {}
+      : simdWidth(get_cpu_simd_width()),
+        precision(Precision::F64) // default to double precision
+        ,
+        useFMA(true), useFMS(true), usePDEP(false), zeroTol(1e-8), oneTol(1e-8),
+        matrixLoadMode(CPUMatrixLoadMode::UseMatImmValues) {}
 
   CPUKernelGenConfig(CPUSimdWidth simdWidth, Precision precision)
-    : simdWidth(simdWidth)
-    , precision(precision)
-    , useFMA(true)
-    , useFMS(true)
-    , usePDEP(false)
-    , zeroTol(1e-8)
-    , oneTol(1e-8)
-    , matrixLoadMode(MatrixLoadMode::UseMatImmValues) {}
+      : simdWidth(simdWidth), precision(precision), useFMA(true), useFMS(true),
+        usePDEP(false), zeroTol(1e-8), oneTol(1e-8),
+        matrixLoadMode(CPUMatrixLoadMode::UseMatImmValues) {}
 
-  int get_simd_s() const {
-    return cast::get_simd_s(simdWidth, precision);
-  }  
+  int get_simd_s() const { return cast::get_simd_s(simdWidth, precision); }
 
   std::ostream& displayInfo(std::ostream& os) const;
 };
@@ -89,17 +79,16 @@ class CPUKernelManager : public KernelManagerBase {
 
   // Generate a CPU kernel for the given gate. This function will check if the
   // gate is a standard gate or a superoperator gate.
-  MaybeError<std::unique_ptr<CPUKernelInfo>> _genCPUGate(
-      const CPUKernelGenConfig& config,
-      ConstQuantumGatePtr gate,
-      const std::string& funcName);
+  MaybeError<std::unique_ptr<CPUKernelInfo>>
+  _genCPUGate(const CPUKernelGenConfig& config,
+              ConstQuantumGatePtr gate,
+              const std::string& funcName);
 
   static std::atomic<int> _standaloneKernelCounter;
+
 public:
   CPUKernelManager()
-    : KernelManagerBase()
-    , _standaloneKernels()
-    , llvmJIT(nullptr) {}
+      : KernelManagerBase(), _standaloneKernels(), llvmJIT(nullptr) {}
 
   std::ostream& displayInfo(std::ostream& os) const;
 
@@ -123,8 +112,8 @@ public:
     return nullptr;
   }
 
-  std::span<const KernelInfoPtr> getKernelsFromGraphName(
-      const std::string& graphName) const {
+  std::span<const KernelInfoPtr>
+  getKernelsFromGraphName(const std::string& graphName) const {
     auto it = _graphKernels.find(graphName);
     if (it == _graphKernels.end())
       return {}; // empty span
@@ -140,11 +129,11 @@ public:
   /// ORC JIT engine. This means all kernels only get compiled just before being
   /// called. If set to false, all kernels are ready to be executed when this
   /// function returns (good for benchmarks).
-  MaybeError<void> initJIT(
-      int nThreads = 1,
-      llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
-      bool useLazyJIT = false,
-      int verbose = 0);
+  MaybeError<void>
+  initJIT(int nThreads = 1,
+          llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
+          bool useLazyJIT = false,
+          int verbose = 0);
 
   bool isJITed() const {
     assert(llvmJIT == nullptr ||
@@ -152,22 +141,20 @@ public:
     return llvmJIT != nullptr;
   }
 
-  // Generate a CPU kernel for the given gate. The generated kernel will be 
-  // put into the standalone kernel pool. This function checks for name 
+  // Generate a CPU kernel for the given gate. The generated kernel will be
+  // put into the standalone kernel pool. This function checks for name
   // conflicts and will not overwrite existing kernels.
-  MaybeError<void> genStandaloneGate(
-      const CPUKernelGenConfig& config,
-      ConstQuantumGatePtr gate,
-      const std::string& funcName);
+  MaybeError<void> genStandaloneGate(const CPUKernelGenConfig& config,
+                                     ConstQuantumGatePtr gate,
+                                     const std::string& funcName);
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
   /// order of the gate in the circuit graph. <order> will be retrieved in
-  /// \c collectKernelsFromGraphName 
-  MaybeError<void> genGraphGates(
-      const CPUKernelGenConfig& config,
-      const ir::CircuitGraphNode& graph,
-      const std::string& graphName);
+  /// \c collectKernelsFromGraphName
+  MaybeError<void> genGraphGates(const CPUKernelGenConfig& config,
+                                 const ir::CircuitGraphNode& graph,
+                                 const std::string& graphName);
 
   // std::vector<CPUKernelInfo*>
   // collectKernelsFromGraphName(const std::string& graphName);
@@ -183,15 +170,17 @@ public:
       if (kernel.executable)
         return;
     }
-    auto addr = cantFail(llvmJIT->lookup(kernel.llvmFuncName)).toPtr<CPU_KERNEL_TYPE>();
-    // std::cerr << "Kernel " << kernel.llvmFuncName << " addr " << (void*)addr << "\n";
+    auto addr =
+        cantFail(llvmJIT->lookup(kernel.llvmFuncName)).toPtr<CPU_KERNEL_TYPE>();
+    // std::cerr << "Kernel " << kernel.llvmFuncName << " addr " << (void*)addr
+    // << "\n";
     {
       std::lock_guard<std::mutex> lock(mtx);
       kernel.executable = addr;
     }
   }
 
-	void dumpIR(const std::string& funcName,
+  void dumpIR(const std::string& funcName,
               llvm::raw_ostream& os = llvm::errs());
 
   // TODO: not implemented yet
@@ -199,23 +188,20 @@ public:
 
   void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
 
-  MaybeError<void> applyCPUKernel(
-      void* sv,
-      int nQubits,
-      const CPUKernelInfo& kernelInfo,
-      int nThreads = 1) const;
+  MaybeError<void> applyCPUKernel(void* sv,
+                                  int nQubits,
+                                  const CPUKernelInfo& kernelInfo,
+                                  int nThreads = 1) const;
 
-  MaybeError<void> applyCPUKernel(
-      void* sv,
-      int nQubits,
-      const std::string& llvmFuncName,
-      int nThreads = 1) const;
-  
-  MaybeError<void> applyCPUKernelsFromGraph(
-      void* sv,
-      int nQubits,
-      const std::string& graphName,
-      int nThreads = 1) const;
+  MaybeError<void> applyCPUKernel(void* sv,
+                                  int nQubits,
+                                  const std::string& llvmFuncName,
+                                  int nThreads = 1) const;
+
+  MaybeError<void> applyCPUKernelsFromGraph(void* sv,
+                                            int nQubits,
+                                            const std::string& graphName,
+                                            int nThreads = 1) const;
 
 }; // class CPUKernelManager
 

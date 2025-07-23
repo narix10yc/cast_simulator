@@ -15,16 +15,18 @@ public:
   /// The LLVM-style RTTI. Indentation corresponds to class hirearchy.
   enum NodeKind {
     IRNode_Base,
-      IRNode_Compound,
-      IRNode_IfMeasure,
-      IRNode_Circuit,
-      IRNode_CircuitGraph,
-      IRNode_OutMeasure,
-      IRNode_OutState,
-      IRNode_End
+    IRNode_Compound,
+    IRNode_IfMeasure,
+    IRNode_Circuit,
+    IRNode_CircuitGraph,
+    IRNode_OutMeasure,
+    IRNode_OutState,
+    IRNode_End
   };
+
 protected:
   NodeKind _kind;
+
 public:
   explicit IRNode(NodeKind kind) : _kind(kind) {}
 
@@ -65,7 +67,7 @@ public:
   void push_front(std::unique_ptr<IRNode> node) {
     nodes.insert(nodes.begin(), std::move(node));
   }
-  
+
   void push_back(std::unique_ptr<IRNode> node) {
     nodes.push_back(std::move(node));
   }
@@ -78,7 +80,7 @@ public:
 
   std::ostream&
   impl_visualize(std::ostream& os, int width, int n_qubits) const override;
-  
+
   static bool classof(const IRNode* node) {
     return node->getKind() == IRNode_Compound;
   }
@@ -103,7 +105,7 @@ public:
   CompoundNode elseBody;
 
   IfMeasureNode(int qubit)
-    : IRNode(IRNode_IfMeasure), qubit(qubit), thenBody(), elseBody() {}
+      : IRNode(IRNode_IfMeasure), qubit(qubit), thenBody(), elseBody() {}
 
   std::ostream& print(std::ostream& os, int indent) const override;
 
@@ -132,19 +134,20 @@ private:
   int _nQubits;
   using row_t = std::vector<QuantumGate*>;
   std::list<row_t> _tile;
+
 public:
   static int _gateMapId;
 
   // This is the width to display in each qubit wire.
   static int getWidthForVisualize();
-  
+
   static constexpr int DefaultRowCapacity = 32;
 
   using row_iterator = std::list<row_t>::iterator;
   using const_row_iterator = std::list<row_t>::const_iterator;
   // struct TransparentHash {
   //   using is_transparent = void;
-    
+
   //   std::size_t operator()(const QuantumGatePtr& gate) const noexcept {
   //     return std::hash<QuantumGate*>()(gate.get());
   //   }
@@ -157,20 +160,24 @@ public:
   // struct TransparentEqual {
   //   using is_transparent = void;
 
-  //   bool operator()(const QuantumGatePtr& lhs, const QuantumGatePtr& rhs) const noexcept {
+  //   bool operator()(const QuantumGatePtr& lhs, const QuantumGatePtr& rhs)
+  //   const noexcept {
   //     return lhs.get() == rhs.get();
   //   }
 
-  //   bool operator()(const QuantumGate* lhs, const QuantumGatePtr& rhs) const noexcept {
+  //   bool operator()(const QuantumGate* lhs, const QuantumGatePtr& rhs) const
+  //   noexcept {
   //     return lhs == rhs.get();
   //   }
 
-  //   bool operator()(const QuantumGatePtr& lhs, const QuantumGate* rhs) const noexcept {
+  //   bool operator()(const QuantumGatePtr& lhs, const QuantumGate* rhs) const
+  //   noexcept {
   //     return lhs.get() == rhs;
   //   }
   // };
 
-  // std::unordered_map<QuantumGatePtr, int, TransparentHash, TransparentEqual> _gateMap;
+  // std::unordered_map<QuantumGatePtr, int, TransparentHash, TransparentEqual>
+  // _gateMap;
 
   /* TODO
    * We sometimes look up gates using raw pointers. Current approach is O(n)
@@ -181,6 +188,7 @@ private:
   std::unordered_map<QuantumGatePtr, int> _gateMap;
 
   void resizeRowsIfNeeded(int size);
+
 public:
   /** TODO: a bit awkward to expose the following functions used in fusion
    * as public.
@@ -205,13 +213,11 @@ public:
   /// there.
   /// @return the tile iterator of the fused gate
   row_iterator fuseAndInsertDiffRow(row_iterator rowItL, int qubit);
-public:
-  CircuitGraphNode()
-    : IRNode(IRNode_CircuitGraph)
-    , _nQubits(0)
-    , _tile() {}
 
-  // Recommend to use assert(checkConsistency()) 
+public:
+  CircuitGraphNode() : IRNode(IRNode_CircuitGraph), _nQubits(0), _tile() {}
+
+  // Recommend to use assert(checkConsistency())
   bool checkConsistency() const;
 
   /// @brief Insert a gate into the end of the circuit graph.
@@ -226,10 +232,10 @@ public:
 
   bool isRowVacant(row_iterator rowIt,
                    const QuantumGate::TargetQubitsType& qubits) const;
-  
+
   /// @brief Remove the two gates \c (*rowItL)[qubit] and
   /// \c (*std::next(rowItL))[qubit], and insert gate \c gate into the tile.
-  /// Often this function is called when \c gate is the fused gate of the 
+  /// Often this function is called when \c gate is the fused gate of the
   /// two removed gates.
   /// The row that \c gate is inserted into takes the following priority:
   /// 1. Put \c gate in row \c std::next(rowItL) if is vacant; If not,
@@ -279,15 +285,15 @@ public:
 
   // Collect gates in the circuit graph in order. This methods returns a vector
   // of raw pointers. These pointers could be invalidated when the circuit graph
-  // goes out of scope. Use \c getAllGatesShared() to retain gate memories. 
+  // goes out of scope. Use \c getAllGatesShared() to retain gate memories.
   std::vector<QuantumGate*> getAllGates() const;
 
-  // Collect gates in the circuit graph in order. 
+  // Collect gates in the circuit graph in order.
   std::vector<QuantumGatePtr> getAllGatesShared() const;
 
   std::ostream& print(std::ostream& os, int indent) const override;
 
-  std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
+  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const;
 
   std::ostream& visualize(std::ostream& os) const;
 
@@ -323,7 +329,7 @@ public:
   CompoundNode body;
 
   CircuitNode(const std::string& name)
-    : IRNode(IRNode_Circuit), name(name), body() {}
+      : IRNode(IRNode_Circuit), name(name), body() {}
 
   std::ostream& print(std::ostream& os, int indent) const override;
 
@@ -333,7 +339,7 @@ public:
 
   unsigned countNumCircuitGraphs() const;
 
-  std::ostream& displayInfo(std::ostream& os, int verbose=1) const;
+  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const;
 
   std::ostream& visualize(std::ostream& os) const;
 
@@ -355,10 +361,10 @@ public:
 } // namespace cast::ir
 
 namespace cast {
-  /// @brief Parse a QASM file and return a cast::ir::CircuitNode.
-  /// The definition is in src/Core/IR/ParseCircuitFromQASM.cpp.
-  cast::MaybeError<ir::CircuitNode>
-  parseCircuitFromQASMFile(const std::string& fileName);
+/// @brief Parse a QASM file and return a cast::ir::CircuitNode.
+/// The definition is in src/Core/IR/ParseCircuitFromQASM.cpp.
+cast::MaybeError<ir::CircuitNode>
+parseCircuitFromQASMFile(const std::string& fileName);
 }; // namespace cast
 
 #endif // CAST_CORE_IRNODE_H

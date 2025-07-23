@@ -8,9 +8,8 @@ namespace utils::impl {
 /// _Iter& increment(), for operator++() and operator++(int);
 /// _Iter& decrement(), for operator--() and operator--(int);
 /// bool equals(const Derived&) const, for operator== and operator!=
-template<typename _Iter, typename T>
-class IteratorBase {
-  public:
+template <typename _Iter, typename T> class IteratorBase {
+public:
   // pre-increment
   _Iter& operator++() {
     static_cast<_Iter*>(this)->increment();
@@ -38,7 +37,7 @@ class IteratorBase {
   }
 
   // bool operator==(const _Iter& other) const {
-    // return static_cast<const _Iter*>(this)->equals(other);
+  // return static_cast<const _Iter*>(this)->equals(other);
   // }
 
   // bool operator!=(const _Iter &other) const { return !(*this == other); }
@@ -61,6 +60,6 @@ class IteratorBase {
 
 }; // IteratorBase
 
-} // namespace utils
+} // namespace utils::impl
 
 #endif // UTILS_ITERATORBASE_H

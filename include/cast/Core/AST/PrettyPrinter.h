@@ -1,9 +1,9 @@
 #ifndef CAST_NEW_PARSER_PRETTY_PRINTER_H
 #define CAST_NEW_PARSER_PRETTY_PRINTER_H
 
+#include <cassert>
 #include <iostream>
 #include <vector>
-#include <cassert>
 
 namespace cast {
 namespace ast {
@@ -14,9 +14,7 @@ public:
   std::vector<int> states;
   std::string prefix;
 
-  PrettyPrinter(std::ostream& os) : os(os), prefix() {
-    states.reserve(8);
-  }
+  PrettyPrinter(std::ostream& os) : os(os), prefix() { states.reserve(8); }
 
   void setState(int idx, int value) {
     assert(idx >= 0);
@@ -31,7 +29,7 @@ public:
     return *this;
   }
 
-  // prefix will be cleared after write. 
+  // prefix will be cleared after write.
   std::ostream& write(int indent) {
     assert(indent >= 0);
     if (indent == 0)
@@ -49,8 +47,7 @@ public:
     else if (states[indent - 1] == 1) {
       states[indent - 1] = 0;
       os << "`-";
-    }
-    else {
+    } else {
       --states[indent - 1];
       os << "|-";
     }
@@ -61,12 +58,11 @@ public:
     }
     return os;
   }
-  
+
 }; // class PrettyPrinter
-  
+
 }; // namespace ast
 
 }; // namespace cast
-
 
 #endif // CAST_NEW_PARSER_PRETTY_PRINTER_H
