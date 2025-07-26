@@ -79,6 +79,7 @@ void CUDAKernelManager::emitPTX(int nThreads,
   archOss << "sm_" << major << minor;
   std::string archString = archOss.str();
 #else
+  // For non-CUDA builds, set default architecture to sm_76
   std::string archString = "sm_76";
 #endif
 
@@ -101,7 +102,7 @@ void CUDAKernelManager::emitPTX(int nThreads,
 
   for (unsigned i = 0; i < standaloneKernels_.size(); i++) {
     dispatcher.enqueue([&, i = i]() {
-      raw_svector_ostream sstream(standaloneKernels_[i].ptxString);
+      raw_svector_ostream sstream(standaloneKernels_[i]->ptxString);
       legacy::PassManager passManager;
       if (createTargetMachine()->addPassesToEmitFile(
               passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
@@ -172,11 +173,11 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
 
   for (unsigned i = 0; i < nKernels; ++i) {
     auto& kernel = standaloneKernels_[i];
-    std::string ptxString(kernel.ptxString.str());
-    CUcontext* cuContextPtr = &(kernel.cuTuple.cuContext);
-    CUmodule* cuModulePtr = &(kernel.cuTuple.cuModule);
-    CUfunction* cuFunctionPtr = &(kernel.cuTuple.cuFunction);
-    const char* funcName = kernel.llvmFuncName.c_str();
+    std::string ptxString(kernel->ptxString.str());
+    CUcontext* cuContextPtr = &(kernel->cuTuple.cuContext);
+    CUmodule* cuModulePtr = &(kernel->cuTuple.cuModule);
+    CUfunction* cuFunctionPtr = &(kernel->cuTuple.cuFunction);
+    const char* funcName = kernel->llvmFuncName.c_str();
     dispatcher.enqueue([=, &sharedMemValues, this, &dispatcher]() {
       auto workerID = dispatcher.getWorkerID();
 
@@ -189,7 +190,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
       int staticShared = 0;
       CU_CALL(cuFuncGetAttribute(&staticShared,
                                  CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
-                                 *cuFunctionPtr // kernel.cuTuple.cuFunction
+                                 *cuFunctionPtr // kernel->cuTuple.cuFunction
                                  ),
               "cuFuncGetAttribute(SHARED_SIZE_BYTES)");
       sharedMemValues[i] = static_cast<size_t>(staticShared);
@@ -199,7 +200,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
     std::cerr << "Loading PTX codes and getting CUDA functions...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
   for (unsigned i = 0; i < nKernels; ++i) {
-    standaloneKernels_[i].cuTuple.sharedMemBytes = sharedMemValues[i];
+    standaloneKernels_[i]->cuTuple.sharedMemBytes = sharedMemValues[i];
   }
 
   jitState = JIT_CUFunctionLoaded;

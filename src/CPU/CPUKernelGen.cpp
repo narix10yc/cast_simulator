@@ -16,8 +16,6 @@
 
 using namespace cast;
 
-std::atomic<int> cast::CPUKernelManager::standaloneKernelCounter_ = 0;
-
 // Top-level entry
 MaybeError<CPUKernelManager::KernelInfoPtr>
 CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
@@ -69,7 +67,7 @@ CPUKernelManager::genStandaloneGate(const CPUKernelGenConfig& config,
                                     const std::string& _funcName) {
   std::string funcName(_funcName);
   if (funcName.empty())
-    funcName = "kernel_" + std::to_string(standaloneKernelCounter_++);
+    funcName = "kernel_" + std::to_string(standaloneKernels_.size());
   // check for name conflicts
   for (const auto& kernel : standaloneKernels_) {
     if (kernel->llvmFuncName == funcName) {

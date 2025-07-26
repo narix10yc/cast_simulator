@@ -48,8 +48,7 @@ struct CPUKernelGenConfig {
   CPUMatrixLoadMode matrixLoadMode;
 
   CPUKernelGenConfig()
-      : simdWidth(get_cpu_simd_width()),
-        precision(Precision::F64),
+      : simdWidth(get_cpu_simd_width()), precision(Precision::F64),
         useFMA(true), useFMS(true), usePDEP(false), zeroTol(1e-8), oneTol(1e-8),
         matrixLoadMode(CPUMatrixLoadMode::UseMatImmValues) {}
 
@@ -76,15 +75,12 @@ class CPUKernelManager : public KernelManagerBase {
                        const QuantumGate::TargetQubitsType& qubits,
                        const std::string& funcName);
 
-  // Generate a CPU kernel for the given gate. This function will check if the
-  // gate is a standard gate or a superoperator gate, and handle accordingly.
-  MaybeError<std::unique_ptr<CPUKernelInfo>>
-  genCPUGate_(const CPUKernelGenConfig& config,
-              ConstQuantumGatePtr gate,
-              const std::string& funcName);
-
-  static std::atomic<int> standaloneKernelCounter_;
-
+  // Generate a CPU kernel for the given gate. This function will wraps around
+  // when gate is a StandardQuantumGate (with or without noise) or
+  // SuperopQuantumGate, and call gen_ with a corresponding ComplexSquareMatrix.
+  MaybeError<KernelInfoPtr> genCPUGate_(const CPUKernelGenConfig& config,
+                                        ConstQuantumGatePtr gate,
+                                        const std::string& funcName);
 public:
   CPUKernelManager()
       : KernelManagerBase(), standaloneKernels_(), llvmJIT(nullptr) {}
@@ -114,9 +110,11 @@ public:
 
   /* Generate Kernels */
 
-  // Generate a CPU kernel for the given gate. The generated kernel will be
-  // put into the standalone kernel pool. This function checks for name
-  // conflicts and will not overwrite existing kernels.
+  /// Generate a CPU kernel for the given gate. The generated kernel will be
+  /// put into the standalone kernel pool. This function checks for name
+  /// conflicts and will not overwrite existing kernels.
+  /// @param gate: The quantum gate. It needs to be in a shared pointer because
+  /// the kernel manager keeps track of the gate.
   MaybeError<void> genStandaloneGate(const CPUKernelGenConfig& config,
                                      ConstQuantumGatePtr gate,
                                      const std::string& funcName);
@@ -174,7 +172,6 @@ public:
                                             int nQubits,
                                             const std::string& graphName,
                                             int nThreads = 1) const;
-
 
   void ensureExecutable(CPUKernelInfo& kernel) {
     // Note: We do not actually need the lock here

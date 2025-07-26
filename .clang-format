@@ -19,3 +19,5 @@ SpaceBeforeParens: ControlStatements
 BinPackArguments: false
 BinPackParameters: false
 AlignAfterOpenBracket: Align
+# PenaltyBreakAssignment: 2
+# PenaltyBreakBeforeFirstCallParameter: 19 # default is 19 

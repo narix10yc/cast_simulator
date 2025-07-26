@@ -14,9 +14,6 @@ add_library(cast_cpu STATIC ${SRC_FILES})
 FILE(GLOB_RECURSE SRC_FILES "FPGA/*.cpp")
 add_library(cast_fpga STATIC ${SRC_FILES})
 
-FILE(GLOB_RECURSE SRC_FILES "Legacy/*.cpp")
-add_library(cast_legacy STATIC ${SRC_FILES})
-
 FILE(GLOB_RECURSE SRC_FILES "Utils/*.cpp")
 add_library(cast_utils STATIC ${SRC_FILES})
 
@@ -32,7 +29,6 @@ target_link_libraries(cast INTERFACE
   cast_cpu
   cast_fpga
   cast_utils
-  cast_legacy
   ${LLVM_LIBS}
 )
 

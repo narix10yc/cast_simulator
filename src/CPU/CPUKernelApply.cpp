@@ -1,5 +1,4 @@
 #include "cast/CPU/CPUKernelManager.h"
-#include "cast/Legacy/CircuitGraph.h"
 
 using namespace cast;
 

@@ -46,6 +46,8 @@ struct IRArgsCUDA {
   Argument* pMatArg; // ptr to matrix
 };
 
+// reVal and imVal will be llvm constants if matrixLoadMode is UseMatImmValues
+// otherwise, they will be loaded from the matrix pointer
 struct IRMatDataCUDA {
   Value* reVal;
   Value* imVal;
@@ -54,70 +56,118 @@ struct IRMatDataCUDA {
 };
 
 std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
-                                          const GateMatrix& gateMatrix,
-                                          const CUDAKernelGenConfig& config) {
-  const int k = gateMatrix.nQubits();
-  const unsigned K = 1 << k;
+                                          const CUDAKernelGenConfig& config,
+                                          const ComplexSquareMatrix& matrix,
+                                          int nQubits) {
+  const unsigned K = 1U << nQubits;
   const unsigned KK = K * K;
 
-  std::vector<IRMatDataCUDA> data(KK);
-
+  // Scale the tolerances by matrix size
   const double zTol = config.zeroTol / K;
   const double oTol = config.oneTol / K;
-  const auto* cMat = gateMatrix.getConstantMatrix();
-  // assert(cMat && "Parametrized matrices codegen not implemented yet");
-  if (cMat == nullptr || config.forceDenseKernel) {
-    for (unsigned i = 0; i < KK; i++) {
-      data[i].reKind = SK_General;
-      data[i].imKind = SK_General;
+
+  std::vector<IRMatDataCUDA> data(KK);
+  // reKind and imKind
+  if (config.forceDenseKernel) {
+    if (config.matrixLoadMode == CUDAMatrixLoadMode::UseMatImmValues) {
+      for (unsigned i = 0; i < KK; ++i) {
+        data[i].reKind = SK_ImmValue;
+        data[i].imKind = SK_ImmValue;
+      }
+    } else {
+      for (unsigned i = 0; i < KK; ++i) {
+        data[i].reKind = SK_General;
+        data[i].imKind = SK_General;
+      }
     }
   } else {
-    for (unsigned i = 0; i < KK; i++) {
-      if (cMat == nullptr || config.forceDenseKernel) {
-        data[i].reKind = SK_General;
-        data[i].imKind = SK_General;
-        continue;
+    for (unsigned r = 0; r < K; ++r) {
+      for (unsigned c = 0; c < K; ++c) {
+        unsigned idx = r * K + c;
+        auto elem = matrix.rc(r, c);
+
+        if (std::abs(elem.real()) < zTol)
+          data[idx].reKind = SK_Zero;
+        else if (std::abs(elem.real() - 1.0) < oTol)
+          data[idx].reKind = SK_One;
+        else if (std::abs(elem.real() + 1.0) < oTol)
+          data[idx].reKind = SK_MinusOne;
+        else
+          data[idx].reKind = SK_General;
+
+        if (std::abs(elem.imag()) < zTol)
+          data[idx].imKind = SK_Zero;
+        else if (std::abs(elem.imag() - 1.0) < oTol)
+          data[idx].imKind = SK_One;
+        else if (std::abs(elem.imag() + 1.0) < oTol)
+          data[idx].imKind = SK_MinusOne;
+        else
+          data[idx].imKind = SK_General;
       }
-      auto real = cMat->data()[i].real();
-      auto imag = cMat->data()[i].imag();
-
-      if (std::abs(real) < zTol)
-        data[i].reKind = SK_Zero;
-      else if (std::abs(real - 1.0) < oTol)
-        data[i].reKind = SK_One;
-      else if (std::abs(real + 1.0) < oTol)
-        data[i].reKind = SK_MinusOne;
-      else if (config.matrixLoadMode == CUDAKernelGenConfig::UseMatImmValues) {
-        data[i].reKind = SK_ImmValue;
-        data[i].reVal = ConstantFP::get(
-            B.getContext(),
-            (config.precision == 32) ? APFloat(static_cast<float>(real))
-                                     : APFloat(static_cast<double>(real)));
-      } else
-        data[i].reKind = SK_General;
-
-      if (std::abs(imag) < zTol)
-        data[i].imKind = SK_Zero;
-      else if (std::abs(imag - 1.0) < oTol)
-        data[i].imKind = SK_One;
-      else if (std::abs(imag + 1.0) < oTol)
-        data[i].imKind = SK_MinusOne;
-      else if (config.matrixLoadMode == CUDAKernelGenConfig::UseMatImmValues) {
-        data[i].imKind = SK_ImmValue;
-        data[i].imVal =
-            ConstantFP::get(B.getContext(),
-                            (config.precision == Precision::F32)
-                                ? APFloat(static_cast<float>(imag))
-                                : APFloat(static_cast<double>(imag)));
-      } else
-        data[i].imKind = SK_General;
     }
   }
+
+  // reVal and imVal
+  auto zeroVal = ConstantFP::get(
+      B.getContext(),
+      (config.precision == Precision::F32) ? APFloat(0.0f) : APFloat(0.0));
+  auto oneVal = ConstantFP::get(
+      B.getContext(),
+      (config.precision == Precision::F32) ? APFloat(1.0f) : APFloat(1.0));
+  auto minusOneVal = ConstantFP::get(
+      B.getContext(),
+      (config.precision == Precision::F32) ? APFloat(-1.0f) : APFloat(-1.0));
+
+  for (unsigned i = 0; i < KK; ++i) {
+    switch (data[i].reKind) {
+    case SK_Zero:
+      data[i].reVal = zeroVal;
+      break;
+    case SK_One:
+      data[i].reVal = oneVal;
+      break;
+    case SK_MinusOne:
+      data[i].reVal = minusOneVal;
+      break;
+    case SK_ImmValue: {
+      auto re = matrix.reData()[i];
+      data[i].reVal = ConstantFP::get(B.getContext(),
+                                      (config.precision == Precision::F32)
+                                          ? APFloat(static_cast<float>(re))
+                                          : APFloat(static_cast<double>(re)));
+      break;
+    }
+    default:
+      assert(false && "Unknown ScalarKind for reVal");
+    } // switch reKind
+
+    switch (data[i].imKind) {
+    case SK_Zero:
+      data[i].imVal = zeroVal;
+      break;
+    case SK_One:
+      data[i].imVal = oneVal;
+      break;
+    case SK_MinusOne:
+      data[i].imVal = minusOneVal;
+      break;
+    case SK_ImmValue: {
+      auto im = matrix.imData()[i];
+      data[i].imVal = ConstantFP::get(B.getContext(),
+                                      (config.precision == Precision::F32)
+                                          ? APFloat(static_cast<float>(im))
+                                          : APFloat(static_cast<double>(im)));
+    } break;
+    default:
+      assert(false && "Unknown ScalarKind for imVal");
+    } // switch imKind
+  }
+
   return data;
 }
 
 // Function* getFunctionDeclarationCUDA(
-//     IRBuilder<>& B, llvm::Module& M, const std::string& funcName,
+//     IRBuilder<>& B, Module& M, const std::string& funcName,
 //     const CUDAKernelGenConfig& config, IRArgsCUDA& args) {
 //   /*
 //       Address space:
@@ -146,7 +196,7 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
 //     func->setName("ptx_kernel_");
 //   else
 //     func->setName(funcName);
-// \
+//
 //   args.pSvArg = func->getArg(0);
 //   args.pSvArg->setName("p.sv");
 //   if (config.matrixLoadMode != CUDAKernelGenConfig::LoadInConstMemSpace) {
@@ -168,12 +218,12 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
 // }
 
 Function* getFunctionDeclarationCUDA(IRBuilder<>& B,
-                                     llvm::Module& M,
+                                     Module& M,
                                      const std::string& funcName,
                                      const CUDAKernelGenConfig& config,
                                      IRArgsCUDA& args) {
   // Always include pSvArg and pMatArg
-  FunctionType* fty =
+  auto* fty =
       FunctionType::get(B.getVoidTy(), {B.getPtrTy(), B.getPtrTy()}, false);
   auto* func = Function::Create(fty, Function::ExternalLinkage, funcName, M);
   if (funcName.empty())
@@ -200,6 +250,7 @@ Value* getGlobalTidCUDA(IRBuilder<>& B) {
   // thread index
   auto* tidV = B.CreateIntrinsic(
       B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_tid_x, {}, nullptr, "tid");
+
   // gridSize (number of threads in each block)
   auto* gridSizeV = B.CreateIntrinsic(B.getInt32Ty(),
                                       Intrinsic::nvvm_read_ptx_sreg_ntid_x,
@@ -212,21 +263,21 @@ Value* getGlobalTidCUDA(IRBuilder<>& B) {
                                  {},
                                  nullptr,
                                  "bid");
+
+  // global tid = grid size * block index + thread index
   auto* globalTidV = B.CreateMul(bidV, gridSizeV);
   globalTidV = B.CreateAdd(globalTidV, tidV, "counter.i32");
   globalTidV = B.CreateIntCast(globalTidV, B.getInt64Ty(), true, "global.tid");
   return globalTidV;
 }
-} // anonymous namespace
 
-static void attachNoUnrollMetadata(llvm::IRBuilder<>& B,
-                                   llvm::BasicBlock* latchBB) {
-  using namespace llvm;
-  Instruction* latchTerm = latchBB->getTerminator();
+void attachNoUnrollMetadata(IRBuilder<>& B, BasicBlock* latchBB) {
+  auto* latchTerm = latchBB->getTerminator();
   if (!latchTerm)
     return; // safety
+
   LLVMContext& ctx = B.getContext();
-  MDNode* noUnrollMD =
+  auto* noUnrollMD =
       MDNode::get(ctx, {MDString::get(ctx, "llvm.loop.unroll.disable")});
   latchTerm->setMetadata("llvm.loop", noUnrollMD);
 }
@@ -236,15 +287,13 @@ static void attachNoUnrollMetadata(llvm::IRBuilder<>& B,
  *    from matData. That way, we can do a run-time IR loop to read them,
  *    instead of unrolling a for-loop in C++.
  */
-static llvm::GlobalVariable*
-createGlobalMatrixArray_NoUnroll(llvm::Module& M,
-                                 llvm::Type* scalarTy,
+GlobalVariable*
+createGlobalMatrixArray_NoUnroll(Module& M,
+                                 Type* scalarTy,
                                  const std::vector<IRMatDataCUDA>& matData,
                                  unsigned K,
                                  const std::string& globalName) {
-  using namespace llvm;
-
-  unsigned totalElems = 2 * K * K;
+  unsigned totalElems = 2U * K * K;
   ArrayType* arrTy = ArrayType::get(scalarTy, totalElems);
 
   // Build a ConstantArray with the imm real/imag values.
@@ -254,8 +303,8 @@ createGlobalMatrixArray_NoUnroll(llvm::Module& M,
   for (unsigned i = 0; i < K * K; i++) {
     const auto& md = matData[i];
     // If md.reVal is a ConstantFP, we can cast directly:
-    ConstantFP* cRe = llvm::dyn_cast_or_null<ConstantFP>(md.reVal);
-    ConstantFP* cIm = llvm::dyn_cast_or_null<ConstantFP>(md.imVal);
+    ConstantFP* cRe = dyn_cast_or_null<ConstantFP>(md.reVal);
+    ConstantFP* cIm = dyn_cast_or_null<ConstantFP>(md.imVal);
 
     double fallbackRe = 0.0, fallbackIm = 0.0;
     // If not SK_ImmValue, fallback to 0 or do more logic
@@ -286,29 +335,27 @@ createGlobalMatrixArray_NoUnroll(llvm::Module& M,
     }
   }
 
-  Constant* arrInit = ConstantArray::get(arrTy, constVals);
+  auto* arrInit = ConstantArray::get(arrTy, constVals);
 
   // Create a private global
   auto* gVar = new GlobalVariable(M,
                                   arrTy,
                                   /*isConstant=*/true,
-                                  llvm::GlobalValue::PrivateLinkage,
+                                  GlobalValue::PrivateLinkage,
                                   arrInit,
                                   globalName);
-  gVar->setAlignment(llvm::MaybeAlign(8));
+  gVar->setAlignment(MaybeAlign(8));
   return gVar;
 }
 
-void genMatrixVectorMultiply(llvm::IRBuilder<>& B,
+void genMatrixVectorMultiply(IRBuilder<>& B,
                              const CUDAKernelGenConfig& config,
-                             const GateMatrix& gateMat,
-                             llvm::ArrayRef<int> qubits,
+                             const ComplexSquareMatrix& matrix,
+                             const QuantumGate::TargetQubitsType& qubits,
                              const std::vector<IRMatDataCUDA>& matData,
-                             llvm::Value* svPtrV,
-                             llvm::Type* scalarTy) {
-  using namespace llvm;
-
-  unsigned k = gateMat.nQubits();
+                             Value* svPtrV,
+                             Type* scalarTy) {
+  unsigned k = qubits.size();
   unsigned K = 1u << k;
   LLVMContext& ctx = B.getContext();
 
@@ -544,7 +591,7 @@ void genMatrixVectorMultiply(llvm::IRBuilder<>& B,
   // for (r,c) partial sums, and unrolling has been disabled.
 }
 
-static GlobalVariable* createGlobalMatrixArray_SharedTiledImm(
+GlobalVariable* createGlobalMatrixArray_SharedTiledImm(
     Module& M,
     Type* scalarTy,
     unsigned N,
@@ -626,20 +673,21 @@ static GlobalVariable* createGlobalMatrixArray_SharedTiledImm(
   return gVar;
 }
 
-Value* getBlockIdxCUDA(IRBuilder<>& B) {
+Value* helper_getBlockIdx(IRBuilder<>& B) {
   return B.CreateIntrinsic(
       B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_ctaid_x, {});
 }
+
 Value* buildBitExtractOffset(IRBuilder<>& B,
                              Value* counterV,
                              ArrayRef<int> tgtQubits,
                              int nQubits) {
   Value* idxStart = B.getInt64(0);
-  Value* blockIdx = B.CreateZExt(getBlockIdxCUDA(B), B.getInt64Ty());
+  auto* blockIdx = B.CreateZExt(helper_getBlockIdx(B), B.getInt64Ty());
   int bitPos = 0;
   for (int q = 0; q < nQubits; q++) {
-    if (std::find(tgtQubits.begin(), tgtQubits.end(), q) == tgtQubits.end()) {
-      Value* bit = B.CreateAnd(blockIdx, B.getInt64(1ULL << bitPos));
+    if (std::ranges::find(tgtQubits, q) == tgtQubits.end()) {
+      auto* bit = B.CreateAnd(blockIdx, B.getInt64(1ULL << bitPos));
       bit = B.CreateLShr(bit, bitPos);
       bit = B.CreateShl(bit, q);
       idxStart = B.CreateOr(idxStart, bit);
@@ -656,8 +704,8 @@ Value* buildBitExtractOffsetConst(IRBuilder<>& B,
   Value* idxStart = B.getInt64(0);
   int bitPos = 0;
   for (int q = 0; q < nQubits; q++) {
-    if (std::find(tgtQubits.begin(), tgtQubits.end(), q) == tgtQubits.end()) {
-      Value* bit = B.CreateAnd(counterV, B.getInt64(1ULL << bitPos));
+    if (std::ranges::find(tgtQubits, q) == tgtQubits.end()) {
+      auto* bit = B.CreateAnd(counterV, B.getInt64(1ULL << bitPos));
       bit = B.CreateLShr(bit, bitPos);
       bit = B.CreateShl(bit, q);
       idxStart = B.CreateOr(idxStart, bit);
@@ -668,16 +716,16 @@ Value* buildBitExtractOffsetConst(IRBuilder<>& B,
 }
 
 void genMatrixVectorMultiply_SharedTiled(
-    llvm::IRBuilder<>& B,
+    IRBuilder<>& B,
     const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
-    llvm::ArrayRef<int> qubits,
+    const ComplexSquareMatrix& matrix,
+    const QuantumGate::TargetQubitsType& qubits,
     const std::vector<IRMatDataCUDA>& matData,
-    llvm::Value* svPtrV,
-    llvm::Type* scalarTy) {
+    Value* svPtrV,
+    Type* scalarTy) {
   using namespace llvm;
 
-  const unsigned k = gateMat.nQubits();
+  const unsigned k = qubits.size();
   const unsigned N = 1u << k;
   // const unsigned TILE  = 256;
   const unsigned TILE = std::min(256u, N);
@@ -727,42 +775,17 @@ void genMatrixVectorMultiply_SharedTiled(
   B.CreateCondBr(B.CreateICmpULT(row64, B.getInt64(N)), rowOK, rowEnd);
   B.SetInsertPoint(rowOK);
 
-  // Value *bDim32 = B.CreateIntrinsic(B.getInt32Ty(),
-  //                     Intrinsic::nvvm_read_ptx_sreg_ntid_x,{});
-
-  // Value *ctr64 = B.CreateAdd(
-  //                  B.CreateMul(B.CreateZExt(bid32 , B.getInt64Ty()),
-  //                               B.CreateZExt(bDim32, B.getInt64Ty())),
-  //                  B.CreateZExt(tid32 , B.getInt64Ty()),
-  //                  "threadCtr");
-
-  // /* packed logical row index */
-  // Value *row64 = B.getInt64(0);
-  // for (unsigned b = 0; b < k; ++b) {
-  //     Value *mask      = B.getInt64(1ULL << qubits[b]);
-  //     Value *bit       = B.CreateAnd(ctr64, mask);
-  //     Value *bitToLSB  = B.CreateLShr(bit, qubits[b]);
-  //     Value *bitPacked = B.CreateShl (bitToLSB,  b);
-  //     row64            = B.CreateOr(row64, bitPacked);
-  // }
-
-  // /* guard: skip if row64 >= N */
-  // BasicBlock *rowOK  = BasicBlock::Create(B.getContext(), "row.ok", func);
-  // BasicBlock *rowEnd = BasicBlock::Create(B.getContext(), "row.end", func);
-  // B.CreateCondBr(B.CreateICmpULT(row64, B.getInt64(N)), rowOK, rowEnd);
-  // B.SetInsertPoint(rowOK);
-
-  /*────────── Local accumulators in registers ──────────*/
+  // Local accumulators in registers
   Value* accRe = ConstantFP::get(scalarTy, 0.0);
   Value* accIm = ConstantFP::get(scalarTy, 0.0);
 
-  /* ========= Loop over column tiles ========*/
+  // Loop over column tiles
   const unsigned nTiles = (N + TILE - 1) / TILE;
 
-  BasicBlock* tileChk = BasicBlock::Create(B.getContext(), "tile.chk", func);
-  BasicBlock* tileBody = BasicBlock::Create(B.getContext(), "tile.body", func);
-  BasicBlock* tileInc = BasicBlock::Create(B.getContext(), "tile.inc", func);
-  BasicBlock* tileDone = BasicBlock::Create(B.getContext(), "tile.done", func);
+  auto* tileChk = BasicBlock::Create(B.getContext(), "tile.chk", func);
+  auto* tileBody = BasicBlock::Create(B.getContext(), "tile.body", func);
+  auto* tileInc = BasicBlock::Create(B.getContext(), "tile.inc", func);
+  auto* tileDone = BasicBlock::Create(B.getContext(), "tile.done", func);
 
   B.CreateBr(tileChk);
   B.SetInsertPoint(tileChk);
@@ -824,7 +847,7 @@ void genMatrixVectorMultiply_SharedTiled(
     B.SetInsertPoint(ldEnd);
   }
 
-  /* __syncthreads() */
+  // __syncthreads()
   B.CreateCall(Intrinsic::getDeclaration(&M, Intrinsic::nvvm_barrier0));
 
   /* dot‑product over this tile */
@@ -832,9 +855,9 @@ void genMatrixVectorMultiply_SharedTiled(
     Value* col = B.CreateAdd(col0Phi, B.getInt64(t));
     Value* inRange = B.CreateICmpULT(col, B.getInt64(N));
 
-    BasicBlock* dotYes = BasicBlock::Create(B.getContext(), "dot.y", func);
-    BasicBlock* dotNo = BasicBlock::Create(B.getContext(), "dot.n", func);
-    BasicBlock* dotEnd = BasicBlock::Create(B.getContext(), "dot.end", func);
+    auto* dotYes = BasicBlock::Create(B.getContext(), "dot.y", func);
+    auto* dotNo = BasicBlock::Create(B.getContext(), "dot.n", func);
+    auto* dotEnd = BasicBlock::Create(B.getContext(), "dot.end", func);
 
     B.CreateCondBr(inRange, dotYes, dotNo);
 
@@ -874,6 +897,7 @@ void genMatrixVectorMultiply_SharedTiled(
     B.SetInsertPoint(dotEnd);
   }
 
+  // __syncthreads()
   B.CreateCall(Intrinsic::getDeclaration(&M, Intrinsic::nvvm_barrier0));
 
   /* advance to next tile */
@@ -905,17 +929,17 @@ void genMatrixVectorMultiply_SharedTiled(
 }
 
 void genMatrixVectorMultiplyFromPointer_SharedTiled(
-    llvm::IRBuilder<>& B,
+    IRBuilder<>& B,
     const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
-    llvm::ArrayRef<int> qubits,
-    llvm::Value* matBasePtr, // AS 1  – run‑time matrix
-    llvm::Value* svPtrV,     // AS 0  – state‑vector
-    llvm::Type* scalarTy) {
+    const ComplexSquareMatrix& gateMat,
+    const QuantumGate::TargetQubitsType& qubits,
+    Value* matBasePtr, // AS 1  – run‑time matrix
+    Value* svPtrV,     // AS 0  – state‑vector
+    Type* scalarTy) {
   using namespace llvm;
 
   /*────────── Parameters & types ──────────*/
-  const unsigned k = gateMat.nQubits();
+  const unsigned k = qubits.size();
   const unsigned N = 1u << k;
   const unsigned TILE = std::min(256u, N); // matches constant path
 
@@ -981,7 +1005,7 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
   /*────────────── tileBody ─────────────*/
   B.SetInsertPoint(tileBody);
 
-  /* 1.  Load TILE amplitudes of |x〉 into shared memory */
+  /* 1. Load TILE amplitudes of |x〉 into shared memory */
   {
     Value* tid64 = B.CreateZExt(tid32, B.getInt64Ty());
     Value* colIdx = B.CreateAdd(col0Phi, tid64);
@@ -1110,16 +1134,15 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
 }
 
 void genMatrixVectorMultiplyFromPointer(
-    llvm::IRBuilder<>& B,
+    IRBuilder<>& B,
     const CUDAKernelGenConfig& config,
-    const GateMatrix& gateMat,
-    llvm::ArrayRef<int> qubits,
-    llvm::Value* matBasePtr, // pointer to global memory (AS 1)
-    llvm::Value* svPtrV,     // pointer to state vector
-    llvm::Type* scalarTy) {
-  using namespace llvm;
+    const ComplexSquareMatrix& gateMat,
+    const QuantumGate::TargetQubitsType& qubits,
+    Value* matBasePtr, // pointer to global memory (AS 1)
+    Value* svPtrV,     // pointer to state vector
+    Type* scalarTy) {
 
-  unsigned k = gateMat.nQubits();
+  unsigned k = qubits.size();
   unsigned K = 1u << k;
   LLVMContext& ctx = B.getContext();
   Function* func = B.GetInsertBlock()->getParent();
@@ -1308,20 +1331,20 @@ void genMatrixVectorMultiplyFromPointer(
   B.SetInsertPoint(checkEndBB);
 }
 
-void genMatrixVectorMultiplyFromConst(llvm::IRBuilder<>& B,
-                                      const CUDAKernelGenConfig& config,
-                                      const GateMatrix& gateMat,
-                                      const llvm::ArrayRef<int> qubits,
-                                      llvm::GlobalVariable* gConstMat,
-                                      llvm::Value* svPtrV,
-                                      llvm::Value* matPtrV,
-                                      llvm::Type* scalarTy) {
-  bool isSymbolic = (gateMat.getConstantMatrix() == nullptr);
-  unsigned k = gateMat.nQubits();
+void genMatrixVectorMultiplyFromConst(
+    IRBuilder<>& B,
+    const CUDAKernelGenConfig& config,
+    const ComplexSquareMatrix& gateMat,
+    const QuantumGate::TargetQubitsType& qubits,
+    GlobalVariable* gConstMat,
+    Value* svPtrV,
+    Value* matPtrV,
+    Type* scalarTy) {
+  unsigned k = qubits.size();
   unsigned K = 1u << k;
 
-  std::vector<llvm::Value*> reAmpPtrs(K), imAmpPtrs(K);
-  std::vector<llvm::Value*> reAmps(K), imAmps(K);
+  std::vector<Value*> reAmpPtrs(K), imAmpPtrs(K);
+  std::vector<Value*> reAmps(K), imAmps(K);
 
   // Load statevector amplitudes
   for (unsigned i = 0; i < K; i++) {
@@ -1342,37 +1365,25 @@ void genMatrixVectorMultiplyFromConst(llvm::IRBuilder<>& B,
 
   // Matrix-vector multiplication
   for (unsigned r = 0; r < K; r++) {
-    llvm::Value* updatedReAmp0 = llvm::ConstantFP::get(scalarTy, 0.0);
-    llvm::Value* updatedReAmp1 = llvm::ConstantFP::get(scalarTy, 0.0);
-    llvm::Value* updatedImAmp = llvm::ConstantFP::get(scalarTy, 0.0);
+    Value* updatedReAmp0 = ConstantFP::get(scalarTy, 0.0);
+    Value* updatedReAmp1 = ConstantFP::get(scalarTy, 0.0);
+    Value* updatedImAmp = ConstantFP::get(scalarTy, 0.0);
 
     for (unsigned c = 0; c < K; c++) {
       uint64_t baseIndex = 2ull * (r * K + c);
-      llvm::Value* idxReal = B.getInt64(baseIndex);
-      llvm::Value* idxImag = B.getInt64(baseIndex + 1);
+      auto* idxReal = B.getInt64(baseIndex);
+      auto* idxImag = B.getInt64(baseIndex + 1);
 
-      llvm::Value* realPtr;
-      llvm::Value* imagPtr;
-      if (isSymbolic) {
-        // Use runtime matrix from global memory (AS 1)
-        realPtr = B.CreateGEP(scalarTy, matPtrV, idxReal, "matElemPtrRe");
-        imagPtr = B.CreateGEP(scalarTy, matPtrV, idxImag, "matElemPtrIm");
-      } else {
-        // Use constant memory (AS 4)
-        realPtr = B.CreateGEP(gConstMat->getValueType(),
-                              gConstMat,
-                              {B.getInt32(0), idxReal},
-                              "constElemPtrRe");
-        imagPtr = B.CreateGEP(gConstMat->getValueType(),
-                              gConstMat,
-                              {B.getInt32(0), idxImag},
-                              "constElemPtrIm");
-      }
+      // Use constant memory (AS 4)
+      auto* realPtr = B.CreateGEP(
+          gConstMat->getValueType(), gConstMat, idxReal, "constElemPtrRe");
+      auto* imagPtr = B.CreateGEP(
+          gConstMat->getValueType(), gConstMat, idxImag, "constElemPtrIm");
 
-      llvm::Value* matRe = B.CreateLoad(scalarTy, realPtr, "matRe");
-      llvm::Value* matIm = B.CreateLoad(scalarTy, imagPtr, "matIm");
-      llvm::Value* oldRe = reAmps[c];
-      llvm::Value* oldIm = imAmps[c];
+      auto* matRe = B.CreateLoad(scalarTy, realPtr, "matRe");
+      auto* matIm = B.CreateLoad(scalarTy, imagPtr, "matIm");
+      auto* oldRe = reAmps[c];
+      auto* oldIm = imAmps[c];
 
       updatedReAmp0 = B.CreateFAdd(updatedReAmp0, B.CreateFMul(matRe, oldRe));
       updatedReAmp1 = B.CreateFAdd(updatedReAmp1, B.CreateFMul(matIm, oldIm));
@@ -1381,14 +1392,14 @@ void genMatrixVectorMultiplyFromConst(llvm::IRBuilder<>& B,
           B.CreateFAdd(B.CreateFMul(matRe, oldIm), B.CreateFMul(matIm, oldRe)));
     }
 
-    llvm::Value* newReAmp = B.CreateFSub(updatedReAmp0, updatedReAmp1);
-    llvm::Value* newImAmp = updatedImAmp;
+    auto* newReAmp = B.CreateFSub(updatedReAmp0, updatedReAmp1);
+    auto* newImAmp = updatedImAmp;
     B.CreateStore(newReAmp, reAmpPtrs[r]);
     B.CreateStore(newImAmp, imAmpPtrs[r]);
   }
 }
 
-static GlobalVariable*
+GlobalVariable*
 getOrCreateConstMatGlobal(Module& M, Type* arrTy, StringRef globalName) {
   // Check if already exists
   if (auto* gv = M.getNamedGlobal(globalName))
@@ -1398,96 +1409,54 @@ getOrCreateConstMatGlobal(Module& M, Type* arrTy, StringRef globalName) {
   auto* gConstMat =
       new GlobalVariable(M,
                          arrTy,
-                         /*isConstant*/ true,
+                         /* isConstant */ true,
                          GlobalValue::ExternalLinkage,
                          UndefValue::get(arrTy), // Initialized later
                          globalName,
                          nullptr,
                          GlobalValue::NotThreadLocal,
-                         4);
+                         /* addressSpace */ 4);
   gConstMat->setAlignment(MaybeAlign(8));
   return gConstMat;
 }
 
-CUDAKernelManager&
-CUDAKernelManager::genCUDAGate(const CUDAKernelGenConfig& config,
-                               std::shared_ptr<QuantumGate> gate,
-                               const std::string& funcName,
-                               int nQubits) {
-  const unsigned k = gate->qubits.size();
+} // end of anonymous namespace
+
+Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
+                                  const ComplexSquareMatrix& matrix,
+                                  const QuantumGate::TargetQubitsType& qubits,
+                                  const std::string& funcName) {
+  const unsigned k = qubits.size();
   const unsigned K = 1ULL << k;
   const unsigned KK = K * K;
-
-  LLVM_DEBUG(
-      std::cerr << CYAN("=== DEBUG genGPUKernel '" << funcName << "' ===\n");
-      utils::printArray(std::cerr << "Matrix on qubits ", gate->qubits) << "\n";
-      gate->gateMatrix.printCMat(std::cerr) << "\n";);
 
   auto& llvmContextModulePair =
       createNewLLVMContextModulePair(funcName + "Module");
 
   IRBuilder<> B(*llvmContextModulePair.llvmContext);
   assert(config.precision != Precision::Unknown);
-  Type* scalarTy = (config.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
+  Type* scalarTy =
+      (config.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
 
   IRArgsCUDA args;
   auto* func = getFunctionDeclarationCUDA(
       B, *llvmContextModulePair.llvmModule, funcName, config, args);
 
-  BasicBlock* entryBB =
+  auto* entryBB =
       BasicBlock::Create(*llvmContextModulePair.llvmContext, "entry", func);
+
   B.SetInsertPoint(entryBB);
-  // get global tid
-  auto* counterV = getGlobalTidCUDA(B);
 
-  // Value* svPtrV = args.pSvArg;
-  Value* idxStartV =
-      (config.matrixLoadMode == CUDAMatrixLoadMode::LoadInConstMemSpace)
-          ? buildBitExtractOffsetConst(
-                B, counterV /*globalTid*/, gate->qubits, nQubits)
-          : buildBitExtractOffset(
-                B, counterV /*globalTid*/, gate->qubits, nQubits);
-  idxStartV = B.CreateShl(idxStartV, 1); // ×2 because (re,im)
-  Value* svPtrV = B.CreateGEP(scalarTy, args.pSvArg, idxStartV);
+  Value* idxStartV;
+  auto* globalTidV = getGlobalTidCUDA(B);
+  if (config.matrixLoadMode == CUDAMatrixLoadMode::LoadInConstMemSpace)
+    idxStartV = buildBitExtractOffsetConst(B, globalTidV, qubits, k);
+  else
+    idxStartV = buildBitExtractOffset(B, globalTidV, qubits, k);
 
-  // Value* svPtrV;
-  // {
-  //   // Value* twoTimesCounter = B.CreateMul(counterV, B.getInt64(2),
-  //   "times2");
-  //   // svPtrV = B.CreateGEP(scalarTy, args.pSvArg, twoTimesCounter,
-  //   "sv.ptr"); Value* idxStartV = B.getInt64(0ULL); Value* tmpCounterV;
-  //   uint64_t mask = 0ULL;
-  //   int highestQ = gate->qubits.back();
-  //   int qIdx = 0;
-  //   int counterQ = 0;
-  //   for (int q = 0; q <= highestQ; q++) {
-  //     if (q < gate->qubits[qIdx]) {
-  //       mask |= (1 << counterQ++);
-  //       continue;
-  //     }
-  //     // q == qubits[qIdx];
-  //     ++qIdx;
-  //     if (mask == 0)
-  //       continue;
-  //     tmpCounterV = B.CreateAnd(counterV, mask, "tmpCounter");
-  //     tmpCounterV = B.CreateShl(tmpCounterV, (qIdx - 1), "tmpCounter");
-  //     idxStartV = B.CreateAdd(idxStartV, tmpCounterV, "tmpIdx");
-  //     // std::cerr << "  (globalThreadIdx & " << utils::as0b(mask, 32) << ")
-  //     <<
-  //     // " << (qIdx - 1) << "\n";
-  //     mask = 0ULL;
-  //   }
-  //   mask = ~((1ULL << (gate->qubits.back() - k + 1)) - 1);
-  //   // std::cerr << "  (globalThreadIdx & " << utils::as0b(mask, 32) << ") <<
-  //   "
-  //   // << (k) << "\n";
+  idxStartV = B.CreateShl(idxStartV, 1); // x2 because (re,im)
 
-  //   tmpCounterV = B.CreateAnd(counterV, mask, "tmpCounter");
-  //   tmpCounterV = B.CreateShl(tmpCounterV, k, "tmpCounter");
-  //   idxStartV = B.CreateAdd(idxStartV, tmpCounterV, "idxStart");
-  //   idxStartV = B.CreateShl(idxStartV, 1, "idxStart");
-  //   svPtrV = B.CreateGEP(scalarTy, args.pSvArg, idxStartV, "sv.ptr");
-  // }
+  auto* svPtrV = B.CreateGEP(scalarTy, args.pSvArg, idxStartV);
 
   /*
   Example: with target qubits 2, 4, 5
@@ -1504,27 +1473,22 @@ CUDAKernelManager::genCUDAGate(const CUDAKernelGenConfig& config,
   corresponding to masks
     00000000011, 00000000100, 11111111000
   */
-  // the pointer of sv start in this thread
-  auto matData = getMatDataCUDA(B, gate->gateMatrix, config);
+
+  auto matData = getMatDataCUDA(B, config, matrix, k);
 
   switch (config.matrixLoadMode) {
   case CUDAMatrixLoadMode::UseMatImmValues: {
-    const auto* gateCMat = gate->gateMatrix.getConstantMatrix();
-    assert(gateCMat &&
-           "Runtime matrix incompatible with UseMatImmValues load mode");
-
-    if (gate->nQubits() <= 0) {
+    // TODO: why number of qubits here
+    if (k < config.enableTilingGateSize) {
       genMatrixVectorMultiply(
-          B, config, gate->gateMatrix, gate->qubits, matData, svPtrV, scalarTy);
+          B, config, matrix, qubits, matData, svPtrV, scalarTy);
     } else {
-      // genMatrixVectorMultiply(B, config, gate->gateMatrix, gate->qubits,
-      // matData, svPtrV, scalarTy);
       genMatrixVectorMultiply_SharedTiled(
-          B, config, gate->gateMatrix, gate->qubits, matData, svPtrV, scalarTy);
+          B, config, matrix, qubits, matData, svPtrV, scalarTy);
     }
     break;
   }
-  case CUDAKernelGenConfig::LoadInDefaultMemSpace: {
+  case CUDAMatrixLoadMode::LoadInDefaultMemSpace: {
     // This path loads matrix from pMatArg (args.pMatArg) in address space 1
     Value* matBasePtr = args.pMatArg;
     // Cast from address space 0 to 1:
@@ -1533,421 +1497,125 @@ CUDAKernelManager::genCUDAGate(const CUDAKernelGenConfig& config,
 
     // Generate the IR that loops over the matrix elements
     // (K*K complex elements) and loads from matBasePtr + offset
-    if (gate->nQubits() <= 0) {
-      genMatrixVectorMultiplyFromPointer(B,
-                                         config,
-                                         gate->gateMatrix,
-                                         gate->qubits,
-                                         matBasePtr,
-                                         svPtrV,
-                                         scalarTy);
+    if (k < config.enableTilingGateSize) {
+      genMatrixVectorMultiplyFromPointer(
+          B, config, matrix, qubits, matBasePtr, svPtrV, scalarTy);
     } else {
-      // genMatrixVectorMultiplyFromPointer(B, config, gate->gateMatrix,
-      // gate->qubits, matBasePtr, svPtrV, scalarTy);
-      genMatrixVectorMultiplyFromPointer_SharedTiled(B,
-                                                     config,
-                                                     gate->gateMatrix,
-                                                     gate->qubits,
-                                                     matBasePtr,
-                                                     svPtrV,
-                                                     scalarTy);
+      genMatrixVectorMultiplyFromPointer_SharedTiled(
+          B, config, matrix, qubits, matBasePtr, svPtrV, scalarTy);
     }
     break;
   }
-  case CUDAKernelGenConfig::LoadInConstMemSpace: {
-    // std::cerr << "***USE CONSTMEMSPACE\n";
-    // This path loads the matrix from pointer in address space 4 (constant
-    // mem).
-    unsigned totalElems = 2 * (K * K);
-    llvm::ArrayType* arrTy = llvm::ArrayType::get(scalarTy, totalElems);
+  case CUDAMatrixLoadMode::LoadInConstMemSpace: {
+    // This path loads the matrix from pointer in address space 4
+    // (constant memory space)
+    auto* arrTy = ArrayType::get(scalarTy, 2U * KK);
     auto* gConstMat = getOrCreateConstMatGlobal(
         *llvmContextModulePair.llvmModule, arrTy, "gConstMatShared");
 
     // Initialize with matrix values if available
-    if (auto cMat = gate->gateMatrix.getConstantMatrix()) {
-      std::vector<llvm::Constant*> constElems;
-      for (unsigned i = 0; i < K * K; i++) {
-        constElems.push_back(ConstantFP::get(scalarTy, cMat->data()[i].real()));
-        constElems.push_back(ConstantFP::get(scalarTy, cMat->data()[i].imag()));
+    std::vector<Constant*> constElems;
+    constElems.reserve(2U * KK);
+    for (unsigned r = 0; r < K; ++r) {
+      for (unsigned c = 0; c < K; ++c) {
+        auto cplx = matrix.rc(r, c);
+        constElems.push_back(ConstantFP::get(scalarTy, cplx.real()));
+        constElems.push_back(ConstantFP::get(scalarTy, cplx.imag()));
       }
-      gConstMat->setInitializer(ConstantArray::get(arrTy, constElems));
-    } else {
-      // For symbolic gates, need to initialize with proper values
-      // should initialize with the actual Rz matrix values
-
-      std::vector<llvm::Constant*> constElems;
-      for (unsigned i = 0; i < K * K; i++) {
-        double real = (i / K == i % K) ? 1.0 : 0.0;
-        double imag = 0.0;
-        constElems.push_back(ConstantFP::get(scalarTy, real));
-        constElems.push_back(ConstantFP::get(scalarTy, imag));
-      }
-      gConstMat->setInitializer(ConstantArray::get(arrTy, constElems));
     }
+    gConstMat->setInitializer(ConstantArray::get(arrTy, constElems));
 
-    genMatrixVectorMultiplyFromConst(B,
-                                     config,
-                                     gate->gateMatrix,
-                                     gate->qubits,
-                                     gConstMat,
-                                     svPtrV,
-                                     args.pMatArg,
-                                     scalarTy);
+    genMatrixVectorMultiplyFromConst(
+        B, config, matrix, qubits, gConstMat, svPtrV, args.pMatArg, scalarTy);
     break;
   }
-  }
+  } // switch (config.matrixLoadMode)
 
   B.CreateRetVoid();
   LLVM_DEBUG(func->dump());
 
-  CUDAKernelInfo::CUDATuple cudaTuple;
-
-  this->_cudaKernels.emplace_back(
-      CUDAKernelInfo::PTXStringType(), // empty ptxString
-      config.precision,
-      func->getName().str(),
-      gate,
-      cudaTuple,
-      gate->opCount(config.zeroTol));
-  return *this;
-}
-
-CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraph(
-    const CUDAKernelGenConfig& config,
-    const CircuitGraph& graph,
-    const std::string& graphName,
-    int nQubits) {
-  const auto allBlocks = graph.getAllBlocks();
-  const auto mangledName = internal::mangleGraphName(graphName);
-  for (const auto& block : allBlocks) {
-    genCUDAGate(config,
-                block->quantumGate,
-                mangledName + std::to_string(block->id),
-                nQubits);
-  }
-  return *this;
-}
-
-// Attempt to implement kernel sharing for gates that meet the conditions
-static constexpr double SIMILARITY_THRESHOLD = 0.85;
-static constexpr unsigned MAX_GATES_PER_KERNEL = 4;
-static constexpr unsigned MAX_QUBITS_PER_GATE = 8;
-
-double qubitSimilarity(const QuantumGate& A, const QuantumGate& B) {
-  // Convert each qubit list to a std::set.
-  std::set<int> setA(A.qubits.begin(), A.qubits.end());
-  std::set<int> setB(B.qubits.begin(), B.qubits.end());
-
-  // Compute intersection
-  std::vector<int> interAB;
-  std::set_intersection(setA.begin(),
-                        setA.end(),
-                        setB.begin(),
-                        setB.end(),
-                        std::back_inserter(interAB));
-
-  // Compute union
-  std::vector<int> unionAB;
-  std::set_union(setA.begin(),
-                 setA.end(),
-                 setB.begin(),
-                 setB.end(),
-                 std::back_inserter(unionAB));
-
-  if (unionAB.empty()) {
-    return 0.0;
-  }
-  return double(interAB.size()) / double(unionAB.size());
-}
-
-static Function* getMultiKernelDeclaration(IRBuilder<>& B,
-                                           Module& M,
-                                           const std::string& funcName) {
-  FunctionType* fty = FunctionType::get(B.getVoidTy(), {B.getPtrTy()}, false);
-  auto* func = Function::Create(fty, Function::ExternalLinkage, funcName, M);
-
-  // Mark as a kernel
-  auto& ctx = M.getContext();
-  auto* mdString = MDString::get(ctx, "kernel");
-  auto* mdOne = ConstantAsMetadata::get(B.getInt32(1));
-  auto* kernelMetadata =
-      MDNode::get(ctx, {ValueAsMetadata::get(func), mdString, mdOne});
-  M.getOrInsertNamedMetadata("nvvm.annotations")->addOperand(kernelMetadata);
-
-  // Name the argument
-  func->getArg(0)->setName("p.sv");
   return func;
 }
 
-/**
- * Only group gates that pass threshold for qubitSimilarity,
- * MAX_QUBITS_PER_GATE, and cap the group at MAX_GATES_PER_KERNEL.
- */
-std::vector<std::vector<std::shared_ptr<QuantumGate>>>
-groupGatesByOverlapAndSize(
-    const std::vector<std::shared_ptr<QuantumGate>>& allGates) {
-  std::vector<std::vector<std::shared_ptr<QuantumGate>>> groups;
-  groups.reserve(allGates.size());
-
-  for (auto& g : allGates) {
-    // also skip if gate is too large
-    if (g->nQubits() > MAX_QUBITS_PER_GATE) {
-      // put it alone in its own group
-      groups.push_back({g});
-      continue;
-    }
-
-    bool placed = false;
-    for (auto& grp : groups) {
-      if (grp.size() >= MAX_GATES_PER_KERNEL)
-        continue; // group full
-      // check similarity vs group[0]
-      double sim = qubitSimilarity(*g, *grp.front());
-      if (sim >= SIMILARITY_THRESHOLD) {
-        grp.push_back(g);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      groups.emplace_back();
-      groups.back().push_back(g);
-    }
+MaybeError<CUDAKernelManager::KernelInfoPtr>
+CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
+                                ConstQuantumGatePtr gate,
+                                const std::string& funcName) {
+  auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
+  llvm::Function* func = nullptr;
+  if (stdQuGate != nullptr && stdQuGate->noiseChannel() == nullptr) {
+    // a normal gate, no noise channel
+    const auto scalarGM = stdQuGate->getScalarGM();
+    assert(scalarGM != nullptr && "Only supporting scalar GM for now");
+    func = gen_(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
+  } else {
+    // super op gates are treated as normal gates with twice the number of
+    // qubits
+    auto superopGate = gate->getSuperopGate();
+    assert(superopGate != nullptr && "Superop gate should not be null");
+    const auto scalarGM = superopGate->getMatrix();
+    assert(scalarGM != nullptr && "superop gate matrix should not be null");
+    auto qubits = superopGate->qubits();
+    auto nQubits = superopGate->nQubits();
+    for (const auto& q : qubits)
+      qubits.push_back(q + nQubits);
+    func = gen_(config, scalarGM->matrix(), qubits, funcName);
   }
 
-  return groups;
+  if (func == nullptr) {
+    std::ostringstream oss;
+    oss << "Failed to generate kernel for gate " << (void*)(gate.get())
+        << " with name " << funcName;
+    return cast::makeError<KernelInfoPtr>(oss.str());
+  }
+
+  CUDAKernelInfo::CUDATuple cuTuple;
+  return std::make_unique<CUDAKernelInfo>(
+      CUDAKernelInfo::PTXStringType(), // ptxString
+      config.precision,
+      func->getName().str(),
+      gate,
+      cuTuple,
+      gate->opCount(config.zeroTol));
 }
 
-CUDAKernelManager& CUDAKernelManager::genCUDAGateMulti(
-    const CUDAKernelGenConfig& config,
-    const std::vector<std::shared_ptr<QuantumGate>>& gateList,
-    const std::string& funcName) {
-  // 1) create new module
-  auto& cmp = createNewLLVMContextModulePair(funcName + "_Module");
-  IRBuilder<> B(*cmp.llvmContext);
-  Module& M = *cmp.llvmModule;
-
-  // 2) Build a function: “__global__ void kernel(double *pSv)”
-  FunctionType* fty = FunctionType::get(B.getVoidTy(), {B.getPtrTy()}, false);
-  Function* func = Function::Create(fty,
-                                    Function::ExternalLinkage,
-                                    funcName,
-                                    &M // place it in module M
-  );
-
-  // Mark as a kernel via metadata
-  {
-    auto& ctx = M.getContext();
-    auto* mdString = MDString::get(ctx, "kernel");
-    auto* mdOne = ConstantAsMetadata::get(B.getInt32(1));
-    auto* mdNode =
-        MDNode::get(ctx, {ValueAsMetadata::get(func), mdString, mdOne});
-    M.getOrInsertNamedMetadata("nvvm.annotations")->addOperand(mdNode);
-  }
-
-  // Name the single argument
-  Argument* pSvArg = func->getArg(0);
-  pSvArg->setName("p.sv");
-
-  // 3) Create the “entry” basic block and set insertion point
-  BasicBlock* entryBB = BasicBlock::Create(B.getContext(), "entry", func);
-  B.SetInsertPoint(entryBB);
-
-  // 4) Get global thread ID in 64-bit
-  Value* threadIdx64 = getGlobalTidCUDA(B); // e.g. 0..(some large)
-
-  // track total ops
-  size_t totalOps = 0;
-
-  // 5) For each gate, do:
-  for (auto& g : gateList) {
-    // (A) Create the bit-mask pointer. This replicates the single-gate
-    // “idxStartV” logic.
-    const auto& qubits = g->qubits;
-    int k = (int)qubits.size();
-    int highestQ = qubits.back();
-
-    // need the scalar type for the GEP
-    Type* scalarTy =
-        (config.precision == 32) ? B.getFloatTy() : B.getDoubleTy();
-
-    // Build idxStartV
-    Value* idxStartV = B.getInt64(0);
-    {
-      Value* tmpCounterV;
-      uint64_t mask = 0ULL;
-      int qIdx = 0;
-      int counterQ = 0;
-
-      // for each integer q in [0..highestQ], build partial mask
-      for (int q = 0; q <= highestQ; q++) {
-        if (q < qubits[qIdx]) {
-          // accumulate bits
-          mask |= (1ULL << (counterQ++));
-          continue;
-        }
-        // else q == qubits[qIdx]
-        ++qIdx;
-        if (mask != 0ULL) {
-          tmpCounterV =
-              B.CreateAnd(threadIdx64, B.getInt64(mask), "tmpCounter");
-          // shift by (qIdx - 1)
-          tmpCounterV =
-              B.CreateShl(tmpCounterV, B.getInt64(qIdx - 1), "tmpCounter");
-          idxStartV = B.CreateAdd(idxStartV, tmpCounterV, "tmpIdx");
-          mask = 0ULL;
-        }
-        if (qIdx >= k) {
-          break; // done if we've processed all gate qubits
-        }
-      }
-
-      // Now handle bits above the last qubit
-      // mask = ~((1ULL << (gate->qubits.back() - k + 1)) - 1);
-      mask = ~((1ULL << (highestQ - k + 1)) - 1ULL);
-
-      tmpCounterV = B.CreateAnd(threadIdx64, B.getInt64(mask), "tmpCounter");
-      tmpCounterV = B.CreateShl(tmpCounterV, B.getInt64(k), "tmpCounter");
-      idxStartV = B.CreateAdd(idxStartV, tmpCounterV, "idxStart");
-    }
-
-    // multiply by 2 (for real+imag)
-    idxStartV = B.CreateShl(idxStartV, 1, "idxStart");
-
-    // Now do GEP
-    Value* maskedSvPtr =
-        B.CreateGEP(scalarTy, pSvArg, idxStartV, "maskedSvPtr");
-
-    // (B) Get matrix data
-    auto matData = getMatDataCUDA(B, g->gateMatrix, config);
-
-    // (C) Call genMatrixVectorMultiply_SharedTiled with this masked pointer
-    genMatrixVectorMultiply_SharedTiled(
-        B,
-        config,
-        g->gateMatrix,
-        g->qubits,
-        matData,
-        maskedSvPtr, // use the bit-masked pointer
-        scalarTy);
-
-    // track ops
-    totalOps += g->opCount(config.zeroTol);
-  }
-
-  // 6) return void
-  B.CreateRetVoid();
-
-  // 7) verify
-  if (verifyFunction(*func, &errs())) {
-    errs() << "[ERROR] multi function invalid.\n";
-  }
-
-  // 8) store kernel info
-  CUDAKernelInfo::CUDATuple emptyCT;
-  _cudaKernels.emplace_back(CUDAKernelInfo::PTXStringType(),
-                            config.precision,
-                            func->getName().str(),
-                            nullptr, // no single gate
-                            emptyCT,
-                            totalOps);
-
-  return *this;
-}
-
-CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraphMulti(
-    const CUDAKernelGenConfig& config,
-    const CircuitGraph& graph,
-    const std::string& graphName) {
-  // gather all gates
-  std::vector<std::shared_ptr<QuantumGate>> allGates;
-  for (auto& block : graph.getAllBlocks()) {
-    allGates.push_back(block->quantumGate);
-  }
-
-  // group them
-  auto grouped = groupGatesByOverlapAndSize(allGates);
-
-  // for each group => build a single multi kernel
-  for (size_t i = 0; i < grouped.size(); i++) {
-    std::string fnName = graphName + "_multi_" + std::to_string(i);
-    genCUDAGateMulti(config, grouped[i], fnName);
-  }
-
-  return *this;
-}
-
-void CUDAKernelManager::dumpPTX(const std::string& kernelName,
-                                llvm::raw_ostream& os) {
-  // First check if we have already compiled to PTX
-  for (auto& kernelInfo : standaloneKernels_) {
-    if (kernelInfo.llvmFuncName == kernelName) {
-      if (!kernelInfo.ptxString.empty()) {
-        os << "=== PTX for kernel '" << kernelName << "' ===\n";
-        os << kernelInfo.ptxString << "\n";
-        return;
-      }
-      break;
+MaybeError<void>
+CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
+                                     ConstQuantumGatePtr gate,
+                                     const std::string& _funcName) {
+  std::string funcName(_funcName);
+  if (funcName.empty())
+    funcName = "kernel_" + std::to_string(standaloneKernels_.size());
+  // check for name conflicts
+  for (const auto& kernel : standaloneKernels_) {
+    if (kernel->llvmFuncName == funcName) {
+      return cast::makeError<void>("Kernel with name '" + funcName +
+                                   "' already exists.");
     }
   }
 
-  // If not found in compiled kernels, check the modules
-  for (auto& cmp : llvmContextModulePairs) {
-    auto& M = *cmp.llvmModule;
-    if (auto* F = M.getFunction(kernelName)) {
-      os << "=== Generating PTX for kernel '" << kernelName << "' ===\n";
-
-      // Initialize LLVM targets
-      llvm::InitializeAllTargetInfos();
-      llvm::InitializeAllTargets();
-      llvm::InitializeAllTargetMCs();
-      llvm::InitializeAllAsmPrinters();
-      llvm::InitializeAllAsmParsers();
-
-      // Configure for NVPTX
-      std::string error;
-      auto targetTriple = "nvptx64-nvidia-cuda";
-      auto target = llvm::TargetRegistry::lookupTarget(targetTriple, error);
-      if (!target) {
-        os << "Error getting NVPTX target: " << error << "\n";
-        return;
-      }
-
-      // Set target options
-      llvm::TargetOptions opt;
-      auto RM = std::optional<llvm::Reloc::Model>();
-      auto targetMachine =
-          target->createTargetMachine(targetTriple, "sm_70", "+ptx60", opt, RM);
-
-      // Set up output stream
-      llvm::SmallString<0> ptxCode;
-      llvm::raw_svector_ostream ptxStream(ptxCode);
-
-      // Use legacy pass manager
-      llvm::legacy::PassManager pass;
-
-      // Version-agnostic file type selection
-      auto fileType =
-#if LLVM_VERSION_MAJOR >= 10
-          llvm::CodeGenFileType::AssemblyFile;
-#else
-          llvm::CGFT_AssemblyFile;
-#endif
-
-      if (targetMachine->addPassesToEmitFile(
-              pass, ptxStream, nullptr, fileType)) {
-        os << "Failed to generate PTX\n";
-        return;
-      }
-
-      pass.run(M);
-
-      os << ptxCode.str() << "\n";
-      return;
-    }
+  auto result = genCUDAGate_(config, gate, funcName);
+  if (!result) {
+    return cast::makeError<void>("Err: " + result.takeError());
   }
-
-  os << "No kernel found with name '" << kernelName << "'\n";
+  standaloneKernels_.emplace_back(result.takeValue());
+  return {}; // success
 }
+
+// CUDAKernelManager& CUDAKernelManager::genCUDAGatesFromCircuitGraph(
+//     const CUDAKernelGenConfig& config,
+//     const CircuitGraph& graph,
+//     const std::string& graphName,
+//     int nQubits) {
+//   const auto allBlocks = graph.getAllBlocks();
+//   const auto mangledName = internal::mangleGraphName(graphName);
+//   for (const auto& block : allBlocks) {
+//     genCUDAGate(config,
+//                 block->quantumGate,
+//                 mangledName + std::to_string(block->id),
+//                 nQubits);
+//   }
+//   return *this;
+// }
 
 #undef DEBUG_TYPE

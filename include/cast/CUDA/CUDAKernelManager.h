@@ -67,6 +67,10 @@ struct CUDAKernelGenConfig {
   double oneTol = 1e-8;
   bool forceDenseKernel = false;
   int blockSize = 64; // for now have constant blocksize across kernels
+
+  // Enable tiling if the gate size >= this value. Setting this value to 0
+  // always enables tiling.
+  int enableTilingGateSize = 0;
   CUDAMatrixLoadMode matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
 
   std::ostream& displayInfo(std::ostream& os) const;
@@ -80,13 +84,29 @@ class CUDAKernelManager : public KernelManagerBase {
   enum JITState { JIT_Uninited, JIT_PTXEmitted, JIT_CUFunctionLoaded };
   JITState jitState;
 
+  // Both gate-sv and superop-dm simulation will boil down to a matrix with
+  // target qubits. This function contains the core logics to emit LLVM IR.
+  llvm::Function* gen_(const CUDAKernelGenConfig& config,
+                       const ComplexSquareMatrix& matrix,
+                       const QuantumGate::TargetQubitsType& qubits,
+                       const std::string& funcName);
+
+  // Generate a CUDA kernel for the given gate. This function will wraps around
+  // when gate is a StandardQuantumGate (with or without noise) or
+  // SuperopQuantumGate, and call gen_ with a corresponding ComplexSquareMatrix.
+  MaybeError<KernelInfoPtr> genCUDAGate_(const CUDAKernelGenConfig& config,
+                                         ConstQuantumGatePtr gate,
+                                         const std::string& funcName);
+
+  static std::atomic<int> standaloneKernelCounter_;
+
 public:
   CUDAKernelManager()
       : KernelManagerBase(), standaloneKernels_(), jitState(JIT_Uninited) {}
 
-  MaybeError<void> genStandardaloneGate(const CUDAKernelGenConfig& config,
-                                        const QuantumGate* gate,
-                                        const std::string& funcName);
+  MaybeError<void> genStandaloneGate(const CUDAKernelGenConfig& config,
+                                     ConstQuantumGatePtr gate,
+                                     const std::string& funcName);
 
   // Get all standalone kernels.
   std::span<const KernelInfoPtr> getAllStandaloneKernels() const {

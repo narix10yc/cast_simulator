@@ -1,8 +1,8 @@
-#include "cast/CUDA/StatevectorCUDA.h"
+#include "cast/CUDA/CUDAStatevector.h"
 #include <curand.h>
 #include <curand_kernel.h>
 
-using namespace utils;
+using namespace cast;
 
 template <typename ScalarType>
 __global__ void
@@ -13,7 +13,7 @@ multiplyByConstantKernel(ScalarType* dArr, ScalarType c, size_t size) {
 }
 
 template <typename ScalarType>
-void utils::internal::HelperCUDAKernels<ScalarType>::multiplyByConstant(
+void cast::internal::HelperCUDAKernels<ScalarType>::multiplyByConstant(
     ScalarType* dArr, ScalarType c, size_t size) {
   size_t blockSize = 256;
   size_t numBlocks = (size + blockSize - 1) / blockSize;
@@ -34,7 +34,7 @@ __global__ void initGaussianKernel(ScalarType* dArr,
 }
 
 template <typename ScalarType>
-void utils::internal::HelperCUDAKernels<ScalarType>::randomizeStatevector(
+void cast::internal::HelperCUDAKernels<ScalarType>::randomizeStatevector(
     ScalarType* dArr, size_t size) {
   size_t blockSize = 256;
   size_t numBlocks = (size + blockSize - 1) / blockSize;
@@ -90,7 +90,7 @@ __global__ void sumOfSquaredReductionKernel(const ScalarType* dArr,
 }
 
 template <typename ScalarType>
-ScalarType utils::internal::HelperCUDAKernels<ScalarType>::reduceSquared(
+ScalarType cast::internal::HelperCUDAKernels<ScalarType>::reduceSquared(
     const ScalarType* dArr, size_t size) {
   constexpr unsigned blockSize = 128;
   size_t gridSize = (size + 2 * blockSize - 1) / (2 * blockSize);
@@ -172,7 +172,7 @@ __global__ void sumOfSquaredOmittingBitReductionKernel(const ScalarType* dArr,
 
 template <typename ScalarType>
 ScalarType
-utils::internal::HelperCUDAKernels<ScalarType>::reduceSquaredOmittingBit(
+cast::internal::HelperCUDAKernels<ScalarType>::reduceSquaredOmittingBit(
     const ScalarType* dArr, size_t size, int bit) {
   constexpr unsigned blockSize = 128;
   size_t gridSize = (size + 2 * blockSize - 1) / (2 * blockSize);
@@ -200,7 +200,7 @@ utils::internal::HelperCUDAKernels<ScalarType>::reduceSquaredOmittingBit(
   return sum;
 }
 
-namespace utils::internal {
+namespace cast::internal {
 template struct HelperCUDAKernels<float>;
 template struct HelperCUDAKernels<double>;
-} // namespace utils::internal
+} // namespace cast::internal
