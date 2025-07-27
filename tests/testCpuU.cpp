@@ -59,11 +59,11 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
     kernelMgr.applyCPUKernel(sv1.data(), sv1.nQubits(), *loadKernel)
         .consumeError();
     sv2.applyGate(*gates[i]);
-    suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
-    suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
-    suite.assertClose(
+    suite.assertCloseF64(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
+    suite.assertCloseF64(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
+    suite.assertCloseF64(
         cast::fidelity(sv0, sv2), 1.0, ss.str() + ": Imm Fidelity", GET_INFO());
-    suite.assertClose(cast::fidelity(sv1, sv2),
+    suite.assertCloseF64(cast::fidelity(sv1, sv2),
                       1.0,
                       ss.str() + ": Load Fidelity",
                       GET_INFO());
@@ -132,11 +132,11 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U2q() {
     kernelMgr.applyCPUKernel(sv1.data(), sv1.nQubits(), *loadKernel)
         .consumeError();
     sv2.applyGate(*gates[i]);
-    suite.assertClose(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
-    suite.assertClose(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
-    suite.assertClose(
+    suite.assertCloseF64(sv0.norm(), 1.0, ss.str() + ": Imm Norm", GET_INFO());
+    suite.assertCloseF64(sv1.norm(), 1.0, ss.str() + ": Load Norm", GET_INFO());
+    suite.assertCloseF64(
         cast::fidelity(sv0, sv2), 1.0, ss.str() + ": Imm Fidelity", GET_INFO());
-    suite.assertClose(cast::fidelity(sv1, sv2),
+    suite.assertCloseF64(cast::fidelity(sv1, sv2),
                       1.0,
                       ss.str() + ": Load Fidelity",
                       GET_INFO());

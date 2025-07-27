@@ -2,7 +2,7 @@
 // #include "cast/CUDA/CUDAKernelManager.h"
 // #include "cast/CUDA/CUDAStatevector.h"
 
-// #include "utils/cuda_api_call.h"
+// #include "cast/CUDA/Config.h"
 
 // #include <random>
 
@@ -538,7 +538,7 @@
 //       "JIT Compilation");
 
 //   // Prepare statevector
-//   utils::StatevectorCUDA<double> sv(nQubits);
+//   cast::CUDAStatevector<double> sv(nQubits);
 //   utils::timedExecute([&]() { sv.randomize(); }, "Initialize statevector");
 
 //   for (auto& kernel : kernelMgr.kernels()) {

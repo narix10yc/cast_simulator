@@ -3,6 +3,29 @@
 
 #include <random>
 
+int utils::parseNonNegativeInt(const char* str) noexcept {
+  constexpr int MAX_SAFE = INT_MAX / 10;
+  constexpr int MAX_LAST_DIGIT = INT_MAX % 10;
+
+  if (str == nullptr || *str == '\0')
+    return -1; // invalid input
+
+  int value = 0;
+  while (*str) {
+    unsigned char ch = static_cast<unsigned char>(*str);
+    if (!std::isdigit(ch))
+      return -1; // invalid input
+
+    int digit = ch - '0';
+    if (value > MAX_SAFE || (value == MAX_SAFE && digit > MAX_LAST_DIGIT))
+      return -2; // would overflow
+
+    value = value * 10 + digit;
+    ++str;
+  }
+  return value;
+}
+
 void utils::sampleNoReplacement(unsigned N,
                                 unsigned K,
                                 std::vector<int>& holder) {

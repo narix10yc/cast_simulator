@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "cast/CUDA/StatevectorCUDA.h"
+#include "cast/CUDA/CUDAStatevector.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Fusion.h"
 #include "cast/Legacy/CircuitGraph.h"
@@ -133,7 +133,7 @@ measureKernelExecutionTime(const cast::legacy::CircuitGraph& graph,
       kernelMgr.collectCUDAKernelsFromlegacy::CircuitGraph("testCircuit");
 
   int nQubits = graph.nQubits;
-  utils::StatevectorCUDA<double> sv(nQubits);
+  cast::CUDAStatevector<double> sv(nQubits);
   sv.initialize(); // or randomize, etc.
 
   timeit::Timer timer(/*replications=*/3);

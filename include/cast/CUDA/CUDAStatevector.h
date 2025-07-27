@@ -1,7 +1,7 @@
 #ifndef CAST_CUDA_CUDASTATEVECTOR_H
 #define CAST_CUDA_CUDASTATEVECTOR_H
 
-#include "utils/cuda_api_call.h"
+#include "cast/CUDA/Config.h"
 
 #include <cassert>
 #include <cmath>
@@ -31,7 +31,7 @@ extern template struct HelperCUDAKernels<double>;
 
 /// @brief A helper class that relies on CUDA Runtime API to handle device data.
 /// Notice that if using \c CUDAKernelManager, \c CUDAKernelManager instances
-/// must appear *before* any \c StatevectorCUDA instances, due to the order they
+/// must appear *before* any \c CUDAStatevector instances, due to the order they
 /// are destructed.
 /// @tparam ScalarType
 template <typename ScalarType> class CUDAStatevector {

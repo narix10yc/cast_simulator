@@ -11,7 +11,7 @@ Value* cast::internal::genMulAdd(IRBuilder<>& B,
                                  const Twine& name) {
   assert(b && "operand b cannot be null when calling genMulAdd");
   switch (aKind) {
-  case SK_General: {
+  case SK_Runtime: {
     // a * b + c
     assert(a != nullptr && "General kind 'a' operand cannot be null");
     if (c)
@@ -77,7 +77,7 @@ Value* cast::internal::genNegMulAdd(IRBuilder<>& B,
 
   auto* aNeg = B.CreateFNeg(a, "a.neg");
   switch (aKind) {
-  case SK_General: {
+  case SK_Runtime: {
     assert(a && "General kind 'a' operand cannot be null");
     assert(a->getType() == b->getType());
     // -a * b + c

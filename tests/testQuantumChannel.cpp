@@ -39,7 +39,7 @@ void cast::test::test_quantumChannel() {
   auto soGate = gate->getSuperopGate();
 
   auto targetSOGate = getSOGateForSPC(0.1, 0);
-  suite.assertClose(cast::maximum_norm(soGate->getMatrix()->matrix(),
+  suite.assertCloseF64(cast::maximum_norm(soGate->getMatrix()->matrix(),
                                        targetSOGate->getMatrix()->matrix()),
                     0.0,
                     "Superop gate SPC test",

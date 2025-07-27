@@ -1,4 +1,5 @@
 #include "cast/CUDA/CUDAKernelManager.h"
+#include "cast/CUDA/Config.h"
 
 #include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -10,7 +11,7 @@
 
 #include "utils/Formats.h"
 #include "utils/TaskDispatcher.h"
-#include "utils/cuda_api_call.h"
+#include "cast/CUDA/Config.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
@@ -67,14 +68,8 @@ void CUDAKernelManager::emitPTX(int nThreads,
   }
 
 #ifdef CAST_USE_CUDA
-  cuInit(0);
-  CUdevice device;
-  cuDeviceGet(&device, 0);
   int major = 0, minor = 0;
-  cuDeviceGetAttribute(
-      &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, device);
-  cuDeviceGetAttribute(
-      &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device);
+  cast::getCudaComputeCapability(major, minor);
   std::ostringstream archOss;
   archOss << "sm_" << major << minor;
   std::string archString = archOss.str();
@@ -118,19 +113,6 @@ void CUDAKernelManager::emitPTX(int nThreads,
   jitState = JIT_PTXEmitted;
 }
 
-static int getFirstVisibleDevice() {
-  const char* castEnvVar = std::getenv("CAST_USE_CUDA_DEVICE");
-  if (castEnvVar != nullptr)
-    return std::stoi(castEnvVar);
-
-  const char* cudaEnvVar = std::getenv("CUDA_VISIBLE_DEVICES");
-  if (cudaEnvVar != nullptr)
-    return std::stoi(cudaEnvVar);
-
-  // If no environment variable is set, return the first device (0).
-  return 0;
-}
-
 void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   assert(jitState == JIT_PTXEmitted);
   assert(nThreads > 0);
@@ -146,7 +128,7 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   CUdevice cuDevice;
   // int deviceIdx = getFirstVisibleDevice();
   int deviceIdx = 0;
-  /* It seems cuDeviceGet expects logical index.
+  /* cuDeviceGet expects logical index.
    * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
    * physical device 2.
    * Therefore, we always choose deviceIdx to be 0, and ask users to control

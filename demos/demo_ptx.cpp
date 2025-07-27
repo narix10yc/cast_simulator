@@ -1,4 +1,4 @@
-#include "cast/CUDA/StatevectorCUDA.h"
+#include "cast/CUDA/CUDAStatevector.h"
 #include "timeit/timeit.h"
 
 #include "cast/Fusion.h"
@@ -193,7 +193,7 @@ int main(int argc, const char** argv) {
       "JIT compile kernels");
 
   // Run kernels
-  utils::StatevectorCUDA<double> sv(graphNoFuse.nQubits);
+  cast::CUDAStatevector<double> sv(graphNoFuse.nQubits);
   // sv.randomize();
   sv.initialize();
   timeit::Timer timer(ArgReplication);

@@ -9,13 +9,6 @@ int main() {
 
   utils::timedExecute(
       [] {
-        test_applyGate();
-        test_gateMatMul();
-      },
-      "Gate Matrix Test Finished!");
-
-  utils::timedExecute(
-      [] {
         test_cpuH();
         test_cpuU();
       },
@@ -40,12 +33,17 @@ int main() {
 #ifdef CAST_USE_CUDA
 
   utils::timedExecute([] { test_statevectorCUDA(); },
-                      "StatevectorCUDA Test Finished!");
+                      "CUDAStatevector Test Finished!");
 
   utils::timedExecute([] { test_cudaU(); }, "CUDA Codegen Test Finished!");
 
-  utils::timedExecute([] { test_cudaRz_param(); },
-                      "CUDA Codegen (Runtime) Test Finished!");
+  utils::timedExecute([] { test_cudaU2(); }, "CUDA Codegen Test Finished!");
+
+  utils::timedExecute([] { test_cuda_gate_var(); },
+                      "CUDA Codegen Test Finished!");
+
+  // utils::timedExecute([] { test_cudaRz_param(); },
+  // "CUDA Codegen (Runtime) Test Finished!");
 
 #endif // CAST_USE_CUDA
 

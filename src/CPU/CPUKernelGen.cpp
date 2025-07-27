@@ -163,8 +163,8 @@ std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
   // Step 1: set the flags
   if (zTol == 0.0 && oTol == 0.0) {
     for (unsigned i = 0; i < KK; ++i) {
-      matData[i].reFlag = SK_General;
-      matData[i].imFlag = SK_General;
+      matData[i].reFlag = SK_Runtime;
+      matData[i].imFlag = SK_Runtime;
     }
   } else {
     for (unsigned i = 0; i < KK; ++i) {
@@ -177,7 +177,7 @@ std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
       else if (std::abs(re + 1.0) < oTol)
         matData[i].reFlag = SK_MinusOne;
       else
-        matData[i].reFlag = SK_General;
+        matData[i].reFlag = SK_Runtime;
 
       if (std::abs(im) < zTol)
         matData[i].imFlag = SK_Zero;
@@ -186,7 +186,7 @@ std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
       else if (std::abs(im + 1.0) < oTol)
         matData[i].imFlag = SK_MinusOne;
       else
-        matData[i].imFlag = SK_General;
+        matData[i].imFlag = SK_Runtime;
     }
   }
 
@@ -204,12 +204,12 @@ std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
       // in the main loop we will only use these imm values if the flag is
       // SK_General.
       auto& d = matData[i];
-      if (d.reFlag == SK_General) {
+      if (d.reFlag == SK_Runtime) {
         auto* reConstantVal = llvm::ConstantFP::get(ty, mat.reData()[i]);
         d.reElmVal = reConstantVal;
         d.reVecVal = llvm::ConstantVector::getSplat(ec, reConstantVal);
       }
-      if (d.imFlag == SK_General) {
+      if (d.imFlag == SK_Runtime) {
         auto* imConstantVal = llvm::ConstantFP::get(ty, mat.imData()[i]);
         d.imElmVal = imConstantVal;
         d.imVecVal = llvm::ConstantVector::getSplat(ec, imConstantVal);
@@ -223,14 +223,14 @@ std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
     // imag[1], ..., real[K*K-1], imag[K*K-1].
     for (unsigned i = 0; i < KK; ++i) {
       auto& d = matData[i];
-      if (d.reFlag == SK_General) {
+      if (d.reFlag == SK_Runtime) {
         auto* ptrV = B.CreateConstGEP1_32(
             ty, pMatArg, 2 * i, "re.mat.elem." + llvm::Twine(i));
         d.reElmVal = B.CreateLoad(ty, ptrV, "re.mat.elem." + llvm::Twine(i));
         d.reVecVal = B.CreateVectorSplat(
             ec, d.reElmVal, "re.mat.vec." + std::to_string(i));
       }
-      if (d.imFlag == SK_General) {
+      if (d.imFlag == SK_Runtime) {
         auto* ptrV = B.CreateConstGEP1_32(
             ty, pMatArg, 2 * i + 1, "im.mat.elem." + llvm::Twine(i));
         d.imElmVal = B.CreateLoad(ty, ptrV, "im.mat.elem." + llvm::Twine(i));
@@ -251,7 +251,7 @@ std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
 
 char flagToChar(ScalarKind flag) {
   switch (flag) {
-  case SK_General:
+  case SK_Runtime:
     return 'X';
   case SK_Zero:
     return '0';

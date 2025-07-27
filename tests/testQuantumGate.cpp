@@ -18,7 +18,7 @@ void cast::test::test_quantumGate() {
     assert(gate0->getScalarGM() != nullptr);
     assert(gate1->getScalarGM() != nullptr);
     assert(gate->getScalarGM() != nullptr);
-    suite.assertClose(cast::maximum_norm(stdQuGate->getScalarGM()->matrix(),
+    suite.assertCloseF64(cast::maximum_norm(stdQuGate->getScalarGM()->matrix(),
                                          gate->getScalarGM()->matrix()),
                       0.0,
                       title,
@@ -39,7 +39,7 @@ void cast::test::test_quantumGate() {
       M_SQRT1_2, 0.0, M_SQRT1_2, 0.0,
       0.0, M_SQRT1_2, 0.0, M_SQRT1_2,
       M_SQRT1_2, 0.0, -M_SQRT1_2, 0.0,
-      0.0, 0.0, M_SQRT1_2, 0.0, -M_SQRT1_2
+      0.0, M_SQRT1_2, 0.0, -M_SQRT1_2
     },
     // imag
     {

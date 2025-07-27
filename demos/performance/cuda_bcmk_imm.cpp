@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "cast/CUDA/StatevectorCUDA.h"
+#include "cast/CUDA/CUDAStatevector.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Fusion.h"
 #include "cast/Legacy/CircuitGraph.h"
@@ -312,7 +312,7 @@ int main() {
   // Execution Time
   Timer execTimer(nReps);
   TimingResult execTR = execTimer.timeit([&]() {
-    utils::StatevectorCUDA<double> sv(graphPtr->nQubits);
+    cast::CUDAStatevector<double> sv(graphPtr->nQubits);
     sv.initialize();
     for (auto* k : kernels) {
       kernelMgr.launchCUDAKernel(sv.dData(), sv.nQubits(), *k, blockSize);

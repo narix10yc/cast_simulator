@@ -44,13 +44,13 @@ public:
 
   void assertFalse(const std::string& title, const std::string& info);
 
-  void assertClose(float a,
+  void assertCloseF32(float a,
                    float b,
                    const std::string& title,
                    const std::string& info,
                    float tol = 1e-4);
 
-  void assertClose(double a,
+  void assertCloseF64(double a,
                    double b,
                    const std::string& title,
                    const std::string& info,
@@ -85,8 +85,6 @@ public:
 
 void test_complexSquareMatrix();
 
-void test_applyGate();
-void test_gateMatMul();
 void test_quantumGate();
 void test_quantumChannel();
 
@@ -101,7 +99,9 @@ void test_fusionCPU();
 
 void test_statevectorCUDA();
 void test_cudaU();
-void test_cudaRz_param();
+void test_cudaU2();
+void test_cuda_gate_var();
+// void test_cudaRz_param();
 
 } // namespace cast::test
 

@@ -52,6 +52,42 @@ std::ostream& CPUKernelManager::displayInfo(std::ostream& os) const {
   return os;
 }
 
+const CPUKernelInfo*
+CPUKernelManager::getKernelByName(const std::string& llvmFuncName) const {
+  for (const auto& kernel : standaloneKernels_) {
+    if (kernel->llvmFuncName == llvmFuncName)
+      return kernel.get();
+  }
+  for (const auto& [graphName, kernels] : graphKernels_) {
+    for (const auto& kernel : kernels) {
+      if (kernel->llvmFuncName == llvmFuncName)
+        return kernel.get();
+    }
+  }
+  return nullptr;
+}
+
+void CPUKernelManager::ensureExecutable(CPUKernelInfo& kernel) {
+  // Note: We do not actually need the lock here
+  // as it is expected (at least now) each KernelInfo is accesses by a unique
+  // thread
+  // TODO: we could inline this function into \c initJIT. Maybe introduce a
+  // lock inside \c initJIT
+  {
+    std::lock_guard<std::mutex> lock(mtx);
+    if (kernel.executable)
+      return;
+  }
+  auto addr =
+      cantFail(llvmJIT->lookup(kernel.llvmFuncName)).toPtr<CPU_KERNEL_TYPE>();
+  // std::cerr << "Kernel " << kernel.llvmFuncName << " addr " << (void*)addr
+  // << "\n";
+  {
+    std::lock_guard<std::mutex> lock(mtx);
+    kernel.executable = addr;
+  }
+}
+
 void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   assert(nThreads > 0);
   if (nThreads == 1) {

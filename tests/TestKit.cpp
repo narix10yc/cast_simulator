@@ -26,7 +26,7 @@ void TestSuite::assertFalse(const std::string& title, const std::string& info) {
   failures.emplace_back(title, info, "AssertFalse");
 }
 
-void TestSuite::assertClose(float a,
+void TestSuite::assertCloseF32(float a,
                             float b,
                             const std::string& title,
                             const std::string& info,
@@ -42,7 +42,7 @@ void TestSuite::assertClose(float a,
   failures.emplace_back(title, info, ss.str());
 }
 
-void TestSuite::assertClose(double a,
+void TestSuite::assertCloseF64(double a,
                             double b,
                             const std::string& title,
                             const std::string& info,

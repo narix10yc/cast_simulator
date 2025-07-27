@@ -4,14 +4,17 @@
 #ifndef CAST_CUDA_CUDAKERNELMANAGER_H
 #define CAST_CUDA_CUDAKERNELMANAGER_H
 
+#include "cast/CUDA/Config.h"
+#include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
+
+#include "utils/MaybeError.h"
 
 // TODO: We may not need cuda_runtime (also no need to link CUDA::cudart)
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include "utils/MaybeError.h"
 
 namespace cast {
 
@@ -98,7 +101,13 @@ class CUDAKernelManager : public KernelManagerBase {
                                          ConstQuantumGatePtr gate,
                                          const std::string& funcName);
 
-  static std::atomic<int> standaloneKernelCounter_;
+  /// Generate kernels for all gates in the given circuit graph. The generated
+  /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
+  /// order of the gate in the circuit graph.
+  // TODO: do we still need the order
+  MaybeError<void> genGraphGates(const CUDAKernelGenConfig& config,
+                                 const ir::CircuitGraphNode& graph,
+                                 const std::string& graphName);
 
 public:
   CUDAKernelManager()
@@ -107,11 +116,6 @@ public:
   MaybeError<void> genStandaloneGate(const CUDAKernelGenConfig& config,
                                      ConstQuantumGatePtr gate,
                                      const std::string& funcName);
-
-  // Get all standalone kernels.
-  std::span<const KernelInfoPtr> getAllStandaloneKernels() const {
-    return std::span<const KernelInfoPtr>(standaloneKernels_);
-  }
 
   void emitPTX(int nThreads = 1,
                llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
@@ -152,6 +156,25 @@ public:
   /// context and module. This function can only be called once and cannot be
   /// undone. This function assumes \c emitPTX is already called.
   void initCUJIT(int nThreads = 1, int verbose = 0);
+
+
+  /* Get Kernels */
+
+  std::span<const KernelInfoPtr> getAllStandaloneKernels() const {
+    return std::span<const KernelInfoPtr>(standaloneKernels_);
+  }
+
+  // Get kernel by name. Return nullptr if not found.
+  const CUDAKernelInfo* getKernelByName(const std::string& llvmFuncName) const;
+
+  std::span<const KernelInfoPtr>
+  getKernelsFromGraphName(const std::string& graphName) const {
+    auto it = graphKernels_.find(graphName);
+    if (it == graphKernels_.end())
+      return {}; // empty span
+    return std::span<const KernelInfoPtr>(it->second);
+  }
+
 
   ///
   void launchCUDAKernel(void* dData,

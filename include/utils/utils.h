@@ -16,6 +16,10 @@
 
 namespace utils {
 
+/// noexcept version of std::stoi for positive integers
+/// Returns -1 for invalid input, -2 for overflow.
+int parseNonNegativeInt(const char* str) noexcept;
+
 /// @brief Sample K unique integers from [0, N-1] without replacement.
 /// @param holder: will be cleared and filled with K unique integers.
 void sampleNoReplacement(unsigned N, unsigned K, std::vector<int>& holder);

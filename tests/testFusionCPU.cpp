@@ -71,16 +71,16 @@ template <CPUSimdWidth SimdWidth> static void f() {
         .applyCPUKernelsFromGraph(sv1.data(), sv1.nQubits(), "graphAfterFusion")
         .consumeError();
 
-    suite.assertClose(sv0.norm(),
+    suite.assertCloseF64(sv0.norm(),
                       1.0,
                       p.path().filename().string() + " no-fuse norm",
                       GET_INFO());
-    suite.assertClose(sv1.norm(),
+    suite.assertCloseF64(sv1.norm(),
                       1.0,
                       p.path().filename().string() + " fuse norm",
                       GET_INFO());
 
-    suite.assertClose(cast::fidelity(sv0, sv1),
+    suite.assertCloseF64(cast::fidelity(sv0, sv1),
                       1.0,
                       p.path().filename().string() + " fidelity",
                       GET_INFO());

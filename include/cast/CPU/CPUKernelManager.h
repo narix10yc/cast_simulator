@@ -81,6 +81,10 @@ class CPUKernelManager : public KernelManagerBase {
   MaybeError<KernelInfoPtr> genCPUGate_(const CPUKernelGenConfig& config,
                                         ConstQuantumGatePtr gate,
                                         const std::string& funcName);
+
+  void ensureExecutable(CPUKernelInfo& kernel);
+  void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
+
 public:
   CPUKernelManager()
       : KernelManagerBase(), standaloneKernels_(), llvmJIT(nullptr) {}
@@ -134,19 +138,7 @@ public:
   }
 
   // Get kernel by name. Return nullptr if not found.
-  const CPUKernelInfo* getKernelByName(const std::string& llvmFuncName) const {
-    for (const auto& kernel : standaloneKernels_) {
-      if (kernel->llvmFuncName == llvmFuncName)
-        return kernel.get();
-    }
-    for (const auto& [graphName, kernels] : graphKernels_) {
-      for (const auto& kernel : kernels) {
-        if (kernel->llvmFuncName == llvmFuncName)
-          return kernel.get();
-      }
-    }
-    return nullptr;
-  }
+  const CPUKernelInfo* getKernelByName(const std::string& llvmFuncName) const;
 
   std::span<const KernelInfoPtr>
   getKernelsFromGraphName(const std::string& graphName) const {
@@ -173,34 +165,11 @@ public:
                                             const std::string& graphName,
                                             int nThreads = 1) const;
 
-  void ensureExecutable(CPUKernelInfo& kernel) {
-    // Note: We do not actually need the lock here
-    // as it is expected (at least now) each KernelInfo is accesses by a unique
-    // thread
-    // TODO: we could inline this function into \c initJIT. Maybe introduce a
-    // lock inside \c initJIT
-    {
-      std::lock_guard<std::mutex> lock(mtx);
-      if (kernel.executable)
-        return;
-    }
-    auto addr =
-        cantFail(llvmJIT->lookup(kernel.llvmFuncName)).toPtr<CPU_KERNEL_TYPE>();
-    // std::cerr << "Kernel " << kernel.llvmFuncName << " addr " << (void*)addr
-    // << "\n";
-    {
-      std::lock_guard<std::mutex> lock(mtx);
-      kernel.executable = addr;
-    }
-  }
-
   void dumpIR(const std::string& funcName,
               llvm::raw_ostream& os = llvm::errs());
 
   // TODO: not implemented yet
   void dumpAsm(const std::string& funcName, llvm::raw_ostream& os);
-
-  void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
 
 }; // class CPUKernelManager
 

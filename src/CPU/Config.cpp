@@ -1,4 +1,5 @@
 #include "cast/CPU/Config.h"
+#include "utils/utils.h"
 #include "utils/iocolor.h"
 
 #include "llvm/ADT/StringMap.h"
@@ -12,23 +13,9 @@
 
 using namespace cast;
 
-static int parsePositiveInt(const char* str) {
-  if (str == nullptr)
-    return 0;
-
-  int value = 0;
-  while (*str) {
-    if (!std::isdigit(*str))
-      return 0;
-    value = value * 10 + (*str - '0');
-    ++str;
-  }
-  return value;
-}
-
 int cast::get_cpu_num_threads() {
   const char* env = std::getenv("CAST_NUM_THREADS");
-  int envNThreads = parsePositiveInt(env);
+  int envNThreads = utils::parseNonNegativeInt(env);
   if (envNThreads > 0)
     return envNThreads;
 
@@ -56,7 +43,7 @@ int cast::get_cpu_num_threads() {
 
 CPUSimdWidth cast::get_cpu_simd_width() {
   const char* env = std::getenv("CAST_SIMD_WIDTH");
-  int width = parsePositiveInt(env);
+  int width = utils::parseNonNegativeInt(env);
   switch (width) {
   case (0):
     break;

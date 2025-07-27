@@ -13,17 +13,17 @@ void test::test_complexSquareMatrix() {
   auto matResult = ComplexSquareMatrix(2);
 
   cast::matmul(matX, matX, matResult);
-  suite.assertClose(maximum_norm(matResult, matI), 0.0, "XX == I", GET_INFO());
+  suite.assertCloseF64(maximum_norm(matResult, matI), 0.0, "XX == I", GET_INFO());
 
   cast::matmul(matY, matY, matResult);
-  suite.assertClose(maximum_norm(matResult, matI), 0.0, "YY == I", GET_INFO());
+  suite.assertCloseF64(maximum_norm(matResult, matI), 0.0, "YY == I", GET_INFO());
 
   cast::matmul(matZ, matZ, matResult);
-  suite.assertClose(maximum_norm(matResult, matI), 0.0, "ZZ == I", GET_INFO());
+  suite.assertCloseF64(maximum_norm(matResult, matI), 0.0, "ZZ == I", GET_INFO());
 
   auto mat_iZ = matZ * std::complex<double>(0, 1);
   cast::matmul(matX, matY, matResult);
-  suite.assertClose(
+  suite.assertCloseF64(
       maximum_norm(matResult, mat_iZ), 0.0, "XY == iZ", GET_INFO());
 
   auto matA = ComplexSquareMatrix::RandomUnitary(4);
@@ -34,7 +34,7 @@ void test::test_complexSquareMatrix() {
   } else {
     ComplexSquareMatrix matAAInv;
     cast::matmul(matA, matAInv, matAAInv);
-    suite.assertClose(maximum_norm(matAAInv, ComplexSquareMatrix::eye(4)),
+    suite.assertCloseF64(maximum_norm(matAAInv, ComplexSquareMatrix::eye(4)),
                       0.0,
                       "A * AInv == I",
                       GET_INFO());

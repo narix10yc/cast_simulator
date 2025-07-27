@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "cast/CUDA/StatevectorCUDA.h"
+#include "cast/CUDA/CUDAStatevector.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Fusion.h"
 #include "cast/Legacy/CircuitGraph.h"
@@ -305,7 +305,7 @@ int main() {
   Timer execTimer(nReps);
   TimingResult execTR = execTimer.timeit([&]() {
     // Create statevector
-    utils::StatevectorCUDA<double> sv(graphPtr->nQubits);
+    cast::CUDAStatevector<double> sv(graphPtr->nQubits);
     sv.initialize();
 
     // Get the entire kernel list

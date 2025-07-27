@@ -25,7 +25,7 @@ using namespace llvm;
 namespace {
 Value* genOptFMul(Value* a, Value* b, ScalarKind aKind, IRBuilder<>& B) {
   switch (aKind) {
-  case SK_General:
+  case SK_Runtime:
   case SK_ImmValue:
     assert(a);
     return B.CreateFMul(a, b);
@@ -67,42 +67,54 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
   const double oTol = config.oneTol / K;
 
   std::vector<IRMatDataCUDA> data(KK);
+
   // reKind and imKind
   if (config.forceDenseKernel) {
     if (config.matrixLoadMode == CUDAMatrixLoadMode::UseMatImmValues) {
+      // forceDenseKernel and UseMatImmValues: everything is an immediate value
       for (unsigned i = 0; i < KK; ++i) {
         data[i].reKind = SK_ImmValue;
         data[i].imKind = SK_ImmValue;
       }
     } else {
+      // forceDenseKernel and not UseMatImmValues:
+      // everything is runtime value, i.e. loaded from the matrix pointer
       for (unsigned i = 0; i < KK; ++i) {
-        data[i].reKind = SK_General;
-        data[i].imKind = SK_General;
+        data[i].reKind = SK_Runtime;
+        data[i].imKind = SK_Runtime;
       }
     }
   } else {
+    // not forceDenseKernel: determine reKind and imKind based on the matrix
+    // elements
     for (unsigned r = 0; r < K; ++r) {
       for (unsigned c = 0; c < K; ++c) {
         unsigned idx = r * K + c;
         auto elem = matrix.rc(r, c);
 
+        // reKind
         if (std::abs(elem.real()) < zTol)
           data[idx].reKind = SK_Zero;
         else if (std::abs(elem.real() - 1.0) < oTol)
           data[idx].reKind = SK_One;
         else if (std::abs(elem.real() + 1.0) < oTol)
           data[idx].reKind = SK_MinusOne;
+        else if (config.matrixLoadMode == CUDAMatrixLoadMode::UseMatImmValues)
+          data[idx].reKind = SK_ImmValue;
         else
-          data[idx].reKind = SK_General;
+          data[idx].reKind = SK_Runtime;
 
+        // imKind
         if (std::abs(elem.imag()) < zTol)
           data[idx].imKind = SK_Zero;
         else if (std::abs(elem.imag() - 1.0) < oTol)
           data[idx].imKind = SK_One;
         else if (std::abs(elem.imag() + 1.0) < oTol)
           data[idx].imKind = SK_MinusOne;
+        else if (config.matrixLoadMode == CUDAMatrixLoadMode::UseMatImmValues)
+          data[idx].imKind = SK_ImmValue;
         else
-          data[idx].imKind = SK_General;
+          data[idx].imKind = SK_Runtime;
       }
     }
   }
@@ -120,6 +132,8 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
 
   for (unsigned i = 0; i < KK; ++i) {
     switch (data[i].reKind) {
+    case SK_Runtime:
+      break;
     case SK_Zero:
       data[i].reVal = zeroVal;
       break;
@@ -142,6 +156,8 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
     } // switch reKind
 
     switch (data[i].imKind) {
+    case SK_Runtime:
+      break;
     case SK_Zero:
       data[i].imVal = zeroVal;
       break;
@@ -157,7 +173,8 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
                                       (config.precision == Precision::F32)
                                           ? APFloat(static_cast<float>(im))
                                           : APFloat(static_cast<double>(im)));
-    } break;
+      break;
+    }
     default:
       assert(false && "Unknown ScalarKind for imVal");
     } // switch imKind
@@ -472,8 +489,8 @@ void genMatrixVectorMultiply(IRBuilder<>& B,
         B.CreateICmpSLT(cPHI, ConstantInt::get(B.getInt32Ty(), K));
     B.CreateCondBr(condInner, innerBodyBB, innerExitBB);
 
-    // innerBody: read M[r,c] from the global array, read oldAmp[c], do partial
-    // sums
+    // innerBody: read M[r,c] from the global array, read oldAmp[c], do
+    // partial sums
     B.SetInsertPoint(innerBodyBB);
     {
       // linear index = r*K + c => 2*(r*K + c) => re/im
@@ -602,7 +619,8 @@ GlobalVariable* createGlobalMatrixArray_SharedTiledImm(
   ArrayType* arrTy = ArrayType::get(scalarTy, totalElems);
 
   // --------------------------------------- For Debug
-  // --------------------------------------------- #include <iostream> std::cerr
+  // --------------------------------------------- #include <iostream>
+  // std::cerr
   // << "matData for " << globalName << ":\n"; for (unsigned i = 0; i < N*N;
   // i++) {
   //     const auto &md = matData[i];
@@ -1487,7 +1505,7 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
           B, config, matrix, qubits, matData, svPtrV, scalarTy);
     }
     break;
-  }
+  } // case CUDAMatrixLoadMode::UseMatImmValues
   case CUDAMatrixLoadMode::LoadInDefaultMemSpace: {
     // This path loads matrix from pMatArg (args.pMatArg) in address space 1
     Value* matBasePtr = args.pMatArg;
@@ -1505,7 +1523,7 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
           B, config, matrix, qubits, matBasePtr, svPtrV, scalarTy);
     }
     break;
-  }
+  } // case CUDAMatrixLoadMode::LoadInDefaultMemSpace
   case CUDAMatrixLoadMode::LoadInConstMemSpace: {
     // This path loads the matrix from pointer in address space 4
     // (constant memory space)
@@ -1528,7 +1546,7 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
     genMatrixVectorMultiplyFromConst(
         B, config, matrix, qubits, gConstMat, svPtrV, args.pMatArg, scalarTy);
     break;
-  }
+  } // case CUDAMatrixLoadMode::LoadInConstMemSpace
   } // switch (config.matrixLoadMode)
 
   B.CreateRetVoid();
@@ -1599,6 +1617,43 @@ CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
     return cast::makeError<void>("Err: " + result.takeError());
   }
   standaloneKernels_.emplace_back(result.takeValue());
+  return {}; // success
+}
+
+MaybeError<void>
+CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
+                                const ir::CircuitGraphNode& graph,
+                                const std::string& graphName) {
+  assert(graph.checkConsistency());
+
+  if (graphKernels_.contains(graphName)) {
+    std::ostringstream oss;
+    oss << "Graph with name '" << graphName
+        << "' already has generated kernels. Please use a different name.";
+    return cast::makeError<void>(oss.str());
+  }
+
+  auto mangledGraphName = internal::mangleGraphName(graphName);
+  auto allGates = graph.getAllGatesShared();
+  int order = 0;
+  std::vector<KernelInfoPtr> kernels;
+  kernels.reserve(allGates.size());
+
+  for (const auto& gate : allGates) {
+    auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
+                std::to_string(graph.gateId(gate));
+    auto result = genCUDAGate_(config, gate, name);
+    if (!result) {
+      std::ostringstream oss;
+      oss << "Failed to generate kernel for gate " << (void*)(gate.get())
+          << ": " << result.takeError() << "\n";
+      return cast::makeError<void>(oss.str());
+    }
+    kernels.emplace_back(result.takeValue());
+  }
+  // Store the generated kernels in the map
+  graphKernels_[graphName] = std::move(kernels);
+
   return {}; // success
 }
 
