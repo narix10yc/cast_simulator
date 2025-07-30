@@ -740,13 +740,13 @@ Value* buildOffset(IRBuilder<>& B,
     tmpCounterV = B.CreateAnd(counterV, mask, "tmpCounter");
     tmpCounterV = B.CreateShl(tmpCounterV, (qIdx - 1), "tmpCounter");
     offset = B.CreateAdd(offset, tmpCounterV, "tmpIdx");
-    LLVM_DEBUG(std::cerr << "  (globalThreadIdx & " << utils::fmt_0b(mask, 32) << ") << "
-              << (qIdx - 1) << "\n";);
+    LLVM_DEBUG(std::cerr << "  (globalThreadIdx & " << utils::fmt_0b(mask, 32)
+                         << ") << " << (qIdx - 1) << "\n";);
     mask = 0ULL;
   }
   mask = ~((1ULL << (highestQ - k + 1)) - 1);
-  LLVM_DEBUG(std::cerr << "  (globalThreadIdx & " << utils::fmt_0b(mask, 32) << ") << "
-            << (k) << "\n";);
+  LLVM_DEBUG(std::cerr << "  (globalThreadIdx & " << utils::fmt_0b(mask, 32)
+                       << ") << " << (k) << "\n";);
 
   tmpCounterV = B.CreateAnd(counterV, mask, "tmpCounter");
   tmpCounterV = B.CreateShl(tmpCounterV, k, "tmpCounter");
@@ -1488,12 +1488,15 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
 
   Value* svPtrV;
   {
-    auto* counterV = (config.matrixLoadMode == CUDAMatrixLoadMode::LoadInConstMemSpace) ? getGlobalTidCUDA(B) : helper_getBlockIdx(B);
+    auto* counterV =
+        (config.matrixLoadMode == CUDAMatrixLoadMode::LoadInConstMemSpace)
+            ? getGlobalTidCUDA(B)
+            : helper_getBlockIdx(B);
     auto* offset = buildOffset(B, counterV, qubits);
-    auto* idxStartV = B.CreateShl(offset, 1, "twice.offset"); // x2 because (re,im)
+    auto* idxStartV =
+        B.CreateShl(offset, 1, "twice.offset"); // x2 because (re,im)
     svPtrV = B.CreateGEP(scalarTy, args.pSvArg, idxStartV, "sv.ptr");
   }
-  entryBB->dump();
 
   auto matData = getMatDataCUDA(B, config, matrix, k);
 

@@ -122,6 +122,8 @@ public:
   ComplexSquareMatrix& matrix() { return _matrix; }
   const ComplexSquareMatrix& matrix() const { return _matrix; }
 
+  void fillZeros() { _matrix.fillZeros(); }
+
   GateMatrixPtr subsystem(uint32_t mask) const override;
 
   std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;

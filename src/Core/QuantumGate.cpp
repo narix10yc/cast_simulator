@@ -174,8 +174,8 @@ SuperopQuantumGatePtr StandardQuantumGate::getSuperopGate() const {
   if (_noiseChannel == nullptr) {
     // If there is no noise channel, the superoperator matrix is just the gate
     // matrix itself.
-    auto superopGateGM = std::make_shared<ScalarGateMatrix>(scalarGM->matrix());
-    return SuperopQuantumGate::Create(superopGateGM, qubits());
+    auto superopGM = std::make_shared<ScalarGateMatrix>(scalarGM->matrix());
+    return SuperopQuantumGate::Create(superopGM, qubits());
   }
 
   assert(_noiseChannel->reps.krausRep != nullptr &&
@@ -184,8 +184,9 @@ SuperopQuantumGatePtr StandardQuantumGate::getSuperopGate() const {
   // If the gate matrix and every Kraus operator are N * N, then the
   // superoperator matrix is (N ** 2) * (N ** 2).
   const size_t N = 1ULL << nQubits();
-  auto superopGateGM = std::make_shared<ScalarGateMatrix>(nQubits() * 2);
-  auto& superOpM = superopGateGM->matrix();
+  auto superopGM = std::make_shared<ScalarGateMatrix>(nQubits() * 2);
+  auto& superopMatrix = superopGM->matrix();
+  superopMatrix.fillZeros();
   for (const auto& krausOp : krausOps) {
     // compute the new Kraus operator F_k = E_k U
     auto newKrausOp = std::make_shared<ScalarGateMatrix>(nQubits());
@@ -202,10 +203,10 @@ SuperopQuantumGatePtr StandardQuantumGate::getSuperopGate() const {
             // (re(r, c) - i * im(r, c)) * (re(rr, cc) + i * im(rr, cc))
             // real part is re(r, c) * re(rr, cc) + im(r, c) * im(rr, cc)
             // imag part is re(r, c) * im(rr, cc) - im(r, c) * re(rr, cc)
-            superOpM.real(row, col) +=
+            superopMatrix.real(row, col) +=
                 newKrausOpM.real(r, c) * newKrausOpM.real(rr, cc) +
                 newKrausOpM.imag(r, c) * newKrausOpM.imag(rr, cc);
-            superOpM.imag(row, col) +=
+            superopMatrix.imag(row, col) +=
                 newKrausOpM.real(r, c) * newKrausOpM.imag(rr, cc) -
                 newKrausOpM.imag(r, c) * newKrausOpM.real(rr, cc);
           }
@@ -213,7 +214,7 @@ SuperopQuantumGatePtr StandardQuantumGate::getSuperopGate() const {
       }
     }
   }
-  return SuperopQuantumGate::Create(superopGateGM, qubits());
+  return SuperopQuantumGate::Create(superopGM, qubits());
 }
 
 /**** op count *****/

@@ -15,24 +15,14 @@ template <unsigned nQubits> static void f() {
   // we have to use W0 here to allow memcpy from cuda sv to cpu sv
   cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
   cast::CUDAStatevector<double> svCUDA0(nQubits), svCUDA1(nQubits);
-  svCUDA0.initialize();
-  svCUDA1.initialize();
-
-  // const auto randomizeSV = [&]() {
-  //   svCUDA0.randomize();
-  //   svCUDA1 = svCUDA0;
-  //   cudaMemcpy(svCPU.data(),
-  //              svCUDA0.dData(),
-  //              svCUDA0.sizeInBytes(),
-  //              cudaMemcpyDeviceToHost);
-  // };
 
   const auto randomizeSV = [&]() {
-    std::fill_n(svCPU.data(), svCPU.size(), 1.0);
-    svCPU.normalize();
-    cudaMemcpy(svCUDA0.dData(), svCPU.data(), svCUDA0.sizeInBytes(),
-               cudaMemcpyHostToDevice);
+    svCUDA0.randomize();
     svCUDA1 = svCUDA0;
+    cudaMemcpy(svCPU.data(),
+               svCUDA0.dData(),
+               svCUDA0.sizeInBytes(),
+               cudaMemcpyDeviceToHost);
   };
 
   // generate random unitary gates
@@ -67,9 +57,6 @@ template <unsigned nQubits> static void f() {
   // }
 
   kernelMgrCUDA.emitPTX(2, llvm::OptimizationLevel::O1, /* verbose */ 0);
-
-  kernelMgrCUDA.dumpPTX(std::cerr, "gateImm_0");
-
   kernelMgrCUDA.initCUJIT(2, /* verbose */ 0);
   for (unsigned q = 0; q < nQubits; q++) {
     std::stringstream ss;
@@ -92,12 +79,6 @@ template <unsigned nQubits> static void f() {
     kernelMgrCUDA.launchCUDAKernel(
         svCUDA0.dData(), svCUDA0.nQubits(), *kernelInfo);
 
-    svCPU.display(std::cerr << "CPU SV after applying gate " << q << "\n")
-        << "\n";
-
-    svCUDA0.display(std::cerr << "CUDA SV after applying gate " << q << "\n")
-        << "\n";
-
     suite.assertCloseF64(
         svCUDA0.norm(), 1.0, ss.str() + "CUDA SV norm equals to 1", GET_INFO());
     suite.assertCloseF64(svCUDA0.prob(q),
@@ -110,6 +91,6 @@ template <unsigned nQubits> static void f() {
 
 void test::test_cudaU() {
   f<4>();
-  // f<8>();
-  // f<12>();
+  f<8>();
+  f<12>();
 }
