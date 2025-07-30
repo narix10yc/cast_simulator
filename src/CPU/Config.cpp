@@ -1,6 +1,6 @@
 #include "cast/CPU/Config.h"
-#include "utils/utils.h"
 #include "utils/iocolor.h"
+#include "utils/utils.h"
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/raw_ostream.h"
@@ -43,22 +43,24 @@ int cast::get_cpu_num_threads() {
 
 CPUSimdWidth cast::get_cpu_simd_width() {
   const char* env = std::getenv("CAST_SIMD_WIDTH");
-  int width = utils::parseNonNegativeInt(env);
-  switch (width) {
-  case (0):
-    break;
-  case (128):
-    return W128;
-  case (256):
-    return W256;
-  case (512):
-    return W512;
-  default:
-    std::cerr << BOLDYELLOW("[Warning]: ")
-              << "Environment variable CAST_SIMD_WIDTH is set to an illegal "
-                 "value: "
-              << width << ". Accepted values are: 128, 256, 512. Ignored.\n";
-    break;
+  if (env != nullptr) {
+    int width = utils::parseNonNegativeInt(env);
+    switch (width) {
+    case (0):
+      break;
+    case (128):
+      return W128;
+    case (256):
+      return W256;
+    case (512):
+      return W512;
+    default:
+      std::cerr << BOLDYELLOW("[Warning]: ")
+                << "Environment variable CAST_SIMD_WIDTH is set to an illegal "
+                   "value: "
+                << width << ". Accepted values are: 128, 256, 512. Ignored.\n";
+      break;
+    }
   }
 
   auto features = llvm::sys::getHostCPUFeatures();

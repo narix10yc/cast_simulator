@@ -136,6 +136,8 @@ int main(int argc, char** argv) {
             << "and multi-qubit Hadamard gates on CPU.\n";
   std::cerr << BOLDCYAN("[Info]: ") << "Using " << NUM_QUBITS
             << "-qubit statevector with " << NUM_THREADS << " threads.\n";
+  std::cerr << BOLDCYAN("[Info]: ") << "SIMD width is set to "
+            << static_cast<int>(SIMD_WIDTH) << " bits.\n";
 
   std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
   benchmark<float>();

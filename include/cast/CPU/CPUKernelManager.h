@@ -7,6 +7,8 @@
 #include "cast/Core/QuantumGate.h"
 #include "utils/MaybeError.h"
 
+#include <span>
+
 #define CPU_KERNEL_TYPE void(void*)
 
 namespace cast {
