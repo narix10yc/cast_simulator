@@ -125,7 +125,7 @@ public:
     return std::string(standaloneKernels_[idx]->ptxString.str());
   }
 
-  void dumpPTX(const std::string& kernelName, llvm::raw_ostream& os);
+  void dumpPTX(std::ostream& os, const std::string& kernelName) const;
 
 private:
   /// \c cuContexts stores a vector of unique \c CUContext. Every thread will
@@ -179,12 +179,12 @@ public:
   ///
   void launchCUDAKernel(void* dData,
                         int nQubits,
-                        CUDAKernelInfo& kernelInfo,
+                        const CUDAKernelInfo& kernelInfo,
                         int blockSize = 64);
 
   void launchCUDAKernelParam(void* dData,
                              int nQubits,
-                             CUDAKernelInfo& kernelInfo,
+                             const CUDAKernelInfo& kernelInfo,
                              void* dMatPtr,
                              int blockSize = 64);
 };

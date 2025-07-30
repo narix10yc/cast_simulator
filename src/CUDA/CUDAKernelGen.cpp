@@ -696,41 +696,62 @@ Value* helper_getBlockIdx(IRBuilder<>& B) {
       B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_ctaid_x, {});
 }
 
-Value* buildBitExtractOffset(IRBuilder<>& B,
-                             Value* counterV,
-                             ArrayRef<int> tgtQubits,
-                             int nQubits) {
-  Value* idxStart = B.getInt64(0);
-  auto* blockIdx = B.CreateZExt(helper_getBlockIdx(B), B.getInt64Ty());
-  int bitPos = 0;
-  for (int q = 0; q < nQubits; q++) {
-    if (std::ranges::find(tgtQubits, q) == tgtQubits.end()) {
-      auto* bit = B.CreateAnd(blockIdx, B.getInt64(1ULL << bitPos));
-      bit = B.CreateLShr(bit, bitPos);
-      bit = B.CreateShl(bit, q);
-      idxStart = B.CreateOr(idxStart, bit);
-      bitPos++;
-    }
-  }
-  return idxStart;
-}
+/// @brief This mimics a runtime PDEP operation with compile-time known mask.
+/// Given a counter t, find the offset index idx such that in round t
+/// of the iteration, amplitude index starts at idx. The returned idx is in the
+/// unit of [real, imag], that is, <2 x ScalarType>.
+Value* buildOffset(IRBuilder<>& B,
+                   Value* counterV,
+                   const QuantumGate::TargetQubitsType& qubits) {
+  /*
+  Example: with target qubits 2, 4, 5
+  counter:   xxxhgfedcba
+  pbex mask: 11111001011
+  idxStart:  hgfed00c0ba (in unit of <2 x scalarTy>)
 
-Value* buildBitExtractOffsetConst(IRBuilder<>& B,
-                                  Value* counterV,
-                                  ArrayRef<int> tgtQubits,
-                                  int nQubits) {
-  Value* idxStart = B.getInt64(0);
-  int bitPos = 0;
-  for (int q = 0; q < nQubits; q++) {
-    if (std::ranges::find(tgtQubits, q) == tgtQubits.end()) {
-      auto* bit = B.CreateAnd(counterV, B.getInt64(1ULL << bitPos));
-      bit = B.CreateLShr(bit, bitPos);
-      bit = B.CreateShl(bit, q);
-      idxStart = B.CreateOr(idxStart, bit);
-      bitPos++;
+  hgfed00c0ba = (xxxhgfedcba & 00000000011) << 0
+              + (xxxhgfedcba & 00000000100) << 1
+              + (xxxhgfedcba & 11111111000) << 3
+
+  We build this segment by segment. For [2, 4, 5], there are 3 segments:
+    [0, 2),      [3, 4),      [5, ),
+  corresponding to masks
+    00000000011, 00000000100, 11111111000
+  */
+
+  assert(!qubits.empty());
+
+  Value* offset = B.getInt64(0ULL);
+  counterV = B.CreateZExt(counterV, B.getInt64Ty(), "i64.counter");
+  Value* tmpCounterV;
+  uint64_t mask = 0ULL;
+  int k = qubits.size();
+  int highestQ = qubits.back();
+  int qIdx = 0;
+  int counterQ = 0;
+  for (int q = 0; q <= highestQ; q++) {
+    if (q < qubits[qIdx]) {
+      mask |= (1 << counterQ++);
+      continue;
     }
+    ++qIdx;
+    if (mask == 0)
+      continue;
+    tmpCounterV = B.CreateAnd(counterV, mask, "tmpCounter");
+    tmpCounterV = B.CreateShl(tmpCounterV, (qIdx - 1), "tmpCounter");
+    offset = B.CreateAdd(offset, tmpCounterV, "tmpIdx");
+    LLVM_DEBUG(std::cerr << "  (globalThreadIdx & " << utils::fmt_0b(mask, 32) << ") << "
+              << (qIdx - 1) << "\n";);
+    mask = 0ULL;
   }
-  return idxStart;
+  mask = ~((1ULL << (highestQ - k + 1)) - 1);
+  LLVM_DEBUG(std::cerr << "  (globalThreadIdx & " << utils::fmt_0b(mask, 32) << ") << "
+            << (k) << "\n";);
+
+  tmpCounterV = B.CreateAnd(counterV, mask, "tmpCounter");
+  tmpCounterV = B.CreateShl(tmpCounterV, k, "tmpCounter");
+  offset = B.CreateAdd(offset, tmpCounterV, "offset");
+  return offset;
 }
 
 void genMatrixVectorMultiply_SharedTiled(
@@ -1465,32 +1486,14 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
 
   B.SetInsertPoint(entryBB);
 
-  Value* idxStartV;
-  auto* globalTidV = getGlobalTidCUDA(B);
-  if (config.matrixLoadMode == CUDAMatrixLoadMode::LoadInConstMemSpace)
-    idxStartV = buildBitExtractOffsetConst(B, globalTidV, qubits, k);
-  else
-    idxStartV = buildBitExtractOffset(B, globalTidV, qubits, k);
-
-  idxStartV = B.CreateShl(idxStartV, 1); // x2 because (re,im)
-
-  auto* svPtrV = B.CreateGEP(scalarTy, args.pSvArg, idxStartV);
-
-  /*
-  Example: with target qubits 2, 4, 5
-  counter:   xxxhgfedcba
-  pbex mask: 11111001011
-  idxStart:  hgfed00c0ba (in unit of <2 x scalarTy>)
-
-  hgfed00c0ba = (xxxhgfedcba & 00000000011) << 0
-              + (xxxhgfedcba & 00000000100) << 1
-              + (xxxhgfedcba & 11111111000) << 3
-
-  We build this segment by segment. For [2, 4, 5], there are 3 segments:
-    [0, 2),      [3, 4),      [5, ),
-  corresponding to masks
-    00000000011, 00000000100, 11111111000
-  */
+  Value* svPtrV;
+  {
+    auto* counterV = (config.matrixLoadMode == CUDAMatrixLoadMode::LoadInConstMemSpace) ? getGlobalTidCUDA(B) : helper_getBlockIdx(B);
+    auto* offset = buildOffset(B, counterV, qubits);
+    auto* idxStartV = B.CreateShl(offset, 1, "twice.offset"); // x2 because (re,im)
+    svPtrV = B.CreateGEP(scalarTy, args.pSvArg, idxStartV, "sv.ptr");
+  }
+  entryBB->dump();
 
   auto matData = getMatDataCUDA(B, config, matrix, k);
 
@@ -1622,8 +1625,8 @@ CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
 
 MaybeError<void>
 CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
-                                const ir::CircuitGraphNode& graph,
-                                const std::string& graphName) {
+                                 const ir::CircuitGraphNode& graph,
+                                 const std::string& graphName) {
   assert(graph.checkConsistency());
 
   if (graphKernels_.contains(graphName)) {

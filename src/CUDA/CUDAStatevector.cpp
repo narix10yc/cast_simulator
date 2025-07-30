@@ -1,6 +1,7 @@
 #ifdef CAST_USE_CUDA
 
 #include "cast/CUDA/CUDAStatevector.h"
+#include "utils/Formats.h"
 #include "utils/iocolor.h"
 
 #include <cassert>
@@ -109,17 +110,26 @@ ScalarType CUDAStatevector<ScalarType>::prob(int qubit) const {
   return 1.0 - Helper::reduceSquaredOmittingBit(_dData, size(), qubit + 1);
 }
 
-template <typename ScalarType> void CUDAStatevector<ScalarType>::sync() {
+template <typename ScalarType> void CUDAStatevector<ScalarType>::sync() const {
   CUDA_CALL(cudaDeviceSynchronize(), "Failed to synchronize device");
-  assert(_dData != nullptr &&
-         "Device array is not initialized when calling sync()");
-  // ensure host data is allocated
+  assert(_dData != nullptr && "Device statevector is not initialized");
+
   if (_hData == nullptr)
     mallocHostData();
 
   CUDA_CALL(cudaMemcpy(_hData, _dData, sizeInBytes(), cudaMemcpyDeviceToHost),
             "Failed to copy statevector from device to host");
   CUDA_CALL(cudaDeviceSynchronize(), "Failed to synchronize device");
+}
+
+template <typename ScalarType>
+std::ostream& CUDAStatevector<ScalarType>::display(std::ostream& os) const {
+  sync();
+  unsigned l = std::min(32U, 1U << _nQubits);
+  for (unsigned i = 0; i < l; ++i)
+    os << utils::fmt_0b(i, 5) << " : "
+       << utils::fmt_complex(_hData[2 * i], _hData[2 * i + 1]) << "\n";
+  return os;
 }
 
 namespace cast {

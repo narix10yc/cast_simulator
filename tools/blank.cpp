@@ -1,11 +1,7 @@
-#include "utils/Logger.h"
+#include "llvm/ADT/Twine.h"
+#include "llvm/Support/raw_ostream.h"
 
-void myFunc(utils::Logger logger) {
-  logger.log(-1) << "This is a log message.\n";
-}
-
-int main() {
-  utils::Logger logger(std::cerr, 2);
-  myFunc(logger);
-  return 0;
+void get() {
+  auto name = llvm::Twine("A") + llvm::Twine(1) + llvm::Twine("B");
+  llvm::outs() << name << "\n";
 }

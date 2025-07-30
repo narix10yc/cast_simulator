@@ -25,7 +25,42 @@ public:
       os.put((n.v & (1 << i)) ? '1' : '0');
     return os;
   }
-};
+}; // class fmt_0b
+
+class fmt_complex {
+  double re, im;
+  int precision;
+
+public:
+  fmt_complex(float re, float im, int precision = 3)
+      : re(static_cast<double>(re)), im(static_cast<double>(im)),
+        precision(precision) {
+    assert(precision >= 0 && precision <= 15);
+  }
+  
+  fmt_complex(double re, double im, int precision = 3)
+      : re(re), im(im), precision(precision) {
+    assert(precision >= 0 && precision <= 15);
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const fmt_complex& c) {
+    const double thres = 0.5 * std::pow(0.1, c.precision);
+    if (c.re >= -thres)
+      os << " ";
+    if (std::fabs(c.re) < thres)
+      os << "0." << std::string(c.precision, ' ');
+    else
+      os << std::fixed << std::setprecision(c.precision) << c.re;
+
+    if (c.im >= -thres)
+      os << "+";
+    if (std::fabs(c.im) < thres)
+      os << "0." << std::string(c.precision, ' ');
+    else
+      os << std::fixed << std::setprecision(c.precision) << c.im;
+    return os << "i";
+  }
+}; // class fmt_complex
 
 // Format time with 4 significant digits. For example, fmt_time(0.001234)
 // will print "1.234 ms".
@@ -79,7 +114,7 @@ public:
                 << " ns";
     return os << "< 1.0 ns";
   }
-};
+}; // class fmt_time
 
 class fmt_1_to_1e3 {
   double number;

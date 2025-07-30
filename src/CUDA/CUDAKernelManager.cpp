@@ -9,9 +9,9 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/TargetParser/Host.h"
 
+#include "cast/CUDA/Config.h"
 #include "utils/Formats.h"
 #include "utils/TaskDispatcher.h"
-#include "cast/CUDA/Config.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
@@ -188,10 +188,36 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
   jitState = JIT_CUFunctionLoaded;
 }
 
+const CUDAKernelInfo*
+CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) const {
+  for (const auto& kernel : standaloneKernels_) {
+    if (kernel->llvmFuncName == llvmFuncName)
+      return kernel.get();
+  }
+  for (const auto& [graphName, kernels] : graphKernels_) {
+    for (const auto& kernel : kernels) {
+      if (kernel->llvmFuncName == llvmFuncName)
+        return kernel.get();
+    }
+  }
+  return nullptr;
+}
+
+void CUDAKernelManager::dumpPTX(std::ostream& os,
+                                const std::string& llvmFuncName) const {
+  const auto* kernelInfo = getKernelByName(llvmFuncName);
+  if (!kernelInfo) {
+    os << RED("[Error] ") << "Kernel with name '" << llvmFuncName
+       << "' not found.\n";
+    return;
+  }
+  os << kernelInfo->ptxString.str().str() << "\n";
+}
+
 void CUDAKernelManager::launchCUDAKernel(
     void* dData, // device state‑vector
     int nQubits, // total system‑qubits
-    CUDAKernelInfo& kernelInfo,
+    const CUDAKernelInfo& kernelInfo,
     int /* blockSize -> ignored - TILE is fixed in kernel */) {
   assert(dData != nullptr);
   assert(kernelInfo.cuTuple.cuContext && kernelInfo.cuTuple.cuFunction);
@@ -235,7 +261,7 @@ void CUDAKernelManager::launchCUDAKernel(
 void CUDAKernelManager::launchCUDAKernelParam(
     void* dData, // pointer to device statevector
     int nQubits,
-    CUDAKernelInfo& kernelInfo,
+    const CUDAKernelInfo& kernelInfo,
     void* dMatPtr, // pointer to device matrix
     int blockSize  // ignored if fixed TILE is used
 ) {

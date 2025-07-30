@@ -6,6 +6,7 @@
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
+#include "utils/Formats.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,190 +17,6 @@
 #include <thread>
 
 namespace cast {
-
-template <typename ScalarType> class StatevectorSep;
-
-template <typename ScalarType> class CPUStatevector;
-
-template <typename ScalarType> class StatevectorSep {
-public:
-  int nQubits;
-  uint64_t N;
-  ScalarType* real;
-  ScalarType* imag;
-
-  StatevectorSep(int nQubits, bool initialize = false)
-      : nQubits(nQubits), N(1ULL << nQubits) {
-    assert(nQubits > 0);
-    real = (ScalarType*)std::aligned_alloc(64, N * sizeof(ScalarType));
-    imag = (ScalarType*)std::aligned_alloc(64, N * sizeof(ScalarType));
-    if (initialize) {
-      for (size_t i = 0; i < (1 << nQubits); i++) {
-        real[i] = 0;
-        imag[i] = 0;
-      }
-      real[0] = 1.0;
-    }
-    // std::cerr << "StatevectorSep(int)\n";
-  }
-
-  StatevectorSep(const StatevectorSep& that)
-      : nQubits(that.nQubits), N(that.N) {
-    real = (ScalarType*)std::aligned_alloc(64, N * sizeof(ScalarType));
-    imag = (ScalarType*)std::aligned_alloc(64, N * sizeof(ScalarType));
-    for (size_t i = 0; i < that.N; i++) {
-      real[i] = that.real[i];
-      imag[i] = that.imag[i];
-      // std::cerr << "StatevectorSep(const StatevectorSep&)\n";
-    }
-  }
-
-  StatevectorSep(StatevectorSep&& that) noexcept
-      : nQubits(that.nQubits), N(that.N), real(that.real), imag(that.imag) {
-    that.real = nullptr;
-    that.imag = nullptr;
-    // std::cerr << "StatevectorSep(StatevectorSep&&)\n";
-  }
-
-  ~StatevectorSep() {
-    std::free(real);
-    std::free(imag);
-    // std::cerr << "~StatevectorSep\n";
-  }
-
-  StatevectorSep& operator=(const StatevectorSep& that) {
-    if (this != &that) {
-      for (size_t i = 0; i < N; i++) {
-        real[i] = that.real[i];
-        imag[i] = that.imag[i];
-      }
-    }
-    // std::cerr << "=(const StatevectorSep&)\n";
-    return *this;
-  }
-
-  StatevectorSep& operator=(StatevectorSep&& that) noexcept {
-    this->~StatevectorSep();
-    real = that.real;
-    imag = that.imag;
-    nQubits = that.nQubits;
-    N = that.N;
-
-    that.real = nullptr;
-    that.imag = nullptr;
-    // std::cerr << "=(StatevectorSep&&)\n";
-    return *this;
-  }
-
-  // void copyValueFrom(const StatevectorAlt<ScalarType>&);
-
-  ScalarType normSquared(int nthreads = 1) const {
-    const auto f = [&](uint64_t i0, uint64_t i1, ScalarType& rst) {
-      ScalarType sum = 0.0;
-      for (uint64_t i = i0; i < i1; i++) {
-        sum += real[i] * real[i];
-        sum += imag[i] * imag[i];
-      }
-      rst = sum;
-    };
-
-    if (nthreads == 1) {
-      ScalarType s;
-      f(0, N, s);
-      return s;
-    }
-
-    std::vector<std::thread> threads(nthreads);
-    std::vector<ScalarType> sums(nthreads);
-    uint64_t blockSize = N / nthreads;
-    for (uint64_t i = 0; i < nthreads; i++) {
-      uint64_t i0 = i * blockSize;
-      uint64_t i1 = (i == nthreads - 1) ? N : ((i + 1) * blockSize);
-      threads[i] = std::thread(f, i0, i1, std::ref(sums[i]));
-    }
-
-    for (auto& thread : threads)
-      thread.join();
-
-    ScalarType sum = 0.0;
-    for (const auto& s : sums)
-      sum += s;
-    return sum;
-  }
-
-  ScalarType norm(int nthreads = 1) const {
-    return std::sqrt(normSquared(nthreads));
-  }
-
-  void normalize(int nthreads = 1) {
-    ScalarType n = norm(nthreads);
-    const auto f = [&](uint64_t i0, uint64_t i1) {
-      for (uint64_t i = i0; i < i1; i++) {
-        real[i] /= n;
-        imag[i] /= n;
-      }
-    };
-
-    if (nthreads == 1) {
-      f(0, N);
-      return;
-    }
-    std::vector<std::thread> threads(nthreads);
-    uint64_t blockSize = N / nthreads;
-    for (uint64_t i = 0; i < nthreads; i++) {
-      uint64_t i0 = i * blockSize;
-      uint64_t i1 = (i == nthreads - 1) ? N : ((i + 1) * blockSize);
-      threads[i] = std::thread(f, i0, i1);
-    }
-
-    for (auto& thread : threads)
-      thread.join();
-  }
-
-  void randomize(int nthreads = 1) {
-    const auto f = [&](uint64_t i0, uint64_t i1) {
-      std::random_device rd;
-      std::mt19937 gen{rd()};
-      std::normal_distribution<ScalarType> d{0, 1};
-      for (uint64_t i = i0; i < i1; i++) {
-        real[i] = d(gen);
-        imag[i] = d(gen);
-      }
-    };
-
-    if (nthreads == 1) {
-      f(0, N);
-      normalize(nthreads);
-      return;
-    }
-
-    std::vector<std::thread> threads(nthreads);
-    uint64_t blockSize = N / nthreads;
-    for (uint64_t i = 0; i < nthreads; i++) {
-      uint64_t i0 = i * blockSize;
-      uint64_t i1 = (i == nthreads - 1) ? N : ((i + 1) * blockSize);
-      threads[i] = std::thread(f, i0, i1);
-    }
-
-    for (auto& thread : threads)
-      thread.join();
-    normalize(nthreads);
-  }
-
-  std::ostream& print(std::ostream& os) const {
-    if (N > 32) {
-      os << IOColor::BOLD << IOColor::CYAN_FG << "Warning: " << IOColor::RESET
-         << "statevector has more than 5 qubits, "
-            "only the first 32 entries are shown.\n";
-    }
-    for (size_t i = 0; i < ((N > 32) ? 32 : N); i++) {
-      os << i << ": ";
-      utils::print_complex(os, {real[i], imag[i]});
-      os << "\n";
-    }
-    return os;
-  }
-};
 
 /// @brief CPUStatevector stores statevector in a single array with alternating
 /// real and imaginary parts. The alternating pattern is controlled by
@@ -235,6 +52,9 @@ public:
     // initialize simd_s
     if constexpr (std::is_same_v<ScalarType, float>) {
       switch (simdWidth) {
+      case CPUSimdWidth::W0:
+        simd_s = 0;
+        break; // 1 element
       case CPUSimdWidth::W128:
         simd_s = 2;
         break; // 4 elements
@@ -249,6 +69,9 @@ public:
       }
     } else if constexpr (std::is_same_v<ScalarType, double>) {
       switch (simdWidth) {
+      case CPUSimdWidth::W0:
+        simd_s = 0;
+        break; // 1 element
       case CPUSimdWidth::W128:
         simd_s = 1;
         break; // 2 elements
@@ -310,6 +133,8 @@ public:
   int nQubits() const { return _nQubits; }
 
   size_t getN() const { return 1ULL << _nQubits; }
+
+  size_t size() const { return 2ULL << _nQubits; }
 
   size_t sizeInBytes() const { return (2ULL << _nQubits) * sizeof(ScalarType); }
 
@@ -383,7 +208,7 @@ public:
     return {_data[tmp], _data[tmp | (1 << simd_s)]};
   }
 
-  std::ostream& print(std::ostream& os = std::cerr) const {
+  std::ostream& display(std::ostream& os = std::cerr) const {
     auto N = getN();
     if (N > 32) {
       os << BOLDCYAN("Info: ")
@@ -391,9 +216,8 @@ public:
             "only the first 32 entries are shown.\n";
     }
     for (size_t i = 0; i < std::min<size_t>(32, N); i++) {
-      os << i << ": ";
-      utils::print_complex(os, {real(i), imag(i)}, 8);
-      os << "\n";
+      os << utils::fmt_0b(i, 5) << " : "
+         << utils::fmt_complex(real(i), imag(i)) << "\n";
     }
     return os;
   }
@@ -466,23 +290,6 @@ public:
 
 using CPUStatevectorF32 = CPUStatevector<float>;
 using CPUStatevectorF64 = CPUStatevector<double>;
-
-// extern template class CPUStatevector<float>;
-// extern template class CPUStatevector<double>;
-
-// template<typename ScalarType>
-// ScalarType fidelity(
-//     const StatevectorSep<ScalarType>& sv1, const StatevectorSep<ScalarType>&
-//     sv2) {
-//   assert(sv1.nQubits == sv2.nQubits);
-
-//   ScalarType re = 0.0, im = 0.0;
-//   for (size_t i = 0; i < sv1.N; i++) {
-//     re += (sv1.real[i] * sv2.real[i] + sv1.imag[i] * sv2.imag[i]);
-//     im += (-sv1.real[i] * sv2.imag[i] + sv1.imag[i] * sv2.real[i]);
-//   }
-//   return re * re + im * im;
-// }
 
 template <typename ScalarType>
 ScalarType fidelity(const CPUStatevector<ScalarType>& sv0,

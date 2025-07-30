@@ -1,6 +1,7 @@
 #include "cast/CPU/CPUStatevector.h"
 #include "cast/CUDA/CUDAStatevector.h"
 #include "tests/TestKit.h"
+#include "llvm/ADT/Twine.h"
 
 using namespace cast::test;
 
@@ -9,8 +10,10 @@ template <int nQubits> static void f() {
                               std::to_string(nQubits) + " qubits");
   cast::CUDAStatevector<float> svCudaF32(nQubits);
   cast::CUDAStatevector<double> svCudaF64(nQubits);
-  cast::CPUStatevector<float> svCpuF32(nQubits, cast::get_cpu_simd_width());
-  cast::CPUStatevector<double> svCpuF64(nQubits, cast::get_cpu_simd_width());
+
+  // We have to use W0 here to allow memcpy from cuda sv to cpu sv
+  cast::CPUStatevector<float> svCpuF32(nQubits, cast::CPUSimdWidth::W0);
+  cast::CPUStatevector<double> svCpuF64(nQubits, cast::CPUSimdWidth::W0);
 
   svCudaF32.initialize();
   svCudaF64.initialize();
@@ -39,9 +42,9 @@ template <int nQubits> static void f() {
              svCudaF64.dData(),
              svCudaF64.sizeInBytes(),
              cudaMemcpyDeviceToHost);
-  suite.assertCloseF32(
-      svCudaF32.norm(), 1.0f, "randomize norm F32", GET_INFO());
-  suite.assertCloseF64(svCudaF64.norm(), 1.0, "randomize norm F64", GET_INFO());
+
+  suite.assertCloseF32(svCudaF32.norm(), 1.0f, "Rand SV F32: Norm", GET_INFO());
+  suite.assertCloseF64(svCudaF64.norm(), 1.0, "Rand SV F64: Norm", GET_INFO());
 
   for (int q = 0; q < nQubits; ++q) {
     suite.assertCloseF32(static_cast<float>(svCudaF32.prob(q)),

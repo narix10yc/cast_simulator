@@ -12,7 +12,7 @@ static void f(const std::vector<int>& targetQubits) {
                         std::to_string(nQubits) + " qubits)");
 
   CUDAKernelManager kernelMgrCUDA;
-  cast::CPUStatevector<double> svCPU(nQubits, cast::get_cpu_simd_width());
+  cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
   cast::CUDAStatevector<double> svCUDA0(nQubits), svCUDA1(nQubits);
 
   const auto randomizeSV = [&]() {

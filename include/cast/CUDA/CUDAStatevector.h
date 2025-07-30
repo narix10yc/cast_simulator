@@ -3,6 +3,7 @@
 
 #include "cast/CUDA/Config.h"
 
+#include <iostream>
 #include <cassert>
 #include <cmath>
 #include <cstring> // for std::memcpy
@@ -40,7 +41,7 @@ private:
   // device data
   ScalarType* _dData;
   // host data
-  ScalarType* _hData;
+  mutable ScalarType* _hData;
 
   // This function will call \c cudaDeviceSynchronize() after \c cudaMalloc()
   void mallocDeviceData();
@@ -48,7 +49,7 @@ private:
   // This function will call \c cudaDeviceSynchronize() before \c cudaFree()
   void freeDeviceData();
 
-  void mallocHostData() {
+  void mallocHostData() const {
     assert(_hData == nullptr && "Host data is not null when trying malloc it");
     _hData = new ScalarType[size()];
   }
@@ -89,16 +90,19 @@ public:
 
   void initialize();
 
+  void randomize();
+
   ScalarType normSquared() const;
   ScalarType norm() const { return std::sqrt(normSquared()); }
 
   ScalarType prob(int qubits) const;
 
-  void randomize();
-
   // This method will call \c cudaDeviceSynchronize(), copy device data (if
   // exists) to host data, and call \c cudaDeviceSynchronize() again.
-  void sync();
+  void sync() const;
+
+  // Display the first few amplitudes in the statevector.
+  std::ostream& display(std::ostream& os = std::cerr) const;
 
   void clearHostData() {
     if (_hData != nullptr)

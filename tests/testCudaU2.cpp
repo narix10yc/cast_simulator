@@ -21,7 +21,7 @@ template <unsigned nQubits> void runU2qTest() {
   TestSuite suite("Gate U2q (" + std::to_string(nQubits) + " qubits)");
 
   CUDAKernelManager kernelMgrCUDA;
-  cast::CPUStatevector<double> svCPU(nQubits, cast::get_cpu_simd_width());
+  cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
   cast::CUDAStatevector<double> svCUDA0(nQubits), svCUDA1(nQubits);
 
   /* Random-initialisation lambda */
@@ -35,7 +35,7 @@ template <unsigned nQubits> void runU2qTest() {
   };
 
   /* Build one non-overlapping 2-qubit gate per pair */
-  std::vector<std::shared_ptr<QuantumGate>> gates;
+  std::vector<QuantumGatePtr> gates;
   gates.reserve(nQubits / 2);
   for (int q = 0; q < nQubits - 1; q += 2) {
     gates.emplace_back(StandardQuantumGate::RandomUnitary({q, q + 1}));

@@ -191,6 +191,7 @@ cast::internal::HelperCUDAKernels<ScalarType>::reduceSquaredOmittingBit(
              dIntermediate,
              gridSize * sizeof(ScalarType),
              cudaMemcpyDeviceToHost);
+
   ScalarType sum = 0;
   for (unsigned i = 0; i < gridSize; ++i)
     sum += hIntermediate[i];
