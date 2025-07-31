@@ -46,8 +46,8 @@ ArgRunAdaptiveFuse("run-adaptive-fuse",
   cl::desc("Run adaptive-fuse circuit"), cl::init(false));
 
 cl::opt<int>
-ArgNaiveMaxK("naive-max-k",
-  cl::desc("The max size of gates in naive fusion"), cl::init(3));
+ArgSizeonlySize("sizeonly-size",
+  cl::desc("The max size of gates in size-only fusion"), cl::init(3));
 
 cl::opt<bool>
 ArgRunDenseKernel("run-dense-kernel",
@@ -178,7 +178,7 @@ int main(int argc, const char** argv) {
   utils::Logger logger(std::cerr, ArgVerbose);
   if (ArgRunSizeOnlyFuse) {
     CPUOptimizer opt;
-    opt.setSizeOnlyFusionConfig(ArgNaiveMaxK)
+    opt.setSizeOnlyFusionConfig(ArgSizeonlySize)
         .setNThreads(nThreads)
         .setPrecision(precision)
         .disableCFO();

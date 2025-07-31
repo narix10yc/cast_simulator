@@ -140,11 +140,12 @@ namespace {
 
 /// @return Speed in gigabytes per second (GiBps)
 double calculateMemUpdateSpeed(int nQubits, Precision precision, double t) {
-  assert(nQubits >= 0);
-  assert(precision != Precision::Unknown);
-  assert(t >= 0.0);
+  assert(nQubits > 0);
+  assert(precision == Precision::F32 || precision == Precision::F64);
+  assert(t > 0.0);
 
-  uint64_t dataSize = (precision == Precision::F32 ? 4ULL : 8ULL) << nQubits;
+  // F32 takes 8 bytes because of complex number
+  uint64_t dataSize = (precision == Precision::F32 ? 8ULL : 16ULL) << nQubits;
   return static_cast<double>(dataSize) * 1e-9 / t;
 }
 
@@ -153,8 +154,8 @@ double calculateMemUpdateSpeed(int nQubits, Precision precision, double t) {
 // and should only be used for testing purposes.
 // For \c StandardQuantumGate, it only applies to the gate matrix.
 // For \c SuperopQuantumGate, it applies to the superoperator matrix (not
-// implemented yet). This method does not apply direct removal. It keeps the
-// matrix to be valid, meaning non of the rows or columns will be completely
+// implemented yet). This method does not apply completely random removal. It
+// keeps the matrix valid, meaning non of the rows or columns will be completely
 // zeroed out.
 void randRemoveQuantumGate(QuantumGatePtr quGate, float p) {
   assert(0.0f <= p && p <= 1.0f);
