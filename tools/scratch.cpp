@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
   CUDAKernelGenConfig cudaGenConfig;
   cudaGenConfig.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
 
-  cudaGenConfig.enableTilingGateSize = 9999; // disable tiling
+  cudaGenConfig.enableTilingGateSize = 999; // disable tiling
 
   auto gate = StandardQuantumGate::H(0);
   kernelMgrCUDA.genStandaloneGate(cudaGenConfig, gate, "gateImm_0")

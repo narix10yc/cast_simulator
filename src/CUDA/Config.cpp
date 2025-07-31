@@ -1,9 +1,9 @@
 #include "cast/CUDA/Config.h"
 
-using namespace cast;
-
 #include "utils/iocolor.h"
 #include "utils/utils.h"
+
+using namespace cast;
 
 #include <cuda.h>
 
