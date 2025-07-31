@@ -37,7 +37,7 @@ public:
         precision(precision) {
     assert(precision >= 0 && precision <= 15);
   }
-  
+
   fmt_complex(double re, double im, int precision = 3)
       : re(re), im(im), precision(precision) {
     assert(precision >= 0 && precision <= 15);
@@ -116,12 +116,14 @@ public:
   }
 }; // class fmt_time
 
+/// Format a number in the range [1.0, 1000.0) to a string with specified width.
+/// For example, fmt_1_to_1e3(123.45678, 5) will print "123.5",
 class fmt_1_to_1e3 {
   double number;
   int width;
 
 public:
-  explicit fmt_1_to_1e3(double n, int width) : number(n), width(width) {
+  explicit fmt_1_to_1e3(double n, int width = 5) : number(n), width(width) {
     assert(n >= 0.0 &&
            "fmt_1_to_1e3: Currently only supporting positive numbers");
     assert(width >= 4);

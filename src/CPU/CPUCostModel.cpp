@@ -21,27 +21,27 @@ CPUCostModel::CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
                  thisItem.precision == cacheItem.precision &&
                  thisItem.nThreads == cacheItem.nThreads;
         });
-    if (it == this->items.end())
-      // a new item
-      items.emplace_back(cacheItem.nQubits,
-                         cacheItem.precision,
-                         cacheItem.nThreads,
-                         1, // nData
-                         1.0 / (cacheItem.memUpdateSpeed *
-                                cacheItem.opCount) // totalGiBTimePerOpCount
-      );
-    else {
+    // time it takes to update 1 GiB memory per opCount
+    auto t = 1.0 / (cacheItem.memUpdateSpeed * cacheItem.opCount);
+    if (it == this->items.end()) {
+      items.emplace_back(
+          cacheItem.nQubits, cacheItem.precision, cacheItem.nThreads, 1, t);
+    } else {
       it->nData++;
-      it->totalGibTimePerOpCount +=
-          1.0 / (cacheItem.opCount * cacheItem.memUpdateSpeed);
+      it->totalGibTimePerOpCount += t;
     }
   }
 
-  // initialize maxMemUpdateSpd
+  // initialize minGibTimeCap
   assert(!items.empty());
-  auto it = items.cbegin();
-  auto end = items.cend();
   this->minGibTimeCap = 0.0;
+  for (const auto& item : items) {
+    // The time it takes to update 1 GiB memory on dense gates
+    auto t = item.totalGibTimePerOpCount * std::pow(2.0, item.nQubits + 2) /
+             static_cast<double>(item.nData);
+    if (t > this->minGibTimeCap)
+      this->minGibTimeCap = t;
+  }
 }
 
 double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
@@ -53,15 +53,14 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
   assert(queryPrecision != Precision::Unknown &&
          "CPUCostModel: Must set queryPrecision before calling computeGiBTime");
 
-  const auto gateNQubits = gate->nQubits();
+  auto gateNQubits = gate->nQubits();
   auto gateOpCount = gate->opCount(zeroTol);
-
   // Try to find an exact match
   for (const auto& item : items) {
     if (item.nQubits == gateNQubits && item.precision == queryPrecision &&
         item.nThreads == queryNThreads) {
-      auto avg = std::max(item.getAvgGibTimePerOpCount(), this->minGibTimeCap);
-      return avg * gateOpCount;
+      auto t = item.getAvgGibTimePerOpCount() * gateOpCount;
+      return std::min(t, this->minGibTimeCap);
     }
   }
 
@@ -99,12 +98,12 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
     }
   }
 
-  // best match avg GiB time per opCount
+  // best match GiBTime per opCount
   auto bestMatchT0 = bestMatchIt->getAvgGibTimePerOpCount();
-  // estimated avg Gib time per opCount
+  // estimated GibTime per opCount
   auto estT0 = bestMatchT0 * bestMatchIt->nThreads / queryNThreads;
-  auto estimateTime =
-      std::max<double>(estT0, this->minGibTimeCap) * gateOpCount;
+  // estimated GibTime for this gate
+  auto estTime = std::min(estT0 * gateOpCount, this->minGibTimeCap);
 
   // std::cerr << YELLOW("Warning: ") << "No exact match to "
   //              "[nQubits, precision, nThreads] = ["
@@ -117,13 +116,14 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
   //           << "] @ " << bestMatchT0 << " s/GiB/op => "
   //              "Est. " << estT0 << " s/GiB/op.\n";
 
-  return estimateTime;
+  return estTime;
 }
 
 std::ostream& CPUCostModel::displayInfo(std::ostream& os, int verbose) const {
   const int nLinesToDisplay = std::min<int>(5 * verbose, items.size());
 
-  os << "Gib Time Cap: " << this->minGibTimeCap << " per op\n";
+  os << "Memory Bandwidth: " << utils::fmt_1_to_1e3(1.0 / this->minGibTimeCap)
+     << " GiBps\n";
   os << "  nQubits | Precision | nThreads | Dense MemSpd \n";
   for (int i = 0; i < nLinesToDisplay; ++i) {
     double opCount = static_cast<double>(1ULL << (items[i].nQubits + 2));
@@ -131,21 +131,21 @@ std::ostream& CPUCostModel::displayInfo(std::ostream& os, int verbose) const {
     os << "    " << std::fixed << std::setw(2) << items[i].nQubits
        << "    |    f" << static_cast<int>(items[i].precision) << "    |    "
        << items[i].nThreads << "    |    "
-       << utils::fmt_1_to_1e3(1.0 / timePerGiB, 5) << "\n";
+       << utils::fmt_1_to_1e3(1.0 / timePerGiB) << "\n";
   }
   return os;
 }
 
 namespace {
+
 /// @return Speed in gigabytes per second (GiBps)
 double calculateMemUpdateSpeed(int nQubits, Precision precision, double t) {
   assert(nQubits >= 0);
   assert(precision != Precision::Unknown);
   assert(t >= 0.0);
 
-  return static_cast<double>((precision == Precision::F32 ? 8ULL : 16ULL)
-                             << nQubits) *
-         1e-9 / t;
+  uint64_t dataSize = (precision == Precision::F32 ? 4ULL : 8ULL) << nQubits;
+  return static_cast<double>(dataSize) * 1e-9 / t;
 }
 
 // Take the scalar gate matrix representation of the gate and randomly zero

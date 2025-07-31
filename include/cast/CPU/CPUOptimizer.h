@@ -90,9 +90,11 @@ public:
     return *this;
   }
 
-  void run(ir::CircuitNode& circuit, utils::Logger logger) const override;
+  void run(ir::CircuitNode& circuit,
+           utils::Logger logger = nullptr) const override;
 
-  void run(ir::CircuitGraphNode& graph, utils::Logger logger) const override;
+  void run(ir::CircuitGraphNode& graph,
+           utils::Logger logger = nullptr) const override;
 
 }; // class CPUOptimizer
 

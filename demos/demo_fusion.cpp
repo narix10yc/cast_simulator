@@ -1,5 +1,5 @@
 #include "cast/CPU/CPUKernelManager.h"
-#include "cast/CPU/CPUOptimizerBuilder.h"
+#include "cast/CPU/CPUOptimizer.h"
 #include "cast/CPU/CPUStatevector.h"
 
 #include "timeit/timeit.h"
@@ -11,56 +11,55 @@ namespace cl = llvm::cl;
 
 using namespace cast;
 
-cl::opt<std::string> ArgInputFilename("i",
-                                      cl::desc("Input file name"),
-                                      cl::Positional,
-                                      cl::Required);
+// clang-format off
+cl::opt<std::string>
+ArgInputFilename("i",
+  cl::desc("Input file name"), cl::Positional, cl::Required);
 
 cl::opt<std::string>
-    ArgModelPath("model", cl::desc("Path to performance model"), cl::init(""));
-
-cl::opt<int> ArgPrecision("precision",
-                          cl::desc("Precision for the simulation (32 or 64)"),
-                          cl::init(64));
+ArgModelPath("model", cl::desc("Path to performance model"), cl::init(""));
 
 cl::opt<int>
-    ArgSimdWidth("simd-width",
-                 cl::desc("SIMD width for the simulation (0 for auto-detect)"),
-                 cl::init(0));
+ArgPrecision("precision",
+  cl::desc("Precision for the simulation (32 or 64)"), cl::init(64));
 
 cl::opt<int>
-    ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
+ArgSimdWidth("simd-width",
+  cl::desc("SIMD width (128, 256, 512, or 0 for auto-detect)"), cl::init(0));
+
+cl::opt<int>
+ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
 
 cl::opt<bool>
-    ArgOverwriteMode("overwrite",
-                     cl::desc("Overwrite the output file with new results"),
-                     cl::init(false));
+ArgOverwriteMode("overwrite",
+  cl::desc("Overwrite the output file with new results"), cl::init(false));
 
-cl::opt<bool> ArgRunNoFuse("run-no-fuse",
-                           cl::desc("Run no-fuse circuit"),
-                           cl::init(false));
+cl::opt<bool>
+ArgRunNoFuse("run-no-fuse", cl::desc("Run no-fuse circuit"), cl::init(false));
 
-cl::opt<bool> ArgRunSizeOnlyFuse("run-sizeonly-fuse",
-                                 cl::desc("Run size-only-fuse circuit"),
-                                 cl::init(true));
+cl::opt<bool>
+ArgRunSizeOnlyFuse("run-sizeonly-fuse",
+  cl::desc("Run size-only-fuse circuit"), cl::init(true));
 
-cl::opt<bool> ArgRunAdaptiveFuse("run-adaptive-fuse",
-                                 cl::desc("Run adaptive-fuse circuit"),
-                                 cl::init(false));
+cl::opt<bool>
+ArgRunAdaptiveFuse("run-adaptive-fuse",
+  cl::desc("Run adaptive-fuse circuit"), cl::init(false));
 
-cl::opt<int> ArgNaiveMaxK("naive-max-k",
-                          cl::desc("The max size of gates in naive fusion"),
-                          cl::init(3));
+cl::opt<int>
+ArgNaiveMaxK("naive-max-k",
+  cl::desc("The max size of gates in naive fusion"), cl::init(3));
 
-cl::opt<bool> ArgRunDenseKernel("run-dense-kernel",
-                                cl::desc("Run dense kernel"),
-                                cl::init(false));
+cl::opt<bool>
+ArgRunDenseKernel("run-dense-kernel",
+  cl::desc("Run dense kernel"), cl::init(false));
 
-cl::opt<int> ArgReplication("replication",
-                            cl::desc("Number of replications"),
-                            cl::init(1));
+cl::opt<int>
+ArgReplication("replication", cl::desc("Number of replications"), cl::init(1));
 
-using namespace cast;
+cl::opt<int>
+ArgVerbose("verbose", cl::desc("Verbosity level"), cl::init(1));
+
+// clang-format on
 
 static void unwrapArguments(Precision& precision,
                             int& nThreads,
@@ -176,20 +175,17 @@ int main(int argc, const char** argv) {
   circuit.body.deepcopyTo(adaptiveFuseCircuitDense.body);
 
   // Fusion
+  utils::Logger logger(std::cerr, ArgVerbose);
   if (ArgRunSizeOnlyFuse) {
-    CPUOptimizerBuilder builder;
-    builder.setSizeOnlyFusion(ArgNaiveMaxK).disableCFO();
-    auto optOrErr = builder.build();
-    if (!optOrErr) {
-      std::cerr << BOLDRED("[Err] ")
-                << "Failed to build optimizer: " << optOrErr.takeError()
-                << "\n";
-      return 1;
-    }
-    auto opt = optOrErr.takeValue();
-    opt.run(sizeOnlyFuseCircuit);
+    CPUOptimizer opt;
+    opt.setSizeOnlyFusionConfig(ArgNaiveMaxK)
+        .setNThreads(nThreads)
+        .setPrecision(precision)
+        .disableCFO();
+
+    opt.run(sizeOnlyFuseCircuit, logger);
     if (ArgRunDenseKernel)
-      opt.run(sizeOnlyFuseCircuitDense);
+      opt.run(sizeOnlyFuseCircuitDense, logger);
   }
 
   if (ArgRunAdaptiveFuse) {
@@ -202,22 +198,15 @@ int main(int argc, const char** argv) {
     auto cpuFusionConfig =
         std::make_unique<CPUFusionConfig>(std::move(cm), nThreads, precision);
 
-    CPUOptimizerBuilder builder;
-    builder.setFusionConfig(std::move(cpuFusionConfig))
-        .setPrecision(precision)
+    CPUOptimizer opt;
+    opt.setCPUFusionConfig(std::move(cpuFusionConfig))
         .setNThreads(nThreads)
+        .setPrecision(precision)
         .disableCFO();
-    auto optOrErr = builder.build();
-    if (!optOrErr) {
-      std::cerr << BOLDRED("[Err] ")
-                << "Failed to build optimizer: " << optOrErr.takeError()
-                << "\n";
-      return 1;
-    }
-    auto opt = optOrErr.takeValue();
-    opt.run(adaptiveFuseCircuit);
+
+    opt.run(adaptiveFuseCircuit, logger);
     if (ArgRunDenseKernel)
-      opt.run(adaptiveFuseCircuitDense);
+      opt.run(adaptiveFuseCircuitDense, logger);
   }
 
   CPUKernelGenConfig kernelGenConfig;
@@ -235,11 +224,11 @@ int main(int argc, const char** argv) {
   if (ArgRunNoFuse) {
     utils::timedExecute(
         [&]() {
-          auto result =
+          auto r =
               kernelMgr.genGraphGates(kernelGenConfig,
                                       *noFuseCircuit.getAllCircuitGraphs()[0],
                                       "graphNoFuse");
-          if (!result) {
+          if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphNoFuse\n";
             std::exit(1);
@@ -250,11 +239,11 @@ int main(int argc, const char** argv) {
   if (ArgRunSizeOnlyFuse) {
     utils::timedExecute(
         [&]() {
-          auto result = kernelMgr.genGraphGates(
+          auto r = kernelMgr.genGraphGates(
               kernelGenConfig,
               *sizeOnlyFuseCircuit.getAllCircuitGraphs()[0],
               "graphNaiveFuse");
-          if (!result) {
+          if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphNaiveFuse\n";
             std::exit(1);
@@ -265,11 +254,11 @@ int main(int argc, const char** argv) {
   if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
     utils::timedExecute(
         [&]() {
-          auto result = kernelMgr.genGraphGates(
+          auto r = kernelMgr.genGraphGates(
               kernelGenConfig,
               *adaptiveFuseCircuit.getAllCircuitGraphs()[0],
               "graphAdaptiveFuse");
-          if (!result) {
+          if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphAdaptiveFuse\n";
             std::exit(1);
@@ -280,11 +269,11 @@ int main(int argc, const char** argv) {
   if (ArgRunNoFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto result =
+          auto r =
               kernelMgr.genGraphGates(denseKernelGenConfig,
                                       *noFuseCircuit.getAllCircuitGraphs()[0],
                                       "graphNoFuseDense");
-          if (!result) {
+          if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphNoFuseDense\n";
             std::exit(1);
@@ -295,11 +284,11 @@ int main(int argc, const char** argv) {
   if (ArgRunSizeOnlyFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto result = kernelMgr.genGraphGates(
+          auto r = kernelMgr.genGraphGates(
               denseKernelGenConfig,
               *sizeOnlyFuseCircuit.getAllCircuitGraphs()[0],
               "graphNaiveFuseDense");
-          if (!result) {
+          if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphNaiveFuseDense\n";
             std::exit(1);
@@ -310,11 +299,11 @@ int main(int argc, const char** argv) {
   if (ArgModelPath != "" && ArgRunAdaptiveFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto result = kernelMgr.genGraphGates(
+          auto r = kernelMgr.genGraphGates(
               denseKernelGenConfig,
               *adaptiveFuseCircuit.getAllCircuitGraphs()[0],
               "graphAdaptiveFuseDense");
-          if (!result) {
+          if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphAdaptiveFuseDense\n";
             std::exit(1);
