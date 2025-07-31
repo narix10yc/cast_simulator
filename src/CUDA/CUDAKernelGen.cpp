@@ -887,7 +887,7 @@ void genMatrixVectorMultiply_SharedTiled(
   }
 
   // __syncthreads()
-  B.CreateCall(Intrinsic::getDeclaration(&M, Intrinsic::nvvm_barrier0));
+  B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
 
   /* dot‑product over this tile */
   for (unsigned t = 0; t < TILE; ++t) {
@@ -937,7 +937,7 @@ void genMatrixVectorMultiply_SharedTiled(
   }
 
   // __syncthreads()
-  B.CreateCall(Intrinsic::getDeclaration(&M, Intrinsic::nvvm_barrier0));
+  B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
 
   /* advance to next tile */
   B.CreateBr(tileInc);
@@ -1096,7 +1096,7 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
   }
 
   /* 2. __syncthreads() so every thread sees |x〉 tile */
-  B.CreateCall(Intrinsic::getDeclaration(&M, Intrinsic::nvvm_barrier0));
+  B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
 
   /* 3. Dot‑product over this tile */
   for (unsigned t = 0; t < TILE; ++t) {
@@ -1142,7 +1142,7 @@ void genMatrixVectorMultiplyFromPointer_SharedTiled(
   }
 
   /* 4. Barrier before next tile iteration */
-  B.CreateCall(Intrinsic::getDeclaration(&M, Intrinsic::nvvm_barrier0));
+  B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
 
   /* 5. Advance to next tile */
   B.CreateBr(tileInc);
@@ -1556,7 +1556,7 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
   } // switch (config.matrixLoadMode)
 
   B.CreateRetVoid();
-  LLVM_DEBUG(func->dump());
+  // LLVM_DEBUG(func->dump());
 
   return func;
 }

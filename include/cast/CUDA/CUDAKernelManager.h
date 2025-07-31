@@ -11,6 +11,8 @@
 
 #include "utils/MaybeError.h"
 
+#include <span>
+
 // TODO: We may not need cuda_runtime (also no need to link CUDA::cudart)
 #include <cuda.h>
 #include <cuda_runtime.h>

@@ -15,6 +15,7 @@
 #include <iostream>
 #include <random>
 #include <thread>
+#include <variant>
 
 namespace cast {
 
