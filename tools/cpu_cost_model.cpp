@@ -6,32 +6,35 @@
 
 #include <fstream>
 namespace cl = llvm::cl;
-
-cl::opt<std::string>
-    ArgOutputFilename("o", cl::desc("Output file name"), cl::Required);
-
-cl::opt<bool>
-    ArgF32("f32", cl::desc("Enable single-precision"), cl::init(false));
-
-cl::opt<bool>
-    ArgF64("f64", cl::desc("Enable double-precision"), cl::init(true));
-
-cl::opt<int> ArgNQubits("nqubits", cl::desc("Number of qubits"), cl::init(28));
-
-cl::opt<int>
-    ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
-
-cl::opt<bool>
-    ArgOverwriteMode("overwrite",
-                     cl::desc("Overwrite the output file with new results"),
-                     cl::init(false));
-
-cl::opt<int> ArgSimdWidth("simd-width", cl::desc("simd width"), cl::init(0));
-
-cl::opt<int>
-    ArgNTests("N", cl::desc("Number of tests"), cl::Prefix, cl::Required);
-
 using namespace cast;
+
+// clang-format off
+cl::opt<std::string>
+ArgOutputFilename("o", cl::desc("Output file name"), cl::Required);
+
+cl::opt<bool>
+ArgF32("f32", cl::desc("Enable single-precision"), cl::init(false));
+
+cl::opt<bool>
+ArgF64("f64", cl::desc("Enable double-precision"), cl::init(true));
+
+cl::opt<int>
+ArgNQubits("nqubits", cl::desc("Number of qubits"), cl::init(28));
+
+cl::opt<int>
+ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
+
+cl::opt<bool>
+ArgOverwriteMode("overwrite",
+  cl::desc("Overwrite the output file with new results"), cl::init(false));
+
+cl::opt<int>
+ArgSimdWidth("simd-width", cl::desc("simd width"), cl::init(0));
+
+cl::opt<int>
+ArgNTests("N", cl::desc("Number of tests"), cl::Prefix, cl::Required);
+
+// clang-format on
 
 void unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
   nQubits = ArgNQubits;

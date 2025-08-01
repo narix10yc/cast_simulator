@@ -55,7 +55,7 @@ public:
   }
 
   /// Base class IRNode deepcopy method
-  virtual std::unique_ptr<IRNode> deepcopy() const = 0;
+  virtual std::unique_ptr<IRNode> deepcopy_() const = 0;
 }; // class IRNode
 
 /// @brief A wrapper of std::vector<std::unique_ptr<IRNode>>.
@@ -87,11 +87,11 @@ public:
 
   void deepcopyTo(CompoundNode& other) const {
     for (const auto& node : nodes) {
-      other.push_back(std::move(node->deepcopy()));
+      other.push_back(std::move(node->deepcopy_()));
     }
   }
 
-  std::unique_ptr<IRNode> deepcopy() const override {
+  std::unique_ptr<IRNode> deepcopy_() const override {
     auto copy = std::make_unique<CompoundNode>();
     deepcopyTo(*copy);
     return copy;
@@ -117,7 +117,7 @@ public:
   }
 
   /// IfMeasureNode deepcopy method
-  std::unique_ptr<IRNode> deepcopy() const override {
+  std::unique_ptr<IRNode> deepcopy_() const override {
     auto copy = std::make_unique<IfMeasureNode>(qubit);
     thenBody.deepcopyTo(copy->thenBody);
     elseBody.deepcopyTo(copy->elseBody);
@@ -311,7 +311,7 @@ public:
       other.insertGate(gate);
   }
 
-  std::unique_ptr<IRNode> deepcopy() const override {
+  std::unique_ptr<IRNode> deepcopy_() const override {
     auto copy = std::make_unique<CircuitGraphNode>();
     deepcopyTo(*copy);
     return copy;
@@ -351,9 +351,16 @@ public:
   }
 
   /// CircuitNode deepcopy method
-  std::unique_ptr<IRNode> deepcopy() const override {
+  std::unique_ptr<IRNode> deepcopy_() const override {
     auto copy = std::make_unique<CircuitNode>(name);
     body.deepcopyTo(copy->body);
+    return copy;
+  }
+
+  /// @brief Create a copy of the CircuitNode with name suffixed with "_copy".
+  CircuitNode copy() const {
+    CircuitNode copy(name + "_copy");
+    body.deepcopyTo(copy.body);
     return copy;
   }
 }; // class CircuitNode

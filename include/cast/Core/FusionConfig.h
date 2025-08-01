@@ -54,7 +54,7 @@ public:
 class SizeOnlyFusionConfig : public FusionConfig {
 public:
   SizeOnlyFusionConfig(int size) : FusionConfig(FC_SizeOnly) {
-    sizeMin = size;
+    sizeMin = 2;
     sizeMax = size;
   }
 

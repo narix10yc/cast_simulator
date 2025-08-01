@@ -55,6 +55,8 @@ public:
     }
   };
 
+  LogStream log() { return LogStream(outStream); }
+
   // Get a log stream for the given level
   LogStream log(int level) {
     return (level <= verbosity) ? LogStream(outStream) : LogStream(nullptr);

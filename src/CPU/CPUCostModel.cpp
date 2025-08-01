@@ -34,12 +34,12 @@ CPUCostModel::CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
 
   // initialize minGibTimeCap
   assert(!items.empty());
-  this->minGibTimeCap = 0.0;
+  this->minGibTimeCap = 1e6; // a large number
   for (const auto& item : items) {
     // The time it takes to update 1 GiB memory on dense gates
-    auto t = item.totalGibTimePerOpCount * std::pow(2.0, item.nQubits + 2) /
-             static_cast<double>(item.nData);
-    if (t > this->minGibTimeCap)
+    double opCount = static_cast<double>(1ULL << (item.nQubits + 2));
+    auto t = item.totalGibTimePerOpCount * opCount / item.nData;
+    if (t < this->minGibTimeCap)
       this->minGibTimeCap = t;
   }
 }
@@ -60,7 +60,7 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
     if (item.nQubits == gateNQubits && item.precision == queryPrecision &&
         item.nThreads == queryNThreads) {
       auto t = item.getAvgGibTimePerOpCount() * gateOpCount;
-      return std::min(t, this->minGibTimeCap);
+      return std::max(t, this->minGibTimeCap);
     }
   }
 
@@ -103,7 +103,7 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
   // estimated GibTime per opCount
   auto estT0 = bestMatchT0 * bestMatchIt->nThreads / queryNThreads;
   // estimated GibTime for this gate
-  auto estTime = std::min(estT0 * gateOpCount, this->minGibTimeCap);
+  auto estTime = std::max(estT0 * gateOpCount, this->minGibTimeCap);
 
   // std::cerr << YELLOW("Warning: ") << "No exact match to "
   //              "[nQubits, precision, nThreads] = ["

@@ -36,27 +36,27 @@ void CPUOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
     int nFused = 0;
     double t = timeit::once([&]() {
       auto allCircuitGraphs = circuit.getAllCircuitGraphs();
-      for (int maxCandidateSize = fusionConfig->sizeMin;
-           maxCandidateSize <= fusionConfig->sizeMax;
-           ++maxCandidateSize) {
+      for (int cddSize = fusionConfig->sizeMin;
+           cddSize <= fusionConfig->sizeMax;
+           ++cddSize) {
         int nFusedThisSize = 0;
         for (auto* graph : allCircuitGraphs) {
           int nFusedThisRound = 0;
           do {
-            nFusedThisRound = impl::applyGateFusion(
-                *graph, fusionConfig.get(), maxCandidateSize);
+            nFusedThisRound =
+                impl::applyGateFusion(*graph, fusionConfig.get(), cddSize);
             nFusedThisSize += nFusedThisRound;
           } while (fusionConfig->enableMultiTraverse && nFusedThisRound > 0);
-        }
+        } // for each graph
         // Processed every graph in this size. Run CFO fusion if enabled
         if (enableCFO_ && nFusedThisSize > 0) {
-          nFusedThisSize += impl::applyCFOFusion(
-              circuit, fusionConfig.get(), maxCandidateSize);
+          nFusedThisSize +=
+              impl::applyCFOFusion(circuit, fusionConfig.get(), cddSize);
         }
         nFused += nFusedThisSize;
-        logger.log(2) << " At size " << maxCandidateSize << ", fused "
-                      << nFusedThisSize << " gates.\n";
-      } // for maxCandidateSize
+        logger.log(2) << " At size " << cddSize << ", fused " << nFusedThisSize
+                      << " gates.\n";
+      } // for candidate size (cddSize)
     });
     logger.log(1) << "Agglomerative Fusion Pass: Finished in "
                   << utils::fmt_time(t) << "\n";
