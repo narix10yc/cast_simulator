@@ -156,6 +156,32 @@ public:
     return StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {q});
   }
 
+  static StandardQuantumGatePtr X(int q) {
+    return StandardQuantumGate::Create(ScalarGateMatrix::X(), nullptr, {q});
+  }
+
+  static StandardQuantumGatePtr Y(int q) {
+    return StandardQuantumGate::Create(ScalarGateMatrix::Y(), nullptr, {q});
+  }
+
+  static StandardQuantumGatePtr Z(int q) {
+    return StandardQuantumGate::Create(ScalarGateMatrix::Z(), nullptr, {q});
+  }
+
+  static StandardQuantumGatePtr S(int q) {
+    return StandardQuantumGate::Create(ScalarGateMatrix::S(), nullptr, {q});
+  }
+
+  static StandardQuantumGatePtr RZ(int q, double theta) {
+    return StandardQuantumGate::Create(
+        ScalarGateMatrix::RZ(theta), nullptr, {q});
+  }
+
+  static StandardQuantumGatePtr RX(int q, double theta) {
+    return StandardQuantumGate::Create(
+        ScalarGateMatrix::RX(theta), nullptr, {q});
+  }
+
   static bool classof(const QuantumGate* qg) {
     return qg->kind() == QG_Standard;
   }

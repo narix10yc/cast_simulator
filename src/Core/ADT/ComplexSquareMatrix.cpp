@@ -6,6 +6,7 @@
 
 using namespace cast;
 
+// clang-format off
 // For code collapse
 #pragma region Constant Matrices
 
@@ -33,6 +34,12 @@ static const ComplexSquareMatrix matH(
     // imag part
     {0, 0, 0, 0});
 
+static const ComplexSquareMatrix matS(
+    // real part
+    {1, 0, 0, 0},
+    // imag part
+    {0, 0, 0, 1});
+
 static const ComplexSquareMatrix matCX(
     // real part
     {1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0},
@@ -51,6 +58,8 @@ static const ComplexSquareMatrix matSWAP(
     // imag part
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
 
+// clang-format on
+
 ComplexSquareMatrix ComplexSquareMatrix::X() { return matX; }
 
 ComplexSquareMatrix ComplexSquareMatrix::Y() { return matY; }
@@ -58,6 +67,8 @@ ComplexSquareMatrix ComplexSquareMatrix::Y() { return matY; }
 ComplexSquareMatrix ComplexSquareMatrix::Z() { return matZ; }
 
 ComplexSquareMatrix ComplexSquareMatrix::H() { return matH; }
+
+ComplexSquareMatrix ComplexSquareMatrix::S() { return matS; }
 
 ComplexSquareMatrix ComplexSquareMatrix::CX() { return matCX; }
 

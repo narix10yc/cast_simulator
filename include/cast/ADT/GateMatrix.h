@@ -159,6 +159,10 @@ public:
     return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::H());
   }
 
+  static ScalarGateMatrixPtr S() {
+    return std::make_shared<ScalarGateMatrix>(ComplexSquareMatrix::S());
+  }
+
   // [cos(theta / 2),                -exp(i * lambda) * sin(theta / 2),
   //  exp(i * phi) * sin(theta / 2), exp(i * (phi + lambda)) * cos(theta / 2)]
   static ScalarGateMatrixPtr U1q(double theta, double phi, double lambda);

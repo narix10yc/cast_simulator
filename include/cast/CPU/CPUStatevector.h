@@ -152,17 +152,17 @@ public:
 
   /// @brief Initialize to the |00...00> state.
   /// Notice: even though we provide nThreads parameter, this function
-  /// uses a single-thread std::memset to initialize the statevector.
+  /// uses a single-thread std::fill_n to initialize the statevector.
   void initialize(int nThreads = 1) {
-    std::memset(_data, 0, sizeInBytes());
+    std::fill_n(_data, 2 * getN(), 0.0);
     _data[0] = 1.0;
   }
 
   /// Notice: nThreads parameter is ignored in this function.
   void normalize(int nThreads = 1) {
-    ScalarType n = norm();
+    auto factor = 1.0 / norm();
     for (size_t i = 0; i < 2 * getN(); ++i)
-      _data[i] /= n;
+      _data[i] *= factor;
   }
 
   /// @brief Uniform randomize statevector (by the Haar-measure on sphere).

@@ -178,6 +178,7 @@ public:
   static ComplexSquareMatrix Y();
   static ComplexSquareMatrix Z();
   static ComplexSquareMatrix H();
+  static ComplexSquareMatrix S();
   static ComplexSquareMatrix eye(size_t edgeSize);
 
   static ComplexSquareMatrix I1() { return eye(2); }
