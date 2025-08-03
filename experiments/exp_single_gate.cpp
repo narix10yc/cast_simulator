@@ -188,8 +188,7 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
     tr = timer.timeit([&]() {
       for (auto* kernelInfo : kernels) {
         kernelMgr
-            .applyCPUKernel(
-                sv.data(), sv.nQubits(), kernelInfo->llvmFuncName, NUM_THREADS)
+            .applyCPUKernel(sv.data(), sv.nQubits(), *kernelInfo, NUM_THREADS)
             .consumeError();
       }
     });
@@ -213,6 +212,8 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
 
   CUDAKernelManager kernelMgr;
   CUDAKernelGenConfig kernelGenConfig;
+  kernelGenConfig.precision =
+      (std::is_same_v<ScalarType, float> ? Precision::F32 : Precision::F64);
 
   std::vector<QuantumGatePtr> gates;
   for (const auto& gateType : gateTypes)
@@ -228,19 +229,14 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   // Initialize JIT engine
   utils::timedExecute(
       [&]() {
-        auto r = kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false, 1);
-        if (!r) {
-          std::cerr << BOLDRED("[Error]: ")
-                    << "In initializing JIT engine: " << r.takeError() << "\n";
-          std::exit(EXIT_FAILURE);
-        }
+        kernelMgr.emitPTX(1, llvm::OptimizationLevel::O1, 1);
+        kernelMgr.initCUJIT(1, 1);
       },
       "Initialize JIT Engine");
 
   // Create a statevector with NUM_QUBITS qubits
-  cast::CPUStatevector<ScalarType> sv(NUM_QUBITS, SIMD_WIDTH);
-  utils::timedExecute([&]() { sv.randomize(NUM_THREADS); },
-                      "Initialize statevector");
+  cast::CUDAStatevector<ScalarType> sv(NUM_QUBITS);
+  utils::timedExecute([&]() { sv.randomize(); }, "Initialize statevector");
 
   // Benchmark the kernels
   timeit::Timer timer(/* replication */ 3, /* verbose */ 0);
@@ -248,7 +244,7 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
 
   int gateIndex = 0;
   for (const auto& gateType : gateTypes) {
-    std::vector<const CPUKernelInfo*> kernels;
+    std::vector<const CUDAKernelInfo*> kernels;
     for (int q = 0; q < NUM_QUBITS; ++q) {
       std::string funcName = "gate_" + std::to_string(gateIndex++);
       const auto* kernelInfo = kernelMgr.getKernelByName(funcName);
@@ -257,12 +253,9 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
     }
 
     tr = timer.timeit([&]() {
-      for (auto* kernelInfo : kernels) {
-        kernelMgr
-            .applyCPUKernel(
-                sv.data(), sv.nQubits(), kernelInfo->llvmFuncName, NUM_THREADS)
-            .consumeError();
-      }
+      for (auto* kernelInfo : kernels)
+        kernelMgr.launchCUDAKernel(sv.dData(), sv.nQubits(), *kernelInfo);
+      cudaDeviceSynchronize();
     });
     // device,method,gate_type,nqubits,precision,time_per_gate
     std::cerr << deviceName << ",cast," << gateType << "," << NUM_QUBITS << ","
@@ -275,11 +268,37 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
 #endif // CAST_USE_CUDA
 
 int main(int argc, char** argv) {
-  if (argc < 2) {
+  if (argc < 3) {
     std::cerr << BOLDRED("[Error]: ") << "Usage: " << argv[0]
-              << " <device_name>\n";
+              << "{CPU/GPU} <device_name>\n";
     return EXIT_FAILURE;
   }
+  std::string cpu_or_gpu(argv[1]);
+  if (cpu_or_gpu != "CPU" && cpu_or_gpu != "GPU") {
+    std::cerr << BOLDRED("[Error]: ") << "Invalid argument: " << cpu_or_gpu
+              << ". Expected 'CPU' or 'GPU'.\n";
+    return EXIT_FAILURE;
+  }
+  if (cpu_or_gpu == "GPU") {
+#ifdef CAST_USE_CUDA
+    std::cerr << BOLDCYAN("[Info]: ") << "Starting CUDA benchmark.\n";
+    std::cerr << "System information:\n";
+    cast::displayCUDA();
+    std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3};
+    std::cerr << BOLDCYAN("[Info]: ") << "Using " << NUM_QUBITS << "-qubit "
+              << "statevectors\n";
+    std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
+    cuda_benchmark<float>(gateTypes, argv[2]);
+    std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
+    cuda_benchmark<double>(gateTypes, argv[2]);
+    return 0;
+#else
+    std::cerr << BOLDRED("[Error]: ")
+              << "CUDA support is not enabled in this build.\n";
+    return EXIT_FAILURE;
+#endif // CAST_USE_CUDA
+  }
+
   std::cerr << BOLDCYAN("[Info]: ")
             << "Benchmarking CPU simulation speed of multi-qubit dense gates "
             << "and multi-qubit Hadamard gates on CPU.\n";
@@ -291,7 +310,7 @@ int main(int argc, char** argv) {
   std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
   std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3};
 
-  std::string deviceName(argv[1]);
+  std::string deviceName(argv[2]);
   cpu_benchmark<float>(gateTypes, deviceName);
 
   std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
