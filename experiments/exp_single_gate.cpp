@@ -132,8 +132,8 @@ static double computeGiBps(std::size_t memoryInBytes, double timeInSeconds) {
 }
 
 template <typename ScalarType>
-static void benchmark(const std::vector<GateType>& gateTypes,
-                      const std::string& deviceName) {
+static void cpu_benchmark(const std::vector<GateType>& gateTypes,
+                          const std::string& deviceName) {
   static_assert(std::is_same_v<ScalarType, float> ||
                     std::is_same_v<ScalarType, double>,
                 "ScalarType must be either float or double");
@@ -157,12 +157,7 @@ static void benchmark(const std::vector<GateType>& gateTypes,
   // Initialize JIT engine
   utils::timedExecute(
       [&]() {
-        auto r =
-            kernelMgr.initJIT(1, /* number of threads */
-                              llvm::OptimizationLevel::O1, /* LLVM opt level */
-                              false,                       /* use lazy JIT */
-                              1 /* verbose (show progress bar) */
-            );
+        auto r = kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false, 1);
         if (!r) {
           std::cerr << BOLDRED("[Error]: ")
                     << "In initializing JIT engine: " << r.takeError() << "\n";
@@ -206,6 +201,79 @@ static void benchmark(const std::vector<GateType>& gateTypes,
   }
 }
 
+#ifdef CAST_USE_CUDA
+#include "cast/CUDA/CUDAKernelManager.h"
+#include "cast/CUDA/CUDAStatevector.h"
+template <typename ScalarType>
+static void cuda_benchmark(const std::vector<GateType>& gateTypes,
+                           const std::string& deviceName) {
+  static_assert(std::is_same_v<ScalarType, float> ||
+                    std::is_same_v<ScalarType, double>,
+                "ScalarType must be either float or double");
+
+  CUDAKernelManager kernelMgr;
+  CUDAKernelGenConfig kernelGenConfig;
+
+  std::vector<QuantumGatePtr> gates;
+  for (const auto& gateType : gateTypes)
+    createGates(gates, gateType);
+
+  for (int i = 0; i < gates.size(); ++i) {
+    const auto& gate = gates[i];
+    std::string funcName = "gate_" + std::to_string(i);
+    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName)
+        .consumeError(); // ignore possible error
+  }
+
+  // Initialize JIT engine
+  utils::timedExecute(
+      [&]() {
+        auto r = kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false, 1);
+        if (!r) {
+          std::cerr << BOLDRED("[Error]: ")
+                    << "In initializing JIT engine: " << r.takeError() << "\n";
+          std::exit(EXIT_FAILURE);
+        }
+      },
+      "Initialize JIT Engine");
+
+  // Create a statevector with NUM_QUBITS qubits
+  cast::CPUStatevector<ScalarType> sv(NUM_QUBITS, SIMD_WIDTH);
+  utils::timedExecute([&]() { sv.randomize(NUM_THREADS); },
+                      "Initialize statevector");
+
+  // Benchmark the kernels
+  timeit::Timer timer(/* replication */ 3, /* verbose */ 0);
+  timeit::TimingResult tr;
+
+  int gateIndex = 0;
+  for (const auto& gateType : gateTypes) {
+    std::vector<const CPUKernelInfo*> kernels;
+    for (int q = 0; q < NUM_QUBITS; ++q) {
+      std::string funcName = "gate_" + std::to_string(gateIndex++);
+      const auto* kernelInfo = kernelMgr.getKernelByName(funcName);
+      assert(kernelInfo != nullptr);
+      kernels.push_back(kernelInfo);
+    }
+
+    tr = timer.timeit([&]() {
+      for (auto* kernelInfo : kernels) {
+        kernelMgr
+            .applyCPUKernel(
+                sv.data(), sv.nQubits(), kernelInfo->llvmFuncName, NUM_THREADS)
+            .consumeError();
+      }
+    });
+    // device,method,gate_type,nqubits,precision,time_per_gate
+    std::cerr << deviceName << ",cast," << gateType << "," << NUM_QUBITS << ","
+              << (std::is_same_v<ScalarType, float> ? "single" : "double")
+              << "," << std::scientific << std::setprecision(6)
+              << (tr.min / NUM_QUBITS) << "\n";
+  }
+}
+
+#endif // CAST_USE_CUDA
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     std::cerr << BOLDRED("[Error]: ") << "Usage: " << argv[0]
@@ -224,9 +292,9 @@ int main(int argc, char** argv) {
   std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3};
 
   std::string deviceName(argv[1]);
-  benchmark<float>(gateTypes, deviceName);
+  cpu_benchmark<float>(gateTypes, deviceName);
 
   std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
-  benchmark<double>(gateTypes, deviceName);
+  cpu_benchmark<double>(gateTypes, deviceName);
   return 0;
 }
