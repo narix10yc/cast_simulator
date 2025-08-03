@@ -12,4 +12,7 @@ target_link_libraries(demo_asm_dump PRIVATE cast)
 
 if (CAST_USE_CUDA)
   add_executable(demo_ptx "demo_ptx.cpp")
+
+  add_executable(cuda_bcmk_imm "performance/cuda_bcmk_imm.cpp")
+  target_link_libraries(cuda_bcmk_imm PRIVATE cast_cuda)
 endif()
