@@ -1,3 +1,6 @@
+## Update 3rd August, 2025
+Known issue: Many system compilers (g++) complains about the openQASM parser. Seems to do with C++ RTTI. This project should *not* be using C++ RTTI, but openQASM parser was implemented a long time ago and did not stick to this rule. clang compiler built from `build_llvm.sh` would compile the project successfully (because we explicitly enabled RTTI there).
+
 ## Update 23th June, 2025
 Code refactoring in process. Python binding in progress. Check the yl5619-dev branch. Stay tuned... :)
 
