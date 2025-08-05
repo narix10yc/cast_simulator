@@ -1,20 +1,20 @@
-FILE(GLOB_RECURSE SRC_FILES "Timeit/*.cpp")
+file(GLOB_RECURSE SRC_FILES "Timeit/*.cpp")
 add_library(timeit STATIC ${SRC_FILES})
 target_compile_options(timeit PRIVATE -O3 -march=native)
 
-FILE(GLOB_RECURSE SRC_FILES "OpenQASM/*.cpp")
+file(GLOB_RECURSE SRC_FILES "OpenQASM/*.cpp")
 add_library(openqasm STATIC ${SRC_FILES})
 
-FILE(GLOB_RECURSE SRC_FILES "Core/*.cpp")
+file(GLOB_RECURSE SRC_FILES "Core/*.cpp")
 add_library(cast_core STATIC ${SRC_FILES})
 
-FILE(GLOB_RECURSE SRC_FILES "CPU/*.cpp")
+file(GLOB_RECURSE SRC_FILES "CPU/*.cpp")
 add_library(cast_cpu STATIC ${SRC_FILES})
 
-FILE(GLOB_RECURSE SRC_FILES "FPGA/*.cpp")
+file(GLOB_RECURSE SRC_FILES "FPGA/*.cpp")
 add_library(cast_fpga STATIC ${SRC_FILES})
 
-FILE(GLOB_RECURSE SRC_FILES "Utils/*.cpp")
+file(GLOB_RECURSE SRC_FILES "Utils/*.cpp")
 add_library(cast_utils STATIC ${SRC_FILES})
 
 add_library(cast INTERFACE)
@@ -33,8 +33,10 @@ target_link_libraries(cast INTERFACE
 )
 
 if (CAST_USE_CUDA)
-  FILE(GLOB_RECURSE SRC_FILES "CUDA/*.cpp" "CUDA/*.cu")
+  file(GLOB_RECURSE SRC_FILES "CUDA/*.cpp" "CUDA/*.cu")
   add_library(cast_cuda STATIC ${SRC_FILES})
   target_link_libraries(cast_cuda cuda CUDA::cudart)
   target_link_libraries(cast INTERFACE cast_cuda)
 endif()
+
+# target_compile_options(cast INTERFACE "-fno-exceptions")

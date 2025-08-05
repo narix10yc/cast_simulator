@@ -98,6 +98,7 @@ std::unique_ptr<ir::CircuitNode>
 transform::cvtAstCircuitToIrCircuit(const ast::CircuitStmt& astCircuit,
                                     ast::ASTContext& astCtx) {
   auto* irCircuit = new ir::CircuitNode(std::string(astCircuit.name.str));
-
+  convertSpanOfStmts(astCircuit.body, astCtx, irCircuit->body);
+  
   return std::unique_ptr<ir::CircuitNode>(irCircuit);
 }
