@@ -103,14 +103,6 @@ class CUDAKernelManager : public KernelManagerBase {
                                          ConstQuantumGatePtr gate,
                                          const std::string& funcName);
 
-  /// Generate kernels for all gates in the given circuit graph. The generated
-  /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
-  /// order of the gate in the circuit graph.
-  // TODO: do we still need the order
-  MaybeError<void> genGraphGates(const CUDAKernelGenConfig& config,
-                                 const ir::CircuitGraphNode& graph,
-                                 const std::string& graphName);
-
 public:
   CUDAKernelManager()
       : KernelManagerBase(), standaloneKernels_(), jitState(JIT_Uninited) {}
@@ -128,6 +120,14 @@ public:
   }
 
   void dumpPTX(std::ostream& os, const std::string& kernelName) const;
+
+  /// Generate kernels for all gates in the given circuit graph. The generated
+  /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
+  /// order of the gate in the circuit graph.
+  // TODO: do we still need the order
+  MaybeError<void> genGraphGates(const CUDAKernelGenConfig& config,
+                                 const ir::CircuitGraphNode& graph,
+                                 const std::string& graphName);
 
 private:
   /// \c cuContexts stores a vector of unique \c CUContext. Every thread will

@@ -592,3 +592,441 @@
 //               << "coalescing=" << coalescing << "\n";
 //   }
 // }
+
+
+#ifdef CAST_USE_CUDA
+
+#include "cast/CUDA/CUDACostModel.h"
+#include "cast/CUDA/CUDAKernelManager.h"
+#include "cast/CUDA/CUDAStatevector.h"
+#include "utils/Formats.h"
+#include "utils/iocolor.h"
+#include "timeit/timeit.h"
+#include "utils/PrintSpan.h"
+#include "utils/utils.h"
+
+#include <cassert>
+#include <cmath>
+#include <iomanip>
+#include <random>
+#include <unordered_set>
+
+using namespace cast;
+
+namespace cast {
+double estimateOccupancy(const CUDAKernelInfo& k, int blockSize) {
+  // Device properties (unchanged for the whole run, so probably should cache)
+  static cudaDeviceProp props;
+  static bool propsInit = false;
+  if (!propsInit) {
+    CUDA_CHECK(cudaGetDeviceProperties(&props, 0));
+    propsInit = true;
+  }
+
+  // Fast path: kernel has been JITed -> ask the driver
+  if (k.kernelFunction()) {
+    int maxBlocksPerSM = 0;
+    CUresult res = cuOccupancyMaxActiveBlocksPerMultiprocessor(
+        &maxBlocksPerSM,
+        k.kernelFunction(),
+        blockSize,
+        k.sharedMemUsage()); // dynamic SMEM
+    if (res != CUDA_SUCCESS) {
+      std::cerr << "cuOccupancyMaxActiveBlocksPerMultiprocessor failed\n";
+      return 1.0;
+    }
+
+    double occ = double(maxBlocksPerSM * blockSize) /
+                 double(props.maxThreadsPerMultiProcessor);
+    return std::clamp(occ, 0.05, 1.0);
+  }
+
+  // Metadata‑only path : have an estimate of regs & SMEM
+  unsigned regsPerThr = k.registerUsage();
+  size_t dynSmem = k.sharedMemUsage();
+
+  unsigned maxBlocksThreads = props.maxThreadsPerMultiProcessor / blockSize;
+
+  unsigned maxBlocksRegs = (regsPerThr == 0)
+                               ? maxBlocksThreads
+                               : props.regsPerBlock / (regsPerThr * blockSize);
+
+  unsigned maxBlocksSmem =
+      (dynSmem == 0) ? maxBlocksThreads : props.sharedMemPerBlock / dynSmem;
+
+  unsigned activeBlocks =
+      std::max(1u, std::min({maxBlocksThreads, maxBlocksRegs, maxBlocksSmem}));
+
+  double occ = double(activeBlocks * blockSize) /
+               double(props.maxThreadsPerMultiProcessor);
+
+  return std::clamp(occ, 0.05, 1.0);
+}
+
+double estimateCoalescingScore(const QuantumGate& gate, int nQubits) {
+  const auto& targets = gate.qubits();
+  const std::vector<int> controls = {}; // Assuming no controls for now
+
+  // Check for perfect coalescing (all strides = 1)
+  bool perfect_coalescing = true;
+  int max_stride = 1;
+  std::unordered_set<int> unique_strides;
+
+  for (int t : targets) {
+    int stride = 1 << t;
+    unique_strides.insert(stride);
+    if (stride != 1)
+      perfect_coalescing = false;
+    if (stride > max_stride)
+      max_stride = stride;
+  }
+
+  if (perfect_coalescing) {
+    return 1.0; // Ideal case
+  }
+
+  double score = 1.0;
+  // Stride-based penalties
+  if (max_stride >= 32) {
+    score *= 0.2; // Worst case for 32-byte transactions
+  } else if (max_stride >= 8) {
+    score *= 0.4;
+  } else if (max_stride >= 2) {
+    score *= 0.7;
+  }
+
+  // Control qubits cause broadcast patterns
+  if (!controls.empty()) {
+    score *=
+        0.6 * pow(0.9, controls.size()); // Base penalty + diminishing returns
+  }
+  // Multiple strides hurt coalescing
+  if (unique_strides.size() > 1) {
+    score *= 0.8 / log2(unique_strides.size() + 1);
+  }
+  // Warp divergence penalty for conditional gates
+  // if (gate.hasConditionalOperations()) {
+  //     score *= 0.7;
+  // }
+
+  // Ensure score stays in valid range
+  return std::clamp(score, 0.05, 1.0);
+}
+
+double calculateMemUpdateSpeedCuda(int nQubits,
+                                   int precision,
+                                   double t,
+                                   double coalescingScore,
+                                   double occupancy) {
+  assert(nQubits >= 0);
+  assert(precision == 32 || precision == 64);
+  assert(t > 0.0);
+  assert(coalescingScore > 0.0 && coalescingScore <= 1.0);
+  assert(occupancy > 0.0 && occupancy <= 1.0);
+
+  const double bytesTouched =
+      (precision == 32 ? 8.0 : 16.0) // 8 or 16 bytes per amplitude
+      * std::pow(2.0, nQubits);
+
+  return bytesTouched / (static_cast<double>(1u << 30) // bytes GiB
+                         * t                           // divide by time
+                         * coalescingScore             // coalescing penalty
+                         * std::sqrt(occupancy));      // occupancy penalty
+}
+
+CUDAPerformanceCache::CUDAPerformanceCache(const std::string &fileName) {
+  std::ifstream ifs(fileName);
+  if (!ifs.is_open())
+    throw std::runtime_error("Cannot open performance-cache file '" +
+                             fileName + '\'');
+
+  std::string line;
+  std::getline(ifs, line);                              // header
+  if (line != Item::CSV_TITLE)
+    throw std::runtime_error("Bad CSV header in '" + fileName + '\'');
+
+  while (std::getline(ifs, line)) {
+    Item it;
+    it.parse(line);
+    items.push_back(std::move(it));
+  }
+}
+
+}
+
+void CUDAPerformanceCache::writeResults(std::ostream &os) const {
+  for (const auto &it : items) {
+    it.write(os);
+    os << '\n';
+  }
+}
+
+void CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig &cfg,
+                                          int  nQubits,
+                                          int  blockSize,
+                                          int  nRuns,
+                                          int  nWorkerThreads,
+                                          int  verbose)
+{
+  // Generate a mixed set of random gates
+  std::vector<StandardQuantumGatePtr> gates;
+  gates.reserve(nRuns);
+
+  std::random_device rd;
+  std::mt19937        gen(rd());
+  std::uniform_real_distribution<float> disFloat(0.0f, 1.0f);
+  std::uniform_int_distribution<int>   disQ(0, nQubits - 1);
+
+  float prob = 1.0f;
+
+  auto randFloat = [&] { return disFloat(gen); };
+  auto randRemove = [&](StandardQuantumGate &g) {
+    if (prob >= 1.0f) return;
+
+    auto scalarGM = g.getScalarGM();
+    assert(scalarGM);
+    auto &mat = scalarGM->matrix();
+    const std::size_t N = mat.size();
+
+    for (std::size_t i = 0; i < N; ++i) {
+      if (randFloat() > prob) mat.reData()[i] = 0.0;
+      if (randFloat() > prob) mat.imData()[i] = 0.0;
+    }
+  };
+
+  auto randomTargets = [&](int k) {
+    std::vector<int> qs; qs.reserve(k);
+    utils::sampleNoReplacement(nQubits, k, qs);
+    return qs;
+  };
+
+  auto addRandU = [&](int k) {
+    auto gate = StandardQuantumGate::RandomUnitary(randomTargets(k));
+    randRemove(*gate);
+    gates.emplace_back(std::move(gate));
+  };
+
+  std::array<int, 8> nQubitsWeights{0,1,2,3,5,5,3,2};
+
+  prob = 1.0f;
+  for (int k = 1; k <= 5; ++k) { addRandU(k); addRandU(k); }
+
+  int initial = gates.size();
+  for (int run = 0; run < nRuns - initial; ++run) {
+    float ratio = static_cast<float>(run) / (nRuns - initial);
+    prob = ratio * 1.0f + (1.0f - ratio) * 0.25f;
+    /* roulette-wheel on weights */
+    int sum = std::accumulate(nQubitsWeights.begin(), nQubitsWeights.end(), 0);
+    std::uniform_int_distribution<int> pick(1, sum);
+    int r = pick(gen), acc = 0, k = 1;
+    for (; k < nQubitsWeights.size(); ++k)
+      if ((acc += nQubitsWeights[k]) >= r) break;
+    addRandU(k);
+  }
+
+  // Kernel generation & JIT
+  CUDAKernelManager kmgr;
+
+  utils::timedExecute([&] {
+  for (std::size_t i = 0; i < gates.size(); ++i) {
+    auto ME = kmgr.genStandaloneGate(cfg, gates[i],
+                                    "gate_" + std::to_string(i));
+    if (!ME) {
+      std::cerr << "[KernelGen-Error] " << ME.takeError() << '\n';
+      continue;
+    }
+  }
+  }, "CUDA Kernel Generation");
+
+  utils::timedExecute([&] {
+    kmgr.emitPTX(nWorkerThreads, llvm::OptimizationLevel::O3);
+    kmgr.initCUJIT(nWorkerThreads, /*streams=*/1);
+  }, "JIT Compilation");
+
+
+  // Benchmark
+  cast::CUDAStatevector<double> sv(nQubits);
+  utils::timedExecute([&]{ sv.randomize(); }, "Init statevector");
+
+  for (const auto &kp : kmgr.getAllStandaloneKernels()) {
+    const auto &k = *kp;
+    // Warmup
+    for (int i = 0; i < 3; ++i)
+      kmgr.launchCUDAKernel(sv.dData(), sv.nQubits(), k, blockSize);
+    cudaDeviceSynchronize();
+
+    // Timing
+    cudaEvent_t start, stop;
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
+
+    const int reps = 15;
+    CUDA_CHECK(cudaEventRecord(start));
+    for (int i = 0; i < reps; ++i)
+      kmgr.launchCUDAKernel(sv.dData(), sv.nQubits(), k, blockSize);
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
+
+    float ms = 0.0f;
+    CUDA_CHECK(cudaEventElapsedTime(&ms, start, stop));
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
+
+    double avgSec = (ms * 1e-3) / reps;
+
+    // Metrics
+    double occ  = estimateOccupancy(k, blockSize);
+    double coal = estimateCoalescingScore(*k.gate, nQubits);
+    int precBits = (k.precision == Precision::F32) ? 32 : 64;
+    double bw = calculateMemUpdateSpeedCuda(nQubits, precBits,
+                                                  avgSec, coal, occ);
+
+    items.emplace_back(Item{k.gate->nQubits(),
+                            static_cast<double>(k.opCount),
+                            k.precision,
+                            blockSize,
+                            occ,
+                            coal,
+                            bw});
+
+    if (verbose > 0) {
+      std::cerr << "Benchmarked gate @ ";
+      utils::printArray(std::cerr,
+                        std::span(k.gate->qubits()));
+      std::cerr << ": " << bw << " GiB/s  (occ=" << occ
+                << ", coal=" << coal << ")\n";
+    }
+  }
+}
+
+
+namespace {
+
+double gpuPeakTFLOPs(Precision p) {
+  return (p == Precision::F32) ? 35.6 : 0.556;
+}
+
+double calculateBytesPerAmp(Precision p) { return (p == Precision::F32) ? 8.0
+                                                                        : 16.0; }
+
+} // anonymous namespace
+
+
+CUDACostModel::CUDACostModel(std::unique_ptr<CUDAPerformanceCache> c,
+                             double zt)
+    : CostModel(CM_CUDA), cache(std::move(c)), zeroTol(zt) {
+
+  items.reserve(32);
+  for (const auto &src : cache->items) {
+    auto it = std::ranges::find_if(items, [&](const Item &dst) {
+      return dst.nQubits   == src.nQubits   &&
+             dst.precision == src.precision &&
+             dst.blockSize == src.blockSize;
+    });
+
+    const double perOpGiBTime = 1.0 / (src.memUpdateSpeed * src.opCount);
+    if (it == items.end()) {
+      items.push_back(Item{src.nQubits, src.precision, src.blockSize,
+                           1, perOpGiBTime,
+                           src.occupancy, src.coalescingScore});
+    } else {
+      it->nData++;
+      it->totalGiBTimePerOpCnt += perOpGiBTime;
+      it->occupancy           += src.occupancy;
+      it->coalescingScore     += src.coalescingScore;
+    }
+  }
+
+  for (const auto &it : items) {
+    const double denseOps = std::pow(2.0, it.nQubits + 2);
+    const double tGiB     = it.getAvgGiBTimePerOpCnt() * denseOps;
+    if (tGiB > minGiBTimeCap) minGiBTimeCap = tGiB;
+  }
+}
+
+double CUDACostModel::computeGiBTime(const QuantumGate *gate) const {
+  assert(gate);
+  assert(queryBlockSize > 0 && "setQueryBlockSize() not called");
+  assert(queryPrecision != Precision::Unknown &&
+         "setQueryPrecision() not called");
+
+  const int    nQ       = gate->nQubits();
+  const double opCnt    = gate->opCount(zeroTol);
+  const double bytesAmp = calculateBytesPerAmp(queryPrecision);
+
+  const CUDAPerformanceCache::Item *anchor = nullptr;
+  double bestScore = -1.0;
+  for (const auto &row : cache->items) {
+    if (row.precision != queryPrecision) continue;
+    double score  = (row.blockSize == queryBlockSize) ? 1.0 : 0.25;
+           score += 1.0 / (1.0 + std::abs(row.nQubits - nQ));
+    if (score > bestScore) { bestScore = score; anchor = &row; }
+  }
+  if (!anchor) return 1e8;
+
+  extern double estimateOccupancy(const CUDAKernelInfo&, int blk);
+  extern double estimateCoalescingScore(const QuantumGate&, int nQ);
+  extern double regPenalty(int regsPerThr, int blk, int regsPerSM);
+
+  CUDAKernelInfo meta;
+  meta.setKernelFunction(nullptr);
+
+  meta.setSharedMemUsage( (nQ <= 5) ? 0
+                                    : (std::size_t{1} << nQ) * bytesAmp );
+  meta.setRegisterUsage(32 + 4 * nQ);
+
+  const double occLive  =
+      std::clamp(estimateOccupancy(meta, queryBlockSize), 0.05, 1.0);
+  const double coalLive =
+      std::clamp(estimateCoalescingScore(*gate, nQ),       0.05, 1.0);
+
+  const double blkScale  = std::sqrt( double(anchor->blockSize) /
+                                      queryBlockSize );
+  const double occScale  = occLive  / std::max(0.05, anchor->occupancy);
+  const double coalScale = std::pow(coalLive /
+                                    std::max(0.05, anchor->coalescingScore),
+                                    1.5);
+
+  double effGiBps = anchor->memUpdateSpeed * blkScale * occScale * coalScale;
+  effGiBps = std::max(effGiBps, 1.0 / minGiBTimeCap);
+
+  const double memGiB   = bytesAmp * opCnt / (1ULL << 30);
+  const double memTime  = memGiB / effGiBps;
+  const double flops    = opCnt * 2.0;
+  const double flopTime = flops / (gpuPeakTFLOPs(queryPrecision) * 1e12);
+
+  constexpr double gpuBWbytes = 840.0 * (1ULL << 30);
+  const double ridgeAI        = (gpuPeakTFLOPs(Precision::F32) * 1e12)
+                                / gpuBWbytes;
+  const double ai             = 2.0 / bytesAmp;
+
+  const double execCore = (ai < ridgeAI) ? memTime : flopTime;
+  const double launchOH = 3.0e-6;
+
+  return execCore + launchOH;
+}
+
+
+std::ostream &CUDACostModel::displayInfo(std::ostream &os,
+                                         int verbose) const {
+  const int lines = std::min<int>(5 * verbose, items.size());
+
+  os << "Effective GPU bandwidth (best dense gate): "
+     << utils::fmt_1_to_1e3(1.0 / minGiBTimeCap) << " GiB/s\n"
+     << " nQ | Prec | Blk |  BW_dense  (GiB/s)\n";
+
+  for (int i = 0; i < lines; ++i) {
+    const auto &it = items[i];
+    const double denseOps = std::pow(2.0, it.nQubits + 2);
+    const double bwDense  = 1.0 /
+        (it.getAvgGiBTimePerOpCnt() * denseOps);
+
+    os << std::setw(3) << it.nQubits << " | f"
+       << static_cast<int>(it.precision) << "  | "
+       << std::setw(4) << it.blockSize  << " | "
+       << utils::fmt_1_to_1e3(bwDense)  << '\n';
+  }
+  return os;
+}
+
+#endif /* CAST_USE_CUDA */
