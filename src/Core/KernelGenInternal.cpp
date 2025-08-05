@@ -107,9 +107,9 @@ cast::internal::genComplexInnerProduct(IRBuilder<>& B,
                                        const Twine& name,
                                        cast::internal::FusedOpKind foKind) {
   assert(aVec.size() == bVec.size());
-  unsigned size = aVec.size();
-  Value* re;
-  Value* im;
+  // unsigned size = aVec.size();
+  // Value* re;
+  // Value* im;
 
   assert(0 && "Not implemented");
   return {nullptr, nullptr};

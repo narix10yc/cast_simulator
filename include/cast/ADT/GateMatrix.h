@@ -268,29 +268,7 @@ GateMatrixPtr permute(GateMatrixPtr gm, const std::vector<int>& flags);
 
 /* Arithmatic Operator Overloading */
 
-inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs,
-                                  const ScalarGateMatrix& rhs) {
-  assert(lhs.nQubits() == rhs.nQubits());
-  return ScalarGateMatrix(lhs.matrix() + rhs.matrix());
-}
-
-inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs, double c) {
-  return ScalarGateMatrix(lhs.matrix() + c);
-}
-
-inline ScalarGateMatrix operator+(double lhs, const ScalarGateMatrix& rhs) {
-  return ScalarGateMatrix(lhs + rhs.matrix());
-}
-
-inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs,
-                                  std::complex<double> c) {
-  return ScalarGateMatrix(lhs.matrix() + c);
-}
-
-inline ScalarGateMatrix operator+(std::complex<double> c,
-                                  const ScalarGateMatrix& rhs) {
-  return ScalarGateMatrix(c + rhs.matrix());
-}
+/* Addition */
 
 inline ScalarGateMatrix& operator+=(ScalarGateMatrix& lhs,
                                     const ScalarGateMatrix& rhs) {
@@ -310,23 +288,35 @@ inline ScalarGateMatrix& operator+=(ScalarGateMatrix& lhs,
   return lhs;
 }
 
-inline ScalarGateMatrix operator*(const ScalarGateMatrix& lhs, double c) {
-  return ScalarGateMatrix(lhs.matrix() * c);
-}
-
-inline ScalarGateMatrix operator*(double c, const ScalarGateMatrix& rhs) {
-  return ScalarGateMatrix(c * rhs.matrix());
-}
-
-inline ScalarGateMatrix operator*(const ScalarGateMatrix& lhs,
-                                  std::complex<double> c) {
-  return ScalarGateMatrix(lhs.matrix() * c);
-}
-
-inline ScalarGateMatrix operator*(std::complex<double> c,
+inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs,
                                   const ScalarGateMatrix& rhs) {
-  return ScalarGateMatrix(c * rhs.matrix());
+  assert(lhs.nQubits() == rhs.nQubits());
+  return ScalarGateMatrix(lhs.matrix() + rhs.matrix());
 }
+
+inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs, double c) {
+  auto copy = lhs;
+  copy += c;
+  return copy;
+}
+
+inline ScalarGateMatrix operator+(double c, const ScalarGateMatrix& rhs) {
+  return rhs + c;
+}
+
+inline ScalarGateMatrix operator+(const ScalarGateMatrix& lhs,
+                                  std::complex<double> c) {
+  auto copy = lhs;
+  copy += c;
+  return copy;
+}
+
+inline ScalarGateMatrix operator+(std::complex<double> c,
+                                  const ScalarGateMatrix& rhs) {
+  return rhs + c;
+}
+
+/* Multiplication */
 
 inline ScalarGateMatrix& operator*=(ScalarGateMatrix& lhs, double c) {
   lhs.matrix() *= c;
@@ -337,6 +327,28 @@ inline ScalarGateMatrix& operator*=(ScalarGateMatrix& lhs,
                                     std::complex<double> c) {
   lhs.matrix() *= c;
   return lhs;
+}
+
+inline ScalarGateMatrix operator*(const ScalarGateMatrix& lhs, double c) {
+  auto copy = lhs;
+  copy *= c;
+  return copy;
+}
+
+inline ScalarGateMatrix operator*(double c, const ScalarGateMatrix& rhs) {
+  return rhs * c;
+}
+
+inline ScalarGateMatrix operator*(const ScalarGateMatrix& lhs,
+                                  std::complex<double> c) {
+  auto copy = lhs;
+  copy *= c;
+  return copy;
+}
+
+inline ScalarGateMatrix operator*(std::complex<double> c,
+                                  const ScalarGateMatrix& rhs) {
+  return rhs * c;
 }
 
 }; // namespace cast

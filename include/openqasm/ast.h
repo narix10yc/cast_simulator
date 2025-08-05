@@ -1,27 +1,13 @@
 #ifndef OPENQASM_AST_H
 #define OPENQASM_AST_H
 
-#include "openqasm/token.h"
+#include "openqasm/Token.h"
 #include "utils/utils.h"
 
 #include <fstream>
 #include <memory>
 
-namespace cast::legacy {
-class CircuitGraph;
-}
 namespace openqasm::ast {
-
-class Node;
-class RootNode;
-
-class Statement;
-
-class Expression;
-class NumericExpr;
-class VariableExpr;
-class UnaryExpr;
-class BinaryExpr;
 
 class ExpressionValue {
 public:
@@ -39,30 +25,58 @@ public:
 };
 
 class Node {
-public:
-  virtual ~Node() = default;
-  virtual std::string toString() const = 0;
-  virtual void prettyPrint(std::ostream& f, int depth) const = 0;
-};
+protected:
+  // clang-format off
+  enum NodeKind {
+    NK_Node,
+      NK_Expression,
+        NK_NumericExpr,
+        NK_VariableExpr,
+        NK_SubscriptExpr,
+        NK_UnaryExpr,
+        NK_BinaryExpr,
+        NK_ExpressionEnd,
+      NK_Statement,
+        NK_IfThenElseStmt,
+        NK_VersionStmt,
+        NK_IncludeStmt,
+        NK_QRegStmt,
+        NK_CRegStmt,
+        NK_GateApplyStmt,
+        NK_StatementEnd,
+      NK_RootNode,
+  };
+  // clang-format on
+  NodeKind kind_;
 
-class Statement : public Node {
 public:
-  std::string toString() const override { return "statement"; }
-  void prettyPrint(std::ostream& f, int depth) const override {}
+  explicit Node(NodeKind kind) : kind_(kind) {}
+
+  NodeKind getKind() const { return kind_; }
+
+  virtual ~Node() = default;
+
+  virtual std::string toString() const = 0;
+
+  virtual void prettyPrint(std::ostream& f, int depth) const = 0;
 };
 
 class Expression : public Node {
 public:
-  std::string toString() const override { return "expression"; }
-  void prettyPrint(std::ostream& f, int depth) const override {}
+  explicit Expression(NodeKind kind) : Node(kind) {}
+
   virtual ExpressionValue getExprValue() const { return false; }
+
+  static bool classof(const Node* node) {
+    return node->getKind() >= NK_Expression && node->getKind() < NK_ExpressionEnd;
+  }
 };
 
 class NumericExpr : public Expression {
   double value;
 
 public:
-  NumericExpr(double value) : value(value) {}
+  NumericExpr(double value) : Expression(NK_NumericExpr), value(value) {}
   std::string toString() const override {
     return "(" + std::to_string(value) + ")";
   }
@@ -70,14 +84,19 @@ public:
   void prettyPrint(std::ostream& f, int depth) const override;
 
   double getValue() const { return value; }
+
   ExpressionValue getExprValue() const override { return value; }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_NumericExpr;
+  }
 };
 
 class VariableExpr : public Expression {
   std::string name;
 
 public:
-  VariableExpr(std::string name) : name(name) {}
+  VariableExpr(std::string name) : Expression(NK_VariableExpr), name(name) {}
 
   std::string getName() const { return name; }
 
@@ -87,13 +106,19 @@ public:
   ExpressionValue getExprValue() const override {
     return (name == "pi") ? 3.14159265358979323846 : false;
   }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_VariableExpr;
+  }
 };
 
 class SubscriptExpr : public Expression {
-public:
   std::string name;
   int index;
-  SubscriptExpr(std::string name, int index) : name(name), index(index) {}
+
+public:
+  SubscriptExpr(std::string name, int index)
+      : Expression(NK_SubscriptExpr), name(name), index(index) {}
 
   std::string getName() const { return name; }
   int getIndex() const { return index; }
@@ -101,9 +126,14 @@ public:
   std::string toString() const override {
     return name + "[" + std::to_string(index) + "]";
   }
+
   void prettyPrint(std::ostream& f, int depth) const override;
 
   ExpressionValue getExprValue() const override { return false; }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_SubscriptExpr;
+  }
 };
 
 class UnaryExpr : public Expression {
@@ -112,7 +142,7 @@ class UnaryExpr : public Expression {
 
 public:
   UnaryExpr(UnaryOp op, std::unique_ptr<Expression> expr)
-      : op(op), expr(std::move(expr)) {}
+      : Expression(NK_UnaryExpr), op(op), expr(std::move(expr)) {}
   std::string toString() const override { return "UnaryExpr"; }
   void prettyPrint(std::ostream& f, int depth) const override;
 
@@ -132,6 +162,10 @@ public:
       return false;
     }
   }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_UnaryExpr;
+  }
 };
 
 class BinaryExpr : public Expression {
@@ -142,7 +176,8 @@ public:
   BinaryExpr(BinaryOp op,
              std::unique_ptr<Expression> lhs,
              std::unique_ptr<Expression> rhs)
-      : op(op), lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+      : Expression(NK_BinaryExpr), op(op), lhs(std::move(lhs)),
+        rhs(std::move(rhs)) {}
 
   std::string toString() const override { return "BinaryExpr"; }
   void prettyPrint(std::ostream& f, int depth) const override;
@@ -170,6 +205,19 @@ public:
       return false;
     }
   }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_BinaryExpr;
+  }
+};
+
+class Statement : public Node {
+public:
+  explicit Statement(NodeKind kind) : Node(kind) {}
+
+  static bool classof(const Node* node) {
+    return node->getKind() >= NK_Statement && node->getKind() < NK_StatementEnd;
+  }
 };
 
 class IfThenElseStmt : public Statement {
@@ -179,7 +227,7 @@ class IfThenElseStmt : public Statement {
 
 public:
   IfThenElseStmt(std::unique_ptr<Expression> ifExpr)
-      : ifExpr(std::move(ifExpr)) {}
+      : Statement(NK_IfThenElseStmt), ifExpr(std::move(ifExpr)) {}
 
   std::string toString() const override { return "IfThenElseStmt"; }
 
@@ -192,30 +240,46 @@ public:
   void addElseBody(std::unique_ptr<Statement> stmt) {
     elseBody.push_back(std::move(stmt));
   }
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_IfThenElseStmt;
+  }
 };
 
 class VersionStmt : public Statement {
   std::string version;
 
 public:
-  VersionStmt(std::string version) : version(version) {}
+  VersionStmt(std::string version)
+      : Statement(NK_VersionStmt), version(version) {}
+
   std::string getVersion() const { return version; }
 
   std::string toString() const override { return "Version(" + version + ")"; }
 
   void prettyPrint(std::ostream& f, int depth) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_VersionStmt;
+  }
 };
 
 class IncludeStmt : public Statement {
   std::string fileName;
 
 public:
-  IncludeStmt(const std::string& fileName) : fileName(fileName) {}
+  IncludeStmt(const std::string& fileName)
+      : Statement(NK_IncludeStmt), fileName(fileName) {}
+
   std::string getFileName() const { return fileName; }
 
   std::string toString() const override { return "Include(" + fileName + ")"; }
 
   void prettyPrint(std::ostream& f, int depth) const override {}
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_IncludeStmt;
+  }
 };
 
 class QRegStmt : public Statement {
@@ -223,7 +287,8 @@ class QRegStmt : public Statement {
   int size;
 
 public:
-  QRegStmt(std::string name, int size) : name(name), size(size) {}
+  QRegStmt(std::string name, int size)
+      : Statement(NK_QRegStmt), name(name), size(size) {}
 
   std::string getName() const { return name; }
   int getSize() const { return size; }
@@ -233,6 +298,10 @@ public:
   }
 
   void prettyPrint(std::ostream& f, int depth) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_QRegStmt;
+  }
 };
 
 class CRegStmt : public Statement {
@@ -240,7 +309,8 @@ class CRegStmt : public Statement {
   int size;
 
 public:
-  CRegStmt(std::string name, int size) : name(name), size(size) {}
+  CRegStmt(std::string name, int size)
+      : Statement(NK_CRegStmt), name(name), size(size) {}
 
   std::string getName() const { return name; }
   int getSize() const { return size; }
@@ -250,6 +320,10 @@ public:
   }
 
   void prettyPrint(std::ostream& f, int depth) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_CRegStmt;
+  }
 };
 
 class GateApplyStmt : public Statement {
@@ -258,7 +332,7 @@ public:
   std::vector<std::unique_ptr<Expression>> parameters;
   std::vector<std::unique_ptr<SubscriptExpr>> targets;
 
-  GateApplyStmt(std::string name) : name(name) {}
+  GateApplyStmt(std::string name) : Statement(NK_GateApplyStmt), name(name) {}
 
   void addParameter(std::unique_ptr<Expression> param) {
     parameters.push_back(std::move(param));
@@ -271,21 +345,31 @@ public:
   std::string toString() const override { return "gate " + name; }
 
   void prettyPrint(std::ostream& f, int depth) const override;
+
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_GateApplyStmt;
+  }
 };
 
 class RootNode : public Node {
 public:
   std::vector<std::unique_ptr<Statement>> stmts;
+
+  RootNode() : Node(NK_RootNode) {}
+
   std::string toString() const override { return "Root"; }
+
   void prettyPrint(std::ostream& f, int depth) const override;
+
   void addStmt(std::unique_ptr<Statement> stmt) {
     stmts.push_back(std::move(stmt));
   }
 
   size_t countStmts() { return stmts.size(); }
-  Statement getStmt(size_t index) { return *(stmts[index]); }
 
-  void toLegacyCircuitGraph(cast::legacy::CircuitGraph&) const;
+  static bool classof(const Node* node) {
+    return node->getKind() == NK_RootNode;
+  }
 };
 
 } // namespace openqasm::ast

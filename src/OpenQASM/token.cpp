@@ -1,4 +1,4 @@
-#include "openqasm/token.h"
+#include "openqasm/Token.h"
 #include <iostream>
 
 namespace openqasm {

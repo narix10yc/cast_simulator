@@ -8,8 +8,8 @@
 #include "cast/Core/KernelManager.h"
 #include "cast/Fusion.h"
 #include "cast/Legacy/CircuitGraph.h"
-#include "openqasm/ast.h"
-#include "openqasm/parser.h"
+#include "openqasm/AST.h"
+#include "openqasm/Parser.h"
 #include "timeit/timeit.h"
 #include "llvm/Passes/OptimizationLevel.h"
 

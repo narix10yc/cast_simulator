@@ -9,12 +9,11 @@ namespace utils {
 
 class Logger {
 private:
+  int verbosity;
   std::shared_ptr<std::ofstream> fileStream;
   std::ostream* outStream;
 
 public:
-  int verbosity;
-
   Logger(std::nullptr_t) : verbosity(0), outStream(nullptr) {}
 
   Logger(std::ostream& stream, int verbosity = 1)

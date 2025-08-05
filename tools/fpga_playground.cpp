@@ -1,7 +1,7 @@
 #include "cast/FPGA/FPGAFusion.h"
 #include "cast/FPGA/FPGAInst.h"
 
-#include "openqasm/parser.h"
+#include "openqasm/Parser.h"
 #include "utils/CommandLine.h"
 
 #include <chrono>

@@ -10,7 +10,7 @@
 
 namespace cast {
 
-class CPUKernelGenConfig;
+struct CPUKernelGenConfig;
 
 class CPUPerformanceCache {
 public:

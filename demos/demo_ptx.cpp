@@ -4,7 +4,7 @@
 #include "cast/Fusion.h"
 #include "cast/Legacy/CircuitGraph.h"
 #include "cast/Parser.h"
-#include "openqasm/parser.h"
+#include "openqasm/Parser.h"
 
 #include "llvm/Support/CommandLine.h>
 

@@ -22,7 +22,7 @@ Fraction simplifyFraction(int n, int d) {
     d = -d;
   }
   auto g = std::gcd(n, d);
-  return {n, d};
+  return {n / g, d / g};
 }
 } // namespace
 

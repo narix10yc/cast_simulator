@@ -87,7 +87,7 @@ public:
 
   void deepcopyTo(CompoundNode& other) const {
     for (const auto& node : nodes) {
-      other.push_back(std::move(node->deepcopy_()));
+      other.push_back(node->deepcopy_());
     }
   }
 

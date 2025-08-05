@@ -134,8 +134,19 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
 
-# Find LLVM
 string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
+
+# disable C++ RTTI
+add_compile_options("-fno-rtti")
+
+# show colored diagnostics in the terminal
+add_compile_options("-fdiagnostics-color=always")
+
+if (CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
+  add_compile_options("-Wall")
+endif()
+
+# Find LLVM
 if(CAST_LLVM_DEBUG_ROOT AND CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
   set(LLVM_DIR "${CAST_LLVM_DEBUG_ROOT}/lib/cmake/llvm")
 else()

@@ -101,28 +101,30 @@ public:
   };
 
 private:
-  std::vector<VariableSumNode> _mulTerms;
-  std::vector<ExpiVar> _expiVars;
+  std::complex<double> coef_;
+  std::vector<VariableSumNode> mulTerms_;
+  std::vector<ExpiVar> expiVars_;
 
 public:
-  std::complex<double> coef;
+  Monomial() : coef_(1.0, 0.0), mulTerms_(), expiVars_() {}
 
-  Monomial() : coef(1.0, 0.0), _mulTerms(), _expiVars() {}
-
-  Monomial(double re, double im) : coef(re, im), _mulTerms(), _expiVars() {}
+  Monomial(double re, double im) : coef_(re, im), mulTerms_(), expiVars_() {}
 
   Monomial(const std::complex<double>& coef)
-      : coef(coef), _mulTerms(), _expiVars() {}
+      : coef_(coef), mulTerms_(), expiVars_() {}
 
   Monomial(const std::complex<double>& coef,
            const std::vector<VariableSumNode>& mulTerms,
            const std::vector<ExpiVar>& expiVars)
-      : coef(coef), _mulTerms(), _expiVars() {
+      : coef_(coef), mulTerms_(), expiVars_() {
     for (const auto& M : mulTerms)
       insertMulTerm(M);
     for (const auto& V : expiVars)
       insertExpiVar(V);
   }
+
+  auto coef() const { return coef_; }
+  auto& coef() { return coef_; }
 
   static Monomial Constant(const std::complex<double>& v) {
     return Monomial(v, {}, {});
@@ -141,49 +143,50 @@ public:
   // expi(var)
   static Monomial Expi(int var) { return Monomial({1.0, 0.0}, {}, {var}); }
 
-  bool isConstant() const { return _expiVars.empty() && _mulTerms.empty(); }
+  bool isConstant() const { return expiVars_.empty() && mulTerms_.empty(); }
   int compare(const Monomial&) const;
   bool operator<(const Monomial& M) const { return compare(M) < 0; }
   bool operator>(const Monomial& M) const { return compare(M) > 0; }
 
   bool mergeable(const Monomial&) const;
 
-  std::vector<VariableSumNode>& mulTerms() { return _mulTerms; }
-  const std::vector<VariableSumNode>& mulTerms() const { return _mulTerms; }
+  std::vector<VariableSumNode>& mulTerms() { return mulTerms_; }
+  const std::vector<VariableSumNode>& mulTerms() const { return mulTerms_; }
 
-  std::vector<ExpiVar>& expiVars() { return _expiVars; }
-  const std::vector<ExpiVar>& expiVars() const { return _expiVars; }
+  std::vector<ExpiVar>& expiVars() { return expiVars_; }
+  const std::vector<ExpiVar>& expiVars() const { return expiVars_; }
 
   void insertMulTerm(const VariableSumNode& node) {
-    if (_mulTerms.empty()) {
-      _mulTerms.push_back(node);
+    if (mulTerms_.empty()) {
+      mulTerms_.push_back(node);
       return;
     }
-    auto it = std::lower_bound(_mulTerms.begin(), _mulTerms.end(), node);
-    _mulTerms.insert(it, node);
+    auto it = std::lower_bound(mulTerms_.begin(), mulTerms_.end(), node);
+    mulTerms_.insert(it, node);
   }
 
   void insertExpiVar(const ExpiVar& E) {
-    if (_expiVars.empty()) {
-      _expiVars.push_back(E);
+    if (expiVars_.empty()) {
+      expiVars_.push_back(E);
       return;
     }
     auto it = std::upper_bound(
-        _expiVars.begin(), _expiVars.end(), ExpiVar(E.var, true));
+        expiVars_.begin(), expiVars_.end(), ExpiVar(E.var, true));
     --it;
     if (it->var == E.var && (it->isPlus ^ E.isPlus)) {
-      _expiVars.erase(it);
+      expiVars_.erase(it);
       return;
     }
 
-    _expiVars.insert(++it, E);
+    expiVars_.insert(++it, E);
   }
+
   void insertExpiVar(int v, bool isPlus = true) {
     return insertExpiVar(ExpiVar(v, isPlus));
   }
 
   Monomial& operator*=(const std::complex<double>& v) {
-    coef *= v;
+    coef_ *= v;
     return *this;
   }
 
@@ -236,7 +239,7 @@ public:
   std::pair<bool, std::complex<double>> getValue() const {
     if (_monomials.size() == 1 && _monomials[0].mulTerms().empty() &&
         _monomials[0].expiVars().empty()) {
-      return {true, _monomials[0].coef};
+      return {true, _monomials[0].coef()};
     }
     return {false, {0.0, 0.0}};
   }

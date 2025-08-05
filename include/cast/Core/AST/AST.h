@@ -20,38 +20,40 @@ class ASTContext;
 
 class Node {
 public:
-  /// The LLVM-style RTTI. Indentation corresponds to class hirearchy.
+  // The LLVM-style RTTI. Indentation corresponds to class hirearchy.
+  // clang-format off
   enum NodeKind {
     NK_Stmt,
-    NK_Stmt_GateApply,
-    NK_Stmt_GateChain,
-    NK_Stmt_GateBlock,
-    NK_Stmt_Measure,
-    NK_Stmt_If,
-    NK_Stmt_Out,
-    NK_Stmt_Repeat,
-    NK_Stmt_Circuit,
-    NK_Stmt_PauliComponent,
-    NK_Stmt_Channel,
-    _NK_Stmt_End,
+      NK_Stmt_GateApply,
+      NK_Stmt_GateChain,
+      NK_Stmt_GateBlock,
+      NK_Stmt_Measure,
+      NK_Stmt_If,
+      NK_Stmt_Out,
+      NK_Stmt_Repeat,
+      NK_Stmt_Circuit,
+      NK_Stmt_PauliComponent,
+      NK_Stmt_Channel,
+      _NK_Stmt_End,
     NK_Expr,
-    NK_Expr_Identifier,
-    NK_Expr_ParameterDecl,
-    NK_Expr_Call,
-    NK_Expr_SimpleNumeric,
-    NK_Expr_IntegerLiteral,
-    NK_Expr_FloatingLiteral,
-    NK_Expr_FractionLiteral,
-    NK_Expr_FractionPiLiteral,
-    _NK_Expr_SimpleNumeric_End,
-    NK_Expr_Measure,
-    NK_Expr_All,
-    NK_Expr_Parameter,
-    NK_Expr_BinaryOp,
-    NK_Expr_MinusOp,
-    _NK_Expr_End,
+      NK_Expr_Identifier,
+      NK_Expr_ParameterDecl,
+      NK_Expr_Call,
+      NK_Expr_SimpleNumeric,
+      NK_Expr_IntegerLiteral,
+      NK_Expr_FloatingLiteral,
+      NK_Expr_FractionLiteral,
+      NK_Expr_FractionPiLiteral,
+      _NK_Expr_SimpleNumeric_End,
+      NK_Expr_Measure,
+      NK_Expr_All,
+      NK_Expr_Parameter,
+      NK_Expr_BinaryOp,
+      NK_Expr_MinusOp,
+      _NK_Expr_End,
     NK_Root
   };
+  // clang-format on
 
 private:
   NodeKind _kind;
@@ -473,7 +475,7 @@ public:
               CircuitAttribute attr,
               std::span<Stmt*> body)
       : Stmt(NK_Stmt_Circuit), name(name), nameLoc(nameLoc),
-        paramDecl(paramDecl), attr(attr), body(body) {}
+        attr(attr), paramDecl(paramDecl), body(body) {}
 
   std::ostream& print(std::ostream& os) const override;
 

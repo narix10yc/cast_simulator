@@ -1,4 +1,4 @@
-#include "openqasm/lexer.h"
+#include "openqasm/Lexer.h"
 
 using namespace openqasm;
 

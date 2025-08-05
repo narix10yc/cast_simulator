@@ -1,4 +1,4 @@
-#include "openqasm/ast.h"
+#include "openqasm/AST.h"
 
 using namespace openqasm::ast;
 

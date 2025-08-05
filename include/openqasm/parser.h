@@ -1,8 +1,8 @@
 #ifndef OPENQASM_PARSER_H
 #define OPENQASM_PARSER_H
 
-#include "openqasm/ast.h"
-#include "openqasm/lexer.h"
+#include "openqasm/AST.h"
+#include "openqasm/Lexer.h"
 #include <memory>
 #include <queue>
 #include <string>

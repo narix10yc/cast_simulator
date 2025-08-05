@@ -2,7 +2,7 @@
 #include "cast/Legacy/CircuitGraph.h"
 #include "cast/Legacy/ir_generator.h"
 #include "cast/cpu.h"
-#include "openqasm/parser.h"
+#include "openqasm/Parser.h"
 
 #include "utils/iocolor.h"
 #include "utils/utils.h"

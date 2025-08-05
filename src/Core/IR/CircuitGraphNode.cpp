@@ -94,7 +94,6 @@ static bool checkConsistency_gateMap(const CircuitGraphNode& graph) {
 static bool checkConsistency_gateMemory(const CircuitGraphNode& graph) {
   std::set<int> gatesInTile;
   int rowNumber = -1;
-  const auto gateMapEnd = graph.gateMap().end();
   // Check if all gates in the tile are present in gateMap
   for (const auto& row : graph.tile()) {
     ++rowNumber;
@@ -110,7 +109,7 @@ static bool checkConsistency_gateMemory(const CircuitGraphNode& graph) {
     // check for gate ID
     for (const auto& gate : gatesInRow) {
       int gateId = -1;
-      for (const auto [gatePtr, id] : graph.gateMap()) {
+      for (const auto& [gatePtr, id] : graph.gateMap()) {
         if (gate == gatePtr.get()) {
           gateId = id;
           break; // found the gate in gateMap

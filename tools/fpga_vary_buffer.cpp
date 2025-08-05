@@ -3,7 +3,7 @@
 #include "cast/Legacy/FPGAInst.h"
 #include "cast/Legacy/Parser.h"
 
-#include "openqasm/parser.h"
+#include "openqasm/Parser.h"
 
 #include <chrono>
 #include <cmath>

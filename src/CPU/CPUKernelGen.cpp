@@ -294,7 +294,7 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
   const unsigned S = 1ULL << s;
   const unsigned k = qubits.size();
   const unsigned K = 1ULL << k;
-  const unsigned KK = K * K;
+
   assert(K == mat.edgeSize() && "matrix size mismatch");
 
   auto& llvmContextModulePair =

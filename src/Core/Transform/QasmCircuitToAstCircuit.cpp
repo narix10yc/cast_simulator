@@ -1,6 +1,6 @@
 #include "cast/Transform/Transform.h"
+#include "llvm/Support/Casting.h"
 
-using namespace cast;
 using namespace cast;
 
 static void capitalize(std::string& str) {
@@ -17,7 +17,7 @@ transform::cvtQasmCircuitToAstCircuit(const openqasm::ast::RootNode& qasmRoot,
 
   for (const auto& s : qasmRoot.stmts) {
     if (auto* gateApplyStmt =
-            dynamic_cast<openqasm::ast::GateApplyStmt*>(s.get())) {
+            llvm::dyn_cast<openqasm::ast::GateApplyStmt>(s.get())) {
       std::vector<ast::Expr*> parameters;
       std::vector<ast::Expr*> qubits;
       // parameters

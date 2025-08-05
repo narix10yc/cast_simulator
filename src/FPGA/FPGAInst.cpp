@@ -14,7 +14,7 @@ double normalizePhase(double phase) {
     phase += TWO_PI;   // ensure result is in [0, 2π)
   return phase - M_PI; // shift back to (-π, π]
 }
-} // namespace
+} // anonymous namespace
 
 fpga::FPGAGateCategory
 cast::fpga::getFPGAGateCategory(const cast::QuantumGate* gate, double tol) {
@@ -38,7 +38,7 @@ cast::fpga::getFPGAGateCategory(const cast::QuantumGate* gate, double tol) {
     // Check for non-computational-ness
     bool isNonComp = true;
     for (unsigned i = 0; i < (1U << gate->nQubits()); ++i) {
-      const auto phase = upGM->data()[i].phase;
+      const auto phase = normalizePhase(upGM->data()[i].phase);
       if (!(std::abs(phase) < tol || std::abs(phase - M_PI) < tol ||
             std::abs(phase + M_PI) < tol || std::abs(phase - M_PI_2) < tol ||
             std::abs(phase + M_PI_2) < tol)) {
@@ -74,7 +74,6 @@ cast::fpga::getFPGAGateCategory(const cast::QuantumGate* gate, double tol) {
   bool isReal = true;
   for (unsigned r = 0; r < scalarGM->matrix().edgeSize(); ++r) {
     for (unsigned c = 0; c < scalarGM->matrix().edgeSize(); ++c) {
-      const auto re = scalarGM->matrix().real(r, c);
       const auto im = scalarGM->matrix().imag(r, c);
       if (std::abs(im) > tol) {
         isReal = false;

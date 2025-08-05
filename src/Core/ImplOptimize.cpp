@@ -385,15 +385,15 @@ namespace {
 
 using namespace cast::ir;
 
-CircuitGraphNode*
-getOrAppendCGNodeToCompoundNodeFront(CompoundNode& compoundNode) {
-  if (!compoundNode.empty() &&
-      llvm::isa<CircuitGraphNode>(compoundNode.nodes[0].get())) {
-    return llvm::cast<CircuitGraphNode>(compoundNode.nodes[0].get());
-  }
-  compoundNode.push_front(std::make_unique<CircuitGraphNode>());
-  return llvm::cast<CircuitGraphNode>(compoundNode.nodes[0].get());
-}
+// CircuitGraphNode*
+// getOrAppendCGNodeToCompoundNodeFront(CompoundNode& compoundNode) {
+//   if (!compoundNode.empty() &&
+//       llvm::isa<CircuitGraphNode>(compoundNode.nodes[0].get())) {
+//     return llvm::cast<CircuitGraphNode>(compoundNode.nodes[0].get());
+//   }
+//   compoundNode.push_front(std::make_unique<CircuitGraphNode>());
+//   return llvm::cast<CircuitGraphNode>(compoundNode.nodes[0].get());
+// }
 
 CircuitGraphNode*
 getOrAppendCGNodeToCompoundNodeBack(CompoundNode& compoundNode) {
@@ -512,77 +512,6 @@ bool isCommutingWithMeasurement(const QuantumGate* gate,
     // and |1><1|
     return false;
   }
-}
-
-// returns true if the pass takes effect
-// move single-qubit gates not on the measurement wire at the bottom of the
-// prior circuit graph node to the top of the if node
-bool applyPriorIfPass(CircuitGraphNode* priorCGNode, IfMeasureNode* ifNode) {
-  assert(priorCGNode != nullptr);
-  assert(ifNode != nullptr);
-  bool hasEffect = false;
-  auto thenCGNode = getOrAppendCGNodeToCompoundNodeFront(ifNode->thenBody);
-  auto elseCGNode = getOrAppendCGNodeToCompoundNodeFront(ifNode->elseBody);
-
-  const int nQubits = priorCGNode->nQubits();
-  const auto begin = priorCGNode->tile_begin();
-  for (int q = 0; q < nQubits; ++q) {
-    if (q == ifNode->qubit)
-      continue; // skip the measurement wire
-    auto it = priorCGNode->tile_end();
-    while (it != begin) {
-      --it;
-      auto gate = priorCGNode->lookup((*it)[q]);
-      if (gate == nullptr)
-        continue;
-      if (gate->nQubits() != 1)
-        continue;
-      thenCGNode->insertGate(gate, thenCGNode->tile_begin());
-      elseCGNode->insertGate(gate, elseCGNode->tile_begin());
-      priorCGNode->removeGate(it, q);
-      hasEffect = true;
-    }
-  }
-  if (hasEffect) {
-    thenCGNode->squeeze();
-    elseCGNode->squeeze();
-  }
-
-  return hasEffect;
-}
-
-// returns true if the pass takes effect
-// move all single-qubit gates at the top of the join circuit graph node to
-// the bottom of the if node
-bool applyIfJoinPass(IfMeasureNode* ifNode, CircuitGraphNode* joinCGNode) {
-  assert(joinCGNode != nullptr);
-  assert(ifNode != nullptr);
-  bool hasEffect = false;
-  auto thenCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->thenBody);
-  auto elseCGNode = getOrAppendCGNodeToCompoundNodeBack(ifNode->elseBody);
-
-  const int nQubits = joinCGNode->nQubits();
-  auto end = joinCGNode->tile_end();
-  for (int q = 0; q < nQubits; ++q) {
-    auto it = joinCGNode->tile_begin();
-    do {
-      auto gate = joinCGNode->lookup((*it)[q]);
-      if (gate == nullptr)
-        continue;
-      if (gate->nQubits() != 1)
-        break;
-      thenCGNode->insertGate(gate, thenCGNode->tile_end());
-      elseCGNode->insertGate(gate, elseCGNode->tile_end());
-      joinCGNode->removeGate(it, q);
-      hasEffect = true;
-    } while (++it != end);
-  }
-  if (hasEffect) {
-    thenCGNode->squeeze();
-    elseCGNode->squeeze();
-  }
-
-  return hasEffect;
 }
 
 // Return a vector of gates, in order, from the bottom of the tile that commutes

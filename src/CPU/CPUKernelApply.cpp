@@ -3,7 +3,7 @@
 using namespace cast;
 
 // Allocates memory for the gate matrix to be used in invoking CPU kernels
-// @return a pointer to the allocated memory. Remember to free it after use.
+// @return a raw pointer to the allocated memory. Remember to free it after use.
 static void* mallocGatePointer(const cast::QuantumGate* gate,
                                Precision precision) {
   void* p = nullptr;
@@ -80,28 +80,25 @@ MaybeError<void> CPUKernelManager::applyCPUKernel(void* sv,
   const uint64_t nTasksPerThread = nTasks / nThreads;
 
   // Thread t will access tasks from taskIds[t] to taskIds[t + 1]
-  uint64_t taskIds[nThreads + 1];
+  std::unique_ptr<uint64_t[]> taskIds(new uint64_t[nThreads + 1]);
   for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)
     taskIds[tIdx] = nTasksPerThread * tIdx;
   taskIds[nThreads] = nTasks; // Last thread will handle the rest
 
-  void** argvs[nThreads];
+  std::unique_ptr<void*[]> argvs(new void*[4 * nThreads]);
   for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx) {
-    argvs[tIdx] = new void*[4];
-    argvs[tIdx][0] = sv;                   // state vector
-    argvs[tIdx][1] = &(taskIds[tIdx]);     // taskID begin
-    argvs[tIdx][2] = &(taskIds[tIdx + 1]); // taskID end
-    argvs[tIdx][3] = pMat;                 // matrix pointer
+    argvs[tIdx * 4] = sv;                       // state vector
+    argvs[tIdx * 4 + 1] = &(taskIds[tIdx]);     // taskID begin
+    argvs[tIdx * 4 + 2] = &(taskIds[tIdx + 1]); // taskID end
+    argvs[tIdx * 4 + 3] = pMat;                 // matrix pointer
   }
 
   for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)
-    threads.emplace_back(kernel.executable, argvs[tIdx]);
+    threads.emplace_back(kernel.executable, &argvs[tIdx * 4]);
   for (auto& t : threads)
     t.join();
 
   // clean up
-  for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)
-    delete[] argvs[tIdx];
   std::free(pMat);
   return {}; // success
 }

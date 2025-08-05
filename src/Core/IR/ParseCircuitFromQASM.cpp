@@ -1,6 +1,6 @@
 #include "cast/Core/IRNode.h"
 #include "cast/Transform/Transform.h"
-#include "openqasm/parser.h"
+#include "openqasm/Parser.h"
 
 using namespace cast;
 

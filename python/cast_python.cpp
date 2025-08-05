@@ -5,7 +5,7 @@
 #include "cast/CPU/CPUDensityMatrix.h"
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/Transform/Transform.h"
-#include "openqasm/parser.h"
+#include "openqasm/Parser.h"
 
 namespace py = pybind11;
 

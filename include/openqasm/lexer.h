@@ -1,7 +1,7 @@
 #ifndef OPENQASM_LEXER_H
 #define OPENQASM_LEXER_H
 
-#include "token.h"
+#include "openqasm/Token.h"
 #include <fstream>
 #include <iostream>
 #include <queue>

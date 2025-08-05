@@ -4,7 +4,7 @@
 #include "cast/Core/AST/AST.h"
 #include "cast/Core/AST/ASTContext.h"
 #include "cast/Core/IRNode.h"
-#include "openqasm/ast.h"
+#include "openqasm/AST.h"
 #include <memory>
 
 namespace cast {
