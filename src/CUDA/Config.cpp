@@ -3,6 +3,8 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
+#include "llvm/Config/llvm-config.h"
+
 using namespace cast;
 
 #include <cuda.h>
@@ -59,7 +61,22 @@ void cast::displayCUDA() {
 }
 
 void cast::getCudaComputeCapability(int& major, int& minor) {
+  // The CUDA compute capability supported by LLVM NVPTX backend can be found
+  // during LLVM builds here:
+  // build/lib/Target/NVPTX/NVPTXGenRegisterInfo.inc
+  // As of LLVM 20, the maximum supported is sm_120 and sm_120a.
+
+#if LLVM_VERSION_MAJOR == 20
+  constexpr int MAJOR_CAP = 12;
+  constexpr int MINOR_CAP = 0;
+#elif LLVM_VERSION_MAJOR == 19
+  constexpr int MAJOR_CAP = 10;
+  constexpr int MINOR_CAP = 0;
+#else // For older versions, we assume sm_90 is the maximum supported.
   constexpr int MAJOR_CAP = 9;
+  constexpr int MINOR_CAP = 0;
+#endif
+
   CUresult res = cuInit(0);
   if (res != CUDA_SUCCESS) {
     std::cerr << "cuInit failed with error code: " << res << "\n";
@@ -88,9 +105,12 @@ void cast::getCudaComputeCapability(int& major, int& minor) {
   }
   std::cerr << YELLOW("[Warning] ") << "CUDA compute capability " << major
             << "." << minor
-            << " may not be supported by this LLVM release. If you encounter "
+            << " may not be supported by this LLVM (" LLVM_VERSION_STRING
+               ") release. If you encounter "
                "issues, set environment variable CAST_CAP_CUDA_ARCH to True, "
-               "and we will cap it to sm_90. Alternatively, set "
+               "and we will cap it to sm_"
+            << MAJOR_CAP << MINOR_CAP
+            << ". Alternatively, set "
                "CAST_CAP_CUDA_ARCH to False to silence this warning.\n";
   return;
 }
