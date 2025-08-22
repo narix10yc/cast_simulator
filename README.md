@@ -1,5 +1,5 @@
-## Update 3rd August, 2025
-Known issue: Many system compilers (g++) complains about the openQASM parser. Seems to do with C++ RTTI. This project should *not* be using C++ RTTI, but openQASM parser was implemented a long time ago and did not stick to this rule. clang compiler built from `build_llvm.sh` would compile the project successfully (because we explicitly enabled RTTI there).
+## Update 22nd August, 2025
+Planning to refactor the custom `MaybeError<T>` to `llvm::Expected<T>`.
 
 ## Update 23th June, 2025
 Code refactoring in process. Python binding in progress. Check the yl5619-dev branch. Stay tuned... :)
@@ -53,7 +53,7 @@ cmake ..
 ```
 Pass in `-DCAST_USE_CUDA=True` if intending to use CUDA backend.
 
-You may adjust the cmake command according to needs. For example,
+You may adjust the cmake command by needs. For example,
 ```
 cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
 ```
@@ -101,6 +101,8 @@ Now `CAST_LLVM_ROOT` should be set to `$HOME/llvm/19.1.0` in this example.
 ### CMake Commands
 CAST uses CMake to configure build. Supported commands include
 - `-DCAST_USE_CUDA=<bool>` Enable CUDA support in CAST. This commands requires LLVM to be built with NVPTX backend.
+- `CAST_PYTHON_BIND=<bool>` Enables python binding. Python binding is based on `pybind11`. Dependencies will be fetched from GitHub to the `<project_source>/_deps` directory. 
+- `-DCAST_NUM_THREADS=<int>` Optional. Controls the default number of threads to use. This can be useful, for example, when CPUs have P/E cores and you only want to use P cores. You don't have to set this variable in CMake. If not set, CAST will query `num_concurrency()`. You can use environment variable `CAST_NUM_THREADS` to override the behavior.
 
 Some useful tips:
 - We suggest using the Ninja builder by adding `-GNinja` option.
