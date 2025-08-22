@@ -1,89 +1,35 @@
-// #ifndef CAST_CUDA_CUDAOPTIMIZER_H
-// #define CAST_CUDA_CUDAOPTIMIZER_H
+#pragma once
+#include "cast/Core/Optimizer.h"
+#include "cast/CUDA/CUDAFusionConfig.h"
 
-// #include "cast/CUDA/CUDAFusionConfig.h"
-// #include "cast/Core/Optimizer.h"
-// #include "utils/MaybeError.h"
+namespace cast {
 
-// #include "llvm/Support/Casting.h"
+class CUDAOptimizer : public Optimizer {
+  std::unique_ptr<FusionConfig> fusionConfig;
+  bool enableCanonicalization_ = true;
+  bool enableFusion_ = true;
+  bool enableCFO_ = true;
 
-// namespace cast {
+public:
+  CUDAOptimizer() = default;
 
-// class CUDAOptimizer : public Optimizer {
-//   // Allowed configs: SizeOnlyFusionConfig, CUDAFusionConfig.
-//   std::unique_ptr<FusionConfig> fusionConfig;
+  CUDAOptimizer& setCUDAFusionConfig(std::unique_ptr<CUDAFusionConfig> cfg) {
+    fusionConfig = std::move(cfg);
+    return *this;
+  }
 
-//   bool enableCanonicalization_ = true;
-//   bool enableFusion_           = true;
-//   bool enableCFO_              = false; // disabled until CUDA CFO is ready
+  CUDAOptimizer& enableCanonicalization() { enableCanonicalization_ = true; return *this; }
+  CUDAOptimizer& disableCanonicalization() { enableCanonicalization_ = false; return *this; }
+  CUDAOptimizer& enableFusion() { enableFusion_ = true; return *this; }
+  CUDAOptimizer& disableFusion() { enableFusion_ = false; return *this; }
+  CUDAOptimizer& enableCFO() { enableCFO_ = true; return *this; }
+  CUDAOptimizer& disableCFO() { enableCFO_ = false; return *this; }
 
-// public:
-//   CUDAOptimizer() : fusionConfig(std::make_unique<SizeOnlyFusionConfig>(3)) {}
+  void run(ir::CircuitNode& circuit,
+           utils::Logger logger = nullptr) const override;
 
-//   CUDAOptimizer &setSizeOnlyFusionConfig(int size) {
-//     fusionConfig = std::make_unique<SizeOnlyFusionConfig>(size);
-//     return *this;
-//   }
+  void run(ir::CircuitGraphNode& graph,
+           utils::Logger logger = nullptr) const override;
+};
 
-//   CUDAOptimizer &setCUDAFusionConfig(std::unique_ptr<CUDAFusionConfig> config) {
-//     fusionConfig = std::move(config);
-//     return *this;
-//   }
-
-//   // Only meaningful for CUDAFusionConfig
-//   CUDAOptimizer &setPrecision(Precision precision) {
-//     if (auto *cfg = llvm::dyn_cast<CUDAFusionConfig>(fusionConfig.get()))
-//       cfg->setPrecision(precision);
-//     return *this;
-//   }
-
-//   // Generic FusionConfig knobs
-//   CUDAOptimizer &setZeroTol(double tol) {
-//     if (fusionConfig)
-//       fusionConfig->zeroTol = tol;
-//     return *this;
-//   }
-
-//   CUDAOptimizer &setSwapTol(double tol) {
-//     if (fusionConfig)
-//       fusionConfig->swapTol = tol;
-//     return *this;
-//   }
-
-//   CUDAOptimizer &disableCanonicalization() {
-//     enableCanonicalization_ = false;
-//     return *this;
-//   }
-//   CUDAOptimizer &enableCanonicalization() {
-//     enableCanonicalization_ = true;
-//     return *this;
-//   }
-
-//   CUDAOptimizer &disableFusion() {
-//     enableFusion_ = false;
-//     return *this;
-//   }
-//   CUDAOptimizer &enableFusion() {
-//     enableFusion_ = true;
-//     return *this;
-//   }
-
-//   CUDAOptimizer &disableCFO() {
-//     enableCFO_ = false;
-//     return *this;
-//   }
-//   CUDAOptimizer &enableCFO() {
-//     enableCFO_ = true;
-//     return *this;
-//   }
-
-//   void run(ir::CircuitNode &circuit,
-//            utils::Logger logger = nullptr) const override;
-
-//   void run(ir::CircuitGraphNode &graph,
-//            utils::Logger logger = nullptr) const override;
-// }; // class CUDAOptimizer
-
-// } // namespace cast
-
-// #endif // CAST_CUDA_CUDAOPTIMIZER_H
+} // namespace cast

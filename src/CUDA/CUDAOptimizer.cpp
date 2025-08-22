@@ -1,120 +1,79 @@
-// #include "cast/CUDA/CUDAOptimizer.h"
-// #include "cast/Core/ImplOptimize.h"   // applySizeTwoFusion / applyGateFusion
-// #include "timeit/timeit.h"
-// #include "utils/Formats.h"
+#include "cast/CUDA/CUDAOptimizer.h"
+#include "cast/Core/ImplOptimize.h"
+#include "timeit/timeit.h"
+#include "utils/Formats.h"
 
-// using namespace cast;
+using namespace cast;
 
-// CUDAOptimizer::CUDAOptimizer()
-//     : fusionConfig(std::make_unique<SizeOnlyFusionConfig>(3)) {}
+void CUDAOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
+  assert(fusionConfig && "CUDAOptimizer requires a CUDAFusionConfig");
+  int nFused = 0;
 
-// CUDAOptimizer &CUDAOptimizer::setSizeOnlyFusionConfig(int size) {
-//   fusionConfig = std::make_unique<SizeOnlyFusionConfig>(size);
-//   return *this;
-// }
+  // 1) Canonicalization (size-2 fusion)
+  if (enableCanonicalization_) {
+    double t = timeit::once([&] {
+      auto graphs = circuit.getAllCircuitGraphs();
+      for (auto* g : graphs)
+        nFused = cast::impl::applySizeTwoFusion(*g, fusionConfig->swapTol);
+    });
+    logger.log(1) << "Canonicalization Block-wise Fusion: " << nFused
+                  << " gates fused in " << utils::fmt_time(t) << "\n";
+  }
 
-// CUDAOptimizer &CUDAOptimizer::setCUDAFusionConfig(
-//     std::unique_ptr<CUDAFusionConfig> config) {
-//   fusionConfig = std::move(config);
-//   return *this;
-// }
+  // 2) Agglomerative fusion (+ optional CFO)
+  if (enableFusion_) {
+    double t = timeit::once([&] {
+      for (int size = fusionConfig->sizeMin; size <= fusionConfig->sizeMax; ++size) {
+        int fusedThisSize = 0;
+        auto graphs = circuit.getAllCircuitGraphs();
+        if (auto* cm = llvm::dyn_cast<CUDACostModel>(fusionConfig->costModel.get())) {
+          cm->enableProbing(true);
+          cm->resetProbeBudget(/*topK*/ 4);
+          cm->setProbeThreads(std::max(1, /* pick a number */ 2));
+          cm->setProbeOptLevel(llvm::OptimizationLevel::O1);
 
-// CUDAOptimizer &CUDAOptimizer::setPrecision(Precision precision) {
-//   if (auto *cfg = llvm::dyn_cast<CUDAFusionConfig>(fusionConfig.get()))
-//     cfg->setPrecision(precision);
-//   return *this;
-// }
+          auto p = cm->params;
+          p.occAlpha = 0.5; // mild occupancy influence
+          p.coalAlpha = 1.0; // stronger coalescing influence
+          cm->setPenaltyParams(p);
+        }
+        for (auto* g : graphs) {
+          int round = 0;
+          do {
+            round = cast::impl::applyGateFusion(*g, fusionConfig.get(), size);
+            fusedThisSize += round;
+          } while (fusionConfig->enableMultiTraverse && round > 0);
+        }
+        if (enableCFO_ && fusedThisSize > 0)
+          fusedThisSize += cast::impl::applyCFOFusion(circuit, fusionConfig.get(), size);
+        nFused += fusedThisSize;
+        logger.log(2) << "  size " << size << ": +" << fusedThisSize << "\n";
+      }
+    });
+    logger.log(1) << "Agglomerative Fusion finished in "
+                  << utils::fmt_time(t) << "\n";
+  }
+}
 
-// CUDAOptimizer &CUDAOptimizer::setZeroTol(double tol) {
-//   if (fusionConfig)
-//     fusionConfig->zeroTol = tol;
-//   return *this;
-// }
+void CUDAOptimizer::run(ir::CircuitGraphNode& graph, utils::Logger logger) const {
+  assert(fusionConfig && "CUDAOptimizer requires a CUDAFusionConfig");
 
-// CUDAOptimizer &CUDAOptimizer::setSwapTol(double tol) {
-//   if (fusionConfig)
-//     fusionConfig->swapTol = tol;
-//   return *this;
-// }
+  // 1) Canonicalization (size-2 fusion)
+  if (enableCanonicalization_) {
+    int n = cast::impl::applySizeTwoFusion(graph, fusionConfig->swapTol);
+    logger.log(1) << "Canonicalization Block-wise Fusion: " << n
+                  << " gates fused.\n";
+  }
 
-// void CUDAOptimizer::run(ir::CircuitNode &circuit,
-//                         utils::Logger logger) const {
-//   assert(fusionConfig != nullptr);
-
-//   // 1. Canonicalisation
-//   if (enableCanonicalization_) {
-//     int nFused = 0;
-//     double elapsed = timeit::once([&] {
-//       for (auto *graph : circuit.getAllCircuitGraphs())
-//         nFused = impl::applySizeTwoFusion(*graph, fusionConfig->swapTol);
-//     });
-//     logger.log(1) << "Canonicalisation Block-wise Fusion Pass: " << nFused
-//                   << " gates fused in " << utils::fmt_time(elapsed) << "\n";
-
-//     if (enableCFO_) {
-//       double cfoTime = timeit::once([&] {
-//         SizeOnlyFusionConfig cfoCfg(2);
-//         cfoCfg.swapTol = fusionConfig->swapTol;
-//         nFused = impl::applyCFOFusion(circuit, &cfoCfg, 2);
-//       });
-//       logger.log(1) << "Canonicalisation CFO Fusion Pass: " << nFused
-//                     << " gates fused in " << utils::fmt_time(cfoTime) << "\n";
-//     }
-//   }
-
-//   // 2. Agglomerative fusion
-//   if (enableFusion_) {
-//     int nFusedTotal = 0;
-//     double elapsed = timeit::once([&] {
-//       auto graphs = circuit.getAllCircuitGraphs();
-//       for (int size = fusionConfig->sizeMin; size <= fusionConfig->sizeMax;
-//            ++size) {
-//         int nFusedAtSize = 0;
-//         for (auto *g : graphs) {
-//           int round = 0;
-//           do {
-//             round = impl::applyGateFusion(*g, fusionConfig.get(), size);
-//             nFusedAtSize += round;
-//           } while (fusionConfig->enableMultiTraverse && round > 0);
-//         }
-//         if (enableCFO_ && nFusedAtSize > 0)
-//           nFusedAtSize +=
-//               impl::applyCFOFusion(circuit, fusionConfig.get(), size);
-
-//         nFusedTotal += nFusedAtSize;
-//         logger.log(2) << "  At size " << size << ", fused "
-//                       << nFusedAtSize << " gates.\n";
-//       }
-//     });
-//     logger.log(1) << "Agglomerative Fusion Pass: Finished in "
-//                   << utils::fmt_time(elapsed) << "\n";
-//   }
-// }
-
-// void CUDAOptimizer::run(ir::CircuitGraphNode &graph,
-//                         utils::Logger logger) const {
-//   assert(fusionConfig != nullptr);
-
-//   // 1. Canonicalisation
-//   if (enableCanonicalization_) {
-//     int nFused = impl::applySizeTwoFusion(graph, fusionConfig->swapTol);
-//     logger.log(1) << "Canonicalisation Block-wise Fusion Pass: " << nFused
-//                   << " gates fused.\n";
-//   }
-
-//   // 2. Agglomerative fusion
-//   if (enableFusion_) {
-//     int nFusedTotal = 0;
-//     double elapsed = timeit::once([&] {
-//       for (int size = fusionConfig->sizeMin; size <= fusionConfig->sizeMax;
-//            ++size) {
-//         int nFused = impl::applyGateFusion(graph, fusionConfig.get(), size);
-//         nFusedTotal += nFused;
-//         logger.log(2) << "  At size " << size << ", fused "
-//                       << nFused << " gates.\n";
-//       }
-//     });
-//     logger.log(1) << "Agglomerative Fusion Pass: Finished in "
-//                   << utils::fmt_time(elapsed) << "\n";
-//   }
-// }
+  // 2) Agglomerative fusion
+  if (enableFusion_) {
+    double t = timeit::once([&] {
+      for (int size = fusionConfig->sizeMin; size <= fusionConfig->sizeMax; ++size) {
+        int n = cast::impl::applyGateFusion(graph, fusionConfig.get(), size);
+        logger.log(2) << "  size " << size << ": +" << n << "\n";
+      }
+    });
+    logger.log(1) << "Agglomerative Fusion finished in "
+                  << utils::fmt_time(t) << "\n";
+  }
+}

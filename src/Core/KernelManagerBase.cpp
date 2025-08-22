@@ -6,6 +6,12 @@
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 
+#include <cstdlib>
+#include "llvm/IR/Verifier.h"
+#include "llvm/IR/OptBisect.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/StandardInstrumentations.h"
+
 #include <ranges>
 
 using namespace cast;
@@ -41,6 +47,7 @@ KernelManagerBase::createNewLLVMContextModulePair(const std::string& name) {
   return llvmContextModulePairs.back();
 }
 
+
 void KernelManagerBase::applyLLVMOptimization(int nThreads,
                                               OptimizationLevel optLevel,
                                               bool progressBar) {
@@ -49,30 +56,49 @@ void KernelManagerBase::applyLLVMOptimization(int nThreads,
     return;
 
   utils::TaskDispatcher dispatcher(nThreads);
-  for (auto& [ctx, mod] : llvmContextModulePairs) {
-    // TODO: For some reason, MPM cannot be reused. For now we construct it
-    // afresh for every module. Overhead is okay though.
-    dispatcher.enqueue([&]() {
-      // These must be declared in this order so that they are destroyed in
-      // the correct order due to inter-analysis-manager references.
+
+  // Capture Module* by value per task; avoid [&] captures.
+  for (auto& [ctxUPtr, modUPtr] : llvmContextModulePairs) {
+    llvm::Module* M = modUPtr.get();
+
+    dispatcher.enqueue([M, optLevel]() {
+      using namespace llvm;
+
+      // --- Analysis managers (must be constructed in this order) ---
       LoopAnalysisManager LAM;
       FunctionAnalysisManager FAM;
       CGSCCAnalysisManager CGAM;
       ModuleAnalysisManager MAM;
 
-      PassBuilder PB;
+      // --- Pass instrumentation (debug hooks, timers, etc.) ---
+      PassInstrumentationCallbacks PIC;
+      StandardInstrumentations SI(M->getContext(), /*DebugLogging=*/false);
+      SI.registerCallbacks(PIC, &MAM);
 
+      // Use the PassBuilder ctor that takes PIC (portable for LLVM 20.x).
+      PipelineTuningOptions PTO;
+      PassBuilder PB(/*TM=*/nullptr, PTO, /*PGO=*/std::nullopt, &PIC);
+
+      // Register analyses and cross-proxies.
       PB.registerLoopAnalyses(LAM);
       PB.registerFunctionAnalyses(FAM);
       PB.registerCGSCCAnalyses(CGAM);
       PB.registerModuleAnalyses(MAM);
       PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-      ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(optLevel);
 
-      MPM.run(*mod, MAM);
+      // Wrap default pipeline with verifiers (pre & post).
+      ModulePassManager MPM;
+      MPM.addPass(VerifierPass());                          // verify pre
+      MPM.addPass(PB.buildPerModuleDefaultPipeline(optLevel));
+      MPM.addPass(VerifierPass());                          // verify post
+
+      // Run the pipeline for this module.
+      MPM.run(*M, MAM);
     });
   }
+
   if (progressBar)
     std::cerr << "Applying LLVM Optimization....\n";
+
   dispatcher.sync(progressBar);
 }

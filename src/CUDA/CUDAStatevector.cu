@@ -1,4 +1,5 @@
 #include "cast/CUDA/CUDAStatevector.h"
+#include "cast/CUDA/CUDAWarpConfig.cuh"
 #include <curand.h>
 #include <curand_kernel.h>
 
@@ -48,8 +49,15 @@ __global__ void sumOfSquaredReductionKernel(const ScalarType* dArr,
                                             size_t size) {
   static_assert(blockSize == 32 || blockSize == 64 || blockSize == 128 ||
                 blockSize == 256 || blockSize == 512);
+  // __shared__ ScalarType shared[blockSize];
+  // unsigned tid = threadIdx.x;
   __shared__ ScalarType shared[blockSize];
-  unsigned tid = threadIdx.x;
+  const unsigned tid = threadIdx.x;
+  const int lane         = threadIdx.x & (kWarpSize - 1);
+  const int warpId       = threadIdx.x >> kWarpBits;
+  const int warpsInBlock = blockDim.x >> kWarpBits;
+  // Guard in case a generic kernel is re-used with a small block
+  if (warpId >= warpsInBlock) return;
   unsigned bid = blockIdx.x;
 
   size_t i0 = (2ULL * bid) * blockSize + tid;
@@ -75,15 +83,26 @@ __global__ void sumOfSquaredReductionKernel(const ScalarType* dArr,
       shared[tid] = shared[tid] + shared[tid + 64];
     __syncthreads();
   }
-  // threads in the same warp. No need to sync
-  if (tid < 32) {
+  // // threads in the same warp. No need to sync
+  // if (tid < 32) {
+  //   volatile ScalarType* vshared = shared;
+  //   vshared[tid] = vshared[tid] + vshared[tid + 32];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 16];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 8];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 4];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 2];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 1];
+  // }
+  // Warp tail (first warp only). No sync needed within a warp.
+  if (warpId == 0) {
     volatile ScalarType* vshared = shared;
-    vshared[tid] = vshared[tid] + vshared[tid + 32];
-    vshared[tid] = vshared[tid] + vshared[tid + 16];
-    vshared[tid] = vshared[tid] + vshared[tid + 8];
-    vshared[tid] = vshared[tid] + vshared[tid + 4];
-    vshared[tid] = vshared[tid] + vshared[tid + 2];
-    vshared[tid] = vshared[tid] + vshared[tid + 1];
+    // Start at +kWarpSize if we arrived at 64-way partials, else at kWarpSize/2
+    constexpr int firstOffset =
+        (blockSize >= 2 * kWarpSize) ? kWarpSize : (kWarpSize >> 1);
+    #pragma unroll
+    for (int offset = firstOffset; offset > 0; offset >>= 1) {
+      vshared[lane] = vshared[lane] + vshared[lane + offset];
+    }
   }
   if (tid == 0)
     dOut[bid] = shared[0];
@@ -125,8 +144,15 @@ __global__ void sumOfSquaredOmittingBitReductionKernel(const ScalarType* dArr,
                                                        int bit) {
   static_assert(blockSize == 32 || blockSize == 64 || blockSize == 128 ||
                 blockSize == 256 || blockSize == 512);
+  // __shared__ ScalarType shared[blockSize];
+  // unsigned tid = threadIdx.x;
   __shared__ ScalarType shared[blockSize];
-  unsigned tid = threadIdx.x;
+  const unsigned tid = threadIdx.x;
+  const int lane         = threadIdx.x & (kWarpSize - 1);
+  const int warpId       = threadIdx.x >> kWarpBits;
+  const int warpsInBlock = blockDim.x >> kWarpBits;
+  // Guard in case a generic kernel is re-used with a small block
+  if (warpId >= warpsInBlock) return;
   unsigned bid = blockIdx.x;
 
   size_t i0 = (2ULL * bid) * blockSize + tid;
@@ -156,15 +182,25 @@ __global__ void sumOfSquaredOmittingBitReductionKernel(const ScalarType* dArr,
       shared[tid] = shared[tid] + shared[tid + 64];
     __syncthreads();
   }
-  // threads in the same warp. No need to sync
-  if (tid < 32) {
+  // // threads in the same warp. No need to sync
+  // if (tid < 32) {
+  //   volatile ScalarType* vshared = shared;
+  //   vshared[tid] = vshared[tid] + vshared[tid + 32];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 16];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 8];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 4];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 2];
+  //   vshared[tid] = vshared[tid] + vshared[tid + 1];
+  // }
+  // Warp tail (first warp only). No sync needed within a warp.
+  if (warpId == 0) {
     volatile ScalarType* vshared = shared;
-    vshared[tid] = vshared[tid] + vshared[tid + 32];
-    vshared[tid] = vshared[tid] + vshared[tid + 16];
-    vshared[tid] = vshared[tid] + vshared[tid + 8];
-    vshared[tid] = vshared[tid] + vshared[tid + 4];
-    vshared[tid] = vshared[tid] + vshared[tid + 2];
-    vshared[tid] = vshared[tid] + vshared[tid + 1];
+    constexpr int firstOffset =
+        (blockSize >= 2 * kWarpSize) ? kWarpSize : (kWarpSize >> 1);
+    #pragma unroll
+    for (int offset = firstOffset; offset > 0; offset >>= 1) {
+      vshared[lane] = vshared[lane] + vshared[lane + offset];
+    }
   }
   if (tid == 0)
     dOut[bid] = shared[0];

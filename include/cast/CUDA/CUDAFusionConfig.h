@@ -1,32 +1,48 @@
 #ifndef CAST_CUDA_CUDAFUSIONCONFIG_H
 #define CAST_CUDA_CUDAFUSIONCONFIG_H
 
-#include "cast/CUDA/CUDACostModel.h"
 #include "cast/Core/FusionConfig.h"
-
+#include "cast/CUDA/CUDACostModel.h"
 #include "llvm/Support/Casting.h"
+#include <memory>
 
 namespace cast {
 
 class CUDAFusionConfig : public FusionConfig {
 public:
   CUDAFusionConfig(std::unique_ptr<CUDACostModel> cudaCostModel,
-                   Precision precision = Precision::Unknown)
+                   int blockSize = -1,                       // -1 means not set
+                   Precision precision = Precision::Unknown) // Unknown means not set
       : FusionConfig(FC_CUDA) {
     this->costModel = std::move(cudaCostModel);
+    setBlockSize(blockSize);
     setPrecision(precision);
   }
 
-  void setPrecision(Precision precision) {
-    if (auto *cudaCM = llvm::dyn_cast<CUDACostModel>(costModel.get()))
-      cudaCM->setQueryPrecision(precision);
+  void setBlockSize(int bs) {
+    if (auto* cm = llvm::dyn_cast<CUDACostModel>(costModel.get())) {
+      if (bs > 0) cm->setQueryBlockSize(bs);
+    }
   }
 
-  std::ostream &displayInfo(std::ostream &os, int verbose = 1) const override;
+  void setPrecision(Precision p) {
+    if (auto* cm = llvm::dyn_cast<CUDACostModel>(costModel.get())) {
+      if (p != Precision::Unknown) cm->setQueryPrecision(p);
+    }
+  }
 
-  /// RTTI hook so `llvm::dyn_cast<CUDAFusionConfig>(config)` works.
-  static bool classof(const FusionConfig *config) {
-    return config->getKind() == FC_CUDA;
+  CUDACostModel* getCUDACostModel() const {
+    return llvm::dyn_cast<CUDACostModel>(costModel.get());
+  }
+
+  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override {
+    if (auto* cm = llvm::dyn_cast<CUDACostModel>(costModel.get()))
+      return cm->displayInfo(os, verbose);
+    return os << "CUDAFusionConfig (no CUDA cost model)\n";
+  }
+
+  static bool classof(const FusionConfig* cfg) {
+    return cfg->getKind() == FC_CUDA;
   }
 };
 

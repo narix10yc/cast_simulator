@@ -1,182 +1,186 @@
-// #ifndef CAST_CUDA_CUDACOSTMODEL_H
-// #define CAST_CUDA_CUDACOSTMODEL_H
-
-// #include "cast/Core/CostModel.h"
-// #include "utils/CSVParsable.h"
-
-// namespace cast {
-
-// class CUDAPerformanceCache {
-// public:
-//   struct Item : public utils::CSVParsable<Item> {
-//     int nQubits;
-//     int opCount;
-//     int precision;
-//     int blockSize;
-//     double occupancy;
-//     double coalescingScore;
-//     double memUpdateSpeed;
-
-//     CSV_DATA_FIELD(nQubits,
-//                    opCount,
-//                    precision,
-//                    blockSize,
-//                    occupancy,
-//                    coalescingScore,
-//                    memUpdateSpeed)
-
-//     double getAvgGibTimePerOpCount() const {
-//       return (1.0 / memUpdateSpeed) / opCount;
-//     }
-//   };
-
-//   std::vector<Item> items;
-//   int defaultBlockSize = 256;
-
-//   void runExperiments(const CUDAKernelGenConfig& gpuConfig,
-//                       int nQubits,
-//                       int blockSize,
-//                       int nRuns,
-//                       int nWorkerThreads);
-//   void writeResults(std::ostream& os) const;
-//   void writeResults(const std::string& filename) const;
-//   static CUDAPerformanceCache LoadFromCSV(const std::string& filename);
-//   const Item*
-//   findClosestMatch(const QuantumGate& gate, int precision, int blockSize) const;
-// };
-
-// class CUDACostModel : public CostModel {
-//   const CUDAPerformanceCache* cache;
-//   double zeroTol;
-//   int currentBlockSize;
-//   double minGibTimeCap;
-
-// public:
-//   explicit CUDACostModel(const CUDAPerformanceCache* c, double zt = 1e-8)
-//       : CostModel(CM_CUDA), cache(c), zeroTol(zt), currentBlockSize(256),
-//         minGibTimeCap(1e-9) {}
-
-//   double
-//   computeGiBTime(const QuantumGate& gate, int precision, int) const override;
-
-//   void setBlockSize(int blockSize) {
-//     if (blockSize < 32 || blockSize > 1024 ||
-//         (blockSize & (blockSize - 1)) != 0) {
-//       throw std::invalid_argument(
-//           "Block size must be power of 2 between 32-1024");
-//     }
-//     currentBlockSize = blockSize;
-//   }
-
-// private:
-//   double
-//   calculateOccupancyPenalty(const CUDAPerformanceCache::Item& item) const;
-//   double
-//   calculateCoalescingPenalty(const CUDAPerformanceCache::Item& item) const;
-// };
-
-// } // namespace cast
-
-// #endif // CAST_CUDA_CUDACOSTMODEL_H
-
-
-
 #ifndef CAST_CUDA_CUDACOSTMODEL_H
 #define CAST_CUDA_CUDACOSTMODEL_H
 
 #ifdef CAST_USE_CUDA
 
-#include "cast/CUDA/CUDAKernelManager.h"
-#include "cast/CUDA/Config.h"
+#pragma once
 #include "cast/Core/CostModel.h"
 #include "cast/Core/Precision.h"
-#include "utils/CSVParsable.h"
+#include "cast/Core/QuantumGate.h"
+#include "cast/CUDA/Config.h"
+#include "cast/CUDA/CUDAKernelManager.h"
+#include "llvm/Passes/OptimizationLevel.h"
 
-#include <array>
-#include <fstream>
+#include <map>
 #include <memory>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace cast {
 
-class CUDAPerformanceCache {
-public:
-  struct Item : utils::CSVParsable<Item> {
-    int nQubits = 0;
-    double opCount = 0.0;
+enum class CUDAVariant : int { Global = 0, SmemTranspose = 1 };
+enum class CUDAComputePath : int { ScalarALU = 0, TensorCore = 1 };
+
+enum class AccessPattern : int {
+  Contiguous = 0,  // low min-qubit index
+  Semi = 1,
+  Strided = 2   // high min-qubit index
+};
+
+struct CUDADeviceInfo {
+  int device = 0;
+  int warpSize = 32;
+  int maxThreadsPerSM = 2048;
+  int smCount = 0;
+};
+
+struct CUDAPerformanceCache {
+  struct Item {
+    // gate/kernel shape
+    int nQubitsGate = 0;                 // k
+    int opCount = 0;                     // opCount(k)
     Precision precision = Precision::Unknown;
-    int blockSize = 256;
-    double occupancy = 1.0;
-    double coalescingScore = 1.0;
-    double memUpdateSpeed = 0.0;
+    CUDAVariant variant = CUDAVariant::Global;
+    CUDAComputePath path = CUDAComputePath::ScalarALU;
+    AccessPattern pattern = AccessPattern::Contiguous;
 
-    Item() = default;
-    Item(int nQ, double ops, Precision p, int blk,
-         double occ, double coal, double bw)
-        : nQubits(nQ), opCount(ops), precision(p), blockSize(blk),
-          occupancy(occ), coalescingScore(coal), memUpdateSpeed(bw) {}
+    // launch & resources (for information / occupancy curves)
+    dim3 gridDim = dim3(0,0,0);
+    dim3 blockDim = dim3(0,0,0);
+    int regsPerThread = 0;
+    int smemPerBlock = 0;              // bytes
+    double occupancy = 0.0;            // 0..1
 
-    CSV_DATA_FIELD(nQubits, opCount, precision,
-                   blockSize, occupancy, coalescingScore, memUpdateSpeed);
+    // measured & derived perf
+    double time_s = 0.0;                  // best-of-N seconds
+    double bytes = 0.0;                   // modeled bytes
+    double flops = 0.0;                   // modeled flops
+    double Bach_GBs = 0.0;                // bytes/time (GB/s, decimal)
+    double Pach_GFLOPs = 0.0;             // flops/time (GF/s)
+
+    // CSV header (optional; used if you dump results)
+    static constexpr const char* CSV_TITLE =
+      "k,opCount,precision,variant,path,pattern,gridX,gridY,gridZ,blockX,blockY,blockZ,"
+      "regsPerThread,smemPerBlock,occupancy,time_s,bytes,flops,Bach_GBs,Pach_GFLOPs";
+
+    void write(std::ostream& os) const;
   };
 
   std::vector<Item> items;
-  int defaultBlockSize = 256;
 
-  CUDAPerformanceCache() = default;
-  explicit CUDAPerformanceCache(const std::string &fileName);
+  // Calibration runs: generate, JIT, measure
+  void runPreliminaryExperiments(const CUDAKernelGenConfig& cfg,
+                                 const CUDADeviceInfo& dev,
+                                 int nQubits, int nRunsHint,
+                                 std::vector<int>& weights,
+                                 int verbose);
 
-  void runExperiments(const CUDAKernelGenConfig &cfg,
-                      int nQubits,
-                      int blockSize,
-                      int nRuns,
-                      int nWorkerThreads,
-                      int verbose = 1);
+  void runExperiments(const CUDAKernelGenConfig& cfg,
+                      const CUDADeviceInfo& dev,
+                      int nQubits, int nRuns, int verbose);
 
-  void writeResults(std::ostream &os) const;
+  void writeResults(std::ostream& os) const;
+};
 
-  const Item *findClosestMatch(const QuantumGate *gate,
-                               Precision precision,
-                               int blockSize) const;
+
+// ----------------------------- query & model ----------------------------------
+struct CUDACostQuery {
+  int nQubits = 0;
+  Precision precision = Precision::Unknown;
+
+  // variant/path choices (the generator may expose only "Global"):
+  bool considerSmemTranspose = false;
+  bool considerTensorCores = false;
+  bool forceGlobalVariant = false;
+  bool forceSmemTransposeVariant = false;
+
+  // execution semantics:
+  int nLaunches = 1;
+  double coverageFraction = 1.0;  // 0..1 fraction of state touched
+  double bytesFixup = 0.0;  // extra bytes for explicit transposes
 };
 
 class CUDACostModel : public CostModel {
-  // One row per (nQ, precision, blockSize)
-  struct Item {
-    int nQubits;
-    Precision precision;
-    int blockSize;
-    int nData = 0;
-    double totalGiBTimePerOpCnt = 0.0;
-    double occupancy = 1.0;
-    double coalescingScore = 1.0;
-
-    double getAvgGiBTimePerOpCnt() const {
-      return totalGiBTimePerOpCnt / nData;
-    }
-  };
-
-  std::unique_ptr<CUDAPerformanceCache> cache;
-  std::vector<Item>                     items;
-  double                                minGiBTimeCap = 0.0;
-  double                                zeroTol       = 1e-8;
-
-  int queryBlockSize = -1;
-  Precision queryPrecision = Precision::Unknown;
-
 public:
+  // ---- Backward-compat penalty knob set (optional) ----
+  struct Params {
+    double launchOH = 3.0e-6;
+    double blkAlpha = 0.25;
+    double occAlpha = 0.0;
+    double coalAlpha= 0.0;
+    double sizeBeta = 0.0;
+  } params;
+
+  // Construct from an empty performance cache (to be populated via runExperiments)
   explicit CUDACostModel(std::unique_ptr<CUDAPerformanceCache> cache,
                          double zeroTol = 1e-8);
 
-  void setQueryBlockSize(int blk)     { queryBlockSize = blk; }
-  void setQueryPrecision(Precision p) { queryPrecision = p;   }
+  ~CUDACostModel() override = default;
 
-  double computeGiBTime(const QuantumGate *gate) const override;
-  std::ostream &displayInfo(std::ostream &os,
-                            int verbose = 1) const override;
+  // --------- Primary roofline API (recommended in new code) ----------
+  // Predict wall-time (seconds) for a gate or fused block
+  double computeTime(const QuantumGate* gate, const CUDACostQuery& q) const;
 
-  static bool classof(const CostModel *m) { return m->getKind() == CM_CUDA; }
+  // --------- Backward-compat API (used by existing passes) ----------
+  // seconds per GiB (binary) for this gate shape (roofline-based)
+  double computeGiBTime(const QuantumGate* gate) const override;
+
+  // very-cheap predictor (kept for compatibility; uses anchor scaling)
+  double computeGiBTimeStage1(const QuantumGate* g) const;
+  // refine with probed occupancy (optional)
+  struct SkeletonStats { int regsPerThread = 0; size_t staticSmem = 0; double occupancy = 1.0; };
+  double refineWithProbe(const QuantumGate* g, int blockSize, const SkeletonStats& sk) const;
+
+  // query context (back-compat)
+  void setQueryBlockSize(int blk) { queryBlockSize_ = blk; }
+  void setQueryPrecision(Precision p) { queryPrecision_ = p; }
+  void setPenaltyParams(const Params& p) { params = p; }
+
+  // in-model probing toggles (back-compat; safe no-ops if unused)
+  void enableProbing(bool on) { probingEnabled_ = on; }
+  void resetProbeBudget(int k) const { probeBudget_ = k; }
+  void setProbeThreads(int n) { probeThreads_ = (n < 1 ? 1 : n); }
+  void setProbeOptLevel(llvm::OptimizationLevel o) { probeOpt_ = o; }
+
+  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
+
+  static bool classof(const CostModel* m) { return m->getKind() == CM_CUDA; }
+
+private:
+  // calibration fit
+  void   fitFromCache();
+  static double interpLUT(const std::vector<std::pair<double,double>>& lut, double x);
+  static AccessPattern classifyPattern(const QuantumGate* g);
+  static double estimateBytes(int nQubits, Precision p, double coverage, int nSweeps, double bytesFixup);
+  static double estimateFlops(const QuantumGate* g, int nQubits, double zeroTol);
+
+  // measured data
+  std::unique_ptr<CUDAPerformanceCache> cache_;
+  double  zeroTol_;
+
+  // fitted params
+  std::map<std::pair<Precision,CUDAVariant>, double> B_peak_GBs_;
+  std::map<std::pair<Precision,CUDAComputePath>, double> F_peak_GFLOPs_;
+  std::map<AccessPattern, double> f_coal_;
+  std::vector<std::pair<double,double>> gB_lut_, gF_lut_;
+  double t_launch_s_ = 3e-6;
+
+  // back-compat query context
+  int queryBlockSize_ = 256;
+  Precision queryPrecision_ = Precision::F64;
+
+  // stage-2 probing
+  bool probingEnabled_ = false;
+  mutable int probeBudget_ = 0;
+  int probeThreads_ = 1;
+  llvm::OptimizationLevel probeOpt_ = llvm::OptimizationLevel::O1;
 };
 
+using PenaltyParams = CUDACostModel::Params;
+
 } // namespace cast
-#endif   // CAST_USE_CUDA
-#endif   // CAST_CUDA_CUDACOSTMODEL_H
+
+#endif // CAST_USE_CUDA
+#endif // CAST_CUDA_CUDACOSTMODEL_H

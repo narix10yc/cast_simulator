@@ -3,8 +3,22 @@
 #include "cast/CUDA/CUDAStatevector.h"
 #include "tests/TestKit.h"
 
+#include <algorithm>
+#include <complex>
+#include <cuda_runtime.h>
+
 using namespace cast;
 using namespace cast::test;
+
+static double prob_from_host_sv(const std::vector<std::complex<double>>& svHost,
+                                int nQubits, int physBit) {
+  const size_t N = svHost.size();
+  double sum = 0.0;
+  for (size_t idx = 0; idx < N; ++idx) {
+    if ((idx >> physBit) & 1ull) sum += std::norm(svHost[idx]);
+  }
+  return sum;
+}
 
 template <unsigned nQubits>
 static void f(const std::vector<int>& targetQubits) {
@@ -12,7 +26,7 @@ static void f(const std::vector<int>& targetQubits) {
                         std::to_string(nQubits) + " qubits)");
 
   CUDAKernelManager kernelMgrCUDA;
-  cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
+  cast::CPUStatevector<double>  svCPU(nQubits, cast::CPUSimdWidth::W0);
   cast::CUDAStatevector<double> svCUDA0(nQubits), svCUDA1(nQubits);
 
   const auto randomizeSV = [&]() {
@@ -24,12 +38,15 @@ static void f(const std::vector<int>& targetQubits) {
                cudaMemcpyDeviceToHost);
   };
 
-  // Generate k-qubit random unitary gate
+  // Generate k‑qubit random unitary gate
   std::vector<QuantumGatePtr> gates;
   gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
 
   CUDAKernelGenConfig cudaGenConfig;
+  cudaGenConfig.precision = Precision::F64;
   cudaGenConfig.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
+  cudaGenConfig.assumeContiguousTargets = false;  // ← key change
+
   for (size_t i = 0; i < gates.size(); i++) {
     auto funcName = "gateImm_" + std::to_string(targetQubits.size()) + "q_" +
                     std::to_string(i);
@@ -37,92 +54,48 @@ static void f(const std::vector<int>& targetQubits) {
         .consumeError();
   }
 
-  kernelMgrCUDA.emitPTX(
-      gates.size(), llvm::OptimizationLevel::O1, /* verbose */ 0);
-  kernelMgrCUDA.initCUJIT(gates.size(), /* verbose */ 0);
+  kernelMgrCUDA.emitPTX(gates.size(), llvm::OptimizationLevel::O1, 0);
+  kernelMgrCUDA.initCUJIT(gates.size(), 0);
 
   for (size_t i = 0; i < gates.size(); i++) {
     randomizeSV();
-    std::stringstream ss;
-    // ss << "Apply U" << targetQubits.size() << "q at ";
-    // for (size_t j = 0; j < targetQubits.size(); ++j) {
-    //   ss << targetQubits[j];
-    //   if (j < targetQubits.size() - 1) ss << ",";
-    // }
-    // ss << ": ";
 
-    // Log expected gate matrix
-    // std::cerr << "Expected Gate Matrix for gate " << i << ":\n";
-    // gates[i]->gateMatrix.printCMat(std::cerr) << "\n";
-
-    // std::cerr << "Initial CUDA Statevector:\n";
+    double* dCurrent = reinterpret_cast<double*>(svCUDA0.dData());
     std::vector<std::complex<double>> svCUDA0_data(1 << svCUDA0.nQubits());
     cudaMemcpy(svCUDA0_data.data(),
-               svCUDA0.dData(),
+               dCurrent,
                svCUDA0.sizeInBytes(),
                cudaMemcpyDeviceToHost);
-    // for (size_t j = 0; j < svCUDA0_data.size(); j++) {
-    //     std::cerr << "State[" << j << "] = (" << svCUDA0_data[j].real() << ",
-    //     " << svCUDA0_data[j].imag() << ")\n";
-    // }
 
-    // std::cerr << "Expected statevector indices for qubits {";
-    // for (size_t j = 0; j < targetQubits.size(); ++j) {
-    //     std::cerr << targetQubits[j];
-    //     if (j < targetQubits.size() - 1) std::cerr << ", ";
-    // }
-    // std::cerr << "}:\n";
-    for (int i = 0; i < (1 << targetQubits.size()); ++i) {
-      uint64_t delta = 0;
-      for (size_t b = 0; b < targetQubits.size(); ++b) {
-        if (i & (1 << b)) {
-          delta |= (1ULL << targetQubits[b]);
-        }
-      }
-      // std::cerr << "i=" << i << ", delta=" << delta << "\n";
-      delta |= (1ULL << 1);
-      // std::cerr << "i=" << i << ", delta (qubit 1=1)=" << delta << "\n";
-    }
+    const unsigned k = static_cast<unsigned>(targetQubits.size());
+    const uint32_t combos = 1u << (nQubits - k);
 
-    kernelMgrCUDA.launchCUDAKernel(svCUDA0.dData(),
+    kernelMgrCUDA.launchCUDAKernel(static_cast<void*>(dCurrent),
                                    svCUDA0.nQubits(),
                                    *kernelMgrCUDA.getAllStandaloneKernels()[i],
-                                   1 << targetQubits.size());
+                                   combos);
     cudaDeviceSynchronize();
 
-    // Print final CUDA statevector
-    // std::cerr << "Final CUDA Statevector:\n";
     cudaMemcpy(svCUDA0_data.data(),
-               svCUDA0.dData(),
+               dCurrent,
                svCUDA0.sizeInBytes(),
                cudaMemcpyDeviceToHost);
-    // for (size_t j = 0; j < svCUDA0_data.size(); j++) {
-    //     std::cerr << "State[" << j << "] = (" << svCUDA0_data[j].real() << ",
-    //     " << svCUDA0_data[j].imag() << ")\n";
-    // }
 
-    suite.assertCloseF64(
-        svCUDA0.norm(), 1.0, ss.str() + "CUDA SV norm equals to 1", GET_INFO());
+    double hostNorm = 0.0;
+    for (const auto& c : svCUDA0_data) hostNorm += std::norm(c);
+    suite.assertCloseF64(hostNorm, 1.0,
+                         "CUDA SV norm equals to 1", GET_INFO());
 
     svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gates[i].get()));
-    // std::cerr << "Final CPU Statevector:\n";
-    // for (size_t j = 0; j < (1 << svCPU.nQubits()); j++) {
-    //     std::cerr << "State[" << j << "] = (" << svCPU.data()[2*j] << ", " <<
-    //     svCPU.data()[2*j+1] << ")\n";
-    // }
-
     for (int q : targetQubits) {
-      double cudaProb = svCUDA0.prob(q);
-      double cpuProb = svCPU.prob(q);
-      // std::cerr << "Qubit " << q << ": CUDA prob=" << cudaProb << ", CPU
-      // prob=" << cpuProb << "\n";
-      suite.assertCloseF64(cudaProb,
-                           cpuProb,
-                           ss.str() + "CUDA and CPU SV prob match for qubit " +
-                               std::to_string(q),
+      double cudaProb = prob_from_host_sv(svCUDA0_data, svCUDA0.nQubits(), /*physBit=*/q);
+      double cpuProb  = svCPU.prob(q);
+      suite.assertCloseF64(cudaProb, cpuProb,
+                           "CUDA and CPU SV prob match for qubit " + std::to_string(q),
                            GET_INFO());
     }
   }
+
   suite.displayResult();
 }
 

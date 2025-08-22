@@ -4,8 +4,11 @@
 #include "utils/iocolor.h"
 #include "llvm/Support/CommandLine.h"
 
+#include <cuda_runtime.h>
 #include <fstream>
 #include <set>
+#include <iostream>
+#include <string>
 
 namespace cl = llvm::cl;
 using namespace cast;
@@ -27,7 +30,7 @@ cl::opt<int>
 
 cl::opt<int>
     ArgWorkerThreads("worker-threads",
-                     cl::desc("CPU threads used for JIT compilation"),
+                     cl::desc("CPU threads used for JIT compilation (if applicable)"),
                      cl::init(0));
 
 cl::opt<int>
@@ -43,6 +46,7 @@ cl::opt<bool>
            cl::init(true));
 
 
+// ---- helpers ----------------------------------------------------------------
 
 static bool validateBlockSize(int blk) {
   if (blk < 32 || blk > 1024 || (blk & (blk - 1)) != 0) {
@@ -57,6 +61,36 @@ static void ensureCsvHeader(std::ofstream &ofs) {
   ofs << CUDAPerformanceCache::Item::CSV_TITLE << '\n';
 }
 
+static CUDADeviceInfo getDeviceInfo(int device, bool verbose) {
+  CUDADeviceInfo dev{};
+  dev.device = device;
+
+  cudaDeviceProp props{};
+  cudaError_t st = cudaGetDeviceProperties(&props, device);
+  if (st != cudaSuccess) {
+    std::cerr << BOLDRED("[Error]: ")
+              << "cudaGetDeviceProperties(" << device << ") failed: "
+              << cudaGetErrorString(st) << "\n";
+    // Provide safe fallbacks to avoid UB
+    dev.warpSize       = 32;
+    dev.maxThreadsPerSM= 2048;
+    dev.smCount        = 1;
+    return dev;
+  }
+
+  dev.warpSize        = props.warpSize;
+  dev.maxThreadsPerSM = props.maxThreadsPerMultiProcessor;
+  dev.smCount         = props.multiProcessorCount;
+
+  if (verbose) {
+    std::cerr << BOLDCYAN("[Info]: ")
+              << "GPU " << device << " = " << props.name
+              << " | SMs=" << dev.smCount
+              << " | warp=" << dev.warpSize
+              << " | maxThreads/SM=" << dev.maxThreadsPerSM << "\n";
+  }
+  return dev;
+}
 
 int main(int argc, char **argv)
 {
@@ -83,6 +117,12 @@ int main(int argc, char **argv)
     ensureCsvHeader(outFile);
   inFile.close();
 
+  // Build device info (measurement-based; we read real device caps once)
+  int devId = 0;
+  (void)cudaGetDevice(&devId); // if not set, default to 0
+  const bool verboseDevice = true;
+  CUDADeviceInfo dev = getDeviceInfo(devId, verboseDevice);
+
   CUDAPerformanceCache cache;
   CUDAKernelGenConfig  cfg;
   cfg.blockSize = ArgBlockSize;
@@ -92,17 +132,20 @@ int main(int argc, char **argv)
             << ArgNQubits << " qubits – block " << ArgBlockSize
             << ", worker threads " << ArgWorkerThreads << ".\n";
 
+  // Each precision is measured independently and appended to the CSV
   if (ArgF32) {
     std::cerr << BOLDCYAN("[Info]: ") << "  • Single precision (f32)\n";
     cfg.precision = Precision::F32;
-    cache.runExperiments(cfg, ArgNQubits,
-                         ArgBlockSize, ArgNTests, ArgWorkerThreads);
+    cache.runExperiments(cfg, dev,
+                         ArgNQubits, ArgNTests,
+                         /*verbose=*/1);
   }
   if (ArgF64) {
     std::cerr << BOLDCYAN("[Info]: ") << "  • Double precision (f64)\n";
     cfg.precision = Precision::F64;
-    cache.runExperiments(cfg, ArgNQubits,
-                         ArgBlockSize, ArgNTests, ArgWorkerThreads);
+    cache.runExperiments(cfg, dev,
+                         ArgNQubits, ArgNTests,
+                         /*verbose=*/1);
   }
 
   cache.writeResults(outFile);
