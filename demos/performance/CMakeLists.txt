@@ -16,4 +16,7 @@ if (CAST_USE_CUDA)
 
   add_executable(cuda_bcmk_imm_share "cuda_bcmk_imm_share.cpp")
   target_link_libraries(cuda_bcmk_imm_share utils qasm cast simulation timeit)
+
+  add_executable(bcmk_noise "bcmk_noise.cpp")
+  target_link_libraries(bcmk_noise utils qasm cast simulation timeit)
 endif()
