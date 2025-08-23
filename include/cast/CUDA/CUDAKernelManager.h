@@ -138,6 +138,7 @@ struct CUDAKernelGenConfig {
   bool forceDenseKernel = false;
   int blockSize = 64; // for now have constant blocksize across kernels
   bool assumeContiguousTargets = false;
+  bool useAsyncTiles = true;
 
   // Enable tiling if the gate size >= this value. Setting this value to 0
   // always enables tiling.

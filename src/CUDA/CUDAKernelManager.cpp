@@ -9,12 +9,17 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/TargetParser/Host.h"
 
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/Config/llvm-config.h"
+
 #include "cast/CUDA/Config.h"
 #include "utils/Formats.h"
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 #include <fstream>
+#include <cstdint>
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include "llvm/Support/Debug.h"
@@ -93,6 +98,48 @@ void CUDAKernelManager::emitPTX(int nThreads,
       llvm::errs() << "Module verification failed, attempting to proceed with "
                       "PTX emission\n";
     }
+    {
+      using namespace llvm;
+
+      auto rewriteCpAsyncCgToCa = [](Module& M) {
+        auto rewriteOne = [&](StringRef bad, StringRef good) {
+          if (Function* Bad = M.getFunction(bad)) {
+            FunctionCallee GoodC = M.getOrInsertFunction(good, Bad->getFunctionType());
+            Function* Good = llvm::cast<Function>(GoodC.getCallee());
+
+            SmallVector<Instruction*, 8> toErase;
+            for (User* U : Bad->users()) {
+              if (auto* CI = dyn_cast<CallInst>(U)) {
+                IRBuilder<> B(CI);
+                SmallVector<Value*, 8> Args(CI->arg_begin(), CI->arg_end());
+                CallInst* New = B.CreateCall(Good, Args);
+                New->setTailCallKind(CI->getTailCallKind());
+                New->setCallingConv(CI->getCallingConv());
+                New->setAttributes(CI->getAttributes());
+                New->setDebugLoc(CI->getDebugLoc());
+                toErase.push_back(CI);
+              } else if (auto* II = dyn_cast<InvokeInst>(U)) {
+                SmallVector<Value*, 8> Args(II->arg_begin(), II->arg_end());
+                InvokeInst* NewI = InvokeInst::Create(
+                    Good, II->getNormalDest(), II->getUnwindDest(), Args, "", II);
+                NewI->setCallingConv(II->getCallingConv());
+                NewI->setAttributes(II->getAttributes());
+                NewI->setDebugLoc(II->getDebugLoc());
+                toErase.push_back(II);
+              }
+            }
+            for (Instruction* I : toErase) I->eraseFromParent();
+            if (Bad->use_empty()) Bad->eraseFromParent();
+          }
+        };
+        rewriteOne("llvm.nvvm.cp.async.cg.shared.global.4",
+                  "llvm.nvvm.cp.async.ca.shared.global.4");
+        rewriteOne("llvm.nvvm.cp.async.cg.shared.global.8",
+                  "llvm.nvvm.cp.async.ca.shared.global.8");
+      };
+
+      rewriteCpAsyncCgToCa(*mod);
+    }
   }
 
   // Build the index matching modules -> kernels
@@ -168,18 +215,80 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
     const char* funcName      = kernel->llvmFuncName.c_str();
 
     dispatcher.enqueue([=, &sharedMemValues, this, &dispatcher]() {
-      // auto workerID = dispatcher.getWorkerID();
-      // CU_CALL(cuCtxSetCurrent(cuContexts[workerID]), "cuCtxSetCurrent");
-      // *cuContextPtr = cuContexts[workerID];
       CU_CALL(cuCtxSetCurrent(cuContexts[0]), "cuCtxSetCurrent");
       *cuContextPtr = cuContexts[0];
-      CU_CALL(cuModuleLoadData(cuModulePtr, ptxString.c_str()),
-              "cuModuleLoadData");
+
+      auto loadModuleWithLogs = [&](CUmodule* module, const char* ptx) -> CUresult {
+        char infoLog[8192]  = {0};
+        char errorLog[8192] = {0};
+        // sizes must be values, not pointers
+        unsigned int infoSize  = sizeof(infoLog);
+        unsigned int errorSize = sizeof(errorLog);
+
+        CUjit_option opts[] = {
+          CU_JIT_TARGET_FROM_CUCONTEXT,
+          CU_JIT_INFO_LOG_BUFFER, CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
+          CU_JIT_ERROR_LOG_BUFFER, CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
+          CU_JIT_LOG_VERBOSE
+        };
+
+        void* optvals[] = {
+          nullptr,
+          (void*)infoLog,                          // buffer pointer
+          (void*)(uintptr_t)infoSize,              // SIZE AS VALUE
+          (void*)errorLog,                         // buffer pointer
+          (void*)(uintptr_t)errorSize,             // SIZE AS VALUE
+          (void*)(uintptr_t)1                      // verbose = 1
+        };
+
+        unsigned int numOpts = sizeof(opts) / sizeof(opts[0]);
+
+        CUresult res = cuModuleLoadDataEx(module, ptx, numOpts, opts, optvals);
+
+        // make sure buffers are terminated (driver usually does, but be defensive)
+        infoLog[sizeof(infoLog) - 1]   = '\0';
+        errorLog[sizeof(errorLog) - 1] = '\0';
+
+        if (res != CUDA_SUCCESS) {
+          std::cerr << "[CUDA JIT Error] cuModuleLoadDataEx failed with code "
+                    << static_cast<int>(res) << "\n";
+          if (errorLog[0]) std::cerr << "--- Error log ---\n" << errorLog << "\n";
+          if (infoLog[0])  std::cerr << "--- Info log ---\n" << infoLog  << "\n";
+        } else if (verbose > 1 && (infoLog[0] || errorLog[0])) {
+          std::cerr << "--- Info log ---\n" << infoLog << "\n";
+        }
+        return res;
+      };
+      if (loadModuleWithLogs(cuModulePtr, ptxString.c_str()) != CUDA_SUCCESS) {
+        // Leave cuFunctionPtr null; later code must not try to launch this kernel.
+        return;
+      }
       CU_CALL(cuModuleGetFunction(cuFunctionPtr, *cuModulePtr, funcName),
               "cuModuleGetFunction");
+
+      // int staticShared = 0;
+      // CU_CALL(cuFuncGetAttribute(&staticShared,
+      //                           CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
+      //                           *cuFunctionPtr),
+      //         "cuFuncGetAttribute(SHARED_SIZE_BYTES)");
+      // sharedMemValues[i] = static_cast<size_t>(staticShared);
+
+      // // Pick carveout per style
+      // const std::string &style =
+      //     kernel->kstyle.empty() ? std::string("") : kernel->kstyle; // field already used in launch
+      // int carveout = (style == "imm-shared") ? CU_SHAREDMEM_CARVEOUT_MAX_SHARED
+      //                                       : CU_SHAREDMEM_CARVEOUT_MAX_L1;
+      // cuFuncSetAttribute(*cuFunctionPtr,
+      //                   CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,
+      //                   carveout);
+      int carveout = CU_SHAREDMEM_CARVEOUT_MAX_L1;
+      const std::string style = kernel->kstyle;  // requires Fix #1
+      if (style == "imm-shared" || style == "imm-shared-warp" || style == "ptr-shared") {
+        carveout = CU_SHAREDMEM_CARVEOUT_MAX_SHARED;
+      }
       cuFuncSetAttribute(*cuFunctionPtr,
-                   CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,
-                   CU_SHAREDMEM_CARVEOUT_MAX_L1);
+          CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,
+          carveout);
       int staticShared = 0;
       CU_CALL(cuFuncGetAttribute(&staticShared,
                                  CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
@@ -357,7 +466,13 @@ void CUDAKernelManager::launchCUDAKernel(
     void* dData, int nQubits, const CUDAKernelInfo& kernelInfo, int /*ignored*/)
 {
   assert(dData != nullptr);
-  assert(kernelInfo.cuTuple.cuContext && kernelInfo.cuTuple.cuFunction);
+  // assert(kernelInfo.cuTuple.cuContext && kernelInfo.cuTuple.cuFunction);
+  if (!kernelInfo.cuTuple.cuContext || !kernelInfo.cuTuple.cuFunction) {
+    std::cerr << RED("[Error] ")
+              << "Kernel launch skipped: JIT/module/function not available for \""
+              << kernelInfo.llvmFuncName << "\"\n";
+    return;
+  }
   cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
 
   unsigned k    = kernelInfo.gate->nQubits();

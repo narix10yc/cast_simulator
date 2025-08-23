@@ -129,8 +129,8 @@ struct Args {
   // std::string qasmFile = "../examples/qft/qft-16-cp.qasm";
   // std::string qasmFile = "../examples/rqc/q12_189_128.qasm";
   // std::string qasmFile = "../examples/rqc/q20_592_427.qasm";
-  std::string qasmFile  = "../examples/rqc/q28_442_300.qasm";
-  // std::string qasmFile = "../examples/rqc/q30_521_379.qasm";
+  // std::string qasmFile  = "../examples/rqc/q28_442_300.qasm";
+  std::string qasmFile = "../examples/rqc/q30_521_379.qasm";
   // std::string qasmFile  = "../examples/rqc/q30_4299_3272.qasm";
   std::string graphName = "testCircuit";
   int reps = 3;
@@ -336,21 +336,59 @@ int main(int argc, char** argv) {
   std::vector<const CUDAKernelInfo*> kernels;
   {
     const std::string prefix = cast::internal::mangleGraphName(args.graphName);
-
-    auto gates = graph->getAllGatesShared(); // vector<shared_ptr<...>>
+    auto gates = graph->getAllGatesShared();
     kernels.reserve(gates.size());
+
+    std::map<int, std::size_t> sizeHistogram; // optional: summary by k
+
     size_t order = 0;
     for (const auto& g : gates) {
-      const std::string kname = prefix + "_" +
-                                std::to_string(order++) + "_" +
-                                std::to_string(graph->gateId(g));
-      if (const auto* ki = km.getKernelByName(kname)) {
-        kernels.push_back(ki);
+      const int k = static_cast<int>(g->nQubits());        // fused gate size
+      const uint64_t dim = 1ull << k;                      // matrix dimension
+      const auto& qs = g->qubits();                          // qubit indices
+
+      const std::string base = prefix + "_" +
+                              std::to_string(order) + "_" +
+                              std::to_string(graph->gateId(g));
+
+      std::string chosenName;
+      const CUDAKernelInfo* ki = km.getKernelByName(base + "_gen");
+      if (ki) {
+        chosenName = base + "_gen";
       } else {
-        std::cerr << "[WARN] kernel not found: " << kname << "\n";
+        ki = km.getKernelByName(base + "_lsb");
+        if (ki) chosenName = base + "_lsb";
+      }
+
+      if (ki) {
+        kernels.push_back(ki);
+        ++sizeHistogram[k];
+
+        // Print per-kernel fused gate size (and some context)
+        std::cout << "[Kernel] #" << order
+                  << " name=" << chosenName
+                  << " gateId=" << graph->gateId(g)
+                  << " k=" << k << " (dim=" << dim << "x" << dim << ") qubits=[";
+        for (size_t i = 0; i < qs.size(); ++i) {
+          std::cout << qs[i] << (i + 1 < qs.size() ? "," : "");
+        }
+        std::cout << "]\n";
+      } else {
+        std::cerr << "[WARN] kernel not found (tried _gen/_lsb): " << base << "\n";
+      }
+
+      ++order;
+    }
+
+    std::cout << "[LOG] Number of generated GPU kernels: " << kernels.size() << "\n";
+
+    // Optional: print a histogram of fused gate sizes
+    if (!sizeHistogram.empty()) {
+      std::cout << "[LOG] Fused gate size histogram:\n";
+      for (const auto& [k, cnt] : sizeHistogram) {
+        std::cout << "  k=" << k << " : " << cnt << "\n";
       }
     }
-    std::cout << "[LOG] Number of generated GPU kernels: " << kernels.size() << "\n";
   }
 
   // Execution (timed)

@@ -3,6 +3,7 @@
 
 #include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/InlineAsm.h"
 
 #include "utils/Formats.h"
 #include "utils/iocolor.h"
@@ -36,6 +37,51 @@ static Value *bitCastPtrToVec2(IRBuilder<> &B, Value *ptr, Type *scalarTy) {
 }
 
 namespace {
+
+static inline void setAlignedLoad(Value *v, unsigned bytes) {
+  if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(v)) LI->setAlignment(llvm::Align(bytes));
+}
+static inline void setAlignedStore(Value *v, unsigned bytes) {
+  if (auto *SI = llvm::dyn_cast<llvm::StoreInst>(v)) SI->setAlignment(llvm::Align(bytes));
+}
+
+static llvm::CallInst* emitCpAsync(llvm::IRBuilder<>& B,
+                                   llvm::Module& M,
+                                   llvm::Value* dstShared, // i8 addrspace(3)* (or castable)
+                                   llvm::Value* srcGlobal, // i8 addrspace(1)* (or castable)
+                                   unsigned bytes,         // 4, 8, or 16
+                                   bool useCg)             // cg is valid only for 16
+{
+  using namespace llvm;
+  assert((bytes == 4 || bytes == 8 || bytes == 16) && "cp.async size must be 4/8/16");
+  if (useCg) {
+    assert(bytes == 16 && "cp.async.cg is only supported for 16B copies");
+  }
+
+  const char* name = nullptr;
+  if (!useCg) {
+    name = (bytes == 4)  ? "llvm.nvvm.cp.async.ca.shared.global.4"
+         : (bytes == 8)  ? "llvm.nvvm.cp.async.ca.shared.global.8"
+                         : "llvm.nvvm.cp.async.ca.shared.global.16";
+  } else {
+    name = "llvm.nvvm.cp.async.cg.shared.global.16";
+  }
+
+  LLVMContext& C = M.getContext();
+  Type* i8 = Type::getInt8Ty(C);
+  PointerType* dstTy = PointerType::get(i8, /*AS=*/3); // shared
+  PointerType* srcTy = PointerType::get(i8, /*AS=*/1); // global
+  FunctionType* FT = FunctionType::get(Type::getVoidTy(C), {dstTy, srcTy}, /*vararg*/false);
+
+  // Bitcast if needed
+  Value* D = dstShared->getType() == dstTy ? dstShared
+                                           : B.CreateBitCast(dstShared, dstTy);
+  Value* S = srcGlobal->getType() == srcTy ? srcGlobal
+                                           : B.CreateBitCast(srcGlobal, srcTy);
+
+  FunctionCallee F = M.getOrInsertFunction(name, FT);
+  return B.CreateCall(F, {D, S});
+}
 
 Value *genOptFMul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B) {
   switch (aKind) {
@@ -262,6 +308,20 @@ Function *getFunctionDeclarationCUDA(
         args.pCombos = func->getArg(1); 
         args.pCombos->setName("p.combos");
     }
+
+    auto addPtrAttrs = [&](Argument* A, bool readOnly) {
+      if (!A) return;
+      AttrBuilder AB(M.getContext());
+      AB.addAttribute(Attribute::NonNull);
+      AB.addAttribute(Attribute::NoAlias);
+      AB.addAlignmentAttr(Align(16));     // v2f32/v2f64 friendly
+      if (readOnly) AB.addAttribute(Attribute::ReadOnly);
+      A->addAttrs(AB);
+    };
+
+    // Apply
+    addPtrAttrs(args.pSvArg, /*readOnly=*/false);
+    if (args.pMatArg) addPtrAttrs(args.pMatArg, /*readOnly=*/true);
 
     // mark as kernel (unchanged)
     auto *mdString = MDString::get(M.getContext(), "kernel");
@@ -867,6 +927,22 @@ static Value* warpBroadcastF32(IRBuilder<> &B, Value *valF32, Value *srcLane) {
     return B.CreateBitCast(resI32, valF32->getType());
 }
 
+static Value* warpBroadcastF64(IRBuilder<> &B, Value *valF64, Value *srcLane) {
+  auto &C = B.getContext();
+  auto shfl = Intrinsic::getOrInsertDeclaration(
+      B.GetInsertBlock()->getModule(), Intrinsic::nvvm_shfl_sync_idx_i32);
+  Value *mask = ConstantInt::get(Type::getInt32Ty(C), -1);
+
+  Value *i64 = B.CreateBitCast(valF64, Type::getInt64Ty(C));
+  Value *lo  = B.CreateTrunc(i64, Type::getInt32Ty(C));
+  Value *hi  = B.CreateTrunc(B.CreateLShr(i64, B.getInt64(32)), Type::getInt32Ty(C));
+  Value *loS = B.CreateCall(shfl, {mask, lo, srcLane, B.getInt32(31)});
+  Value *hiS = B.CreateCall(shfl, {mask, hi, srcLane, B.getInt32(31)});
+  Value *i64S = B.CreateOr(B.CreateZExt(loS, B.getInt64Ty()),
+                           B.CreateShl(B.CreateZExt(hiS, B.getInt64Ty()), 32));
+  return B.CreateBitCast(i64S, valF64->getType());
+}
+
 static void genMatrixVectorMultiply_ImmRowPerLane(
   IRBuilder<> &B,
   const CUDAKernelGenConfig &config,
@@ -885,13 +961,20 @@ static void genMatrixVectorMultiply_ImmRowPerLane(
 
   const unsigned k = qubits.size();
   const unsigned N = 1u << k;
+  const unsigned vecAlign = (config.precision == Precision::F32) ? 8u : 16u;
+  const unsigned scaAlign = (config.precision == Precision::F32) ? 4u : 8u;
 
   Function *func = B.GetInsertBlock()->getParent();
   Module &M = *func->getParent();
   LLVMContext &CTX = B.getContext();
   const size_t elem = (config.precision == Precision::F32) ? 4 : 8;
   const size_t bytesM = size_t(2) * N * N * elem;
-  const unsigned AS_M = 1;
+
+  const size_t bytesKind = size_t(N) * N;
+  const bool matrixFits = (bytesM <= 64 * 1024);
+  const bool bothFit = (bytesM + bytesKind) <= 64 * 1024;
+  const unsigned AS_M = (matrixFits && bothFit) ? 4 : 1;
+  // const unsigned AS_M = 1;
   GlobalVariable *gMatImm = createGlobalMatrixArray_SharedTiledImm(
       M, scalarTy, N, matData, (Twine("gMatImm_") + func->getName()).str(), AS_M);
   auto *arrTyM = llvm::cast<ArrayType>(gMatImm->getValueType());
@@ -941,7 +1024,6 @@ static void genMatrixVectorMultiply_ImmRowPerLane(
   //     nullptr, GlobalValue::NotThreadLocal, (bytesM<=64*1024?4:1));
   // gMatKind->setAlignment(MaybeAlign(16));
 
-  const size_t bytesKind = size_t(N) * N;
   const unsigned AS_KIND = (bytesKind <= 64 * 1024) ? 4 : 1;
   auto *gMatKindPacked = createPackedKindTable(
       M, N, matData, (Twine("gMatKind_") + func->getName()).str(), AS_KIND);
@@ -1086,6 +1168,7 @@ static void genMatrixVectorMultiply_ImmRowPerLane(
       Value *mPairPtr = bitCastPtrToVec2(
           B, B.CreateGEP(arrTyM, gMatImm, {B.getInt32(0), toI32(idx2)}), scalarTy);
       mPairLd = B.CreateLoad(getVec2Ty(scalarTy), mPairPtr, "m.pair");
+      setAlignedLoad(mPairLd, vecAlign);
       B.CreateBr(ldEnd);
 
       B.SetInsertPoint(ldNo);
@@ -1136,6 +1219,7 @@ static void genMatrixVectorMultiply_ImmRowPerLane(
           Value *c32 = B.CreateIntCast(cPHI, B.getInt32Ty(), false);
           Value *dPtr = B.CreateGEP(deltaArrTy, gDelta, {B.getInt32(0), c32});
           delta = B.CreateLoad(B.getInt64Ty(), dPtr, "delta.c");
+          setAlignedLoad(delta, 8);
       }
       // Load x[c] from svBaseCombo (vectorized)
       // Value *xPairPtr = bitCastPtrToVec2(
@@ -1148,42 +1232,66 @@ static void genMatrixVectorMultiply_ImmRowPerLane(
       Value *xIm = UndefValue::get(scalarTy);
 
       if (config.precision == Precision::F32) {
-          // Only lane 0 loads; everyone else gets it via warp broadcast.
-          Value *isLane0 = B.CreateICmpEQ(lane32, B.getInt32(0));
-          BasicBlock *ldYes = BasicBlock::Create(CTX, "x.ld.y", func);
-          BasicBlock *ldNo = BasicBlock::Create(CTX, "x.ld.n", func);
-          BasicBlock *ldEnd = BasicBlock::Create(CTX, "x.ld.end", func);
-          B.CreateCondBr(isLane0, ldYes, ldNo);
+        // Only lane 0 loads; everyone else gets it via warp broadcast.
+        Value *isLane0 = B.CreateICmpEQ(lane32, B.getInt32(0));
+        BasicBlock *ldYes = BasicBlock::Create(CTX, "x.ld.y", func);
+        BasicBlock *ldNo = BasicBlock::Create(CTX, "x.ld.n", func);
+        BasicBlock *ldEnd = BasicBlock::Create(CTX, "x.ld.end", func);
+        B.CreateCondBr(isLane0, ldYes, ldNo);
 
-          B.SetInsertPoint(ldYes);
-          Value *xPairPtr = bitCastPtrToVec2(
-              B, B.CreateGEP(scalarTy, svBaseCombo, B.CreateShl(delta, 1)), scalarTy);
-          Value *xPairLd = B.CreateLoad(getVec2Ty(scalarTy), xPairPtr, "x.pair.lane0");
-          Value *xRe0 = B.CreateExtractElement(xPairLd, B.getInt32(0));
-          Value *xIm0 = B.CreateExtractElement(xPairLd, B.getInt32(1));
-          B.CreateBr(ldEnd);
+        B.SetInsertPoint(ldYes);
+        Value *xPairPtr = bitCastPtrToVec2(
+            B, B.CreateGEP(scalarTy, svBaseCombo, B.CreateShl(delta, 1)), scalarTy);
+        Value *xPairLd = B.CreateLoad(getVec2Ty(scalarTy), xPairPtr, "x.pair.lane0");
+        setAlignedLoad(xPairLd, vecAlign);
+        Value *xRe0 = B.CreateExtractElement(xPairLd, B.getInt32(0));
+        Value *xIm0 = B.CreateExtractElement(xPairLd, B.getInt32(1));
+        B.CreateBr(ldEnd);
 
-          B.SetInsertPoint(ldNo);
-          Value *xReU = UndefValue::get(scalarTy);
-          Value *xImU = UndefValue::get(scalarTy);
-          B.CreateBr(ldEnd);
+        B.SetInsertPoint(ldNo);
+        Value *xReU = UndefValue::get(scalarTy);
+        Value *xImU = UndefValue::get(scalarTy);
+        B.CreateBr(ldEnd);
 
-          B.SetInsertPoint(ldEnd);
-          PHINode *xRePhi = B.CreatePHI(scalarTy, 2);
-          PHINode *xImPhi = B.CreatePHI(scalarTy, 2);
-          xRePhi->addIncoming(xRe0, ldYes); xRePhi->addIncoming(xReU, ldNo);
-          xImPhi->addIncoming(xIm0, ldYes); xImPhi->addIncoming(xImU, ldNo);
+        B.SetInsertPoint(ldEnd);
+        PHINode *xRePhi = B.CreatePHI(scalarTy, 2);
+        PHINode *xImPhi = B.CreatePHI(scalarTy, 2);
+        xRePhi->addIncoming(xRe0, ldYes); xRePhi->addIncoming(xReU, ldNo);
+        xImPhi->addIncoming(xIm0, ldYes); xImPhi->addIncoming(xImU, ldNo);
 
-          Value *srcLane = B.getInt32(0);
-          xRe = warpBroadcastF32(B, xRePhi, srcLane);
-          xIm = warpBroadcastF32(B, xImPhi, srcLane);
+        Value *srcLane = B.getInt32(0);
+        xRe = warpBroadcastF32(B, xRePhi, srcLane);
+        xIm = warpBroadcastF32(B, xImPhi, srcLane);
       } else {
-          // F64 path: leave as-is (or split to two I32 shfls if desired later)
-          Value *xPairPtr = bitCastPtrToVec2(
-              B, B.CreateGEP(scalarTy, svBaseCombo, B.CreateShl(delta, 1)), scalarTy);
-          Value *xPair = B.CreateLoad(getVec2Ty(scalarTy), xPairPtr, "x.pair");
-          xRe = B.CreateExtractElement(xPair, B.getInt32(0));
-          xIm = B.CreateExtractElement(xPair, B.getInt32(1));
+        Value *isLane0 = B.CreateICmpEQ(lane32, B.getInt32(0));
+        BasicBlock *ldYes = BasicBlock::Create(CTX, "x.ld64.y", func);
+        BasicBlock *ldNo  = BasicBlock::Create(CTX, "x.ld64.n", func);
+        BasicBlock *ldEnd = BasicBlock::Create(CTX, "x.ld64.end", func);
+        B.CreateCondBr(isLane0, ldYes, ldNo);
+
+        B.SetInsertPoint(ldYes);
+        Value *xPairPtr = bitCastPtrToVec2(
+            B, B.CreateGEP(scalarTy, svBaseCombo, B.CreateShl(delta, 1)), scalarTy);
+        Value *xPairLd = B.CreateLoad(getVec2Ty(scalarTy), xPairPtr, "x.pair.lane0");
+        setAlignedLoad(xPairLd, vecAlign);
+        Value *xRe0 = B.CreateExtractElement(xPairLd, B.getInt32(0));
+        Value *xIm0 = B.CreateExtractElement(xPairLd, B.getInt32(1));
+        B.CreateBr(ldEnd);
+
+        B.SetInsertPoint(ldNo);
+        Value *xReU = UndefValue::get(scalarTy);
+        Value *xImU = UndefValue::get(scalarTy);
+        B.CreateBr(ldEnd);
+
+        B.SetInsertPoint(ldEnd);
+        PHINode *xRePhi = B.CreatePHI(scalarTy, 2);
+        PHINode *xImPhi = B.CreatePHI(scalarTy, 2);
+        xRePhi->addIncoming(xRe0, ldYes); xRePhi->addIncoming(xReU, ldNo);
+        xImPhi->addIncoming(xIm0, ldYes); xImPhi->addIncoming(xImU, ldNo);
+
+        Value *srcLane = B.getInt32(0);
+        xRe = warpBroadcastF64(B, xRePhi, srcLane);
+        xIm = warpBroadcastF64(B, xImPhi, srcLane);
       }
 
 
@@ -1219,13 +1327,15 @@ static void genMatrixVectorMultiply_ImmRowPerLane(
       Value *r32 = B.CreateIntCast(rPHI, B.getInt32Ty(), false);
       Value *dPtr = B.CreateGEP(deltaArrTy, gDelta, {B.getInt32(0), r32});
       rDelta = B.CreateLoad(B.getInt64Ty(), dPtr, "delta.r");
+      setAlignedLoad(rDelta, 8);
   }
   Value *dstPair = UndefValue::get(getVec2Ty(scalarTy));
   dstPair = B.CreateInsertElement(dstPair, newRe, B.getInt32(0));
   dstPair = B.CreateInsertElement(dstPair, newIm, B.getInt32(1));
   Value *dstPtr = bitCastPtrToVec2(B,
       B.CreateGEP(scalarTy, svBaseCombo, B.CreateShl(rDelta, 1)), scalarTy);
-  B.CreateStore(dstPair, dstPtr);
+  auto *st = B.CreateStore(dstPair, dstPtr);
+  setAlignedStore(st, vecAlign);
 
   // Advance r
   B.CreateBr(rInc);
@@ -1281,6 +1391,8 @@ void genMatrixVectorMultiply_SharedTiled(
   // Parameters
   const unsigned k = qubits.size();
   const unsigned N = 1u << k;
+  const unsigned vecAlign = (config.precision == Precision::F32) ? 8u : 16u;
+  const unsigned scaAlign = (config.precision == Precision::F32) ? 4u : 8u;
   const unsigned TILE = std::min((config.precision == Precision::F64) ? 128u : 256u, N);
 
   Function *func = B.GetInsertBlock()->getParent();
@@ -1288,6 +1400,28 @@ void genMatrixVectorMultiply_SharedTiled(
       func->addFnAttr("cast.tile", std::to_string(TILE));
   Module &M = *func->getParent();
   LLVMContext &CTX = B.getContext();
+
+  auto cpAsyncCopy = [&](Value *dstSharedSca, Value *srcGlobalSca, unsigned bytes) {
+    bool useCg = false;
+    if (bytes == 16) {
+      if (const char* e = std::getenv("CAST_CP_ASYNC_CG")) useCg = (*e == '1');
+    }
+    auto *dstI8AS3 = B.CreateBitCast(dstSharedSca, PointerType::get(Type::getInt8Ty(CTX), 3));
+    auto *srcI8AS1 = B.CreateBitCast(srcGlobalSca, PointerType::get(Type::getInt8Ty(CTX), 1));
+    emitCpAsync(B, M, dstI8AS3, srcI8AS1, bytes, useCg);
+  };
+
+  auto cpAsyncCommit = [&](){
+    auto *fty  = FunctionType::get(B.getVoidTy(), /*isVarArg=*/false);
+    auto *iasm = InlineAsm::get(fty, "cp.async.commit_group;", "", true);
+    B.CreateCall(iasm);
+  };
+
+  auto cpAsyncWaitAll = [&](){
+    auto *fty  = FunctionType::get(B.getVoidTy(), /*isVarArg=*/false);
+    auto *iasm = InlineAsm::get(fty, "cp.async.wait_group 0;", "", true);
+    B.CreateCall(iasm);
+  };
 
   // Fetch p.combos (added to the function prototype and named "p.combos")
   Argument *combosV = nullptr;
@@ -1353,13 +1487,29 @@ void genMatrixVectorMultiply_SharedTiled(
   }
 
   // Shared tile for statevector
-  ArrayType *smVecTy = ArrayType::get(scalarTy, 2 * TILE);
-  auto *smVecGV = new GlobalVariable(
-      M, smVecTy, /*constant=*/false, GlobalValue::PrivateLinkage,
-      UndefValue::get(smVecTy), (Twine("tileX_") + func->getName()).str(),
-      nullptr, GlobalValue::NotThreadLocal, /*AS=*/3);
-  Value *smVecBase =
-      B.CreateGEP(smVecTy, smVecGV, {B.getInt32(0), B.getInt32(0)}, "smX.base");
+  // ArrayType *smVecTy = ArrayType::get(scalarTy, 2 * TILE);
+  // auto *smVecGV = new GlobalVariable(
+  //     M, smVecTy, /*constant=*/false, GlobalValue::PrivateLinkage,
+  //     UndefValue::get(smVecTy), (Twine("tileX_") + func->getName()).str(),
+  //     nullptr, GlobalValue::NotThreadLocal, /*AS=*/3);
+  // Value *smVecBase =
+  //     B.CreateGEP(smVecTy, smVecGV, {B.getInt32(0), B.getInt32(0)}, "smX.base");
+
+  const unsigned SCALARS_PER_TILE = 2u * TILE;           // re,im interleaved
+  ArrayType *smVecTy2 = ArrayType::get(scalarTy, 2 * SCALARS_PER_TILE); // ping+pong
+  auto *smVecGV = new GlobalVariable(M, smVecTy2, false, GlobalValue::PrivateLinkage,
+                                    UndefValue::get(smVecTy2),
+                                    (Twine("tileX2_") + func->getName()).str(),
+                                    nullptr, GlobalValue::NotThreadLocal, /*AS=*/3);
+  smVecGV->setAlignment(MaybeAlign(16));
+
+  // Base pointers for [0] and [1]
+  Value *smBase0 = B.CreateGEP(smVecTy2, smVecGV, {B.getInt32(0), B.getInt32(0)}, "sm.base0");
+  Value *smBase1 = B.CreateGEP(smVecTy2, smVecGV, {B.getInt32(0), B.getInt32(SCALARS_PER_TILE)}, "sm.base1");
+
+  auto *i8Ty   = Type::getInt8Ty(CTX);
+  auto *i8pGen = PointerType::get(i8Ty, 0);
+  const unsigned BYTES = (config.precision == Precision::F32) ? 8u : 16u; // re+im
 
   // Thread & grid indices
   Value *tid32 = B.CreateIntrinsic(B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_tid_x, {});
@@ -1422,106 +1572,271 @@ void genMatrixVectorMultiply_SharedTiled(
       Value *base2 = B.CreateShl(off, 1);
       svBaseCombo = B.CreateGEP(scalarTy, svPtrV, base2, "sv.base.combo");
     }
-}
+  }
 
 // Tile loop scaffolding (with loop-carried accumulators)
-BasicBlock *tileChk = BasicBlock::Create(CTX, "tile.chk", func);
-BasicBlock *tileBody = BasicBlock::Create(CTX, "tile.body", func);
-BasicBlock *tileInc = BasicBlock::Create(CTX, "tile.inc", func);
-BasicBlock *tileDone = BasicBlock::Create(CTX, "tile.done", func);
+// BasicBlock *tileChk = BasicBlock::Create(CTX, "tile.chk", func);
+// BasicBlock *tileBody = BasicBlock::Create(CTX, "tile.body", func);
+// BasicBlock *tileInc = BasicBlock::Create(CTX, "tile.inc", func);
+// BasicBlock *tileDone = BasicBlock::Create(CTX, "tile.done", func);
+// B.CreateBr(tileChk);
 
-B.CreateBr(tileChk);
-B.SetInsertPoint(tileChk);
+  // Tile loop scaffolding (with loop-carried accumulators)
+  BasicBlock *tileChk  = BasicBlock::Create(CTX, "tile.chk",  func);
+  BasicBlock *tileBody = BasicBlock::Create(CTX, "tile.body", func);
+  BasicBlock *tileInc  = BasicBlock::Create(CTX, "tile.inc",  func);
+  BasicBlock *tileDone = BasicBlock::Create(CTX, "tile.done", func);
+  BasicBlock *preLdEnd = nullptr;
 
-// Loop-carried accumulators start at 0.0 for each combo iteration
-PHINode *accReLC = B.CreatePHI(scalarTy, /*numPreds=*/2, "accRe.lc");
-PHINode *accImLC = B.CreatePHI(scalarTy, /*numPreds=*/2, "accIm.lc");
-accReLC->addIncoming(ConstantFP::get(scalarTy, 0.0), cmbBody);
-accImLC->addIncoming(ConstantFP::get(scalarTy, 0.0), cmbBody);
+  // ===== Preload tile 0 into buffer 0 with cp.async =====
+  {
+    BasicBlock *preLdChk  = BasicBlock::Create(CTX, "pre.ld.chk",  func);
+    BasicBlock *preLdYes  = BasicBlock::Create(CTX, "pre.ld.y",    func);
+    BasicBlock *preLdZero = BasicBlock::Create(CTX, "pre.ld.zero", func);
+    BasicBlock *preLdSkip = BasicBlock::Create(CTX, "pre.ld.skip", func);
+    preLdEnd = BasicBlock::Create(CTX, "pre.ld.end", func);
 
-PHINode *col0Phi = B.CreatePHI(B.getInt64Ty(), 2, "col0");
-col0Phi->addIncoming(B.getInt64(0), cmbBody);
+    // Only threads tid < TILE participate
+    B.CreateCondBr(tidInTile, preLdChk, preLdSkip);
 
-B.CreateCondBr(B.CreateICmpULT(col0Phi, B.getInt64(N)), tileBody, tileDone);
+    // in-range check for column colIdx0 = 0 + tid
+    B.SetInsertPoint(preLdChk);
+    Value *colIdx0  = B.CreateZExt(tid32L, B.getInt64Ty());
+    Value *inRange0 = B.CreateICmpULT(colIdx0, B.getInt64(N));
+    B.CreateCondBr(inRange0, preLdYes, preLdZero);
 
-// tile.body
-B.SetInsertPoint(tileBody);
+    // in-range → cp.async(smBase0 + 2*tid, svBaseCombo + off2(colIdx0), BYTES)
+    B.SetInsertPoint(preLdYes);
+    {
+      Value *off2 = nullptr;
+      if (config.assumeContiguousTargets) {
+        off2 = B.CreateShl(colIdx0, 1);       // ×2 for (re,im)
+      } else {
+        Value *c32  = B.CreateIntCast(colIdx0, B.getInt32Ty(), false);
+        Value *dPtr = B.CreateGEP(deltaArrTy, gDelta, {B.getInt32(0), c32});
+        Value *delta= B.CreateLoad(B.getInt64Ty(), dPtr);
+        setAlignedLoad(delta, 8);
+        off2 = B.CreateShl(delta, 1);
+      }
+
+      // dst (shared, buf=0)
+      Value *dstScaIdx = B.CreateMul(tid64L, B.getInt64(2));
+      Value *dstScaPtr = B.CreateGEP(scalarTy, smBase0, dstScaIdx);
+
+      // src (global) — AS=1
+      Value *srcScaPtr = B.CreateGEP(scalarTy, svBaseCombo, off2);
+
+      cpAsyncCopy(dstScaPtr, srcScaPtr, BYTES);
+      B.CreateBr(preLdEnd);
+    }
+
+    // out-of-range → zero fill that shared slot
+    B.SetInsertPoint(preLdZero);
+    {
+      Constant *z = ConstantFP::get(scalarTy, 0.0);
+      Value *idxS = B.CreateMul(tid64L, B.getInt64(2));
+      B.CreateStore(z, B.CreateGEP(scalarTy, smBase0, idxS));
+      B.CreateStore(z, B.CreateGEP(scalarTy, smBase0, B.CreateAdd(idxS, B.getInt64(1))));
+      B.CreateBr(preLdEnd);
+    }
+
+    // threads ≥ TILE skip
+    B.SetInsertPoint(preLdSkip);
+    B.CreateBr(preLdEnd);
+
+    // commit+wait → tile 0 is ready to consume
+    B.SetInsertPoint(preLdEnd);
+    cpAsyncCommit();
+    cpAsyncWaitAll();
+    B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
+    B.CreateBr(tileChk);   // enter the tile loop
+  }
+  B.SetInsertPoint(tileChk);
+
+  // // Loop-carried accumulators start at 0.0 for each combo iteration
+  // PHINode *accReLC = B.CreatePHI(scalarTy, /*numPreds=*/2, "accRe.lc");
+  // PHINode *accImLC = B.CreatePHI(scalarTy, /*numPreds=*/2, "accIm.lc");
+  // accReLC->addIncoming(ConstantFP::get(scalarTy, 0.0), cmbBody);
+  // accImLC->addIncoming(ConstantFP::get(scalarTy, 0.0), cmbBody);
+
+  // PHINode *col0Phi = B.CreatePHI(B.getInt64Ty(), 2, "col0");
+  // col0Phi->addIncoming(B.getInt64(0), cmbBody);
+
+  // B.CreateCondBr(B.CreateICmpULT(col0Phi, B.getInt64(N)), tileBody, tileDone);
+
+  // Loop-carried accumulators (start at 0)
+  PHINode *accReLC = B.CreatePHI(scalarTy, 2, "accRe.lc");
+  PHINode *accImLC = B.CreatePHI(scalarTy, 2, "accIm.lc");
+
+  // Track which shared buffer we’re consuming: 0 then 1 then 0 …
+  PHINode *bufPhi = B.CreatePHI(B.getInt32Ty(), 2, "buf");
+
+  // Column base of the current tile
+  PHINode *col0Phi = B.CreatePHI(B.getInt64Ty(), 2, "col0");
+
+  // auto *zero = ConstantFP::get(scalarTy, 0.0);
+
+  // // Finish the initial incoming bindings **right after** creating the PHIs:
+  // accReLC ->addIncoming(ConstantFP::get(scalarTy, 0.0), predecessorOfTileChk);
+  // accImLC ->addIncoming(ConstantFP::get(scalarTy, 0.0), predecessorOfTileChk);
+  // bufPhi  ->addIncoming(B.getInt32(0), predecessorOfTileChk); // start from buffer 0
+  // col0Phi ->addIncoming(B.getInt64(0), predecessorOfTileChk);
+
+  auto *zero = ConstantFP::get(scalarTy, 0.0);
+  accReLC->addIncoming(zero, preLdEnd);
+  accImLC->addIncoming(zero, preLdEnd);
+  bufPhi ->addIncoming(B.getInt32(0), preLdEnd);   // start from buffer 0
+  col0Phi->addIncoming(B.getInt64(0), preLdEnd);   // start at column 0
+
+  B.CreateCondBr(B.CreateICmpULT(col0Phi, B.getInt64(N)), tileBody, tileDone);
+
+  // tile.body
+  B.SetInsertPoint(tileBody);
+
+  // Select current and next shared buffers
+  Value *isBuf0 = B.CreateICmpEQ(bufPhi, B.getInt32(0));
+  Value *smCur  = B.CreateSelect(isBuf0, smBase0, smBase1);
+  Value *nxtBuf = B.CreateXor(bufPhi, B.getInt32(1));
+  Value *smNext = B.CreateSelect(B.CreateICmpEQ(nxtBuf, B.getInt32(0)), smBase0, smBase1);
+
+  // Has a next tile?
+  Value *hasNext = B.CreateICmpULT(B.CreateAdd(col0Phi, B.getInt64(TILE)), B.getInt64(N));
+  BasicBlock *pfYes = BasicBlock::Create(CTX, "pf.y", func);
+  BasicBlock *pfNo  = BasicBlock::Create(CTX, "pf.n", func);
+  B.CreateCondBr(hasNext, pfYes, pfNo);
+
+  // pf.y: issue cp.async for tile t+1 (col0+TILE) → smNext
+  B.SetInsertPoint(pfYes);
+  {
+    BasicBlock *pfChk  = BasicBlock::Create(CTX, "pf.chk",  func);
+    BasicBlock *pfDo   = BasicBlock::Create(CTX, "pf.do",   func);
+    BasicBlock *pfZero = BasicBlock::Create(CTX, "pf.zero", func);
+    BasicBlock *pfEnd  = BasicBlock::Create(CTX, "pf.end",  func);
+
+    B.CreateCondBr(tidInTile, pfChk, pfEnd);
+
+    B.SetInsertPoint(pfChk);
+    Value *colNextIdx = B.CreateAdd(B.CreateAdd(col0Phi, B.getInt64(TILE)), tid64L);
+    Value *inRangeN   = B.CreateICmpULT(colNextIdx, B.getInt64(N));
+    B.CreateCondBr(inRangeN, pfDo, pfZero);
+
+    // in-range next → cp.async
+    B.SetInsertPoint(pfDo);
+    {
+      Value *off2 = nullptr;
+      if (config.assumeContiguousTargets) {
+        off2 = B.CreateShl(colNextIdx, 1);
+      } else {
+        Value *c32  = B.CreateIntCast(colNextIdx, B.getInt32Ty(), false);
+        Value *dPtr = B.CreateGEP(deltaArrTy, gDelta, {B.getInt32(0), c32});
+        Value *delta= B.CreateLoad(B.getInt64Ty(), dPtr);
+        setAlignedLoad(delta, 8);
+        off2 = B.CreateShl(delta, 1);
+      }
+      // dst = smNext + 2*tid
+      Value *dstScaIdx = B.CreateMul(tid64L, B.getInt64(2));
+      Value *dstScaPtr = B.CreateGEP(scalarTy, smNext, dstScaIdx);
+
+      // src = svBaseCombo + off2 — AS=1
+      Value *srcScaPtr = B.CreateGEP(scalarTy, svBaseCombo, off2);
+
+      cpAsyncCopy(dstScaPtr, srcScaPtr, BYTES);
+      B.CreateBr(pfEnd);
+    }
+
+    // out-of-range next → zero fill
+    B.SetInsertPoint(pfZero);
+    {
+      Constant *z = ConstantFP::get(scalarTy, 0.0);
+      Value *idxS = B.CreateMul(tid64L, B.getInt64(2));
+      B.CreateStore(z, B.CreateGEP(scalarTy, smNext, idxS));
+      B.CreateStore(z, B.CreateGEP(scalarTy, smNext, B.CreateAdd(idxS, B.getInt64(1))));
+      B.CreateBr(pfEnd);
+    }
+
+    B.SetInsertPoint(pfEnd);
+    cpAsyncCommit();       // finalize the group for tile t+1
+    B.CreateBr(pfNo);
+  }
+
+  B.SetInsertPoint(pfNo);
 
 // This tile's running sums start from loop-carried values
 Value *accReTile = accReLC;
 Value *accImTile = accImLC;
 
-// (1) Load |x⟩ tile into shared (only tid < TILE)
-{
-    BasicBlock *ldChk = BasicBlock::Create(CTX, "ld.chk", func);
-    BasicBlock *ldYes = BasicBlock::Create(CTX, "ld.y", func);
-    BasicBlock *ldZero = BasicBlock::Create(CTX, "ld.zero", func);
-    BasicBlock *ldSkip = BasicBlock::Create(CTX, "ld.skip", func);
-    BasicBlock *ldEnd = BasicBlock::Create(CTX, "ld.end", func);
+  // (1) Load |x⟩ tile into shared (only tid < TILE)
+  // {
+  //     BasicBlock *ldChk = BasicBlock::Create(CTX, "ld.chk", func);
+  //     BasicBlock *ldYes = BasicBlock::Create(CTX, "ld.y", func);
+  //     BasicBlock *ldZero = BasicBlock::Create(CTX, "ld.zero", func);
+  //     BasicBlock *ldSkip = BasicBlock::Create(CTX, "ld.skip", func);
+  //     BasicBlock *ldEnd = BasicBlock::Create(CTX, "ld.end", func);
 
-    B.CreateCondBr(tidInTile, ldChk, ldSkip);
+  //     B.CreateCondBr(tidInTile, ldChk, ldSkip);
 
-    // in-range check for column we own in this tile
-    B.SetInsertPoint(ldChk);
-    Value *colIdx  = B.CreateAdd(col0Phi, tid64L, "colIdx");
-    Value *inRange = B.CreateICmpULT(colIdx, B.getInt64(N), "col.in.range");
-    B.CreateCondBr(inRange, ldYes, ldZero);
+  //     // in-range check for column we own in this tile
+  //     B.SetInsertPoint(ldChk);
+  //     Value *colIdx  = B.CreateAdd(col0Phi, tid64L, "colIdx");
+  //     Value *inRange = B.CreateICmpULT(colIdx, B.getInt64(N), "col.in.range");
+  //     B.CreateCondBr(inRange, ldYes, ldZero);
 
-    // load from statevector into shared
-    B.SetInsertPoint(ldYes);
-    {
-        // Value *off2;
-        // if (config.assumeContiguousTargets) {
-        //     off2 = B.CreateShl(colIdx, 1); // ×2 for (re,im)
-        // } else {
-        //     Value *delta = B.getInt64(0);
-        //     for (unsigned b = 0; b < k; ++b) {
-        //         Value *mask = B.getInt64(1ULL << b);
-        //         Value *bit  = B.CreateAnd(colIdx, mask);
-        //         Value *cond = B.CreateICmpNE(bit, B.getInt64(0));
-        //         Value *shift= B.getInt64(1ULL << qubits[b]);
-        //         delta = B.CreateSelect(cond, B.CreateOr(delta, shift), delta);
-        //     }
-        //     off2 = B.CreateShl(delta, 1);
-        // }
-        Value *off2 = nullptr;
-        if (config.assumeContiguousTargets) {
-            off2 = B.CreateShl(colIdx, 1);   // ×2 for (re,im)
-        } else {
-            Value *c32  = B.CreateIntCast(colIdx, B.getInt32Ty(), false);
-            Value *dPtr = B.CreateGEP(deltaArrTy, gDelta, {B.getInt32(0), c32});
-            Value *delta = B.CreateLoad(B.getInt64Ty(), dPtr);
-            off2 = B.CreateShl(delta, 1);
-        }
+  //     // load from statevector into shared
+  //     B.SetInsertPoint(ldYes);
+  //     {
+  //         // Value *off2;
+  //         // if (config.assumeContiguousTargets) {
+  //         //     off2 = B.CreateShl(colIdx, 1); // ×2 for (re,im)
+  //         // } else {
+  //         //     Value *delta = B.getInt64(0);
+  //         //     for (unsigned b = 0; b < k; ++b) {
+  //         //         Value *mask = B.getInt64(1ULL << b);
+  //         //         Value *bit  = B.CreateAnd(colIdx, mask);
+  //         //         Value *cond = B.CreateICmpNE(bit, B.getInt64(0));
+  //         //         Value *shift= B.getInt64(1ULL << qubits[b]);
+  //         //         delta = B.CreateSelect(cond, B.CreateOr(delta, shift), delta);
+  //         //     }
+  //         //     off2 = B.CreateShl(delta, 1);
+  //         // }
+  //         Value *off2 = nullptr;
+  //         if (config.assumeContiguousTargets) {
+  //             off2 = B.CreateShl(colIdx, 1);   // ×2 for (re,im)
+  //         } else {
+  //             Value *c32  = B.CreateIntCast(colIdx, B.getInt32Ty(), false);
+  //             Value *dPtr = B.CreateGEP(deltaArrTy, gDelta, {B.getInt32(0), c32});
+  //             Value *delta = B.CreateLoad(B.getInt64Ty(), dPtr);
+  //             setAlignedLoad(delta, 8);
+  //             off2 = B.CreateShl(delta, 1);
+  //         }
 
-        Value *srcPairPtr = bitCastPtrToVec2(
-            B, B.CreateGEP(scalarTy, svBaseCombo, off2), scalarTy);
-        Value *xPairLd = B.CreateLoad(getVec2Ty(scalarTy), srcPairPtr, "x.pair");
-        Value *dstPairPtr = bitCastPtrToVec2(
-            B, B.CreateGEP(scalarTy, smVecBase, B.CreateMul(tid64L, B.getInt64(2))), scalarTy);
-        B.CreateStore(xPairLd, dstPairPtr);
-    }
-    B.CreateBr(ldEnd);
+  //         Value *srcPairPtr = bitCastPtrToVec2(
+  //             B, B.CreateGEP(scalarTy, svBaseCombo, off2), scalarTy);
+  //         Value *xPairLd = B.CreateLoad(getVec2Ty(scalarTy), srcPairPtr, "x.pair");
+  //         Value *dstPairPtr = bitCastPtrToVec2(
+  //             B, B.CreateGEP(scalarTy, smVecBase, B.CreateMul(tid64L, B.getInt64(2))), scalarTy);
+  //         B.CreateStore(xPairLd, dstPairPtr);
+  //     }
+  //     B.CreateBr(ldEnd);
 
-    // out-of-range → write zeros
-    B.SetInsertPoint(ldZero);
-    {
-        Constant *z = ConstantFP::get(scalarTy, 0.0);
-        Value *idxS = B.CreateMul(tid64L, B.getInt64(2));
-        B.CreateStore(z, B.CreateGEP(scalarTy, smVecBase, idxS));
-        B.CreateStore(z, B.CreateGEP(scalarTy, smVecBase, B.CreateAdd(idxS, B.getInt64(1))));
-    }
-    B.CreateBr(ldEnd);
+  //     // out-of-range → write zeros
+  //     B.SetInsertPoint(ldZero);
+  //     {
+  //         Constant *z = ConstantFP::get(scalarTy, 0.0);
+  //         Value *idxS = B.CreateMul(tid64L, B.getInt64(2));
+  //         B.CreateStore(z, B.CreateGEP(scalarTy, smVecBase, idxS));
+  //         B.CreateStore(z, B.CreateGEP(scalarTy, smVecBase, B.CreateAdd(idxS, B.getInt64(1))));
+  //     }
+  //     B.CreateBr(ldEnd);
 
-    // skip entirely if tid ≥ TILE
-    B.SetInsertPoint(ldSkip);
-    B.CreateBr(ldEnd);
+  //     // skip entirely if tid ≥ TILE
+  //     B.SetInsertPoint(ldSkip);
+  //     B.CreateBr(ldEnd);
 
-    B.SetInsertPoint(ldEnd);
-  }
+  //     B.SetInsertPoint(ldEnd);
+  // }
 
-  // __syncthreads()
-  B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
+  // // __syncthreads()
+  // B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
 
   // (2) Dot product over this tile (skip zeros; ±1 materialized without loads)
   for (unsigned t = 0; t < TILE; ++t) {
@@ -1586,6 +1901,7 @@ Value *accImTile = accImLC;
         B.SetInsertPoint(ldYes);
         Value *mPairPtr = bitCastPtrToVec2(B, B.CreateGEP(scalarTy, gMatBase, idx2), scalarTy);
         mPairLd = B.CreateLoad(getVec2Ty(scalarTy), mPairPtr, "mPair");
+        setAlignedLoad(mPairLd, vecAlign);
         B.CreateBr(ldEnd);
 
         B.SetInsertPoint(ldNo);
@@ -1618,10 +1934,16 @@ Value *accImTile = accImLC;
         Value *mIm = selK(kIm, loadedIm);
 
         // x[col] from shared
+        // Value *xPairPtr = bitCastPtrToVec2(
+        //     B, B.CreateGEP(scalarTy, smVecBase, B.CreateMul(B.getInt64(t), B.getInt64(2))),
+        //     scalarTy);
+        // Value *xPair = B.CreateLoad(getVec2Ty(scalarTy), xPairPtr, "x.pair.t");
+
         Value *xPairPtr = bitCastPtrToVec2(
-            B, B.CreateGEP(scalarTy, smVecBase, B.CreateMul(B.getInt64(t), B.getInt64(2))),
+            B, B.CreateGEP(scalarTy, smCur, B.CreateMul(B.getInt64(t), B.getInt64(2))),
             scalarTy);
         Value *xPair = B.CreateLoad(getVec2Ty(scalarTy), xPairPtr, "x.pair.t");
+        setAlignedLoad(xPair, vecAlign);
         Value *xRe = B.CreateExtractElement(xPair, B.getInt32(0));
         Value *xIm = B.CreateExtractElement(xPair, B.getInt32(1));
 
@@ -1666,7 +1988,18 @@ Value *accImTile = accImLC;
   }
 
   // __syncthreads() before advancing tile
+  // B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
+
+  BasicBlock *wYes = BasicBlock::Create(CTX, "wait.y", func);
+  BasicBlock *wNo  = BasicBlock::Create(CTX, "wait.n", func);
+  B.CreateCondBr(hasNext, wYes, wNo);
+
+  B.SetInsertPoint(wYes);
+  cpAsyncWaitAll();
   B.CreateCall(Intrinsic::getOrInsertDeclaration(&M, Intrinsic::nvvm_barrier0));
+  B.CreateBr(wNo);
+
+  B.SetInsertPoint(wNo);
 
   // (3) Next tile: advance and feed loop-carried PHIs
   B.CreateBr(tileInc);
@@ -1675,6 +2008,8 @@ Value *accImTile = accImLC;
   col0Phi->addIncoming(nextCol0, tileInc);
   accReLC->addIncoming(accReTile, tileInc);
   accImLC->addIncoming(accImTile, tileInc);
+  Value *bufNext = B.CreateXor(bufPhi, B.getInt32(1));
+  bufPhi->addIncoming(bufNext, tileInc);
   B.CreateBr(tileChk);
 
   // tile.done
@@ -1694,6 +2029,7 @@ Value *accImTile = accImLC;
         Value *r32 = B.CreateIntCast(row64, B.getInt32Ty(), false);
         Value *dPtr = B.CreateGEP(deltaArrTy, gDelta, {B.getInt32(0), r32});
         Value *delta = B.CreateLoad(B.getInt64Ty(), dPtr);
+        setAlignedLoad(delta, 8);
         off2 = B.CreateShl(delta, 1);
     }
 
@@ -1701,7 +2037,8 @@ Value *accImTile = accImLC;
     Value *resPair = UndefValue::get(getVec2Ty(scalarTy));
     resPair = B.CreateInsertElement(resPair, accReLC, B.getInt32(0));
     resPair = B.CreateInsertElement(resPair, accImLC, B.getInt32(1));
-    B.CreateStore(resPair, dstPairPtr);
+    auto *st = B.CreateStore(resPair, dstPairPtr);
+    setAlignedStore(st, vecAlign);
     B.CreateBr(stNo);
   }
 
@@ -1950,6 +2287,8 @@ static void genMatrixVectorMultiply_InlineImm(
 
     const unsigned k = qubits.size();
     const unsigned K = 1u << k;
+    const unsigned vecAlign = (config.precision == Precision::F32) ? 8u : 16u;
+    const unsigned scaAlign = (config.precision == Precision::F32) ? 4u : 8u;
 
     // Precompute per-amplitude pointers and load them once.
     std::vector<Value *> reAmpPtrs(K), imAmpPtrs(K);
@@ -1969,6 +2308,8 @@ static void genMatrixVectorMultiply_InlineImm(
         imAmpPtrs[i] = B.CreateConstGEP1_64(scalarTy, svPtrV, off2 + 1ull);
         reAmps[i] = B.CreateLoad(scalarTy, reAmpPtrs[i]);
         imAmps[i] = B.CreateLoad(scalarTy, imAmpPtrs[i]);
+        setAlignedLoad(reAmps[i], scaAlign);
+        setAlignedLoad(imAmps[i], scaAlign);
     }
 
     // For each output row r: new = M[r,*] · old
@@ -1995,8 +2336,8 @@ static void genMatrixVectorMultiply_InlineImm(
         }
 
         Value *newRe = B.CreateFSub(accRe0, accRe1);
-        B.CreateStore(newRe, reAmpPtrs[r]);
-        B.CreateStore(accIm, imAmpPtrs[r]);
+        auto *st0 = B.CreateStore(newRe, reAmpPtrs[r]); setAlignedStore(st0, scaAlign);
+        auto *st1 = B.CreateStore(accIm, imAmpPtrs[r]); setAlignedStore(st1, scaAlign);
     }
 }
 
@@ -2691,6 +3032,7 @@ CUDAKernelManager::genCUDAGateVariants_(
       // }
       if (f->hasFnAttribute("cast.kstyle")) {
           auto style = f->getFnAttribute("cast.kstyle").getValueAsString();
+          ki->kstyle = style.str();
           if (style == "imm-inline" || style == "const-small") {
               ki->oneThreadPerBlock = true;
           } else if (style == "imm-inline-warp" || style == "imm-shared-warp") {
@@ -2741,6 +3083,18 @@ Function *CUDAKernelManager::gen_(
   auto *entryBB = BasicBlock::Create(*llvmContextModulePair.llvmContext, "entry", func);
   B.SetInsertPoint(entryBB);
 
+  auto *svGlobalTy = llvm::PointerType::get(scalarTy, /*AS=*/1);
+  llvm::Value *svGlobal = nullptr;
+
+  #if LLVM_VERSION_MAJOR >= 15  // opaque pointers world
+  svGlobal = B.CreateAddrSpaceCast(args.pSvArg, svGlobalTy, "sv.global");
+  #else                         // typed pointers world (older LLVM)
+  auto *svGenericTyped = B.CreateBitCast(args.pSvArg,
+                                        llvm::PointerType::get(scalarTy, /*AS=*/0),
+                                        "sv.gen.typed");
+  svGlobal = B.CreateAddrSpaceCast(svGenericTyped, svGlobalTy, "sv.global");
+  #endif
+
   // Helper: compute the base pointer (into the full statevector) for this CTA's combo.
   // We map comboSlot := ctaid.x / tilesPerGate, where tilesPerGate is the number of
   // row-tiles per gate for the chosen kernel style (or 1 when there is no row tiling).
@@ -2760,7 +3114,8 @@ Function *CUDAKernelManager::gen_(
           Value *off = buildOffset(B, idx64, qsForOffset);  // qsForOffset must be ascending
           base2 = B.CreateShl(off, 1);
       }
-      return B.CreateGEP(scalarTy, args.pSvArg, base2, "sv.combo.base");
+      // return B.CreateGEP(scalarTy, args.pSvArg, base2, "sv.combo.base");
+      return B.CreateGEP(scalarTy, svGlobal, base2, "sv.combo.base");
   };
 
   // For kernels that need compile-time matrix analysis
@@ -2862,16 +3217,16 @@ Function *CUDAKernelManager::gen_(
           if (inlineOK) {
               // lane-per-combo persistent inline
               genMatrixVectorMultiply_InlineImm_LanePerCombo(
-                  B, cfg, matrix, qLSB, matData, /*svRoot=*/args.pSvArg, scalarTy);
+                  B, cfg, matrix, qLSB, matData, /*svRoot=*/svGlobal, scalarTy);
               func->addFnAttr("cast.kstyle", "imm-inline-warp");
               func->addFnAttr("cast.warps", "4"); // default: 4 warps/CTA → blockDim.x=128
               break;
           }
           if (N >= 32 && N <= 64) {
-              genMatrixVectorMultiply_ImmRowPerLane(B, cfg, qLSB, matData, /*svBase=*/args.pSvArg, scalarTy);
+              genMatrixVectorMultiply_ImmRowPerLane(B, cfg, qLSB, matData, /*svBase=*/svGlobal, scalarTy);
               // callee sets cast.kstyle and cast.warps
           } else {
-              genMatrixVectorMultiply_SharedTiled(B, cfg, matrix, qLSB, matData, /*svBase=*/args.pSvArg, scalarTy);
+              genMatrixVectorMultiply_SharedTiled(B, cfg, matrix, qLSB, matData, /*svBase=*/svGlobal, scalarTy);
               func->addFnAttr("cast.kstyle", "imm-shared");
           }
           break;
@@ -3036,6 +3391,7 @@ CUDAKernelManager::genCUDAGate_(
 
     if (func->hasFnAttribute("cast.kstyle")) {
         auto style = func->getFnAttribute("cast.kstyle").getValueAsString();
+        ki->kstyle = style.str();
         if (style == "imm-inline" || style == "const-small") {
             ki->oneThreadPerBlock = true;
         } else if (style == "imm-inline-warp" || style == "imm-shared-warp") {

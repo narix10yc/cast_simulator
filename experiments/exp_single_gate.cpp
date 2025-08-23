@@ -115,6 +115,42 @@ static void createGates(std::vector<QuantumGatePtr>& gates, GateType gateType) {
     }
     break;
   }
+  case U4: {
+    for (int q = 0; q < NUM_QUBITS; ++q) {
+      gates.push_back(StandardQuantumGate::RandomUnitary(
+          { q,
+            (q + 1) % NUM_QUBITS,
+            (q + 2) % NUM_QUBITS,
+            (q + 3) % NUM_QUBITS }));
+    }
+    break;
+  }
+  case H4: {
+    for (int q = 0; q < NUM_QUBITS; ++q) {
+      QuantumGatePtr gate = StandardQuantumGate::H(q);
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::H((q + 1) % NUM_QUBITS).get());
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::H((q + 2) % NUM_QUBITS).get());
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::H((q + 3) % NUM_QUBITS).get());
+      gates.push_back(gate);
+    }
+    break;
+  }
+  case S4: {
+    for (int q = 0; q < NUM_QUBITS; ++q) {
+      QuantumGatePtr gate = StandardQuantumGate::S(q);
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::S((q + 1) % NUM_QUBITS).get());
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::S((q + 2) % NUM_QUBITS).get());
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::S((q + 3) % NUM_QUBITS).get());
+      gates.push_back(gate);
+    }
+    break;
+  }
   default:
     std::cerr << BOLDRED("[Error]: ")
               << "Unknown gate type: " << static_cast<int>(gateType) << "\n";
@@ -284,7 +320,7 @@ int main(int argc, char** argv) {
     std::cerr << BOLDCYAN("[Info]: ") << "Starting CUDA benchmark.\n";
     std::cerr << "System information:\n";
     cast::displayCUDA();
-    std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3};
+    std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3, U4, H4, S4};
     std::cerr << BOLDCYAN("[Info]: ") << "Using " << NUM_QUBITS << "-qubit "
               << "statevectors\n";
     std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
