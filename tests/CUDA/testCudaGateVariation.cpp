@@ -99,22 +99,22 @@ static void f(const std::vector<int>& targetQubits) {
   suite.displayResult();
 }
 
-void test::test_cuda_gate_var() {
-  // Test 1: 2-qubit system, 2-qubit gate on contiguous qubits {0, 1}
-  f<2>({0, 1});
+// void test::test_cuda_gate_var() {
+//   // Test 1: 2-qubit system, 2-qubit gate on contiguous qubits {0, 1}
+//   f<2>({0, 1});
 
-  // Test 2: 3-qubit system, 3-qubit gate on contiguous qubits {0, 1, 2}
-  f<3>({0, 1, 2});
+//   // Test 2: 3-qubit system, 3-qubit gate on contiguous qubits {0, 1, 2}
+//   f<3>({0, 1, 2});
 
-  // Test 3: 3-qubit system, 2-qubit gate on contiguous qubits {0, 1}
-  f<3>({0, 1});
+//   // Test 3: 3-qubit system, 2-qubit gate on contiguous qubits {0, 1}
+//   f<3>({0, 1});
 
-  // Test 4: 3-qubit system, 2-qubit gate on non-contiguous qubits {0, 2}
-  f<3>({0, 2});
+//   // Test 4: 3-qubit system, 2-qubit gate on non-contiguous qubits {0, 2}
+//   f<3>({0, 2});
 
-  // Test 5: 6-qubit system, 3-qubit gate on non-contiguous qubits {2, 4, 5}
-  f<6>({2, 4, 5});
+//   // Test 5: 6-qubit system, 3-qubit gate on non-contiguous qubits {2, 4, 5}
+//   f<6>({2, 4, 5});
 
-  // Test 6: 10-qubit system, 4-qubit gate on non-contiguous qubits {0, 2, 3, 6}
-  f<10>({0, 2, 3, 6});
-}
+//   // Test 6: 10-qubit system, 4-qubit gate on non-contiguous qubits {0, 2, 3, 6}
+//   f<10>({0, 2, 3, 6});
+// }

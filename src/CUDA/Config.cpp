@@ -90,7 +90,7 @@ void cast::getCudaComputeCapability(int& major, int& minor) {
   CU_CHECK(cuDeviceGetAttribute(
       &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
 
-  if (major < MAJOR_CAP)
+  if (major < MAJOR_CAP || (major == MAJOR_CAP && minor <= MINOR_CAP))
     return;
 
   const char* env = std::getenv("CAST_CAP_CUDA_ARCH");
