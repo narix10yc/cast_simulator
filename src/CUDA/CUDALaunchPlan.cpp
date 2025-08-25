@@ -3,18 +3,25 @@
 
 namespace cast {
 
-bool streakWorthPermuting(std::span<const GateDesc> gates, size_t i,
+bool streakWorthPermuting(std::span<const GateDesc> gates,
+                          size_t i,
                           unsigned lookaheadS,
                           const CostModel& cm,
-                          unsigned nQubits, size_t sizeofScalar,
+                          unsigned nQubits,
+                          size_t sizeofScalar,
                           double epsilon) {
   const auto& g0 = gates[i];
-  if (g0.k() <= 3) return false;
+  if (g0.k() <= 3)
+    return false;
   unsigned S = 1;
-  for (size_t j = i+1; j < gates.size() && S < lookaheadS; ++j) {
-    if (gates[j].targets == g0.targets) ++S; else break;
+  for (size_t j = i + 1; j < gates.size() && S < lookaheadS; ++j) {
+    if (gates[j].targets == g0.targets)
+      ++S;
+    else
+      break;
   }
-  if (S < 2) return false;
+  if (S < 2)
+    return false;
   double save_ms = 0.0;
   for (unsigned s = 0; s < S; ++s) {
     unsigned k = g0.k();

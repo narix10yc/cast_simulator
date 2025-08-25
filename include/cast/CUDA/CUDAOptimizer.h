@@ -1,6 +1,8 @@
-#pragma once
-#include "cast/Core/Optimizer.h"
+#ifndef CAST_CUDA_CUDAOPTIMIZER_H
+#define CAST_CUDA_CUDAOPTIMIZER_H
+
 #include "cast/CUDA/CUDAFusionConfig.h"
+#include "cast/Core/Optimizer.h"
 
 namespace cast {
 
@@ -18,12 +20,30 @@ public:
     return *this;
   }
 
-  CUDAOptimizer& enableCanonicalization() { enableCanonicalization_ = true; return *this; }
-  CUDAOptimizer& disableCanonicalization() { enableCanonicalization_ = false; return *this; }
-  CUDAOptimizer& enableFusion() { enableFusion_ = true; return *this; }
-  CUDAOptimizer& disableFusion() { enableFusion_ = false; return *this; }
-  CUDAOptimizer& enableCFO() { enableCFO_ = true; return *this; }
-  CUDAOptimizer& disableCFO() { enableCFO_ = false; return *this; }
+  CUDAOptimizer& enableCanonicalization() {
+    enableCanonicalization_ = true;
+    return *this;
+  }
+  CUDAOptimizer& disableCanonicalization() {
+    enableCanonicalization_ = false;
+    return *this;
+  }
+  CUDAOptimizer& enableFusion() {
+    enableFusion_ = true;
+    return *this;
+  }
+  CUDAOptimizer& disableFusion() {
+    enableFusion_ = false;
+    return *this;
+  }
+  CUDAOptimizer& enableCFO() {
+    enableCFO_ = true;
+    return *this;
+  }
+  CUDAOptimizer& disableCFO() {
+    enableCFO_ = false;
+    return *this;
+  }
 
   void run(ir::CircuitNode& circuit,
            utils::Logger logger = nullptr) const override;
@@ -33,3 +53,5 @@ public:
 };
 
 } // namespace cast
+
+#endif // CAST_CUDA_CUDAOPTIMIZER_H

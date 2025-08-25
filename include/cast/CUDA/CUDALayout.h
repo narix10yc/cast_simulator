@@ -1,4 +1,6 @@
-#pragma once
+#ifndef CAST_CUDA_CUDALAYOUT_H
+#define CAST_CUDA_CUDALAYOUT_H
+
 #include <vector>
 #include <bitset>
 #include <span>
@@ -69,3 +71,5 @@ inline bool subsetFitsLSB(const Layout& L, std::span<const int> targets, unsigne
 }
 
 } // namespace cast
+
+#endif // CAST_CUDA_CUDALAYOUT_H

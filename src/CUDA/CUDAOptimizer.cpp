@@ -23,17 +23,19 @@ void CUDAOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
   // 2) Agglomerative fusion (+ optional CFO)
   if (enableFusion_) {
     double t = timeit::once([&] {
-      for (int size = fusionConfig->sizeMin; size <= fusionConfig->sizeMax; ++size) {
+      for (int size = fusionConfig->sizeMin; size <= fusionConfig->sizeMax;
+           ++size) {
         int fusedThisSize = 0;
         auto graphs = circuit.getAllCircuitGraphs();
-        if (auto* cm = llvm::dyn_cast<CUDACostModel>(fusionConfig->costModel.get())) {
+        if (auto* cm =
+                llvm::dyn_cast<CUDACostModel>(fusionConfig->costModel.get())) {
           cm->enableProbing(true);
           cm->resetProbeBudget(/*topK*/ 4);
           cm->setProbeThreads(std::max(1, /* pick a number */ 2));
           cm->setProbeOptLevel(llvm::OptimizationLevel::O1);
 
           auto p = cm->params;
-          p.occAlpha = 0.5; // mild occupancy influence
+          p.occAlpha = 0.5;  // mild occupancy influence
           p.coalAlpha = 1.0; // stronger coalescing influence
           cm->setPenaltyParams(p);
         }
@@ -45,17 +47,19 @@ void CUDAOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
           } while (fusionConfig->enableMultiTraverse && round > 0);
         }
         if (enableCFO_ && fusedThisSize > 0)
-          fusedThisSize += cast::impl::applyCFOFusion(circuit, fusionConfig.get(), size);
+          fusedThisSize +=
+              cast::impl::applyCFOFusion(circuit, fusionConfig.get(), size);
         nFused += fusedThisSize;
         logger.log(2) << "  size " << size << ": +" << fusedThisSize << "\n";
       }
     });
-    logger.log(1) << "Agglomerative Fusion finished in "
-                  << utils::fmt_time(t) << "\n";
+    logger.log(1) << "Agglomerative Fusion finished in " << utils::fmt_time(t)
+                  << "\n";
   }
 }
 
-void CUDAOptimizer::run(ir::CircuitGraphNode& graph, utils::Logger logger) const {
+void CUDAOptimizer::run(ir::CircuitGraphNode& graph,
+                        utils::Logger logger) const {
   assert(fusionConfig && "CUDAOptimizer requires a CUDAFusionConfig");
 
   // 1) Canonicalization (size-2 fusion)
@@ -68,12 +72,13 @@ void CUDAOptimizer::run(ir::CircuitGraphNode& graph, utils::Logger logger) const
   // 2) Agglomerative fusion
   if (enableFusion_) {
     double t = timeit::once([&] {
-      for (int size = fusionConfig->sizeMin; size <= fusionConfig->sizeMax; ++size) {
+      for (int size = fusionConfig->sizeMin; size <= fusionConfig->sizeMax;
+           ++size) {
         int n = cast::impl::applyGateFusion(graph, fusionConfig.get(), size);
         logger.log(2) << "  size " << size << ": +" << n << "\n";
       }
     });
-    logger.log(1) << "Agglomerative Fusion finished in "
-                  << utils::fmt_time(t) << "\n";
+    logger.log(1) << "Agglomerative Fusion finished in " << utils::fmt_time(t)
+                  << "\n";
   }
 }

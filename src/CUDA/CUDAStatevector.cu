@@ -49,15 +49,14 @@ __global__ void sumOfSquaredReductionKernel(const ScalarType* dArr,
                                             size_t size) {
   static_assert(blockSize == 32 || blockSize == 64 || blockSize == 128 ||
                 blockSize == 256 || blockSize == 512);
-  // __shared__ ScalarType shared[blockSize];
-  // unsigned tid = threadIdx.x;
   __shared__ ScalarType shared[blockSize];
   const unsigned tid = threadIdx.x;
-  const int lane         = threadIdx.x & (kWarpSize - 1);
-  const int warpId       = threadIdx.x >> kWarpBits;
+  const int lane = threadIdx.x & (kWarpSize - 1);
+  const int warpId = threadIdx.x >> kWarpBits;
   const int warpsInBlock = blockDim.x >> kWarpBits;
   // Guard in case a generic kernel is re-used with a small block
-  if (warpId >= warpsInBlock) return;
+  if (warpId >= warpsInBlock)
+    return;
   unsigned bid = blockIdx.x;
 
   size_t i0 = (2ULL * bid) * blockSize + tid;
@@ -99,7 +98,7 @@ __global__ void sumOfSquaredReductionKernel(const ScalarType* dArr,
     // Start at +kWarpSize if we arrived at 64-way partials, else at kWarpSize/2
     constexpr int firstOffset =
         (blockSize >= 2 * kWarpSize) ? kWarpSize : (kWarpSize >> 1);
-    #pragma unroll
+#pragma unroll
     for (int offset = firstOffset; offset > 0; offset >>= 1) {
       vshared[lane] = vshared[lane] + vshared[lane + offset];
     }
@@ -148,11 +147,12 @@ __global__ void sumOfSquaredOmittingBitReductionKernel(const ScalarType* dArr,
   // unsigned tid = threadIdx.x;
   __shared__ ScalarType shared[blockSize];
   const unsigned tid = threadIdx.x;
-  const int lane         = threadIdx.x & (kWarpSize - 1);
-  const int warpId       = threadIdx.x >> kWarpBits;
+  const int lane = threadIdx.x & (kWarpSize - 1);
+  const int warpId = threadIdx.x >> kWarpBits;
   const int warpsInBlock = blockDim.x >> kWarpBits;
   // Guard in case a generic kernel is re-used with a small block
-  if (warpId >= warpsInBlock) return;
+  if (warpId >= warpsInBlock)
+    return;
   unsigned bid = blockIdx.x;
 
   size_t i0 = (2ULL * bid) * blockSize + tid;
@@ -197,7 +197,7 @@ __global__ void sumOfSquaredOmittingBitReductionKernel(const ScalarType* dArr,
     volatile ScalarType* vshared = shared;
     constexpr int firstOffset =
         (blockSize >= 2 * kWarpSize) ? kWarpSize : (kWarpSize >> 1);
-    #pragma unroll
+#pragma unroll
     for (int offset = firstOffset; offset > 0; offset >>= 1) {
       vshared[lane] = vshared[lane] + vshared[lane + offset];
     }

@@ -217,7 +217,7 @@ struct Args {
   // std::string qasmFile = "../examples/qft/qft-16-cp.qasm";
   // std::string qasmFile = "../examples/rqc/q12_189_128.qasm";
   // std::string qasmFile = "../examples/rqc/q20_592_427.qasm";
-  std::string qasmFile  = "../examples/rqc/q28_442_300.qasm";
+  std::string qasmFile  = "../analysis/examples/rqc/q28_442_300.qasm";
   // std::string qasmFile = "../examples/rqc/q30_521_379.qasm";
   // std::string qasmFile  = "../examples/rqc/q30_4299_3272.qasm";
   std::string graphName = "testCircuit";

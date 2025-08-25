@@ -1,8 +1,8 @@
 #ifndef CAST_CUDA_CUDAFUSIONCONFIG_H
 #define CAST_CUDA_CUDAFUSIONCONFIG_H
 
-#include "cast/Core/FusionConfig.h"
 #include "cast/CUDA/CUDACostModel.h"
+#include "cast/Core/FusionConfig.h"
 #include "llvm/Support/Casting.h"
 #include <memory>
 
@@ -10,9 +10,10 @@ namespace cast {
 
 class CUDAFusionConfig : public FusionConfig {
 public:
-  CUDAFusionConfig(std::unique_ptr<CUDACostModel> cudaCostModel,
-                   int blockSize = -1,                       // -1 means not set
-                   Precision precision = Precision::Unknown) // Unknown means not set
+  CUDAFusionConfig(
+      std::unique_ptr<CUDACostModel> cudaCostModel,
+      int blockSize = -1,                       // -1 means not set
+      Precision precision = Precision::Unknown) // Unknown means not set
       : FusionConfig(FC_CUDA) {
     this->costModel = std::move(cudaCostModel);
     setBlockSize(blockSize);
@@ -21,13 +22,15 @@ public:
 
   void setBlockSize(int bs) {
     if (auto* cm = llvm::dyn_cast<CUDACostModel>(costModel.get())) {
-      if (bs > 0) cm->setQueryBlockSize(bs);
+      if (bs > 0)
+        cm->setQueryBlockSize(bs);
     }
   }
 
   void setPrecision(Precision p) {
     if (auto* cm = llvm::dyn_cast<CUDACostModel>(costModel.get())) {
-      if (p != Precision::Unknown) cm->setQueryPrecision(p);
+      if (p != Precision::Unknown)
+        cm->setQueryPrecision(p);
     }
   }
 

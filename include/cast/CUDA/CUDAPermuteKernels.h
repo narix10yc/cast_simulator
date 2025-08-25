@@ -1,8 +1,10 @@
-#pragma once
+#ifndef CAST_CUDA_CUDAPERMUTEKERNELS_H
+#define CAST_CUDA_CUDAPERMUTEKERNELS_H
+
+#include "cast/CUDA/CUDALaunchPlan.h"
+#include "cast/CUDA/CUDALayout.h"
 #include <cstdint>
 #include <span>
-#include "cast/CUDA/CUDALayout.h"
-#include "cast/CUDA/CUDALaunchPlan.h"
 
 namespace cast {
 void applyPermutationOnGPU(void* svReIm,
@@ -11,3 +13,5 @@ void applyPermutationOnGPU(void* svReIm,
                            size_t sizeofScalar,
                            cudaStream_t stream);
 }
+
+#endif // CAST_CUDA_CUDAPERMUTEKERNELS_H

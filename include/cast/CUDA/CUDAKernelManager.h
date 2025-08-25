@@ -14,16 +14,15 @@
 #include <span>
 
 // TODO: We may not need cuda_runtime (also no need to link CUDA::cudart)
+#include <algorithm>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <map>
+#include <memory>
 #include <numeric>
 #include <string>
-#include <vector>
-#include <memory>
-#include <map>
 #include <unordered_map>
-#include <algorithm>
-
+#include <vector>
 
 namespace cast {
 
@@ -46,21 +45,27 @@ struct BitLayout {
   void setLSB(const std::vector<int>& Q, int nSys) {
     const int k = (int)Q.size();
     // non-target logicals, in ascending old physical order
-    std::vector<std::pair<int,int>> others; others.reserve(nSys-k);
+    std::vector<std::pair<int, int>> others;
+    others.reserve(nSys - k);
     std::vector<char> isTarget(nSys, 0);
-    for (int b = 0; b < k; ++b) isTarget[Q[b]] = 1;
-    for (int l = 0; l < nSys; ++l) if (!isTarget[l])
-      others.emplace_back(phys_of_log[l], l);
+    for (int b = 0; b < k; ++b)
+      isTarget[Q[b]] = 1;
+    for (int l = 0; l < nSys; ++l)
+      if (!isTarget[l])
+        others.emplace_back(phys_of_log[l], l);
     std::sort(others.begin(), others.end()); // by old phys pos
 
     // write new phys_of_log
-    for (int b = 0; b < k; ++b)        phys_of_log[Q[b]] = b;
+    for (int b = 0; b < k; ++b)
+      phys_of_log[Q[b]] = b;
     for (int i = 0; i < (int)others.size(); ++i)
       phys_of_log[others[i].second] = k + i;
 
     // rebuild inverse
-    for (int p = 0; p < nSys; ++p) log_of_phys[p] = -1;
-    for (int l = 0; l < nSys; ++l) log_of_phys[phys_of_log[l]] = l;
+    for (int p = 0; p < nSys; ++p)
+      log_of_phys[p] = -1;
+    for (int l = 0; l < nSys; ++l)
+      log_of_phys[phys_of_log[l]] = l;
   }
 };
 
@@ -69,22 +74,28 @@ struct KernelKey {
   Precision prec;
   CUDAMatrixLoadMode load;
   bool assumeContiguous;
-  uint64_t matHash;  // 0 for runtime-loaded matrices; hash for immediate path
+  uint64_t matHash; // 0 for runtime-loaded matrices; hash for immediate path
   bool operator==(const KernelKey&) const = default;
 };
 struct KernelKeyHash {
   size_t operator()(const KernelKey& k) const {
     // cheap hash; feel free to xxhash
     size_t h = 1469598103934665603ull;
-    auto mix=[&](uint64_t v){ h ^= v; h *= 1099511628211ull; };
-    mix(k.k); mix((uint64_t)k.prec); mix((uint64_t)k.load);
-    mix(k.assumeContiguous); mix(k.matHash);
+    auto mix = [&](uint64_t v) {
+      h ^= v;
+      h *= 1099511628211ull;
+    };
+    mix(k.k);
+    mix((uint64_t)k.prec);
+    mix((uint64_t)k.load);
+    mix(k.assumeContiguous);
+    mix(k.matHash);
     return h;
   }
 };
 struct KernelInfoCompiled {
   llvm::Function* fn = nullptr;
-  std::string llvmFuncName;  // for launch lookup
+  std::string llvmFuncName; // for launch lookup
 };
 
 struct CUDAKernelInfo {
@@ -150,8 +161,8 @@ struct CUDAKernelGenConfig {
 class CUDAKernelManager : public KernelManagerBase {
   using KernelInfoPtr = std::unique_ptr<CUDAKernelInfo>;
   struct KernelPair {
-    KernelInfoPtr lsb;  // assumeContiguousTargets = true
-    KernelInfoPtr gen;  // assumeContiguousTargets = false
+    KernelInfoPtr lsb; // assumeContiguousTargets = true
+    KernelInfoPtr gen; // assumeContiguousTargets = false
   };
   std::vector<KernelInfoPtr> standaloneKernels_;
   std::map<std::string, std::vector<KernelInfoPtr>> graphKernels_;
@@ -216,35 +227,39 @@ public:
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
   ~CUDAKernelManager() {
-  #ifdef CAST_USE_CUDA
+#ifdef CAST_USE_CUDA
     auto unload = [&](CUDAKernelInfo* k) {
       if (k && k->cuTuple.cuModule) {
         cuModuleUnload(k->cuTuple.cuModule);
       }
     };
     if (!orderedKernels_.empty()) {
-      for (auto* k : orderedKernels_) unload(k);
+      for (auto* k : orderedKernels_)
+        unload(k);
     } else {
-      for (auto& k : standaloneKernels_) unload(k.get());
+      for (auto& k : standaloneKernels_)
+        unload(k.get());
       for (auto& kv : graphKernels_) {
-        for (auto& k : kv.second) unload(k.get());
+        for (auto& k : kv.second)
+          unload(k.get());
       }
     }
     for (auto& ctx : cuContexts) {
-      if (ctx) cuCtxDestroy(ctx);
+      if (ctx)
+        cuCtxDestroy(ctx);
     }
-  #else
+#else
     for (auto& ctx : cuContexts) {
-      if (ctx) cuCtxDestroy(ctx);
+      if (ctx)
+        cuCtxDestroy(ctx);
     }
-  #endif
+#endif
   }
 
   /// @brief Initialize CUDA JIT session by loading PTX strings into CUDA
   /// context and module. This function can only be called once and cannot be
   /// undone. This function assumes \c emitPTX is already called.
   void initCUJIT(int nThreads = 1, int verbose = 0);
-
 
   /* Get Kernels */
 
@@ -263,7 +278,6 @@ public:
     return std::span<const KernelInfoPtr>(it->second);
   }
 
-
   ///
   void launchCUDAKernel(void* dData,
                         int nQubits,
@@ -275,14 +289,16 @@ public:
                              const CUDAKernelInfo& kernelInfo,
                              void* dMatPtr,
                              int blockSize = 64);
+                             
   std::vector<CUDAKernelInfo*> orderedKernels_;
+
   void rebuildOrderedKernelIndex_();
-  KernelInfoCompiled getOrBuildKernel_(
-    const CUDAKernelGenConfig& baseCfg,
-    const ComplexSquareMatrix& M,
-    llvm::ArrayRef<int> qubits,
-    bool assumeContiguous,
-    const std::string& nameHint);
+
+  KernelInfoCompiled getOrBuildKernel_(const CUDAKernelGenConfig& baseCfg,
+                                       const ComplexSquareMatrix& M,
+                                       llvm::ArrayRef<int> qubits,
+                                       bool assumeContiguous,
+                                       const std::string& nameHint);
 };
 
 } // namespace cast

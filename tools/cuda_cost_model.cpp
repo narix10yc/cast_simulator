@@ -1,13 +1,13 @@
-#include "cast/CUDA/CUDAKernelManager.h"
 #include "cast/CUDA/CUDACostModel.h"
+#include "cast/CUDA/CUDAKernelManager.h"
 
 #include "utils/iocolor.h"
 #include "llvm/Support/CommandLine.h"
 
 #include <cuda_runtime.h>
 #include <fstream>
-#include <set>
 #include <iostream>
+#include <set>
 #include <string>
 
 namespace cl = llvm::cl;
@@ -23,28 +23,27 @@ cl::opt<bool>
 
 cl::opt<int> ArgNQubits("nqubits", cl::desc("Number of qubits"), cl::init(28));
 
-cl::opt<int>
-    ArgBlockSize("block-size",
-                 cl::desc("CUDA block size (power of two ≤ 1024)"),
-                 cl::init(256));
+cl::opt<int> ArgBlockSize("block-size",
+                          cl::desc("CUDA block size (power of two ≤ 1024)"),
+                          cl::init(256));
 
-cl::opt<int>
-    ArgWorkerThreads("worker-threads",
-                     cl::desc("CPU threads used for JIT compilation (if applicable)"),
-                     cl::init(0));
+cl::opt<int> ArgWorkerThreads(
+    "worker-threads",
+    cl::desc("CPU threads used for JIT compilation (if applicable)"),
+    cl::init(0));
 
-cl::opt<int>
-    ArgNTests("N", cl::desc("Number of benchmarked kernels"),
-              cl::Prefix, cl::Required);
+cl::opt<int> ArgNTests("N",
+                       cl::desc("Number of benchmarked kernels"),
+                       cl::Prefix,
+                       cl::Required);
 
-cl::opt<bool>
-    ArgF32("f32", cl::desc("Enable single-precision (f32) kernels"),
-           cl::init(false));
+cl::opt<bool> ArgF32("f32",
+                     cl::desc("Enable single-precision (f32) kernels"),
+                     cl::init(false));
 
-cl::opt<bool>
-    ArgF64("f64", cl::desc("Enable double-precision (f64) kernels"),
-           cl::init(true));
-
+cl::opt<bool> ArgF64("f64",
+                     cl::desc("Enable double-precision (f64) kernels"),
+                     cl::init(true));
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -57,7 +56,7 @@ static bool validateBlockSize(int blk) {
   return true;
 }
 
-static void ensureCsvHeader(std::ofstream &ofs) {
+static void ensureCsvHeader(std::ofstream& ofs) {
   ofs << CUDAPerformanceCache::Item::CSV_TITLE << '\n';
 }
 
@@ -68,32 +67,28 @@ static CUDADeviceInfo getDeviceInfo(int device, bool verbose) {
   cudaDeviceProp props{};
   cudaError_t st = cudaGetDeviceProperties(&props, device);
   if (st != cudaSuccess) {
-    std::cerr << BOLDRED("[Error]: ")
-              << "cudaGetDeviceProperties(" << device << ") failed: "
-              << cudaGetErrorString(st) << "\n";
+    std::cerr << BOLDRED("[Error]: ") << "cudaGetDeviceProperties(" << device
+              << ") failed: " << cudaGetErrorString(st) << "\n";
     // Provide safe fallbacks to avoid UB
-    dev.warpSize       = 32;
-    dev.maxThreadsPerSM= 2048;
-    dev.smCount        = 1;
+    dev.warpSize = 32;
+    dev.maxThreadsPerSM = 2048;
+    dev.smCount = 1;
     return dev;
   }
 
-  dev.warpSize        = props.warpSize;
+  dev.warpSize = props.warpSize;
   dev.maxThreadsPerSM = props.maxThreadsPerMultiProcessor;
-  dev.smCount         = props.multiProcessorCount;
+  dev.smCount = props.multiProcessorCount;
 
   if (verbose) {
-    std::cerr << BOLDCYAN("[Info]: ")
-              << "GPU " << device << " = " << props.name
-              << " | SMs=" << dev.smCount
-              << " | warp=" << dev.warpSize
+    std::cerr << BOLDCYAN("[Info]: ") << "GPU " << device << " = " << props.name
+              << " | SMs=" << dev.smCount << " | warp=" << dev.warpSize
               << " | maxThreads/SM=" << dev.maxThreadsPerSM << "\n";
   }
   return dev;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char** argv) {
   cl::ParseCommandLineOptions(argc, argv);
 
   if (!validateBlockSize(ArgBlockSize))
@@ -109,8 +104,8 @@ int main(int argc, char **argv)
 
   inFile.open(ArgOutputFilename, std::ios::in);
   if (!outFile || !inFile) {
-    std::cerr << BOLDRED("[Error]: ")
-              << "Unable to open '" << ArgOutputFilename << "'.\n";
+    std::cerr << BOLDRED("[Error]: ") << "Unable to open '" << ArgOutputFilename
+              << "'.\n";
     return 1;
   }
   if (inFile.peek() == std::ifstream::traits_type::eof())
@@ -124,34 +119,37 @@ int main(int argc, char **argv)
   CUDADeviceInfo dev = getDeviceInfo(devId, verboseDevice);
 
   CUDAPerformanceCache cache;
-  CUDAKernelGenConfig  cfg;
+  CUDAKernelGenConfig cfg;
   cfg.blockSize = ArgBlockSize;
 
-  std::cerr << BOLDCYAN("[Info]: ")
-            << "Benchmarking " << ArgNTests << " kernels on "
-            << ArgNQubits << " qubits – block " << ArgBlockSize
-            << ", worker threads " << ArgWorkerThreads << ".\n";
+  std::cerr << BOLDCYAN("[Info]: ") << "Benchmarking " << ArgNTests
+            << " kernels on " << ArgNQubits << " qubits – block "
+            << ArgBlockSize << ", worker threads " << ArgWorkerThreads << ".\n";
 
   // Each precision is measured independently and appended to the CSV
   if (ArgF32) {
     std::cerr << BOLDCYAN("[Info]: ") << "  • Single precision (f32)\n";
     cfg.precision = Precision::F32;
-    cache.runExperiments(cfg, dev,
-                         ArgNQubits, ArgNTests,
+    cache.runExperiments(cfg,
+                         dev,
+                         ArgNQubits,
+                         ArgNTests,
                          /*verbose=*/1);
   }
   if (ArgF64) {
     std::cerr << BOLDCYAN("[Info]: ") << "  • Double precision (f64)\n";
     cfg.precision = Precision::F64;
-    cache.runExperiments(cfg, dev,
-                         ArgNQubits, ArgNTests,
+    cache.runExperiments(cfg,
+                         dev,
+                         ArgNQubits,
+                         ArgNTests,
                          /*verbose=*/1);
   }
 
   cache.writeResults(outFile);
   outFile.close();
 
-  std::cerr << BOLDCYAN("[Info]: ")
-            << "Results appended to '" << ArgOutputFilename << "'.\n";
+  std::cerr << BOLDCYAN("[Info]: ") << "Results appended to '"
+            << ArgOutputFilename << "'.\n";
   return 0;
 }

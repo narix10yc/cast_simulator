@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CAST_CUDA_CUDAWARPCONFIG_H
+#define CAST_CUDA_CUDAWARPCONFIG_H
 
 #ifdef CAST_USE_CUDA
   static constexpr int kWarpSize = 32;
@@ -10,3 +11,5 @@
   # define GPU_BACKEND_CUDA 1
   #endif
 #endif
+
+#endif // CAST_CUDA_CUDAWARPCONFIG_H

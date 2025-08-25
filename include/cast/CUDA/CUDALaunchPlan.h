@@ -1,4 +1,6 @@
-#pragma once
+#ifndef CAST_CUDA_CUDALAUNCHPLAN_H
+#define CAST_CUDA_CUDALAUNCHPLAN_H
+
 #include <vector>
 #include <span>
 #include <array>
@@ -43,3 +45,5 @@ struct Plan {
 };
 
 } // namespace cast
+
+#endif // CAST_CUDA_CUDALAUNCHPLAN_H
