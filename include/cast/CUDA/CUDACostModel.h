@@ -8,25 +8,60 @@
 #include "cast/Core/CostModel.h"
 #include "cast/Core/Precision.h"
 #include "cast/Core/QuantumGate.h"
+#include "utils/CSVParsable.h"
 #include "llvm/Passes/OptimizationLevel.h"
 
 #include <map>
-#include <memory>
 #include <ostream>
-#include <string>
 #include <utility>
-#include <vector>
 
 namespace cast {
-
-enum class CUDAVariant : int { Global = 0, SmemTranspose = 1 };
-enum class CUDAComputePath : int { ScalarALU = 0, TensorCore = 1 };
 
 enum class AccessPattern : int {
   Contiguous = 0, // low min-qubit index
   Semi = 1,
-  Strided = 2 // high min-qubit index
+  Strided = 2, // high min-qubit index
+  Unknown = -1
 };
+
+} // namespace cast
+
+namespace utils {
+
+template <> struct CSVField<cast::AccessPattern> {
+  static void parse(std::string_view token, cast::AccessPattern& field) {
+    if (token == "contiguous")
+      field = cast::AccessPattern::Contiguous;
+    else if (token == "semi")
+      field = cast::AccessPattern::Semi;
+    else if (token == "strided")
+      field = cast::AccessPattern::Strided;
+    else
+      field = cast::AccessPattern::Unknown;
+  }
+
+  static void write(std::ostream& os, const cast::AccessPattern& value) {
+    switch (value) {
+    case cast::AccessPattern::Contiguous:
+      os << "contiguous";
+      break;
+    case cast::AccessPattern::Semi:
+      os << "semi";
+      break;
+    case cast::AccessPattern::Strided:
+      os << "strided";
+      break;
+    case cast::AccessPattern::Unknown:
+    default:
+      os << "unknown";
+      break;
+    }
+  }
+};
+
+} // namespace utils
+
+namespace cast {
 
 struct CUDADeviceInfo {
   int device = 0;
@@ -36,21 +71,19 @@ struct CUDADeviceInfo {
 };
 
 struct CUDAPerformanceCache {
-  struct Item {
+  struct Item : utils::CSVParsable<Item> {
     // gate/kernel shape
     int nQubitsGate = 0; // k
-    int opCount = 0;     // opCount(k)
+    double opCount = 0.0;
     Precision precision = Precision::Unknown;
-    CUDAVariant variant = CUDAVariant::Global;
-    CUDAComputePath path = CUDAComputePath::ScalarALU;
     AccessPattern pattern = AccessPattern::Contiguous;
 
     // launch & resources (for information / occupancy curves)
-    dim3 gridDim = dim3(0, 0, 0);
-    dim3 blockDim = dim3(0, 0, 0);
+    int gridX, gridY, gridZ;
+    int blockX, blockY, blockZ;
     int regsPerThread = 0;
     int smemPerBlock = 0;   // bytes
-    double occupancy = 0.0; // 0..1
+    double occupancy = 0.0; // [0.0, 1.0]
 
     // measured & derived perf
     double time_s = 0.0;      // best-of-N seconds
@@ -59,14 +92,14 @@ struct CUDAPerformanceCache {
     double Bach_GBs = 0.0;    // bytes/time (GB/s, decimal)
     double Pach_GFLOPs = 0.0; // flops/time (GF/s)
 
-    // CSV header (optional; used if you dump results)
-    static constexpr const char* CSV_TITLE =
-        "k,opCount,precision,variant,path,pattern,gridX,gridY,gridZ,blockX,"
-        "blockY,blockZ,"
-        "regsPerThread,smemPerBlock,occupancy,time_s,bytes,flops,Bach_GBs,Pach_"
-        "GFLOPs";
-
-    void write(std::ostream& os) const;
+    // clang-format off
+    CSV_DATA_FIELD(nQubitsGate, opCount, precision, pattern,
+                   gridX, gridY, gridZ,
+                   blockX, blockY, blockZ,
+                   regsPerThread,
+                   smemPerBlock, occupancy, time_s, bytes, flops, Bach_GBs,
+                   Pach_GFLOPs);
+    // clang-format on
   };
 
   std::vector<Item> items;
@@ -88,8 +121,7 @@ struct CUDAPerformanceCache {
   void writeResults(std::ostream& os) const;
 };
 
-// ----------------------------- query & model
-// ----------------------------------
+// ----------------------------- query & model -----------------------------
 struct CUDACostQuery {
   int nQubits = 0;
   Precision precision = Precision::Unknown;
@@ -129,7 +161,7 @@ public:
   double computeTime(const QuantumGate* gate, const CUDACostQuery& q) const;
 
   // --------- Backward-compat API (used by existing passes) ----------
-  // seconds per GiB (binary) for this gate shape (roofline-based)
+  // seconds per GiB memory for this gate shape (roofline-based)
   double computeGiBTime(const QuantumGate* gate) const override;
 
   // very-cheap predictor (kept for compatibility; uses anchor scaling)
@@ -162,9 +194,12 @@ public:
 private:
   // calibration fit
   void fitFromCache();
+
   static double interpLUT(const std::vector<std::pair<double, double>>& lut,
                           double x);
+
   static AccessPattern classifyPattern(const QuantumGate* g);
+
   static double estimateBytes(int nQubits,
                               Precision p,
                               double coverage,
@@ -178,8 +213,8 @@ private:
   double zeroTol_;
 
   // fitted params
-  std::map<std::pair<Precision, CUDAVariant>, double> B_peak_GBs_;
-  std::map<std::pair<Precision, CUDAComputePath>, double> F_peak_GFLOPs_;
+  std::map<Precision, double> B_peak_GBs_;
+  std::map<Precision, double> F_peak_GFLOPs_;
   std::map<AccessPattern, double> f_coal_;
   std::vector<std::pair<double, double>> gB_lut_, gF_lut_;
   double t_launch_s_ = 3e-6;

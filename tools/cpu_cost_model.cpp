@@ -5,6 +5,7 @@
 #include "llvm/Support/CommandLine.h"
 
 #include <fstream>
+
 namespace cl = llvm::cl;
 using namespace cast;
 
@@ -46,7 +47,8 @@ ArgNTests("N", cl::cat(ArgCategory),
 
 // clang-format on
 
-void unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
+static void
+unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
   nQubits = ArgNQubits;
   if (ArgNThreads <= 0)
     nThreads = cast::get_cpu_num_threads();

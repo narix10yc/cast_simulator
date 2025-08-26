@@ -3,13 +3,14 @@
 #define UTILS_CSVPARSABLE_H
 
 #include <array>
+#include <cassert>
 #include <iostream>
 #include <sstream>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <variant>
 #include <vector>
-#include <cassert>
 
 namespace utils {
 // -------------------- CSVField Protocol --------------------

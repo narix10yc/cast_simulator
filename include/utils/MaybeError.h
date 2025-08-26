@@ -1,7 +1,6 @@
 #ifndef UTILS_MAYBE_ERROR_H
 #define UTILS_MAYBE_ERROR_H
 
-#include "llvm/Support/ErrorOr.h"
 #include <string>
 
 namespace cast {

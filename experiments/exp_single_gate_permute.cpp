@@ -196,60 +196,68 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
 
 #ifdef CAST_USE_CUDA
 #include "cast/CUDA/CUDAKernelManager.h"
-#include "cast/CUDA/CUDAStatevector.h"
 #include "cast/CUDA/CUDAPermute.h"
+#include "cast/CUDA/CUDAStatevector.h"
 #include <algorithm>
 #include <numeric>
 
-static inline void set_layout_LSB(cast::BitLayout& layout,
-                                  const std::vector<int>& Q,
-                                  int nSys) {
+static inline void
+set_layout_LSB(cast::BitLayout& layout, const std::vector<int>& Q, int nSys) {
   const int k = (int)Q.size();
   std::vector<char> isTarget(nSys, 0);
-  for (int b = 0; b < k; ++b) isTarget[Q[b]] = 1;
+  for (int b = 0; b < k; ++b)
+    isTarget[Q[b]] = 1;
 
   // non-targets in ascending old physical order
-  std::vector<std::pair<int,int>> others;
+  std::vector<std::pair<int, int>> others;
   others.reserve(nSys - k);
   for (int l = 0; l < nSys; ++l)
-    if (!isTarget[l]) others.emplace_back(layout.phys_of_log[l], l);
+    if (!isTarget[l])
+      others.emplace_back(layout.phys_of_log[l], l);
   std::sort(others.begin(), others.end());
 
-  for (int b = 0; b < k; ++b) layout.phys_of_log[Q[b]] = b;
+  for (int b = 0; b < k; ++b)
+    layout.phys_of_log[Q[b]] = b;
   for (int i = 0; i < (int)others.size(); ++i)
     layout.phys_of_log[others[i].second] = k + i;
 
-  for (int p = 0; p < nSys; ++p) layout.log_of_phys[p] = -1;
-  for (int l = 0; l < nSys; ++l) layout.log_of_phys[layout.phys_of_log[l]] = l;
+  for (int p = 0; p < nSys; ++p)
+    layout.log_of_phys[p] = -1;
+  for (int l = 0; l < nSys; ++l)
+    layout.log_of_phys[layout.phys_of_log[l]] = l;
 }
 
-template<typename ScalarType>
-static inline void permute_to_LSBs_if_needed(
-    ScalarType*& dCurrent,
-    ScalarType*  dScratch,
-    int          nSys,
-    const std::vector<int>& logicalQubits,
-    cast::BitLayout& layout,
-    cudaStream_t stream = 0)
-{
+template <typename ScalarType>
+static inline void
+permute_to_LSBs_if_needed(ScalarType*& dCurrent,
+                          ScalarType* dScratch,
+                          int nSys,
+                          const std::vector<int>& logicalQubits,
+                          cast::BitLayout& layout,
+                          cudaStream_t stream = 0) {
   const int k = (int)logicalQubits.size();
-  if (k == 0) return;
+  if (k == 0)
+    return;
 
   bool lsbOK = true;
   for (int b = 0; b < k; ++b)
-    if (layout.phys_of_log[logicalQubits[b]] != b) { lsbOK = false; break; }
-  if (lsbOK) return;
+    if (layout.phys_of_log[logicalQubits[b]] != b) {
+      lsbOK = false;
+      break;
+    }
+  if (lsbOK)
+    return;
 
   uint64_t maskLow = 0;
   for (int b = 0; b < k; ++b)
     maskLow |= (1ull << layout.phys_of_log[logicalQubits[b]]);
 
-  cast_permute_lowbits<ScalarType>(dCurrent, dScratch, nSys, maskLow, k, stream);
+  cast_permute_lowbits<ScalarType>(
+      dCurrent, dScratch, nSys, maskLow, k, stream);
   std::swap(dCurrent, dScratch);
 
   set_layout_LSB(layout, logicalQubits, nSys);
 }
-
 
 template <typename ScalarType>
 static void cuda_benchmark(const std::vector<GateType>& gateTypes,
@@ -257,7 +265,7 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   static_assert(std::is_same_v<ScalarType, float> ||
                     std::is_same_v<ScalarType, double>,
                 "ScalarType must be either float or double");
-  
+
   CUDAKernelManager kernelMgr;
   CUDAKernelGenConfig kernelGenConfig;
   kernelGenConfig.precision =
@@ -273,8 +281,7 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   for (int i = 0; i < gates.size(); ++i) {
     const auto& gate = gates[i];
     std::string funcName = "gate_" + std::to_string(i);
-    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName)
-        .consumeError(); // ignore possible error
+    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName).consumeError();
   }
 
   // Initialize JIT engine
@@ -296,11 +303,11 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   ScalarType* dScratch = nullptr;
   {
     const uint64_t nComplex = 1ull << NUM_QUBITS;
-    const size_t   nScalars = size_t(2) * nComplex;
+    const size_t nScalars = size_t(2) * nComplex;
     cudaMalloc(&dScratch, nScalars * sizeof(ScalarType));
   }
 
-  timeit::Timer timer(/*replication*/3, /*verbose*/0);
+  timeit::Timer timer(/*replication*/ 3, /*verbose*/ 0);
   timeit::TimingResult tr;
 
   int gateIndex = 0;
@@ -317,9 +324,9 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
       for (auto* kernelInfo : kernels) {
         const auto& Q = kernelInfo->gate->qubits();
         permute_to_LSBs_if_needed<ScalarType>(
-            dCurrent, dScratch, sv.nQubits(), Q, layout, /*stream*/0);
-        kernelMgr.launchCUDAKernel(static_cast<void*>(dCurrent),
-                                   sv.nQubits(), *kernelInfo);
+            dCurrent, dScratch, sv.nQubits(), Q, layout, /*stream*/ 0);
+        kernelMgr.launchCUDAKernel(
+            static_cast<void*>(dCurrent), sv.nQubits(), *kernelInfo);
       }
       cudaDeviceSynchronize();
     });
@@ -333,6 +340,8 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
 }
 
 #endif // CAST_USE_CUDA
+
+static std::ostream& info() { return std::cerr << BOLDCYAN("[Info]: "); }
 
 int main(int argc, char** argv) {
   if (argc < 3) {
@@ -348,15 +357,14 @@ int main(int argc, char** argv) {
   }
   if (cpu_or_gpu == "GPU") {
 #ifdef CAST_USE_CUDA
-    std::cerr << BOLDCYAN("[Info]: ") << "Starting CUDA benchmark.\n";
+    info() << "Starting CUDA benchmark.\n";
     std::cerr << "System information:\n";
     cast::displayCUDA();
     std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3};
-    std::cerr << BOLDCYAN("[Info]: ") << "Using " << NUM_QUBITS << "-qubit "
-              << "statevectors\n";
-    std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
+    info() << "Using " << NUM_QUBITS << "-qubit " << "statevectors\n";
+    info() << "Starting single-precision test.\n";
     cuda_benchmark<float>(gateTypes, argv[2]);
-    std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
+    info() << "Starting double-precision test.\n";
     cuda_benchmark<double>(gateTypes, argv[2]);
     return 0;
 #else
@@ -366,21 +374,20 @@ int main(int argc, char** argv) {
 #endif // CAST_USE_CUDA
   }
 
-  std::cerr << BOLDCYAN("[Info]: ")
-            << "Benchmarking CPU simulation speed of multi-qubit dense gates "
-            << "and multi-qubit Hadamard gates on CPU.\n";
-  std::cerr << BOLDCYAN("[Info]: ") << "Using " << NUM_QUBITS
-            << "-qubit statevector with " << NUM_THREADS << " threads.\n";
-  std::cerr << BOLDCYAN("[Info]: ") << "SIMD width is set to "
-            << static_cast<int>(SIMD_WIDTH) << " bits.\n";
+  info() << "Benchmarking CPU simulation speed of multi-qubit dense gates "
+         << "and multi-qubit Hadamard gates on CPU.\n";
+  info() << "Using " << NUM_QUBITS << "-qubit statevector with " << NUM_THREADS
+         << " threads.\n";
+  info() << "SIMD width is set to " << static_cast<int>(SIMD_WIDTH)
+         << " bits.\n";
 
-  std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
+  info() << "Starting single-precision test.\n";
   std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3};
 
   std::string deviceName(argv[2]);
   cpu_benchmark<float>(gateTypes, deviceName);
 
-  std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
+  info() << "Starting double-precision test.\n";
   cpu_benchmark<double>(gateTypes, deviceName);
   return 0;
 }

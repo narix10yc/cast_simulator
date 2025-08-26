@@ -14,7 +14,7 @@ extern "C" void cast_permute_lowbits_f32(const float* src,
                                          uint64_t maskLow,
                                          int k,
                                          cudaStream_t stream);
-                                         
+
 extern "C" void cast_permute_lowbits_f64(const double* src,
                                          double* dst,
                                          int nSys,

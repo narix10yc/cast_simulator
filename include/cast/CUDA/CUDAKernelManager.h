@@ -124,7 +124,7 @@ struct CUDAKernelInfo {
   std::string llvmFuncName;
   ConstQuantumGatePtr gate;
   CUDATuple cuTuple;
-  int opCount;
+  double opCount;
   unsigned regsPerThread = 32;
   bool oneThreadPerBlock = false;
   unsigned tileSize = 0;
@@ -183,6 +183,7 @@ class CUDAKernelManager : public KernelManagerBase {
   MaybeError<KernelInfoPtr> genCUDAGate_(const CUDAKernelGenConfig& config,
                                          ConstQuantumGatePtr gate,
                                          const std::string& funcName);
+                                         
   MaybeError<KernelPair> genCUDAGateVariants_(const CUDAKernelGenConfig& config,
                                               ConstQuantumGatePtr gate,
                                               const std::string& baseName);

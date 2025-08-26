@@ -115,6 +115,41 @@ static void createGates(std::vector<QuantumGatePtr>& gates, GateType gateType) {
     }
     break;
   }
+  case U4: {
+    for (int q = 0; q < NUM_QUBITS; ++q)
+      gates.push_back(
+          StandardQuantumGate::RandomUnitary({q,
+                                              (q + 1) % NUM_QUBITS,
+                                              (q + 2) % NUM_QUBITS,
+                                              (q + 3) % NUM_QUBITS}));
+    break;
+  }
+  case H4: {
+    for (int q = 0; q < NUM_QUBITS; ++q) {
+      QuantumGatePtr gate = StandardQuantumGate::H(q);
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::H((q + 1) % NUM_QUBITS).get());
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::H((q + 2) % NUM_QUBITS).get());
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::H((q + 3) % NUM_QUBITS).get());
+      gates.push_back(gate);
+    }
+    break;
+  }
+  case S4: {
+    for (int q = 0; q < NUM_QUBITS; ++q) {
+      QuantumGatePtr gate = StandardQuantumGate::S(q);
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::S((q + 1) % NUM_QUBITS).get());
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::S((q + 2) % NUM_QUBITS).get());
+      gate = cast::matmul(gate.get(),
+                          StandardQuantumGate::S((q + 3) % NUM_QUBITS).get());
+      gates.push_back(gate);
+    }
+    break;
+  }
   default:
     std::cerr << BOLDRED("[Error]: ")
               << "Unknown gate type: " << static_cast<int>(gateType) << "\n";
@@ -222,8 +257,7 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   for (int i = 0; i < gates.size(); ++i) {
     const auto& gate = gates[i];
     std::string funcName = "gate_" + std::to_string(i);
-    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName)
-        .consumeError(); // ignore possible error
+    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName).consumeError();
   }
 
   // Initialize JIT engine
@@ -267,6 +301,8 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
 
 #endif // CAST_USE_CUDA
 
+static std::ostream& info() { return std::cerr << BOLDCYAN("[Info]: "); }
+
 int main(int argc, char** argv) {
   if (argc < 3) {
     std::cerr << BOLDRED("[Error]: ") << "Usage: " << argv[0]
@@ -279,17 +315,16 @@ int main(int argc, char** argv) {
               << ". Expected 'CPU' or 'GPU'.\n";
     return EXIT_FAILURE;
   }
+  std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3, U4, H4, S4};
   if (cpu_or_gpu == "GPU") {
 #ifdef CAST_USE_CUDA
-    std::cerr << BOLDCYAN("[Info]: ") << "Starting CUDA benchmark.\n";
+    info() << "Starting CUDA benchmark.\n";
     std::cerr << "System information:\n";
     cast::displayCUDA();
-    std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3};
-    std::cerr << BOLDCYAN("[Info]: ") << "Using " << NUM_QUBITS << "-qubit "
-              << "statevectors\n";
-    std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
+    info() << "Using " << NUM_QUBITS << "-qubit " << "statevectors\n";
+    info() << "Starting single-precision test.\n";
     cuda_benchmark<float>(gateTypes, argv[2]);
-    std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
+    info() << "Starting double-precision test.\n";
     cuda_benchmark<double>(gateTypes, argv[2]);
     return 0;
 #else
@@ -299,21 +334,19 @@ int main(int argc, char** argv) {
 #endif // CAST_USE_CUDA
   }
 
-  std::cerr << BOLDCYAN("[Info]: ")
-            << "Benchmarking CPU simulation speed of multi-qubit dense gates "
-            << "and multi-qubit Hadamard gates on CPU.\n";
-  std::cerr << BOLDCYAN("[Info]: ") << "Using " << NUM_QUBITS
-            << "-qubit statevector with " << NUM_THREADS << " threads.\n";
-  std::cerr << BOLDCYAN("[Info]: ") << "SIMD width is set to "
-            << static_cast<int>(SIMD_WIDTH) << " bits.\n";
+  info() << "Benchmarking CPU simulation speed of multi-qubit dense gates "
+         << "and multi-qubit Hadamard gates on CPU.\n";
+  info() << "Using " << NUM_QUBITS << "-qubit statevector with " << NUM_THREADS
+         << " threads.\n";
+  info() << "SIMD width is set to " << static_cast<int>(SIMD_WIDTH)
+         << " bits.\n";
 
-  std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
-  std::vector<GateType> gateTypes{U1, H1, S1, U3, H3, S3};
+  info() << "Starting single-precision test.\n";
 
   std::string deviceName(argv[2]);
   cpu_benchmark<float>(gateTypes, deviceName);
 
-  std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
+  info() << "Starting double-precision test.\n";
   cpu_benchmark<double>(gateTypes, deviceName);
   return 0;
 }

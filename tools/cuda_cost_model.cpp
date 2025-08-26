@@ -13,37 +13,50 @@
 namespace cl = llvm::cl;
 using namespace cast;
 
-cl::opt<std::string>
-    ArgOutputFilename("o", cl::desc("Output file name"), cl::Required);
+static cl::OptionCategory ArgCategory("CUDA Cost Model Options");
 
-cl::opt<bool>
-    ArgOverwriteMode("overwrite",
-                     cl::desc("Overwrite the output file with new results"),
-                     cl::init(false));
+// clang-format off
+static cl::opt<std::string>
+ArgOutputFilename("o", cl::cat(ArgCategory),
+    cl::desc("Output file name"),
+    cl::Required);
 
-cl::opt<int> ArgNQubits("nqubits", cl::desc("Number of qubits"), cl::init(28));
+static cl::opt<bool>
+ArgOverwriteMode("overwrite", cl::cat(ArgCategory),
+    cl::desc("Overwrite the output file with new results"),
+    cl::init(false));
 
-cl::opt<int> ArgBlockSize("block-size",
-                          cl::desc("CUDA block size (power of two ≤ 1024)"),
-                          cl::init(256));
+static cl::opt<int>
+ArgNQubits("nqubits", cl::cat(ArgCategory),
+    cl::desc("Number of qubits"), cl::init(28));
 
-cl::opt<int> ArgWorkerThreads(
-    "worker-threads",
+static cl::opt<int>
+ArgBlockSize("block-size", cl::cat(ArgCategory),
+    cl::desc("CUDA block size (power of two ≤ 1024)"),
+    cl::init(256));
+
+static cl::opt<int> 
+ArgWorkerThreads("worker-threads", cl::cat(ArgCategory),
     cl::desc("CPU threads used for JIT compilation (if applicable)"),
     cl::init(0));
 
-cl::opt<int> ArgNTests("N",
-                       cl::desc("Number of benchmarked kernels"),
-                       cl::Prefix,
-                       cl::Required);
+static cl::opt<int>
+ArgNTests("N", cl::cat(ArgCategory),
+    cl::desc("Number of benchmarked kernels"),
+    cl::Prefix,
+    cl::Required);
 
-cl::opt<bool> ArgF32("f32",
-                     cl::desc("Enable single-precision (f32) kernels"),
-                     cl::init(false));
+static cl::opt<bool>
+ArgF32("f32", cl::cat(ArgCategory),
+    cl::desc("Enable single-precision (f32) kernels"),
+    cl::init(false));
 
-cl::opt<bool> ArgF64("f64",
-                     cl::desc("Enable double-precision (f64) kernels"),
-                     cl::init(true));
+static cl::opt<bool>
+ArgF64("f64", cl::cat(ArgCategory),
+    cl::desc("Enable double-precision (f64) kernels"),
+    cl::init(true));
+
+// clang-format on
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -89,6 +102,7 @@ static CUDADeviceInfo getDeviceInfo(int device, bool verbose) {
 }
 
 int main(int argc, char** argv) {
+  cl::HideUnrelatedOptions({&ArgCategory});
   cl::ParseCommandLineOptions(argc, argv);
 
   if (!validateBlockSize(ArgBlockSize))
@@ -123,27 +137,19 @@ int main(int argc, char** argv) {
   cfg.blockSize = ArgBlockSize;
 
   std::cerr << BOLDCYAN("[Info]: ") << "Benchmarking " << ArgNTests
-            << " kernels on " << ArgNQubits << " qubits – block "
+            << " kernels on " << ArgNQubits << " qubits - block "
             << ArgBlockSize << ", worker threads " << ArgWorkerThreads << ".\n";
 
   // Each precision is measured independently and appended to the CSV
   if (ArgF32) {
     std::cerr << BOLDCYAN("[Info]: ") << "  • Single precision (f32)\n";
     cfg.precision = Precision::F32;
-    cache.runExperiments(cfg,
-                         dev,
-                         ArgNQubits,
-                         ArgNTests,
-                         /*verbose=*/1);
+    cache.runExperiments(cfg, dev, ArgNQubits, ArgNTests, 1);
   }
   if (ArgF64) {
     std::cerr << BOLDCYAN("[Info]: ") << "  • Double precision (f64)\n";
     cfg.precision = Precision::F64;
-    cache.runExperiments(cfg,
-                         dev,
-                         ArgNQubits,
-                         ArgNTests,
-                         /*verbose=*/1);
+    cache.runExperiments(cfg, dev, ArgNQubits, ArgNTests, 1);
   }
 
   cache.writeResults(outFile);

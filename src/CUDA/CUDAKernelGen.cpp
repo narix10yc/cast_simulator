@@ -886,7 +886,7 @@ static void genMatrixVectorMultiply_ImmRowPerLane(
   Module& M = *func->getParent();
   LLVMContext& CTX = B.getContext();
   const size_t elem = (config.precision == Precision::F32) ? 4 : 8;
-  const size_t bytesM = size_t(2) * N * N * elem;
+  // const size_t bytesM = size_t(2) * N * N * elem;
   const unsigned AS_M = 1;
   GlobalVariable* gMatImm = createGlobalMatrixArray_SharedTiledImm(
       M,
@@ -2068,7 +2068,7 @@ genMatrixVectorMultiply_InlineImm(IRBuilder<>& B,
 
 static void genMatrixVectorMultiply_InlineImm_LanePerCombo(
     IRBuilder<>& B,
-    const CUDAKernelGenConfig& cfg,
+    const CUDAKernelGenConfig& config,
     const ComplexSquareMatrix& matrix,
     const QuantumGate::TargetQubitsType& qLSB,
     const std::vector<IRMatDataCUDA>& matData,
@@ -2128,14 +2128,14 @@ static void genMatrixVectorMultiply_InlineImm_LanePerCombo(
   {
     Value* idx64 = B.CreateZExt(comboPhi, B.getInt64Ty());
     unsigned k = (unsigned)qLSB.size();
-    Value* base2 = cfg.assumeContiguousTargets
+    Value* base2 = config.assumeContiguousTargets
                        ? B.CreateShl(idx64, k + 1) // ×2 for (re,im)
                        : B.CreateShl(buildOffset(B, idx64, qLSB), 1);
     Value* svComboBase = B.CreateGEP(scalarTy, svRoot, base2, "sv.combo.base");
 
     // Reuse straight-line multiply on this combo:
     genMatrixVectorMultiply_InlineImm(
-        B, cfg, matrix, qLSB, matData, svComboBase, scalarTy);
+        B, config, matrix, qLSB, matData, svComboBase, scalarTy);
 
     B.CreateBr(cmbInc);
   }
@@ -2472,233 +2472,6 @@ getOrCreateConstMatGlobal(Module& M, Type* arrTy, StringRef globalName) {
 
 } // end of anonymous namespace
 
-// Function *CUDAKernelManager::gen_(
-//     const CUDAKernelGenConfig &config,
-//     const ComplexSquareMatrix &matrix,
-//     const QuantumGate::TargetQubitsType &qubits,
-//     const std::string &funcName
-// ) {
-//     const unsigned k  = qubits.size();
-//     const unsigned K  = 1ULL << k;
-//     const unsigned KK = K * K;
-
-//     CUDAKernelGenConfig cfg = config;
-//     // if (cfg.matrixLoadMode == CUDAMatrixLoadMode::UseMatImmValues && k <=
-//     3)
-//     //     cfg.matrixLoadMode = CUDAMatrixLoadMode::LoadInConstMemSpace;
-
-//     auto &llvmContextModulePair = createNewLLVMContextModulePair(funcName +
-//     "Module"); IRBuilder<> B(*llvmContextModulePair.llvmContext);
-
-//     assert(config.precision != Precision::Unknown);
-//     Type *scalarTy = (cfg.precision == Precision::F32) ? B.getFloatTy() :
-//     B.getDoubleTy();
-
-//     IRArgsCUDA args;
-//     auto *func = getFunctionDeclarationCUDA(
-//         B, *llvmContextModulePair.llvmModule, funcName, config, args
-//     );
-
-//     auto *entryBB = BasicBlock::Create(*llvmContextModulePair.llvmContext,
-//     "entry", func); B.SetInsertPoint(entryBB);
-
-//     Value *svPtrV;
-//     {
-//         // auto* counterV = helper_getBlockIdx(B);
-//         // auto* offset   = buildOffset(B, counterV, qubits);
-//         // auto* idxStartV =
-//         //     B.CreateShl(offset, 1, "twice.offset"); // x2 because (re,im)
-//         // svPtrV = B.CreateGEP(scalarTy, args.pSvArg, idxStartV, "sv.ptr");
-
-//         if (cfg.matrixLoadMode == CUDAMatrixLoadMode::UseMatImmValues &&
-//             cfg.assumeContiguousTargets) {
-//             // Compute combosIdx = ctaid.x / tilesPerGate (tilesPerGate is
-//             compile-time const here) const unsigned N = 1u << k; const
-//             unsigned TILE = std::min(256u, N); const unsigned tilesPerGate =
-//             (N + TILE - 1u) / TILE;
-
-//             auto *cta = B.CreateIntrinsic(B.getInt32Ty(),
-//             Intrinsic::nvvm_read_ptx_sreg_ctaid_x, {}); auto *combosIdx32 =
-//             B.CreateUDiv(cta, B.getInt32(tilesPerGate)); auto *combosIdx64 =
-//             B.CreateZExt(combosIdx32, B.getInt64Ty());
-
-//             // base2 = (combosIdx << k) * 2 == combosIdx << (k+1)
-//             auto *base2 = B.CreateShl(combosIdx64, k + 1, "base2");
-//             svPtrV = B.CreateGEP(scalarTy, args.pSvArg, base2, "sv.ptr");
-//         } else {
-//             const unsigned N = 1u << k;
-//             const unsigned TILE = std::min(256u, N);
-//             const unsigned tilesPerGate = (N + TILE - 1u) / TILE;
-
-//             auto *cta = B.CreateIntrinsic(B.getInt32Ty(),
-//             Intrinsic::nvvm_read_ptx_sreg_ctaid_x, {}); auto *combosIdx32 =
-//             B.CreateUDiv(cta, B.getInt32(tilesPerGate)); auto *combosIdx64 =
-//             B.CreateZExt(combosIdx32, B.getInt64Ty());
-
-//             auto *offset = buildOffset(B, combosIdx64, qubits);
-//             auto *idxStartV = B.CreateShl(offset, 1, "twice.offset"); // x2
-//             because (re,im) svPtrV = B.CreateGEP(scalarTy, args.pSvArg,
-//             idxStartV, "sv.ptr");
-//         }
-//     }
-//     svPtrV = args.pSvArg;
-
-//     auto matData = getMatDataCUDA(B, cfg, matrix, k);
-
-//     switch (cfg.matrixLoadMode) {
-//         // case CUDAMatrixLoadMode::UseMatImmValues: {
-//         //     // // heuristic: inline up to K<=16 (k<=4) for f32, K<=8
-//         (k<=3) for f64
-//         //     // const bool inlineOK =
-//         //     //     (cfg.precision == Precision::F32) ? (k <= 4) : (k <=
-//         3);
-//         //     // if (inlineOK) {
-//         //     //     genMatrixVectorMultiply_InlineImm(B, cfg, matrix,
-//         qubits, matData, svPtrV, scalarTy);
-//         //     //     func->addFnAttr("cast.kstyle", "imm-inline");
-//         //     // } else {
-//         //     //     genMatrixVectorMultiply_SharedTiled(B, cfg, matrix,
-//         qubits, matData, svPtrV, scalarTy);
-//         //     //     func->addFnAttr("cast.kstyle", "imm-shared");
-//         //     // }
-//         //     // break;
-
-//         //     std::vector<int> qLSB = qubits;
-//         //     if (cfg.assumeContiguousTargets) {
-//         //         qLSB.resize(k);
-//         //         std::iota(qLSB.begin(), qLSB.end(), 0);
-//         //     }
-
-//         //     const bool inlineOK = (cfg.precision == Precision::F32) ? (k
-//         <= 4) : (k <= 3);
-//         //     if (inlineOK) {
-//         //       genMatrixVectorMultiply_ImmRowPerLane(B, cfg, qLSB, matData,
-//         svPtrV, scalarTy);
-//         //       // genMatrixVectorMultiply_InlineImm(B, cfg, matrix, qLSB,
-//         matData, svPtrV, scalarTy);
-//         //       // func->addFnAttr("cast.kstyle", "imm-inline");
-//         //     } else {
-//         //         genMatrixVectorMultiply_SharedTiled(B, cfg, matrix, qLSB,
-//         matData, svPtrV, scalarTy);
-//         //         func->addFnAttr("cast.kstyle", "imm-shared");
-//         //         // genMatrixVectorMultiply_SharedTiled_WarpPerRow(B, cfg,
-//         matrix, qLSB, matData, svPtrV, scalarTy);
-//         //     }
-//         //     break;
-//         // }
-
-//         case CUDAMatrixLoadMode::UseMatImmValues: {
-//             std::vector<int> qLSB = qubits;
-//             if (cfg.assumeContiguousTargets) {
-//                 qLSB.resize(k);
-//                 std::iota(qLSB.begin(), qLSB.end(), 0); // {0..k-1}
-//             }
-//             // Heuristic: warp-per-row for small/medium K; shared-tiled for
-//             bigger K
-//             // const bool useWPR = (cfg.precision == Precision::F32) ? (k <=
-//             6) : (k <= 5);
-//             // if (useWPR) {
-//             //     genMatrixVectorMultiply_ImmRowPerLane(B, cfg, qLSB,
-//             matData, svPtrV, scalarTy);
-//             //     // The callee sets cast.kstyle="imm-shared-warp" +
-//             cast.warps
-//             // } else {
-//             //     genMatrixVectorMultiply_SharedTiled(B, cfg, matrix, qLSB,
-//             matData, svPtrV, scalarTy);
-//             //     func->addFnAttr("cast.kstyle", "imm-shared");
-//             // }
-//             const unsigned N = 1u << k;
-//             if ((cfg.precision == Precision::F32 ? (N <= 8) : (N <= 4))) {
-//                 // Tiny gates → straight-line inline path (best warp
-//                 efficiency and least CF) genMatrixVectorMultiply_InlineImm(B,
-//                 cfg, matrix, qLSB, matData, svPtrV, scalarTy);
-//                 func->addFnAttr("cast.kstyle", "imm-inline");
-//             } else if (N >= 32 && N <= 64) {
-//                 // Row-per-lane only when we have ≥1 full warp of rows
-//                 genMatrixVectorMultiply_ImmRowPerLane(B, cfg, qLSB, matData,
-//                 svPtrV, scalarTy);
-//                 // cast.kstyle set by callee
-//             } else {
-//                 // Mid/large → shared tiled
-//                 genMatrixVectorMultiply_SharedTiled(B, cfg, matrix, qLSB,
-//                 matData, svPtrV, scalarTy); func->addFnAttr("cast.kstyle",
-//                 "imm-shared");
-//             }
-//             break;
-//         }
-
-//         // case CUDAMatrixLoadMode::UseMatImmValues: {
-//         //     // TODO: why number of qubits here
-//         //     if (k < config.enableTilingGateSize) {
-//         //         genMatrixVectorMultiply(
-//         //             B, config, matrix, qubits, matData, svPtrV, scalarTy);
-//         //     } else {
-//         //         genMatrixVectorMultiply_SharedTiled(
-//         //             B, config, matrix, qubits, matData, svPtrV, scalarTy);
-//         //     }
-//         //     break;
-//         // }
-
-//         case CUDAMatrixLoadMode::LoadInDefaultMemSpace: {
-//             // This path loads matrix from pMatArg (args.pMatArg) in address
-//             space 1 Value *matBasePtr = args.pMatArg;
-
-//             // Cast from address space 0 to 1:
-//             matBasePtr = B.CreateAddrSpaceCast(
-//                 args.pMatArg,
-//                 PointerType::get(scalarTy, /*AS=*/1),
-//                 "matGlobalPtr"
-//             );
-
-//             // Generate the IR that loops over the matrix elements
-//             // (K*K complex elements) and loads from matBasePtr + offset
-//             if (k < config.enableTilingGateSize) {
-//                 genMatrixVectorMultiplyFromPointer(
-//                     B, config, matrix, qubits, matBasePtr, svPtrV, scalarTy
-//                 );
-//             } else {
-//                 genMatrixVectorMultiplyFromPointer_SharedTiled(
-//                     B, config, matrix, qubits, matBasePtr, svPtrV, scalarTy
-//                 );
-//             }
-//             break;
-//         }
-
-//         case CUDAMatrixLoadMode::LoadInConstMemSpace: {
-//             // This path loads the matrix from pointer in address space 4
-//             // (constant memory space)
-//             auto *arrTy = ArrayType::get(scalarTy, 2U * KK);
-//             auto *gConstMat = getOrCreateConstMatGlobal(
-//                 *llvmContextModulePair.llvmModule, arrTy, "gConstMatShared"
-//             );
-
-//             // Initialize with matrix values if available
-//             std::vector<Constant *> constElems;
-//             constElems.reserve(2U * KK);
-//             for (unsigned r = 0; r < K; ++r) {
-//                 for (unsigned c = 0; c < K; ++c) {
-//                     auto cplx = matrix.rc(r, c);
-//                     constElems.push_back(ConstantFP::get(scalarTy,
-//                     cplx.real()));
-//                     constElems.push_back(ConstantFP::get(scalarTy,
-//                     cplx.imag()));
-//                 }
-//             }
-//             gConstMat->setInitializer(ConstantArray::get(arrTy, constElems));
-
-//             genMatrixVectorMultiplyFromConst(
-//                 B, config, matrix, qubits, gConstMat, svPtrV, args.pMatArg,
-//                 scalarTy, matData
-//             );
-//             func->addFnAttr("cast.kstyle", "const-small");
-//             break;
-//         }
-//     }
-
-//     B.CreateRetVoid();
-//     // LLVM_DEBUG(func->dump());
-//     return func;
-// }
 
 cast::MaybeError<cast::CUDAKernelManager::KernelPair>
 CUDAKernelManager::genCUDAGateVariants_(const CUDAKernelGenConfig& config,
@@ -2706,7 +2479,7 @@ CUDAKernelManager::genCUDAGateVariants_(const CUDAKernelGenConfig& config,
                                         const std::string& baseName) {
   auto buildOne = [&](bool assumeContiguous,
                       const std::string& name) -> llvm::Function* {
-    CUDAKernelGenConfig cfg = config;
+    auto cfg = config;
     cfg.assumeContiguousTargets = assumeContiguous;
 
     llvm::Function* fn = nullptr;
@@ -2771,24 +2544,6 @@ CUDAKernelManager::genCUDAGateVariants_(const CUDAKernelGenConfig& config,
                                                CUDAKernelInfo::CUDATuple{},
                                                gate->opCount(config.zeroTol));
 
-    // if (f->hasFnAttribute("cast.kstyle")) {
-    //     auto style = f->getFnAttribute("cast.kstyle").getValueAsString();
-    //     // inline (or const-small) => 1 thread/block
-    //     if (style == "imm-inline" || style == "const-small") {
-    //         ki->oneThreadPerBlock = true;
-    //     }
-    //     // WPR shared => ask for small fixed #warps (default 4)
-    //     else if (style == "imm-shared-warp") {
-    //         ki->oneThreadPerBlock = false;
-    //         if (f->hasFnAttribute("cast.warps")) {
-    //             auto s =
-    //             f->getFnAttribute("cast.warps").getValueAsString().str();
-    //             ki->warpsPerCTA = std::max(1u, (unsigned)std::stoi(s));
-    //         } else {
-    //             ki->warpsPerCTA = 4; // sane default
-    //         }
-    //     }
-    // }
     if (f->hasFnAttribute("cast.kstyle")) {
       auto style = f->getFnAttribute("cast.kstyle").getValueAsString();
       if (style == "imm-inline" || style == "const-small") {
@@ -2819,21 +2574,17 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
   const unsigned K = 1u << k;
   const unsigned KK = K * K;
 
-  CUDAKernelGenConfig cfg = config;
-
   auto& llvmContextModulePair =
       createNewLLVMContextModulePair(funcName + "Module");
   IRBuilder<> B(*llvmContextModulePair.llvmContext);
 
-  assert(cfg.precision != Precision::Unknown);
+  assert(config.precision != Precision::Unknown);
   Type* scalarTy =
-      (cfg.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
+      (config.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
 
-  // Create the kernel function and plumb the arguments (p.sv, [p.mat],
-  // p.combos)
   IRArgsCUDA args;
   auto* func = getFunctionDeclarationCUDA(
-      B, *llvmContextModulePair.llvmModule, funcName, cfg, args);
+      B, *llvmContextModulePair.llvmModule, funcName, config, args);
 
   auto* entryBB =
       BasicBlock::Create(*llvmContextModulePair.llvmContext, "entry", func);
@@ -2843,7 +2594,7 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
   // combo. We map comboSlot := ctaid.x / tilesPerGate, where tilesPerGate is
   // the number of row-tiles per gate for the chosen kernel style (or 1 when
   // there is no row tiling).
-  auto comboBasePtr =
+  const auto computeComboBasePtr =
       [&](unsigned tilesPerGate,
           const QuantumGate::TargetQubitsType& qsForOffset) -> Value* {
     // ctaid.x
@@ -2854,7 +2605,7 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
     Value* idx64 = B.CreateZExt(idx32, B.getInt64Ty());
 
     Value* base2 = nullptr;
-    if (cfg.assumeContiguousTargets) {
+    if (config.assumeContiguousTargets) {
       // combo << (k+1)  (×2 for (re,im))
       base2 = B.CreateShl(idx64, k + 1);
     } else {
@@ -2867,105 +2618,25 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
   };
 
   // For kernels that need compile-time matrix analysis
-  auto matData = getMatDataCUDA(B, cfg, matrix, k);
+  auto matData = getMatDataCUDA(B, config, matrix, k);
 
   // Build a "local view" of qubits: for LSB kernels we want {0..k-1},
   // otherwise we keep the provided (ascending) physical positions.
   std::vector<int> qLSB = qubits;
-  if (cfg.assumeContiguousTargets) {
+  if (config.assumeContiguousTargets) {
     qLSB.resize(k);
     std::iota(qLSB.begin(), qLSB.end(), 0); // {0..k-1}
   }
 
-  switch (cfg.matrixLoadMode) {
+  switch (config.matrixLoadMode) {
   case CUDAMatrixLoadMode::UseMatImmValues: {
-    // const unsigned N = 1u << k;
-
-    // // Tiny gates -> straight-line inline path per combo
-    // const bool inlineOK = (cfg.precision == Precision::F32) ? (N <= 8) : (N
-    // <= 4); if (inlineOK) {
-    //     // No row-tiling; one CTA per combo ⇒ tilesPerGate = 1
-    //     Value *svComboBase = comboBasePtr(/*tilesPerGate=*/1, qLSB);
-    //     genMatrixVectorMultiply_InlineImm(
-    //         B, cfg, matrix, qLSB, matData, svComboBase, scalarTy
-    //     );
-    //     func->addFnAttr("cast.kstyle", "imm-inline");
-    //     break;
-
-    //     // Argument *combosV = nullptr;
-    //     // for (auto &A : func->args()) if (A.getName() == "p.combos") {
-    //     combosV = &A; break; }
-    //     // assert(combosV && "Missing kernel arg 'p.combos'");
-
-    //     // auto *cta   = B.CreateIntrinsic(B.getInt32Ty(),
-    //     Intrinsic::nvvm_read_ptx_sreg_ctaid_x,   {});
-    //     // auto *gridX = B.CreateIntrinsic(B.getInt32Ty(),
-    //     Intrinsic::nvvm_read_ptx_sreg_nctaid_x, {});
-
-    //     // // combo loop scaffolding
-    //     // auto *cmbChk  = BasicBlock::Create(B.getContext(), "cmb.chk",
-    //     func);
-    //     // auto *cmbBody = BasicBlock::Create(B.getContext(), "cmb.body",
-    //     func);
-    //     // auto *cmbInc  = BasicBlock::Create(B.getContext(), "cmb.inc",
-    //     func);
-    //     // auto *cmbDone = BasicBlock::Create(B.getContext(), "cmb.done",
-    //     func);
-
-    //     // B.CreateBr(cmbChk);
-    //     // B.SetInsertPoint(cmbChk);
-    //     // auto *comboPhi = B.CreatePHI(B.getInt32Ty(), 2, "combo");
-    //     // comboPhi->addIncoming(cta, entryBB);
-    //     // B.CreateCondBr(B.CreateICmpULT(comboPhi, combosV), cmbBody,
-    //     cmbDone);
-
-    //     // B.SetInsertPoint(cmbBody);
-    //     // {
-    //     //   Value *idx64 = B.CreateZExt(comboPhi, B.getInt64Ty());
-    //     //   Value *base2 = cfg.assumeContiguousTargets
-    //     //                 ? B.CreateShl(idx64, k + 1)
-    //     //                 : B.CreateShl(buildOffset(B, idx64, qLSB), 1);
-    //     //   Value *svComboBase = B.CreateGEP(scalarTy, args.pSvArg, base2,
-    //     "sv.combo.base");
-    //     //   genMatrixVectorMultiply_InlineImm(B, cfg, matrix, qLSB, matData,
-    //     svComboBase, scalarTy);
-    //     //   B.CreateBr(cmbInc);
-    //     // }
-
-    //     // B.SetInsertPoint(cmbInc);
-    //     // {
-    //     //   Value *nextCombo = B.CreateAdd(comboPhi, gridX);
-    //     //   comboPhi->addIncoming(nextCombo, cmbInc);
-    //     //   B.CreateBr(cmbChk);
-    //     // }
-
-    //     // B.SetInsertPoint(cmbDone);
-    //     // func->addFnAttr("cast.kstyle", "imm-inline");
-    // }
-
-    // // Medium (one warp handles a row each): the kernel loops over combos
-    // internally if (N >= 32 && N <= 64) {
-    //     // Pass the full SV base; the callee reads p.combos and iterates
-    //     combos genMatrixVectorMultiply_ImmRowPerLane(
-    //         B, cfg, qLSB, matData, /*svBase=*/args.pSvArg, scalarTy
-    //     );
-    //     // callee sets "cast.kstyle" and "cast.warps"
-    //     break;
-    // }
-
-    // // Large → shared tiled (kernel iterates combos internally)
-    // genMatrixVectorMultiply_SharedTiled(
-    //     B, cfg, matrix, qLSB, matData, /*svBase=*/args.pSvArg, scalarTy
-    // );
-    // func->addFnAttr("cast.kstyle", "imm-shared");
-    // break;
-
-    const unsigned N = 1u << k;
-    const bool inlineOK = (N <= 8);
+    // const bool inlineOK = (K <= 8);
+    // okay to inline if the gate acts on <= 8 qubits
+    const bool inlineOK = (k <= 8);
 
     // Build {0..k-1} for LSB kernels
     std::vector<int> qLSB = qubits;
-    if (cfg.assumeContiguousTargets) {
+    if (config.assumeContiguousTargets) {
       qLSB.resize(k);
       std::iota(qLSB.begin(), qLSB.end(), 0);
     }
@@ -2973,19 +2644,20 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
     if (inlineOK) {
       // lane-per-combo persistent inline
       genMatrixVectorMultiply_InlineImm_LanePerCombo(
-          B, cfg, matrix, qLSB, matData, /*svRoot=*/args.pSvArg, scalarTy);
+          B, config, matrix, qLSB, matData, /*svRoot=*/args.pSvArg, scalarTy);
       func->addFnAttr("cast.kstyle", "imm-inline-warp");
-      func->addFnAttr("cast.warps",
-                      "4"); // default: 4 warps/CTA → blockDim.x=128
+      // default: 4 warps/CTA → blockDim.x=128
+      func->addFnAttr("cast.warps", "4");
       break;
     }
-    if (N >= 32 && N <= 64) {
+    if (K >= 32 && K <= 64) {
+      assert(false && "Unreachable");
       genMatrixVectorMultiply_ImmRowPerLane(
-          B, cfg, qLSB, matData, /*svBase=*/args.pSvArg, scalarTy);
+          B, config, qLSB, matData, /*svBase=*/args.pSvArg, scalarTy);
       // callee sets cast.kstyle and cast.warps
     } else {
       genMatrixVectorMultiply_SharedTiled(
-          B, cfg, matrix, qLSB, matData, /*svBase=*/args.pSvArg, scalarTy);
+          B, config, matrix, qLSB, matData, /*svBase=*/args.pSvArg, scalarTy);
       func->addFnAttr("cast.kstyle", "imm-shared");
     }
     break;
@@ -2997,19 +2669,19 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
 
     const unsigned N = 1u << k;
     const unsigned TILE =
-        std::min((cfg.precision == Precision::F64) ? 128u : 256u, N);
+        std::min((config.precision == Precision::F64) ? 128u : 256u, N);
 
-    if (k < cfg.enableTilingGateSize) {
+    if (k < config.enableTilingGateSize) {
       // Non-tiled pointer kernel computes one combo per CTA -> tilesPerGate=1
-      Value* svComboBase = comboBasePtr(/*tilesPerGate=*/1, qLSB);
+      Value* svComboBase = computeComboBasePtr(/*tilesPerGate=*/1, qLSB);
       genMatrixVectorMultiplyFromPointer(
-          B, cfg, matrix, qLSB, matBasePtr, svComboBase, scalarTy);
+          B, config, matrix, qLSB, matBasePtr, svComboBase, scalarTy);
     } else {
       // Shared-tiled pointer kernel; there are tilesPerGate row tiles per gate.
       const unsigned tilesPerGate = (N + TILE - 1u) / TILE;
-      Value* svComboBase = comboBasePtr(tilesPerGate, qLSB);
+      Value* svComboBase = computeComboBasePtr(tilesPerGate, qLSB);
       genMatrixVectorMultiplyFromPointer_SharedTiled(
-          B, cfg, matrix, qLSB, matBasePtr, svComboBase, scalarTy);
+          B, config, matrix, qLSB, matBasePtr, svComboBase, scalarTy);
       if (!func->hasFnAttribute("cast.tile"))
         func->addFnAttr("cast.tile", std::to_string(TILE));
     }
@@ -3034,9 +2706,9 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
     gConstMat->setInitializer(ConstantArray::get(arrTy, constElems));
 
     // Const path is non-persistent wrt combos -> one CTA per combo
-    Value* svComboBase = comboBasePtr(/*tilesPerGate=*/1, qLSB);
+    Value* svComboBase = computeComboBasePtr(/*tilesPerGate=*/1, qLSB);
     genMatrixVectorMultiplyFromConst(B,
-                                     cfg,
+                                     config,
                                      matrix,
                                      qLSB,
                                      gConstMat,
@@ -3050,6 +2722,7 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
   }
 
   B.CreateRetVoid();
+  // func->print(errs());
   return func;
 }
 
@@ -3072,8 +2745,8 @@ CUDAKernelManager::getOrBuildKernel_(const CUDAKernelGenConfig& baseCfg,
     return it->second;
 
   // Build
-  CUDAKernelGenConfig cfg = baseCfg;
-  cfg.assumeContiguousTargets = assumeContiguous;
+  CUDAKernelGenConfig config = baseCfg;
+  config.assumeContiguousTargets = assumeContiguous;
 
   std::vector<int> qArg(qubits.begin(), qubits.end());
   if (assumeContiguous) {
@@ -3083,7 +2756,7 @@ CUDAKernelManager::getOrBuildKernel_(const CUDAKernelGenConfig& baseCfg,
 
   // Distinguish names so both can live in the module
   std::string finalName = nameHint + (assumeContiguous ? "_lsb" : "_gen");
-  llvm::Function* fn = gen_(cfg, M, qArg, finalName);
+  llvm::Function* fn = gen_(config, M, qArg, finalName);
 
   KernelInfoCompiled out{fn, fn->getName().str()};
   kernelCache_.emplace(key, out);
@@ -3112,18 +2785,10 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
 
     auto qubits = superopGate->qubits();
     auto nQubits = superopGate->nQubits();
+    for (const auto& q : qubits)
+      qubits.push_back(q + nQubits);
 
-    // for (const auto& q : qubits)
-    //     qubits.push_back(q + nQubits);
-
-    auto qs = superopGate->qubits();
-    auto nQ = superopGate->nQubits();
-    std::vector<int> both = qs;
-    for (auto q : qs)
-      both.push_back(q + nQ);
-
-    func = gen_(config, scalarGM->matrix(), both, funcName);
-    // func = gen_(config, scalarGM->matrix(), qubits, funcName);
+    func = gen_(config, scalarGM->matrix(), qubits, funcName);
   }
 
   if (func == nullptr) {
@@ -3140,14 +2805,6 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
                                              gate,
                                              cuTuple,
                                              gate->opCount(config.zeroTol));
-
-  // if (func->hasFnAttribute("cast.kstyle")) {
-  //     auto style = func->getFnAttribute("cast.kstyle").getValueAsString();
-  //     ki->oneThreadPerBlock = (style == "imm-inline" || style ==
-  //     "const-small");
-  // } else {
-  //     ki->oneThreadPerBlock = false;
-  // }
 
   if (func->hasFnAttribute("cast.kstyle")) {
     auto style = func->getFnAttribute("cast.kstyle").getValueAsString();

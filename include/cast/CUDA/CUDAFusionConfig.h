@@ -10,10 +10,9 @@ namespace cast {
 
 class CUDAFusionConfig : public FusionConfig {
 public:
-  CUDAFusionConfig(
-      std::unique_ptr<CUDACostModel> cudaCostModel,
-      int blockSize = -1,                       // -1 means not set
-      Precision precision = Precision::Unknown) // Unknown means not set
+  CUDAFusionConfig(std::unique_ptr<CUDACostModel> cudaCostModel,
+                   int blockSize = -1, // -1 means not set
+                   Precision precision = Precision::Unknown)
       : FusionConfig(FC_CUDA) {
     this->costModel = std::move(cudaCostModel);
     setBlockSize(blockSize);
@@ -44,8 +43,8 @@ public:
     return os << "CUDAFusionConfig (no CUDA cost model)\n";
   }
 
-  static bool classof(const FusionConfig* cfg) {
-    return cfg->getKind() == FC_CUDA;
+  static bool classof(const FusionConfig* base) {
+    return base->getKind() == FC_CUDA;
   }
 };
 
