@@ -35,10 +35,8 @@ struct CUDAKernelInfo {
     CUcontext cuContext;
     CUmodule cuModule;
     CUfunction cuFunction;
-    size_t sharedMemBytes;
     CUDATuple()
-        : cuContext(nullptr), cuModule(nullptr), cuFunction(nullptr),
-          sharedMemBytes(0) {}
+        : cuContext(nullptr), cuModule(nullptr), cuFunction(nullptr) {}
   };
   // We expect large stream writes anyway, so always trigger heap allocation.
   using PTXStringType = llvm::SmallString<0>;
@@ -50,11 +48,6 @@ struct CUDAKernelInfo {
   ConstQuantumGatePtr gate;
   CUDATuple cuTuple;
   double opCount;
-
-  void setSharedMemUsage(size_t bytes) { cuTuple.sharedMemBytes = bytes; }
-  void setKernelFunction(CUfunction fn) { cuTuple.cuFunction = fn; }
-  CUfunction kernelFunction() const { return cuTuple.cuFunction; }
-  size_t sharedMemUsage() const { return cuTuple.sharedMemBytes; }
 
 }; // struct CUDAKernelInfo
 

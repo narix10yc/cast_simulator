@@ -43,7 +43,7 @@ static std::ostream& operator<<(std::ostream& os, GateType gateType) {
 }
 
 // 28-qubit statevector takes 2GiB memory for float and 4GiB for double
-static constexpr int NUM_QUBITS = 28;
+static constexpr int NUM_QUBITS = 26;
 
 static void createGates(std::vector<QuantumGatePtr>& gates, GateType gateType) {
   switch (gateType) {
@@ -161,11 +161,6 @@ static void createGates(std::vector<QuantumGatePtr>& gates, GateType gateType) {
 int NUM_THREADS = cast::get_cpu_num_threads();
 CPUSimdWidth SIMD_WIDTH = cast::get_cpu_simd_width();
 
-static double computeGiBps(std::size_t memoryInBytes, double timeInSeconds) {
-  return static_cast<double>(memoryInBytes) /
-         (timeInSeconds * 1024 * 1024 * 1024);
-}
-
 template <typename ScalarType>
 static void cpu_benchmark(const std::vector<GateType>& gateTypes,
                           const std::string& deviceName) {
@@ -245,7 +240,7 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
                     std::is_same_v<ScalarType, double>,
                 "ScalarType must be either float or double");
 
-  CUDAKernelManager kernelMgr;
+  CUDAKernelManager kernelMgr(NUM_THREADS);
   CUDAKernelGenConfig kernelGenConfig;
   kernelGenConfig.precision =
       (std::is_same_v<ScalarType, float> ? Precision::F32 : Precision::F64);
@@ -263,8 +258,8 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   // Initialize JIT engine
   utils::timedExecute(
       [&]() {
-        kernelMgr.emitPTX(1, llvm::OptimizationLevel::O1, 1);
-        kernelMgr.initCUJIT(1, 1);
+        kernelMgr.emitPTX(llvm::OptimizationLevel::O1, 1);
+        kernelMgr.initCUJIT(1);
       },
       "Initialize JIT Engine");
 

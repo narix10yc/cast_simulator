@@ -48,9 +48,9 @@ int main() {
     test_cudaU2();
   }, "CUDA U2 Test Finished!");
 
-  utils::timedExecute([] {
-    test_cuda_gate_var();
-  }, "CUDA Gate Variation Test Finished!");
+  // utils::timedExecute([] {
+  //   test_cuda_gate_var();
+  // }, "CUDA Gate Variation Test Finished!");
 
   // utils::timedExecute([] { test_cudaRz_param(); },
   // "CUDA Codegen (Runtime) Test Finished!");

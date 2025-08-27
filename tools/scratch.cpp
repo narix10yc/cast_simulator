@@ -3,7 +3,7 @@
 using namespace cast;
 
 int main(int argc, char** argv) {
-  auto gate = StandardQuantumGate::H(0);
+  auto gate = StandardQuantumGate::H(6);
 
   CUDAKernelGenConfig config;
   CUDAKernelManager km;

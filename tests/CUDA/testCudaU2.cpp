@@ -20,7 +20,9 @@ inline void dumpStatevector(const char* tag,
 template <unsigned nQubits> void runU2qTest() {
   TestSuite suite("Gate U2q (" + std::to_string(nQubits) + " qubits)");
 
-  CUDAKernelManager kernelMgrCUDA;
+  // use 2 worker threads
+  CUDAKernelManager km(2);
+  // we have to use W0 here to allow direct memcpy between host and device
   cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
   cast::CUDAStatevector<double> svCUDA0(nQubits), svCUDA1(nQubits);
 
@@ -45,12 +47,11 @@ template <unsigned nQubits> void runU2qTest() {
   CUDAKernelGenConfig cgCfg;
   cgCfg.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
   for (std::size_t i = 0; i < gates.size(); ++i) {
-    kernelMgrCUDA
-        .genStandaloneGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i))
+    km.genStandaloneGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i))
         .consumeError();
   }
-  kernelMgrCUDA.emitPTX(llvm::OptimizationLevel::O1, /*verbose*/ 0);
-  kernelMgrCUDA.initCUJIT(/*verbose*/ 0);
+  km.emitPTX(llvm::OptimizationLevel::O1, /*verbose*/ 0);
+  km.initCUJIT(/*verbose*/ 0);
 
   /* main test loop */
   for (std::size_t i = 0; i < gates.size(); ++i) {
@@ -73,9 +74,8 @@ template <unsigned nQubits> void runU2qTest() {
     // dumpStatevector("Initial CUDA statevector:", hostSV);
 
     /* apply gate on GPU */
-    kernelMgrCUDA.launchCUDAKernel(svCUDA0.dData(),
-                                   svCUDA0.nQubits(),
-                                   *kernelMgrCUDA.getAllStandaloneKernels()[i]);
+    km.launchCUDAKernel(
+        svCUDA0.dData(), svCUDA0.nQubits(), *km.getAllStandaloneKernels()[i]);
     cudaDeviceSynchronize();
 
     /* diagnostics: final CUDA statevector */
