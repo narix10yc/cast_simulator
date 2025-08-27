@@ -1,7 +1,6 @@
 #ifndef CAST_CUDA_CUDAFUSIONCONFIG_H
 #define CAST_CUDA_CUDAFUSIONCONFIG_H
 
-#include "cast/CUDA/CUDAAdvCostModel.h"
 #include "cast/Core/FusionConfig.h"
 #include "llvm/Support/Casting.h"
 #include <memory>
@@ -10,38 +9,7 @@ namespace cast {
 
 class CUDAFusionConfig : public FusionConfig {
 public:
-  CUDAFusionConfig(std::unique_ptr<CUDAAdvCostModel> CUDAAdvCostModel,
-                   int blockSize = -1, // -1 means not set
-                   Precision precision = Precision::Unknown)
-      : FusionConfig(FC_CUDA) {
-    this->costModel = std::move(CUDAAdvCostModel);
-    setBlockSize(blockSize);
-    setPrecision(precision);
-  }
-
-  void setBlockSize(int bs) {
-    if (auto* cm = llvm::dyn_cast<CUDAAdvCostModel>(costModel.get())) {
-      if (bs > 0)
-        cm->setQueryBlockSize(bs);
-    }
-  }
-
-  void setPrecision(Precision p) {
-    if (auto* cm = llvm::dyn_cast<CUDAAdvCostModel>(costModel.get())) {
-      if (p != Precision::Unknown)
-        cm->setQueryPrecision(p);
-    }
-  }
-
-  CUDAAdvCostModel* getCUDAAdvCostModel() const {
-    return llvm::dyn_cast<CUDAAdvCostModel>(costModel.get());
-  }
-
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override {
-    if (auto* cm = llvm::dyn_cast<CUDAAdvCostModel>(costModel.get()))
-      return cm->displayInfo(os, verbose);
-    return os << "CUDAFusionConfig (no CUDA cost model)\n";
-  }
+  CUDAFusionConfig() : FusionConfig(FC_CUDA) {}
 
   static bool classof(const FusionConfig* base) {
     return base->getKind() == FC_CUDA;

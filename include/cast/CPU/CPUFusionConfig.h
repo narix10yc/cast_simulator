@@ -8,16 +8,12 @@
 
 namespace cast {
 
-// Must provide a CPUCostModel in the constructor.
+// CPUFusionConfig is strongly associated with CPUCostModel.
 class CPUFusionConfig : public FusionConfig {
 public:
-  CPUFusionConfig(std::unique_ptr<CPUCostModel> cpuCostModel,
-                  int nThreads = -1, // -1 means not set
-                  Precision precision = Precision::Unknown)
-      : FusionConfig(FC_CPU) {
-    this->costModel = std::move(cpuCostModel);
-    setNThreads(nThreads);
-    setPrecision(precision);
+  CPUFusionConfig(std::unique_ptr<CPUCostModel> cpuCM) : FusionConfig(FC_CPU) {
+    assert(cpuCM != nullptr);
+    this->costModel_ = std::move(cpuCM);
   }
 
   static std::unique_ptr<CPUFusionConfig>
@@ -26,18 +22,6 @@ public:
     if (!cm)
       return nullptr;
     return std::make_unique<CPUFusionConfig>(std::move(cm));
-  }
-
-  void setNThreads(int nThreads) {
-    if (auto* cpuCostModel = llvm::dyn_cast<CPUCostModel>(costModel.get())) {
-      cpuCostModel->setQueryNThreads(nThreads);
-    }
-  }
-
-  void setPrecision(Precision precision) {
-    if (auto* cpuCostModel = llvm::dyn_cast<CPUCostModel>(costModel.get())) {
-      cpuCostModel->setQueryPrecision(precision);
-    }
   }
 
   std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;

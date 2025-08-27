@@ -27,10 +27,8 @@ std::ostream& CUDAKernelGenConfig::displayInfo(std::ostream& os) const {
   os << std::scientific;
   os << CYAN("=== CUDA Kernel Gen Config ===\n") << "precision        : f"
      << static_cast<int>(precision) << "\n"
-     << "forceDenseKernel : " << forceDenseKernel << "\n"
      << "zeroTolerance    : " << zeroTol << "\n"
      << "oneTolerance     : " << oneTol << "\n"
-     << "assumeContiguousTargets : " << assumeContiguousTargets << "\n"
      << "matrixLoadMode   : ";
 
   switch (this->matrixLoadMode) {
@@ -94,109 +92,187 @@ void CUDAKernelManager::emitPTX(OptimizationLevel optLevel, int verbose) {
     }
   }
 
-  // Build the index matching modules -> kernels
-  rebuildOrderedKernelIndex_();
-  assert(orderedKernels_.size() == llvmContextModulePairs.size() &&
-         "Mismatch between modules and kernels");
-
   utils::TaskDispatcher dispatcher(nWorkerThreads_);
 
-  for (unsigned i = 0; i < orderedKernels_.size(); i++) {
-    dispatcher.enqueue([&, i]() {
-      raw_svector_ostream sstream(orderedKernels_[i]->ptxString);
+  for (auto& kernel : standaloneKernels_) {
+    dispatcher.enqueue([&]() {
+      raw_svector_ostream sstream(kernel->ptxString);
       legacy::PassManager passManager;
       if (createTargetMachine()->addPassesToEmitFile(
               passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
         llvm::errs() << "The target machine can't emit a file of this type\n";
         return;
       }
-      passManager.run(*llvmContextModulePairs[i].llvmModule);
+      passManager.run(*(kernel->llvmModule));
     });
   }
+  for (auto& [name, kernels] : graphKernels_) {
+    for (auto& kernel : kernels) {
+      dispatcher.enqueue([&]() {
+        raw_svector_ostream sstream(kernel->ptxString);
+        legacy::PassManager passManager;
+        if (createTargetMachine()->addPassesToEmitFile(
+                passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
+          llvm::errs() << "The target machine can't emit a file of this type\n";
+          return;
+        }
+        passManager.run(*(kernel->llvmModule));
+      });
+    }
+  }
+
   if (verbose > 0)
     std::cerr << "Emitting PTX codes...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
   jitState = JIT_PTXEmitted;
 }
 
-void CUDAKernelManager::initCUJIT(int verbose) {
-  assert(jitState == JIT_PTXEmitted);
-  assert(nWorkerThreads_ > 0);
+// void CUDAKernelManager::initCUJIT(int verbose) {
+//   assert(jitState == JIT_PTXEmitted);
+//   assert(nWorkerThreads_ > 0);
 
-  if (orderedKernels_.empty())
-    rebuildOrderedKernelIndex_();
+//   size_t nKernels = getAllStandaloneKernels().size();
+//   if (nKernels == 0) {
+//     std::cerr << RED("[Error] ") << "No kernels to JIT.\n";
+//     return;
+//   }
 
-  size_t nKernels = orderedKernels_.size();
-  if (nKernels == 0) {
-    std::cerr << RED("[Error] ") << "No kernels to JIT.\n";
-    return;
-  }
+//   cuInit(0);
+//   /* cuDeviceGet expects logical index.
+//    * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
+//    * physical device 2.
+//    * Therefore, we always choose deviceIdx to be 0, and ask users to control
+//    * via environment variable CUDA_VISIBLE_DEVICES
+//    */
+//   int deviceIdx = 0;
+//   CUdevice cuDevice;
+//   CU_CALL(cuDeviceGet(&cuDevice, deviceIdx), "Get CUDA device");
 
-  cuInit(0);
-  /* cuDeviceGet expects logical index.
-   * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
-   * physical device 2.
-   * Therefore, we always choose deviceIdx to be 0, and ask users to control
-   * via environment variable CUDA_VISIBLE_DEVICES
-   */
-  int deviceIdx = 0;
-  CUdevice cuDevice;
-  CU_CALL(cuDeviceGet(&cuDevice, deviceIdx), "Get CUDA device");
+//   // Create CUDA contexts
+//   cuContexts.resize(nWorkerThreads_, nullptr);
+//   for (unsigned t = 0; t < nWorkerThreads_; ++t) {
+//     CU_CALL(cuCtxCreate(&cuContexts[t], 0, cuDevice), "Create CUDA context");
+//   }
 
-  // Create CUDA contexts
-  cuContexts.resize(nWorkerThreads_, nullptr);
-  for (unsigned t = 0; t < nWorkerThreads_; ++t) {
-    CU_CALL(cuCtxCreate(&cuContexts[t], 0, cuDevice), "Create CUDA context");
-  }
+//   utils::TaskDispatcher dispatcher(nWorkerThreads_);
+//   std::vector<size_t> sharedMemValues(nKernels);
 
-  utils::TaskDispatcher dispatcher(nWorkerThreads_);
-  std::vector<size_t> sharedMemValues(nKernels);
+//   for (unsigned i = 0; i < nKernels; ++i) {
+//     // capture values needed per kernel
+//     auto& kernel = getAllStandaloneKernels()[i];
+//     // TODO: Currently ptxString is captured by value. This seems to be due to
+//     // the property of llvm::SmallVector<char, 0> -- calling str() returns an
+//     // empty StringRef. One fix is to replace PTXStringType from
+//     // SmallVector<char, 0> to std::string. Then we need to adjust emitPTX
+//     // accordingly.
+//     std::string ptxString(kernel->ptxString.str());
+//     CUcontext* cuContextPtr = &(kernel->cuTuple.cuContext);
+//     CUmodule* cuModulePtr = &(kernel->cuTuple.cuModule);
+//     CUfunction* cuFunctionPtr = &(kernel->cuTuple.cuFunction);
+//     const char* funcName = kernel->llvmFuncName.c_str();
 
-  for (unsigned i = 0; i < nKernels; ++i) {
-    // capture values needed per kernel
-    auto* kernel = orderedKernels_[i];
-    // TODO: Currently ptxString is captured by value. This seems to be due to
-    // the property of llvm::SmallVector<char, 0> -- calling str() returns an
-    // empty StringRef. One fix is to replace PTXStringType from
-    // SmallVector<char, 0> to std::string. Then we need to adjust emitPTX
-    // accordingly.
-    std::string ptxString(kernel->ptxString.str());
-    CUcontext* cuContextPtr = &(kernel->cuTuple.cuContext);
-    CUmodule* cuModulePtr = &(kernel->cuTuple.cuModule);
-    CUfunction* cuFunctionPtr = &(kernel->cuTuple.cuFunction);
-    const char* funcName = kernel->llvmFuncName.c_str();
+//     dispatcher.enqueue([=, this, &sharedMemValues, &dispatcher]() {
+//       auto workerID = dispatcher.getWorkerID();
 
-    dispatcher.enqueue([=, this, &sharedMemValues, &dispatcher]() {
-      auto workerID = dispatcher.getWorkerID();
+//       CU_CALL(cuCtxSetCurrent(cuContexts[workerID]), "cuCtxSetCurrent");
+//       *cuContextPtr = cuContexts[workerID];
+//       CU_CALL(cuModuleLoadData(cuModulePtr, ptxString.c_str()),
+//               "cuModuleLoadData");
+//       CU_CALL(cuModuleGetFunction(cuFunctionPtr, *cuModulePtr, funcName),
+//               "cuModuleGetFunction");
+//       cuFuncSetAttribute(*cuFunctionPtr,
+//                          CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,
+//                          CU_SHAREDMEM_CARVEOUT_MAX_L1);
+//       int staticShared = 0;
+//       CU_CALL(cuFuncGetAttribute(&staticShared,
+//                                  CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
+//                                  *cuFunctionPtr),
+//               "cuFuncGetAttribute(SHARED_SIZE_BYTES)");
+//       sharedMemValues[i] = static_cast<size_t>(staticShared);
+//     });
+//   }
 
-      CU_CALL(cuCtxSetCurrent(cuContexts[workerID]), "cuCtxSetCurrent");
-      *cuContextPtr = cuContexts[workerID];
-      CU_CALL(cuModuleLoadData(cuModulePtr, ptxString.c_str()),
-              "cuModuleLoadData");
-      CU_CALL(cuModuleGetFunction(cuFunctionPtr, *cuModulePtr, funcName),
-              "cuModuleGetFunction");
-      cuFuncSetAttribute(*cuFunctionPtr,
-                         CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT,
-                         CU_SHAREDMEM_CARVEOUT_MAX_L1);
-      int staticShared = 0;
-      CU_CALL(cuFuncGetAttribute(&staticShared,
-                                 CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES,
-                                 *cuFunctionPtr),
-              "cuFuncGetAttribute(SHARED_SIZE_BYTES)");
-      sharedMemValues[i] = static_cast<size_t>(staticShared);
-    });
-  }
+//   if (verbose > 0)
+//     std::cerr << "Loading CUDA Modules...\n";
+//   dispatcher.sync(/* progressBar */ verbose > 0);
 
-  if (verbose > 0)
-    std::cerr << "Loading CUDA Modules...\n";
-  dispatcher.sync(/* progressBar */ verbose > 0);
+//   for (unsigned i = 0; i < nKernels; ++i) {
+//     orderedKernels_[i]->cuTuple.sharedMemBytes = sharedMemValues[i];
+//   }
 
-  for (unsigned i = 0; i < nKernels; ++i) {
-    orderedKernels_[i]->cuTuple.sharedMemBytes = sharedMemValues[i];
-  }
+//   jitState = JIT_CUFunctionLoaded;
+// }
 
-  jitState = JIT_CUFunctionLoaded;
-}
+// void CUDAKernelManager::initCUJIT_New(int cuOptLevel, int verbose) {
+//   assert(jitState == JIT_PTXEmitted);
+//   assert(nWorkerThreads_ > 0);
+
+//   CU_CHECK(cuInit(0));
+//   /* cuDeviceGet expects logical index.
+//    * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
+//    * physical device 2.
+//    * Therefore, we always choose deviceIdx to be 0, and ask users to control
+//    * via environment variable CUDA_VISIBLE_DEVICES
+//    */
+//   int deviceIdx = 0;
+//   CUdevice cuDevice;
+//   CU_CHECK(cuDeviceGet(&cuDevice, deviceIdx));
+//   CUcontext cuCtx;
+//   CU_CHECK(cuDevicePrimaryCtxRetain(&cuCtx, cuDevice));
+
+//   utils::TaskDispatcher dispatcher(nWorkerThreads_);
+//   for (auto& kernel : getAllStandaloneKernels()) {
+//     std::string ptxString(kernel->ptxString.str());
+
+//     // Capture ptx string by value
+//     dispatcher.enqueue([&, ptx = ptxString, cuCtx = cuCtx]() {
+//       CU_CHECK(cuCtxSetCurrent(cuCtx));
+//       // --- JIT compile (PTX -> CUBIN) ---
+//       CUlinkState link;
+//       std::vector<CUjit_option> opts;
+//       std::vector<void*> vals;
+//       // Use device from current context
+//       opts.push_back(CU_JIT_TARGET_FROM_CUCONTEXT);
+//       vals.push_back(nullptr);
+
+//       // Lower opt level compiles faster (0..4)
+//       opts.push_back(CU_JIT_OPTIMIZATION_LEVEL);
+//       vals.push_back((void*)(uintptr_t)cuOptLevel);
+
+//       // Optional: collect logs (helpful if something fails)
+//       char infoLog[1 << 16] = {0}, errLog[1 << 16] = {0};
+//       opts.push_back(CU_JIT_INFO_LOG_BUFFER);
+//       vals.push_back(infoLog);
+//       opts.push_back(CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES);
+//       vals.push_back((void*)(uintptr_t)sizeof(infoLog));
+//       opts.push_back(CU_JIT_ERROR_LOG_BUFFER);
+//       vals.push_back(errLog);
+//       opts.push_back(CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES);
+//       vals.push_back((void*)(uintptr_t)sizeof(errLog));
+
+//       CU_CHECK(
+//           cuLinkCreate((unsigned)opts.size(), opts.data(), vals.data(), &link));
+
+//       CU_CHECK(cuLinkAddData(link,
+//                              CU_JIT_INPUT_PTX,
+//                              (void*)ptx.data(),
+//                              ptx.size(),
+//                              "unit.ptx",
+//                              0,
+//                              nullptr,
+//                              nullptr));
+
+//       void* cubin = nullptr;
+//       size_t cubinSize = 0;
+//       CUresult c = cuLinkComplete(link, &cubin, &cubinSize);
+//       if (c != CUDA_SUCCESS) {
+//         fprintf(
+//             stderr, "Link failed:\nINFO:\n%s\nERROR:\n%s\n", infoLog, errLog);
+//         std::exit(1);
+//       }
+//     });
+//   }
+// }
 
 const CUDAKernelInfo*
 CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) const {
@@ -227,91 +303,20 @@ void CUDAKernelManager::dumpPTX(std::ostream& os,
 void CUDAKernelManager::launchCUDAKernel(void* dData,
                                          int nQubits,
                                          const CUDAKernelInfo& kernelInfo,
-                                         int /*ignored*/) {
+                                         int blockDim) {
   assert(dData != nullptr);
   assert(kernelInfo.cuTuple.cuContext && kernelInfo.cuTuple.cuFunction);
   cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
 
-  unsigned k = kernelInfo.gate->nQubits();
-  unsigned N = 1u << k;
-  unsigned TILE = std::min(256u, N);
+  unsigned gridDim = 1;
 
-  constexpr unsigned MIN_BLOCK_THREADS = 32;
-  unsigned BLK;
-  if (kernelInfo.oneThreadPerBlock) {
-    BLK = 1u;
-  } else if (kernelInfo.warpsPerCTA > 0) {
-    BLK = kernelInfo.warpsPerCTA * 32u; // multiple of warp
-  } else {
-    BLK = std::max(TILE, MIN_BLOCK_THREADS); // shared‑tiled
-  }
-
-  // work geometry
-  unsigned combos = 1u << (nQubits - k);
-  unsigned tilesPerGate =
-      (N + TILE - 1) / TILE; // used by shared‑tiled & row‑per‑lane
-
-  // device limits / targets
-  CUdevice dev;
-  cuCtxGetDevice(&dev);
-  int sms = 0;
-  cuDeviceGetAttribute(&sms, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, dev);
-
-  int maxBlocksPerSMAttr = 0;
-  cuDeviceGetAttribute(&maxBlocksPerSMAttr,
-                       CU_DEVICE_ATTRIBUTE_MAX_BLOCKS_PER_MULTIPROCESSOR,
-                       dev);
-  unsigned maxCTAsPerSMHW =
-      (maxBlocksPerSMAttr > 0) ? (unsigned)maxBlocksPerSMAttr : 32u;
-
-  // derive warps/CTA
-  unsigned warpsPerCTA = (kernelInfo.warpsPerCTA > 0) ? kernelInfo.warpsPerCTA
-                                                      : std::max(1u, BLK / 32u);
-
-  // targets (env‑overridable)
-  // default 48; override with CAST_WARPS_PER_SM
-  unsigned targetWarpsPerSM = 48u;
-  if (const char* envW = std::getenv("CAST_WARPS_PER_SM")) {
-    unsigned v = (unsigned)std::strtoul(envW, nullptr, 10);
-    if (v)
-      targetWarpsPerSM = v;
-  }
-  unsigned targetCTAsPerSM = std::min(
-      std::max(1u, (targetWarpsPerSM + warpsPerCTA - 1u) / warpsPerCTA), // ceil
-      maxCTAsPerSMHW);
-  if (const char* env = std::getenv("CAST_CTA_PER_SM")) {
-    unsigned v = (unsigned)std::strtoul(env, nullptr, 10);
-    if (v) {
-      targetCTAsPerSM = std::min(std::max(1u, v), maxCTAsPerSMHW);
-    }
-  }
-
-  const unsigned maxComboSlots = std::max(1u, (unsigned)sms * targetCTAsPerSM);
-
-  // --- pick grid.x depending on style ---------------------------------------
-  unsigned gridX = 1;
-
-  if (kernelInfo.kstyle == "imm-inline-warp") {
-    // Lane‑per‑combo inline: grid * warps * 32 ≳ combos, no tilesPerGate factor
-    unsigned blocksForWork =
-        (combos + warpsPerCTA * 32u - 1u) / (warpsPerCTA * 32u);
-    gridX = std::max(1u, std::min(blocksForWork, maxComboSlots));
-  } else if (kernelInfo.oneThreadPerBlock) {
-    // 1‑thread inline: one combo per CTA
-    gridX = std::max(1u, std::min(combos, maxComboSlots));
-  } else {
-    // Shared‑tiled & row‑per‑lane paths: grid.x must be a multiple of
-    // tilesPerGate
-    const unsigned gridComboSlots = std::min(combos, maxComboSlots);
-    gridX = tilesPerGate * gridComboSlots;
-  }
-
-  void* kernelParams[2] = {&dData, &combos};
+  // the second arg is supposed to be &combos
+  void* kernelParams[2] = {&dData, nullptr};
 
   // clang-format off
   CU_CALL(cuLaunchKernel(kernelInfo.cuTuple.cuFunction,
-                         gridX, 1, 1,
-                         BLK, 1, 1,
+                         gridDim, 1, 1,
+                         blockDim, 1, 1,
                          kernelInfo.cuTuple.sharedMemBytes,
                          /*stream*/ 0,
                          kernelParams,

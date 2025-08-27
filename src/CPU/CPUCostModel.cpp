@@ -1,6 +1,8 @@
 #include "cast/CPU/CPUCostModel.h"
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUStatevector.h"
+#include "cast/Internal/PerfCacheHelper.h"
+
 #include "timeit/timeit.h"
 #include "utils/Formats.h"
 #include "utils/PrintSpan.h"
@@ -136,96 +138,6 @@ std::ostream& CPUCostModel::displayInfo(std::ostream& os, int verbose) const {
   return os;
 }
 
-namespace {
-
-/// @return Speed in gigabytes per second (GiBps)
-double calculateMemUpdateSpeed(int nQubits, Precision precision, double t) {
-  assert(nQubits > 0);
-  assert(precision == Precision::F32 || precision == Precision::F64);
-  assert(t > 0.0);
-
-  // F32 takes 8 bytes because of complex number
-  uint64_t dataSize = (precision == Precision::F32 ? 8ULL : 16ULL) << nQubits;
-  return static_cast<double>(dataSize) * 1e-9 / t;
-}
-
-// Take the scalar gate matrix representation of the gate and randomly zero
-// out some of the elements with probability p. The final matrix is not
-// guaranteed to remain unitary. This method is only intended to be used for
-// testing purposes.
-// For \c StandardQuantumGate, it only applies to the gate
-// matrix. For \c SuperopQuantumGate, it applies to the superoperator matrix
-// (not implemented yet). This method does not apply completely random removal.
-// It keeps the matrix valid, meaning non of the rows or columns will be
-// completely zeroed out.
-void randRemoveQuantumGate(QuantumGatePtr quGate, float p) {
-  assert(0.0f <= p && p <= 1.0f);
-  if (p == 0.0f)
-    return; // nothing to do
-
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> distF(0.0f, 1.0f);
-
-  auto* stdQuGate = llvm::dyn_cast<StandardQuantumGate>(quGate.get());
-  assert(stdQuGate != nullptr);
-  auto scalarGM = stdQuGate->getScalarGM();
-  assert(scalarGM != nullptr);
-
-  auto& mat = scalarGM->matrix();
-  auto edgeSize = mat.edgeSize();
-
-  // randomly zero out some elements
-  for (unsigned r = 0; r < edgeSize; ++r) {
-    for (unsigned c = 0; c < edgeSize; ++c) {
-      if (distF(gen) < p) {
-        // zero out the element
-        mat.reData()[r * edgeSize + c] = 0.0;
-        mat.imData()[r * edgeSize + c] = 0.0;
-      }
-    }
-  }
-
-  std::uniform_int_distribution<unsigned> distI(0, edgeSize - 1);
-  // check if some row is completely zeroed out
-  for (unsigned r = 0; r < edgeSize; ++r) {
-    bool isRowZeroed = true;
-    for (unsigned c = 0; c < edgeSize; ++c) {
-      if (mat.reData()[r * edgeSize + c] != 0.0 ||
-          mat.imData()[r * edgeSize + c] != 0.0) {
-        isRowZeroed = false;
-        break;
-      }
-    }
-    if (isRowZeroed) {
-      // randomly choose a non-zero element to keep
-      auto keepCol = distI(gen);
-      mat.reData()[r * edgeSize + keepCol] = 0.5;
-      mat.imData()[r * edgeSize + keepCol] = 0.5;
-    }
-  }
-
-  // check if some column is completely zeroed out
-  for (unsigned c = 0; c < edgeSize; ++c) {
-    bool isColZeroed = true;
-    for (unsigned r = 0; r < edgeSize; ++r) {
-      if (mat.reData()[r * edgeSize + c] != 0.0 ||
-          mat.imData()[r * edgeSize + c] != 0.0) {
-        isColZeroed = false;
-        break;
-      }
-    }
-    if (isColZeroed) {
-      // randomly choose a non-zero element to keep
-      auto keepRow = distI(gen);
-      mat.reData()[keepRow * edgeSize + c] = 0.5;
-      mat.imData()[keepRow * edgeSize + c] = 0.5;
-    }
-  }
-} // randRemoveQuantumGate
-
-} // anonymous namespace
-
 void CPUPerformanceCache::runPreliminaryExperiments(
     const CPUKernelGenConfig& cpuConfig,
     int nQubits,
@@ -266,7 +178,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
           .consumeError();
     });
     memSpds[k - 1] =
-        calculateMemUpdateSpeed(nQubits, cpuConfig.precision, tr.min);
+        internal::calculateMemUpdateSpeed(nQubits, cpuConfig.precision, tr.min);
     if (verbose > 0) {
       std::cerr << "Dense " << k << "-qubit gate @ " << memSpds[k - 1]
                 << " GiBps\n";
@@ -352,7 +264,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
         std::vector<int> targetQubits;
         utils::sampleNoReplacement(nQubits, i + 1, targetQubits);
         gates.emplace_back(StandardQuantumGate::RandomUnitary(targetQubits));
-        randRemoveQuantumGate(gates.back(), erasureProb);
+        internal::randRemoveQuantumGate(gates.back().get(), erasureProb);
         return;
       }
     }
@@ -413,12 +325,13 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
       kernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), *kernel, nThreads)
           .consumeError();
     });
-    auto memSpd = calculateMemUpdateSpeed(nQubits, kernel->precision, tr.min);
+    auto memSpd =
+        internal::calculateMemUpdateSpeed(nQubits, kernel->precision, tr.min);
     items_.emplace_back(kernel->gate->nQubits(),
-                       kernel->opCount,
-                       kernel->precision,
-                       nThreads,
-                       memSpd);
+                        kernel->opCount,
+                        kernel->precision,
+                        nThreads,
+                        memSpd);
     if (verbose > 0) {
       utils::printSpan(std::cerr << "Gate @ ",
                        std::span(kernel->gate->qubits()));

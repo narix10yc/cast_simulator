@@ -229,8 +229,12 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
       auto* candidateGate = (*curIt)[q];
       if (checkFuseable(candidateGate) == false) {
         assert(std::next(prodIt) == curIt);
-        bool swapped = swapIfPossible(
-            graph, prodIt, q, maxCandidateSize, GLOBAL_MAX_K, config->swapTol);
+        bool swapped = swapIfPossible(graph,
+                                      prodIt,
+                                      q,
+                                      maxCandidateSize,
+                                      GLOBAL_MAX_GATE_SIZE,
+                                      config->swapTol);
         if (!swapped)
           continue;
         // swapping triggered, so we can use the swapped gate
@@ -257,23 +261,17 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
 
   assert(prodIt != graph.tile_end());
 
-  if (config->costModel == nullptr)
+  auto* cm = config->getCostModel();
+  if (cm == nullptr)
     return nFused + fusedGates.size() - 1;
 
   // Check benefit
   double oldTime = 0.0;
   for (const auto& [gate, iter] : fusedGates)
-    oldTime += config->costModel->computeGiBTime(gate.get());
-  double newTime = config->costModel->computeGiBTime(prodGate.get());
-
-  // for (const auto& [gate, iter] : fusedGates) {
-  //   oldTime += config->costModel->computeGiBTime(
-  //     gate, config->precision, config->nThreads);
-  // }
-  // double newTime = config->costModel->computeGiBTime(
-  //   productGate, config->precision, config->nThreads);
-
+    oldTime += cm->computeGiBTime(gate.get());
+  double newTime = cm->computeGiBTime(prodGate.get());
   double benefit = oldTime / (newTime + 1e-10) - 1.0;
+
   LLVM_DEBUG(utils::printSpanWithPrinter(
                  std::cerr,
                  std::span(fusedGates.data(), fusedGates.size()),
@@ -406,8 +404,7 @@ getOrAppendCGNodeToCompoundNodeBack(CompoundNode& compoundNode) {
 }
 
 // This class is used to keep track of which qubits have been checked.
-// It saves memory by using a single 64-bit integer with bitwise operations.
-// Therefore, it can only handle up to 64 qubits.
+// It can only handle up to 64 qubits.
 class FlagArray {
   uint64_t flags;
 

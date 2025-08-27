@@ -12,14 +12,9 @@
 #include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
 #include "utils/MaybeError.h"
 
-#include <span>
-
-// TODO: We may not need cuda_runtime (also no need to link CUDA::cudart)
-#include <algorithm>
 #include <cuda.h>
 #include <map>
-#include <numeric>
-#include <unordered_map>
+#include <span>
 
 namespace cast {
 
@@ -29,74 +24,7 @@ enum class CUDAMatrixLoadMode {
   LoadInConstMemSpace
 };
 
-struct BitLayout {
-  std::vector<int> log_of_phys; // physical pos -> logical id
-  std::vector<int> phys_of_log; // logical id  -> physical pos
-  void init(int nSys) {
-    log_of_phys.resize(nSys);
-    phys_of_log.resize(nSys);
-    std::iota(log_of_phys.begin(), log_of_phys.end(), 0);
-    std::iota(phys_of_log.begin(), phys_of_log.end(), 0);
-  }
-  // After permuting gate qubits Q into {0..k-1} in-order, update maps.
-  void setLSB(const std::vector<int>& Q, int nSys) {
-    const int k = (int)Q.size();
-    // non-target logicals, in ascending old physical order
-    std::vector<std::pair<int, int>> others;
-    others.reserve(nSys - k);
-    std::vector<char> isTarget(nSys, 0);
-    for (int b = 0; b < k; ++b)
-      isTarget[Q[b]] = 1;
-    for (int l = 0; l < nSys; ++l)
-      if (!isTarget[l])
-        others.emplace_back(phys_of_log[l], l);
-    std::sort(others.begin(), others.end()); // by old phys pos
-
-    // write new phys_of_log
-    for (int b = 0; b < k; ++b)
-      phys_of_log[Q[b]] = b;
-    for (int i = 0; i < (int)others.size(); ++i)
-      phys_of_log[others[i].second] = k + i;
-
-    // rebuild inverse
-    for (int p = 0; p < nSys; ++p)
-      log_of_phys[p] = -1;
-    for (int l = 0; l < nSys; ++l)
-      log_of_phys[phys_of_log[l]] = l;
-  }
-};
-
-struct KernelKey {
-  unsigned k;
-  Precision prec;
-  CUDAMatrixLoadMode load;
-  bool assumeContiguous;
-  uint64_t matHash; // 0 for runtime-loaded matrices; hash for immediate path
-  bool operator==(const KernelKey&) const = default;
-};
-struct KernelKeyHash {
-  size_t operator()(const KernelKey& k) const {
-    // cheap hash; feel free to xxhash
-    size_t h = 1469598103934665603ull;
-    auto mix = [&](uint64_t v) {
-      h ^= v;
-      h *= 1099511628211ull;
-    };
-    mix(k.k);
-    mix((uint64_t)k.prec);
-    mix((uint64_t)k.load);
-    mix(k.assumeContiguous);
-    mix(k.matHash);
-    return h;
-  }
-};
-struct KernelInfoCompiled {
-  llvm::Function* fn = nullptr;
-  std::string llvmFuncName; // for launch lookup
-};
-
 struct CUDAKernelInfo {
-  /// If CAST_USE_CUDA is not defined, \c CUDATuple is simply an empty struct.
   /// Every CUDA module will contain exactly one CUDA function. Multiple CUDA
   /// modules may share the same CUDA context. For multi-threading JIT session,
   /// we create \c nThread number of CUDA contexts.
@@ -104,7 +32,6 @@ struct CUDAKernelInfo {
   /// the same \c cuContext. The collection of unique \c cuContext is stored in
   /// \c cuContexts (only available if CAST_USE_CUDA is defined).
   struct CUDATuple {
-#ifdef CAST_USE_CUDA
     CUcontext cuContext;
     CUmodule cuModule;
     CUfunction cuFunction;
@@ -112,44 +39,30 @@ struct CUDAKernelInfo {
     CUDATuple()
         : cuContext(nullptr), cuModule(nullptr), cuFunction(nullptr),
           sharedMemBytes(0) {}
-#endif // #ifdef CAST_USE_CUDA
   };
   // We expect large stream writes anyway, so always trigger heap allocation.
   using PTXStringType = llvm::SmallString<0>;
   PTXStringType ptxString;
   Precision precision;
+  llvm::LLVMContext* llvmContext;
+  llvm::Module* llvmModule;
   std::string llvmFuncName;
   ConstQuantumGatePtr gate;
   CUDATuple cuTuple;
   double opCount;
-  unsigned regsPerThread = 32;
-  bool oneThreadPerBlock = false;
-  unsigned tileSize = 0;
-  unsigned warpsPerCTA = 0;
-  std::string kstyle;
-  // int blockSize = 256;
 
-#ifdef CAST_USE_CUDA
   void setSharedMemUsage(size_t bytes) { cuTuple.sharedMemBytes = bytes; }
   void setKernelFunction(CUfunction fn) { cuTuple.cuFunction = fn; }
   CUfunction kernelFunction() const { return cuTuple.cuFunction; }
   size_t sharedMemUsage() const { return cuTuple.sharedMemBytes; }
-  void setRegisterUsage(unsigned r) { regsPerThread = r; }
-  unsigned registerUsage() const { return regsPerThread; }
-#endif // #ifdef CAST_USE_CUDA
+
 }; // struct CUDAKernelInfo
 
 struct CUDAKernelGenConfig {
   Precision precision = Precision::F64; // default to double precision
   double zeroTol = 1e-8;
   double oneTol = 1e-8;
-  bool forceDenseKernel = false;
-  int blockSize = 64; // for now have constant blocksize across kernels
-  bool assumeContiguousTargets = false;
 
-  // Enable tiling if the gate size >= this value. Setting this value to 0
-  // always enables tiling.
-  int enableTilingGateSize = 0;
   CUDAMatrixLoadMode matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
 
   std::ostream& displayInfo(std::ostream& os) const;
@@ -157,10 +70,7 @@ struct CUDAKernelGenConfig {
 
 class CUDAKernelManager : public KernelManagerBase {
   using KernelInfoPtr = std::unique_ptr<CUDAKernelInfo>;
-  struct KernelPair {
-    KernelInfoPtr lsb; // assumeContiguousTargets = true
-    KernelInfoPtr gen; // assumeContiguousTargets = false
-  };
+
   std::vector<KernelInfoPtr> standaloneKernels_;
   std::map<std::string, std::vector<KernelInfoPtr>> graphKernels_;
 
@@ -182,10 +92,6 @@ class CUDAKernelManager : public KernelManagerBase {
                                          ConstQuantumGatePtr gate,
                                          const std::string& funcName);
 
-  MaybeError<KernelPair> genCUDAGateVariants_(const CUDAKernelGenConfig& config,
-                                              ConstQuantumGatePtr gate,
-                                              const std::string& baseName);
-
 public:
   CUDAKernelManager(int nWorkerThreads = -1)
       : KernelManagerBase(), standaloneKernels_(), jitState(JIT_Uninited),
@@ -194,7 +100,6 @@ public:
       this->nWorkerThreads_ = cast::get_cpu_num_threads();
   }
 
-  std::unordered_map<KernelKey, KernelInfoCompiled, KernelKeyHash> kernelCache_;
   MaybeError<void> genStandaloneGate(const CUDAKernelGenConfig& config,
                                      ConstQuantumGatePtr gate,
                                      const std::string& funcName);
@@ -229,39 +134,32 @@ public:
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
   ~CUDAKernelManager() {
-#ifdef CAST_USE_CUDA
-    auto unload = [&](CUDAKernelInfo* k) {
-      if (k && k->cuTuple.cuModule) {
-        cuModuleUnload(k->cuTuple.cuModule);
+    for (auto& kernel : standaloneKernels_) {
+      if (kernel->cuTuple.cuModule) {
+        cuModuleUnload(kernel->cuTuple.cuModule);
       }
-    };
-    if (!orderedKernels_.empty()) {
-      for (auto* k : orderedKernels_)
-        unload(k);
-    } else {
-      for (auto& k : standaloneKernels_)
-        unload(k.get());
-      for (auto& kv : graphKernels_) {
-        for (auto& k : kv.second)
-          unload(k.get());
+    }
+    for (auto& [name, kernels] : graphKernels_) {
+      for (auto& kernel : kernels) {
+        if (kernel->cuTuple.cuModule) {
+          cuModuleUnload(kernel->cuTuple.cuModule);
+        }
       }
     }
     for (auto& ctx : cuContexts) {
-      if (ctx)
+      if (ctx) {
         cuCtxDestroy(ctx);
+      }
     }
-#else
-    for (auto& ctx : cuContexts) {
-      if (ctx)
-        cuCtxDestroy(ctx);
-    }
-#endif
   }
 
   /// @brief Initialize CUDA JIT session by loading PTX strings into CUDA
   /// context and module. This function can only be called once and cannot be
   /// undone. This function assumes \c emitPTX is already called.
   void initCUJIT(int verbose = 0);
+
+  // cuOptLevel: 0 .. 4
+  void initCUJIT_New(int cuOptLevel = 1, int verbose = 0);
 
   /* Get Kernels */
 
@@ -284,23 +182,13 @@ public:
   void launchCUDAKernel(void* dData,
                         int nQubits,
                         const CUDAKernelInfo& kernelInfo,
-                        int blockSize = 64);
+                        int blockDim = 64);
 
   void launchCUDAKernelParam(void* dData,
                              int nQubits,
                              const CUDAKernelInfo& kernelInfo,
                              void* dMatPtr,
-                             int blockSize = 64);
-
-  std::vector<CUDAKernelInfo*> orderedKernels_;
-
-  void rebuildOrderedKernelIndex_();
-
-  KernelInfoCompiled getOrBuildKernel_(const CUDAKernelGenConfig& baseCfg,
-                                       const ComplexSquareMatrix& M,
-                                       llvm::ArrayRef<int> qubits,
-                                       bool assumeContiguous,
-                                       const std::string& nameHint);
+                             int blockDim = 64);
 };
 
 } // namespace cast

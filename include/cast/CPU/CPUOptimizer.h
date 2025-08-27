@@ -36,7 +36,7 @@ public:
                                    filename);
     }
     // Fusion configs do not have queries. Cost models do.
-    auto* cm = llvm::dyn_cast_or_null<CPUCostModel>(fc->costModel.get());
+    auto* cm = llvm::dyn_cast_or_null<CPUCostModel>(fc->getCostModel());
     if (cm == nullptr) {
       return cast::makeError<void>("No CPU Cost Model found");
     }

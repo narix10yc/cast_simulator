@@ -1,9 +1,8 @@
 #ifndef CAST_CORE_FUSIONCONFIG_H
 #define CAST_CORE_FUSIONCONFIG_H
 
+#include "cast/Core/Config.h"
 #include "cast/Core/CostModel.h"
-
-constexpr int GLOBAL_MAX_K = 7;
 
 namespace cast {
 
@@ -18,16 +17,18 @@ public:
   };
 
 protected:
-  FusionConfigKind _kind;
+  FusionConfigKind kind_;
+  std::unique_ptr<CostModel> costModel_ = nullptr;
 
 public:
-  explicit FusionConfig(FusionConfigKind kind) : _kind(kind) {}
+  explicit FusionConfig(FusionConfigKind kind) : kind_(kind) {}
 
   virtual ~FusionConfig() = default;
 
-  FusionConfigKind getKind() const { return _kind; }
+  FusionConfigKind getKind() const { return kind_; }
 
-  std::unique_ptr<CostModel> costModel = nullptr;
+  CostModel* getCostModel() { return costModel_.get(); }
+  const CostModel* getCostModel() const { return costModel_.get(); }
 
   // Zero tolerance. This mainly affects calculating the operation count.
   double zeroTol = 1e-8;
@@ -40,7 +41,7 @@ public:
   // We pose an upper limit this because sometimes even though the cost model
   // predicts a benefit, kernel generation may be too expensive.
   int sizeMin = 2;
-  int sizeMax = GLOBAL_MAX_K;
+  int sizeMax = GLOBAL_MAX_GATE_SIZE;
 
   /// How much benefit do we recognize as significant. For example, if set to
   /// 0.1, then we accept fusion whenever costModel predicts >10% improvement
