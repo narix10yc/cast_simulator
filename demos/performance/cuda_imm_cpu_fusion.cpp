@@ -235,7 +235,7 @@ int main(int argc, char** argv) {
         fcfg->zeroTol = zeroTol;
         fcfg->swapTol = swapTol;
 
-        opt.setCPUFusionConfig(std::move(fcfg))
+        opt.loadCPUCostModel(std::move(fcfg))
            .enableCanonicalization()
            .enableFusion()
            .enableCFO();

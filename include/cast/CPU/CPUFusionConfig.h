@@ -20,6 +20,14 @@ public:
     setPrecision(precision);
   }
 
+  static std::unique_ptr<CPUFusionConfig>
+  LoadFromFile(const std::string& fileName) {
+    auto cm = CPUCostModel::LoadFromFile(fileName);
+    if (!cm)
+      return nullptr;
+    return std::make_unique<CPUFusionConfig>(std::move(cm));
+  }
+
   void setNThreads(int nThreads) {
     if (auto* cpuCostModel = llvm::dyn_cast<CPUCostModel>(costModel.get())) {
       cpuCostModel->setQueryNThreads(nThreads);

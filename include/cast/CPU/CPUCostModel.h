@@ -47,8 +47,20 @@ class CPUPerformanceCache {
 public:
   CPUPerformanceCache() = default;
 
+  // Returns null if we cannot find performance cache or the cache is empty
+  static std::unique_ptr<CPUPerformanceCache>
+  LoadFromFile(const std::string& filename) {
+    auto pc = std::make_unique<CPUPerformanceCache>();
+    if (!pc->loadFromFile(filename))
+      return nullptr;
+    if (pc->items().empty())
+      return nullptr;
+    return pc;
+  }
+
   std::span<const Item> items() const { return items_; }
 
+  // return true on success
   bool loadFromFile(const std::string& fileName) {
     std::ifstream ifs(fileName);
     if (!ifs.is_open()) {
@@ -104,6 +116,14 @@ class CPUCostModel : public CostModel {
 public:
   CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
                double zeroTol = 1e-8);
+
+  static std::unique_ptr<CPUCostModel>
+  LoadFromFile(const std::string& filename) {
+    auto pc = CPUPerformanceCache::LoadFromFile(filename);
+    if (!pc)
+      return nullptr;
+    return std::make_unique<CPUCostModel>(std::move(pc));
+  }
 
   void setQueryNThreads(int nThreads) { queryNThreads = nThreads; }
 

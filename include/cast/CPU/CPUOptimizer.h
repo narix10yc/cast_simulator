@@ -21,32 +21,29 @@ class CPUOptimizer : public Optimizer {
 public:
   CPUOptimizer() : fusionConfig(std::make_unique<SizeOnlyFusionConfig>(3)) {}
 
+  // Size-only fusion does not take any queries.
   CPUOptimizer& setSizeOnlyFusionConfig(int size) {
     fusionConfig = std::make_unique<SizeOnlyFusionConfig>(size);
     return *this;
   }
 
-  CPUOptimizer& setCPUFusionConfig(std::unique_ptr<CPUFusionConfig> config) {
-    fusionConfig = std::move(config);
-    return *this;
-  }
-
-  // Only meaningful for CPUFusionConfig
-  CPUOptimizer& setNThreads(int nThreads) {
-    if (auto* cpuFusionConfig =
-            llvm::dyn_cast<CPUFusionConfig>(fusionConfig.get())) {
-      cpuFusionConfig->setNThreads(nThreads);
+  MaybeError<void> loadCPUCostModel(const std::string& filename,
+                                    int queryNThreads,
+                                    Precision queryPrecision) {
+    auto fc = CPUFusionConfig::LoadFromFile(filename);
+    if (fc == nullptr) {
+      return cast::makeError<void>("Unable to load cost model from " +
+                                   filename);
     }
-    return *this;
-  }
-
-  // Only meaningful for CPUFusionConfig
-  CPUOptimizer& setPrecision(Precision precision) {
-    if (auto* cpuFusionConfig =
-            llvm::dyn_cast<CPUFusionConfig>(fusionConfig.get())) {
-      cpuFusionConfig->setPrecision(precision);
+    // Fusion configs do not have queries. Cost models do.
+    auto* cm = llvm::dyn_cast_or_null<CPUCostModel>(fc->costModel.get());
+    if (cm == nullptr) {
+      return cast::makeError<void>("No CPU Cost Model found");
     }
-    return *this;
+    cm->setQueryNThreads(queryNThreads);
+    cm->setQueryPrecision(queryPrecision);
+
+    return {}; // success
   }
 
   CPUOptimizer& setZeroTol(double zeroTol) {

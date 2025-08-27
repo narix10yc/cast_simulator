@@ -33,7 +33,7 @@ public:
   double zeroTol = 1e-8;
 
   // Swapping tolerance. Set to 0.0 or negative to disable.
-  double swapTol = 1e-8;
+  double swapTol = 0.0;
 
   // The range of sizes in fusion algorithms.
   // The lower limit effectively controls turning on/off agglomerative scheme

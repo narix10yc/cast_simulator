@@ -178,10 +178,7 @@ int main(int argc, const char** argv) {
   utils::Logger logger(std::cerr, ArgVerbose);
   if (ArgRunSizeOnlyFuse) {
     CPUOptimizer opt;
-    opt.setSizeOnlyFusionConfig(ArgSizeonlySize)
-        .setNThreads(nThreads)
-        .setPrecision(precision)
-        .disableCFO();
+    opt.setSizeOnlyFusionConfig(ArgSizeonlySize).disableCFO();
 
     opt.run(sizeOnlyFuseCircuit, logger);
     if (ArgRunDenseKernel)
@@ -189,20 +186,14 @@ int main(int argc, const char** argv) {
   }
 
   if (ArgRunAdaptiveFuse) {
-    auto pc = std::make_unique<CPUPerformanceCache>(
-        static_cast<std::string>(ArgModelPath));
-
-    auto cm = std::make_unique<CPUCostModel>(std::move(pc));
-    cm->displayInfo(std::cerr, 2) << "\n";
-
-    auto cpuFusionConfig =
-        std::make_unique<CPUFusionConfig>(std::move(cm), nThreads, precision);
-
     CPUOptimizer opt;
-    opt.setCPUFusionConfig(std::move(cpuFusionConfig))
-        .setNThreads(nThreads)
-        .setPrecision(precision)
-        .disableCFO();
+    opt.disableCFO();
+    auto r = opt.loadCPUCostModel(ArgModelPath, nThreads, precision);
+    if (!r) {
+      std::cerr << BOLDRED("[Err] ")
+                << "Optimizer initialization failed: " << r.takeError() << "\n";
+      std::exit(1);
+    }
 
     opt.run(adaptiveFuseCircuit, logger);
     if (ArgRunDenseKernel)
@@ -212,7 +203,6 @@ int main(int argc, const char** argv) {
   CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.precision = precision;
   kernelGenConfig.simdWidth = simdWidth;
-  // kernelGenConfig.matrixLoadMode = MatrixLoadMode::StackLoadMatElems;
   kernelGenConfig.displayInfo(std::cerr) << "\n";
 
   auto denseKernelGenConfig = kernelGenConfig;
