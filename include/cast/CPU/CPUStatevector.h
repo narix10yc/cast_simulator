@@ -3,10 +3,10 @@
 
 #include "cast/CPU/Config.h"
 #include "cast/Core/QuantumGate.h"
+#include "utils/Formats.h"
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
-#include "utils/Formats.h"
 
 #include <algorithm>
 #include <cmath>
@@ -217,8 +217,8 @@ public:
             "only the first 32 entries are shown.\n";
     }
     for (size_t i = 0; i < std::min<size_t>(32, N); i++) {
-      os << utils::fmt_0b(i, 5) << " : "
-         << utils::fmt_complex(real(i), imag(i)) << "\n";
+      os << utils::fmt_0b(i, 5) << " : " << utils::fmt_complex(real(i), imag(i))
+         << "\n";
     }
     return os;
   }
@@ -309,6 +309,8 @@ ScalarType fidelity(const CPUStatevector<ScalarType>& sv0,
 using CPUStatevectorF32 = CPUStatevector<float>;
 using CPUStatevectorF64 = CPUStatevector<double>;
 
+// This is a wrapper around F32 and F64 CPU Statevectors. Internally just a
+// std::variant.
 class CPUStatevectorWrapper {
 private:
   std::variant<CPUStatevectorF32, CPUStatevectorF64> sv;

@@ -7,6 +7,7 @@
 namespace cast {
 
 class CUDAOptimizer : public Optimizer {
+public:
   std::unique_ptr<FusionConfig> fusionConfig;
   bool enableCanonicalization_ = true;
   bool enableFusion_ = true;

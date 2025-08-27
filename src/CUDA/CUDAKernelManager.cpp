@@ -25,8 +25,8 @@ using namespace llvm;
 
 std::ostream& CUDAKernelGenConfig::displayInfo(std::ostream& os) const {
   os << std::scientific;
-  os << CYAN("=== CUDA Kernel Gen Config ===\n")
-     << "precision        : f" << static_cast<int>(precision) << "\n"
+  os << CYAN("=== CUDA Kernel Gen Config ===\n") << "precision        : f"
+     << static_cast<int>(precision) << "\n"
      << "forceDenseKernel : " << forceDenseKernel << "\n"
      << "zeroTolerance    : " << zeroTol << "\n"
      << "oneTolerance     : " << oneTol << "\n"
@@ -48,17 +48,16 @@ std::ostream& CUDAKernelGenConfig::displayInfo(std::ostream& os) const {
   return os << CYAN("================================\n");
 }
 
-void CUDAKernelManager::emitPTX(int nThreads,
-                                OptimizationLevel optLevel,
-                                int verbose) {
-  assert(nThreads > 0);
+void CUDAKernelManager::emitPTX(OptimizationLevel optLevel, int verbose) {
+  assert(nWorkerThreads_ > 0);
 
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
 
-  applyLLVMOptimization(nThreads, optLevel, /* progressBar */ verbose > 0);
+  applyLLVMOptimization(
+      nWorkerThreads_, optLevel, /* progressBar */ verbose > 0);
 
   std::string targetTriple = "nvptx64-nvidia-cuda";
   std::string err;
@@ -100,7 +99,7 @@ void CUDAKernelManager::emitPTX(int nThreads,
   assert(orderedKernels_.size() == llvmContextModulePairs.size() &&
          "Mismatch between modules and kernels");
 
-  utils::TaskDispatcher dispatcher(nThreads);
+  utils::TaskDispatcher dispatcher(nWorkerThreads_);
 
   for (unsigned i = 0; i < orderedKernels_.size(); i++) {
     dispatcher.enqueue([&, i]() {
@@ -120,9 +119,9 @@ void CUDAKernelManager::emitPTX(int nThreads,
   jitState = JIT_PTXEmitted;
 }
 
-void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
+void CUDAKernelManager::initCUJIT(int verbose) {
   assert(jitState == JIT_PTXEmitted);
-  assert(nThreads > 0);
+  assert(nWorkerThreads_ > 0);
 
   if (orderedKernels_.empty())
     rebuildOrderedKernelIndex_();
@@ -132,32 +131,35 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
     std::cerr << RED("[Error] ") << "No kernels to JIT.\n";
     return;
   }
-  if (nKernels < static_cast<size_t>(nThreads)) {
-    std::cerr << YELLOW("[Warning] ") << "Calling initCUJIT with " << nThreads
-              << " threads when there are only " << nKernels
-              << " kernels. Set nThreads to " << nKernels << " instead.\n";
-    nThreads = static_cast<int>(nKernels);
-  }
 
   cuInit(0);
+  /* cuDeviceGet expects logical index.
+   * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
+   * physical device 2.
+   * Therefore, we always choose deviceIdx to be 0, and ask users to control
+   * via environment variable CUDA_VISIBLE_DEVICES
+   */
+  int deviceIdx = 0;
   CUdevice cuDevice;
-  int deviceIdx = 0; // honor CUDA_VISIBLE_DEVICES
   CU_CALL(cuDeviceGet(&cuDevice, deviceIdx), "Get CUDA device");
 
   // Create CUDA contexts
-  CUcontext sharedCtx = nullptr;
-  // Primary context is the simplest way to share:
-  CU_CALL(cuDevicePrimaryCtxRetain(&sharedCtx, cuDevice),
-          "Retain primary context");
-  cuContexts.clear();
-  cuContexts.push_back(sharedCtx);
+  cuContexts.resize(nWorkerThreads_, nullptr);
+  for (unsigned t = 0; t < nWorkerThreads_; ++t) {
+    CU_CALL(cuCtxCreate(&cuContexts[t], 0, cuDevice), "Create CUDA context");
+  }
 
-  utils::TaskDispatcher dispatcher(nThreads);
+  utils::TaskDispatcher dispatcher(nWorkerThreads_);
   std::vector<size_t> sharedMemValues(nKernels);
 
   for (unsigned i = 0; i < nKernels; ++i) {
     // capture values needed per kernel
     auto* kernel = orderedKernels_[i];
+    // TODO: Currently ptxString is captured by value. This seems to be due to
+    // the property of llvm::SmallVector<char, 0> -- calling str() returns an
+    // empty StringRef. One fix is to replace PTXStringType from
+    // SmallVector<char, 0> to std::string. Then we need to adjust emitPTX
+    // accordingly.
     std::string ptxString(kernel->ptxString.str());
     CUcontext* cuContextPtr = &(kernel->cuTuple.cuContext);
     CUmodule* cuModulePtr = &(kernel->cuTuple.cuModule);
@@ -165,8 +167,10 @@ void CUDAKernelManager::initCUJIT(int nThreads, int verbose) {
     const char* funcName = kernel->llvmFuncName.c_str();
 
     dispatcher.enqueue([=, this, &sharedMemValues, &dispatcher]() {
-      CU_CALL(cuCtxSetCurrent(cuContexts[0]), "cuCtxSetCurrent");
-      *cuContextPtr = cuContexts[0];
+      auto workerID = dispatcher.getWorkerID();
+
+      CU_CALL(cuCtxSetCurrent(cuContexts[workerID]), "cuCtxSetCurrent");
+      *cuContextPtr = cuContexts[workerID];
       CU_CALL(cuModuleLoadData(cuModulePtr, ptxString.c_str()),
               "cuModuleLoadData");
       CU_CALL(cuModuleGetFunction(cuFunctionPtr, *cuModulePtr, funcName),
@@ -302,15 +306,12 @@ void CUDAKernelManager::launchCUDAKernel(void* dData,
     gridX = tilesPerGate * gridComboSlots;
   }
 
-  dim3 blockDim(BLK, 1, 1);
-  dim3 gridDim(gridX, 1, 1);
-
   void* kernelParams[2] = {&dData, &combos};
 
   // clang-format off
   CU_CALL(cuLaunchKernel(kernelInfo.cuTuple.cuFunction,
-                         gridDim.x, 1, 1,
-                         blockDim.x, 1, 1,
+                         gridX, 1, 1,
+                         BLK, 1, 1,
                          kernelInfo.cuTuple.sharedMemBytes,
                          /*stream*/ 0,
                          kernelParams,
@@ -342,15 +343,12 @@ void CUDAKernelManager::launchCUDAKernelParam(
   unsigned tilesPerGate = (N + TILE - 1) / TILE;
   unsigned gridDimX = combos * tilesPerGate;
 
-  dim3 gridDim(gridDimX, 1, 1);
-  dim3 blockDim(TILE, 1, 1);
-
   void* kernelParams[] = {&dData, &dMatPtr, &combos};
 
   // clang-format off
   CU_CALL(cuLaunchKernel(kernelInfo.cuTuple.cuFunction,
-                         gridDim.x, gridDim.y, gridDim.z,
-                         blockDim.x, blockDim.y, blockDim.z,
+                         gridDimX, 1, 1,                    // grid dim
+                         TILE, 1, 1,                        // block dim
                          kernelInfo.cuTuple.sharedMemBytes, // shared memory
                          0,                                 // stream
                          kernelParams,                      // kernel arguments

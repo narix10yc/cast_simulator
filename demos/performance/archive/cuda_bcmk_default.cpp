@@ -134,16 +134,16 @@ int main() {
   // if the fusion or circuit references them, they do not go out of scope.
   NaiveCostModel naiveModel(naiveMaxK, -1, 1e-8);
   StandardCostModel* scModelPtr = nullptr;
-  CUDACostModel* cudaModelPtr = nullptr;
+  CUDAAdvCostModel* cudaModelPtr = nullptr;
 
   std::unique_ptr<StandardCostModel> scModel;
-  std::unique_ptr<CUDACostModel> cudaModel;
+  std::unique_ptr<CUDAAdvCostModel> cudaModel;
   if (adaptiveCachePtr) {
     scModel = std::make_unique<StandardCostModel>(adaptiveCachePtr.get());
     scModelPtr = scModel.get();
   }
   if (cudaCachePtr) {
-    cudaModel = std::make_unique<CUDACostModel>(cudaCachePtr.get());
+    cudaModel = std::make_unique<CUDAAdvCostModel>(cudaCachePtr.get());
     cudaModelPtr = cudaModel.get();
   }
 

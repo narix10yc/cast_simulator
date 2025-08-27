@@ -1,4 +1,4 @@
-#include "cast/CUDA/CUDACostModel.h"
+#include "cast/CUDA/CUDAAdvCostModel.h"
 #include "cast/CUDA/CUDAKernelManager.h"
 
 #include "utils/iocolor.h"
@@ -56,6 +56,11 @@ ArgF64("f64", cl::cat(ArgCategory),
     cl::desc("Enable double-precision (f64) kernels"),
     cl::init(true));
 
+static cl::opt<int>
+ArgVerbose("verbose", cl::cat(ArgCategory),
+    cl::desc("Verbosity level (0=quiet, 1=some, 2=more)"),
+    cl::init(1));
+
 // clang-format on
 
 // ---- helpers ----------------------------------------------------------------
@@ -70,7 +75,7 @@ static bool validateBlockSize(int blk) {
 }
 
 static void ensureCsvHeader(std::ofstream& ofs) {
-  ofs << CUDAPerformanceCache::Item::CSV_TITLE << '\n';
+  ofs << CUDAAdvPerfCache::Item::CSV_TITLE << '\n';
 }
 
 static CUDADeviceInfo getDeviceInfo(int device, bool verbose) {
@@ -132,7 +137,7 @@ int main(int argc, char** argv) {
   const bool verboseDevice = true;
   CUDADeviceInfo dev = getDeviceInfo(devId, verboseDevice);
 
-  CUDAPerformanceCache cache;
+  CUDAAdvPerfCache cache;
   CUDAKernelGenConfig cfg;
   cfg.blockSize = ArgBlockSize;
 
@@ -144,12 +149,12 @@ int main(int argc, char** argv) {
   if (ArgF32) {
     std::cerr << BOLDCYAN("[Info]: ") << "  • Single precision (f32)\n";
     cfg.precision = Precision::F32;
-    cache.runExperiments(cfg, dev, ArgNQubits, ArgNTests, 1);
+    cache.runExperiments(cfg, dev, ArgNQubits, ArgNTests, ArgVerbose);
   }
   if (ArgF64) {
     std::cerr << BOLDCYAN("[Info]: ") << "  • Double precision (f64)\n";
     cfg.precision = Precision::F64;
-    cache.runExperiments(cfg, dev, ArgNQubits, ArgNTests, 1);
+    cache.runExperiments(cfg, dev, ArgNQubits, ArgNTests, ArgVerbose);
   }
 
   cache.writeResults(outFile);

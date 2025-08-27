@@ -14,7 +14,7 @@ CPUCostModel::CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
   items.reserve(32);
 
   // loop through cache and initialize this->items
-  for (const auto& cacheItem : this->cache->items) {
+  for (const auto& cacheItem : this->cache->items()) {
     auto it =
         std::ranges::find_if(this->items, [&cacheItem](const Item& thisItem) {
           return thisItem.nQubits == cacheItem.nQubits &&
@@ -150,13 +150,14 @@ double calculateMemUpdateSpeed(int nQubits, Precision precision, double t) {
 }
 
 // Take the scalar gate matrix representation of the gate and randomly zero
-// out some of the elements with probability p. This methods is not versatile
-// and should only be used for testing purposes.
-// For \c StandardQuantumGate, it only applies to the gate matrix.
-// For \c SuperopQuantumGate, it applies to the superoperator matrix (not
-// implemented yet). This method does not apply completely random removal. It
-// keeps the matrix valid, meaning non of the rows or columns will be completely
-// zeroed out.
+// out some of the elements with probability p. The final matrix is not
+// guaranteed to remain unitary. This method is only intended to be used for
+// testing purposes.
+// For \c StandardQuantumGate, it only applies to the gate
+// matrix. For \c SuperopQuantumGate, it applies to the superoperator matrix
+// (not implemented yet). This method does not apply completely random removal.
+// It keeps the matrix valid, meaning non of the rows or columns will be
+// completely zeroed out.
 void randRemoveQuantumGate(QuantumGatePtr quGate, float p) {
   assert(0.0f <= p && p <= 1.0f);
   if (p == 0.0f)
@@ -185,7 +186,7 @@ void randRemoveQuantumGate(QuantumGatePtr quGate, float p) {
     }
   }
 
-  std::uniform_int_distribution<size_t> distI(0, edgeSize - 1);
+  std::uniform_int_distribution<unsigned> distI(0, edgeSize - 1);
   // check if some row is completely zeroed out
   for (unsigned r = 0; r < edgeSize; ++r) {
     bool isRowZeroed = true;
@@ -233,37 +234,36 @@ void CPUPerformanceCache::runPreliminaryExperiments(
     int verbose) {
   CPUKernelManager kernelMgr;
   std::vector<int> qubits;
-  utils::timedExecute(
-      [&]() {
-        for (int k = 1; k <= 5; ++k) {
-          utils::sampleNoReplacement(nQubits, k, qubits);
-          kernelMgr
-              .genStandaloneGate(cpuConfig,
-                                 StandardQuantumGate::RandomUnitary(qubits),
-                                 "gate_k" + std::to_string(k))
-              .consumeError(); // ignore possible errors
-        }
-        kernelMgr
-            .initJIT(nThreads,
-                     llvm::OptimizationLevel::O1,
-                     false, // useLazyJIT
-                     0      // verbose
-                     )
-            .consumeError(); // ignore possible errors
-      },
-      "Code Generation and JIT Initialization");
+
+  const auto generateGatesAndInitJit = [&]() {
+    for (int k = 1; k <= 5; ++k) {
+      utils::sampleNoReplacement(nQubits, k, qubits);
+      auto gate = StandardQuantumGate::RandomUnitary(qubits);
+      kernelMgr.genStandaloneGate(cpuConfig, gate, "gate_k" + std::to_string(k))
+          .consumeError();
+    }
+    kernelMgr.initJIT(nThreads, llvm::OptimizationLevel::O1, false, 0)
+        .consumeError();
+  };
+
+  if (verbose > 0) {
+    utils::timedExecute(generateGatesAndInitJit,
+                        "Code Generation and JIT Initialization");
+  } else {
+    generateGatesAndInitJit();
+  }
 
   CPUStatevectorWrapper sv(cpuConfig.precision, nQubits, cpuConfig.simdWidth);
 
   timeit::Timer timer(3, /* verbose */ 0);
   timeit::TimingResult tr;
-  std::array<double, 5> memSpds{120.0, 120.0, 77.6, 32.1, 12.9};
+  std::array<double, 5> memSpds;
   for (int k = 1; k <= 5; ++k) {
     tr = timer.timeit([&]() {
       kernelMgr
           .applyCPUKernel(
               sv.data(), nQubits, "gate_k" + std::to_string(k), nThreads)
-          .consumeError(); // ignore possible errors
+          .consumeError();
     });
     memSpds[k - 1] =
         calculateMemUpdateSpeed(nQubits, cpuConfig.precision, tr.min);
@@ -275,10 +275,14 @@ void CPUPerformanceCache::runPreliminaryExperiments(
 
   assert(weights.size() >= 5);
   weights[0] = 100; // 1-qubit gates
+
+  // The ratio decides the scaling of weights when mem speed halves.
+  // Set to a larger value to focus more on the transition region.
+  constexpr double ratio = 1.1;
+
+  // Decay decides the decaying rate for >=5 qubit gates
+  constexpr double decay = 0.45;
   for (int k = 2; k <= 5; ++k) {
-    // The ratio decides the scaling of weights when mem speeds halves.
-    // Set to a larger value to focus more on the transition region.
-    constexpr double ratio = 1.1;
     // weights[k] is the weight for k-qubit gates
     weights[k - 1] = static_cast<int>(
         static_cast<double>(weights[k - 2]) *
@@ -286,7 +290,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
   }
   for (int k = 6; k < weights.size() + 1; ++k) {
     weights[k - 1] =
-        static_cast<int>(static_cast<double>(weights[k - 2]) * 0.45);
+        static_cast<int>(static_cast<double>(weights[k - 2]) * decay);
   }
 
   int maxIdx = 0;
@@ -297,6 +301,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
       maxIdx = k;
     }
   }
+  // An extra round of weight decay. More decay for distant weights
   for (int k = 0; k < weights.size(); ++k) {
     if (k == maxIdx)
       continue;
@@ -306,12 +311,10 @@ void CPUPerformanceCache::runPreliminaryExperiments(
     weights[k] = static_cast<int>(newWeight);
   }
 
-  if (verbose > 0) {
-    double sum = 0.0;
-    for (const auto& w : weights)
-      sum += static_cast<double>(w);
+  if (verbose > 1) {
+    double sum = std::reduce(weights.begin(), weights.end(), 0.0);
     std::cerr << "Relative weights:\n";
-    for (int k = 1; k <= CPU_GLOBAL_MAX_SIZE; ++k) {
+    for (int k = 1; k <= weights.size(); ++k) {
       std::cerr << "  " << k << "-qubit: " << "weight = " << weights[k - 1]
                 << "; percentage = "
                 << (100.0 * static_cast<double>(weights[k - 1]) / sum) << "\n";
@@ -411,7 +414,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
           .consumeError();
     });
     auto memSpd = calculateMemUpdateSpeed(nQubits, kernel->precision, tr.min);
-    items.emplace_back(kernel->gate->nQubits(),
+    items_.emplace_back(kernel->gate->nQubits(),
                        kernel->opCount,
                        kernel->precision,
                        nThreads,
@@ -425,7 +428,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
 }
 
 void CPUPerformanceCache::writeResults(std::ostream& os) const {
-  for (const auto& item : items) {
+  for (const auto& item : items_) {
     item.write(os);
     os << "\n";
   }

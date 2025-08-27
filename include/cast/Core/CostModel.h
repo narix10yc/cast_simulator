@@ -16,6 +16,7 @@ public:
     CM_Constant, // Constant cost model. Every gate takes the same time.
     CM_CPU,      // CPU cost model
     CM_CUDA,
+    CM_CUDA_Adv, // Advanced CUDA cost model
     CM_End
   };
 

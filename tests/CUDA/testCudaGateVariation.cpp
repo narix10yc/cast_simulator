@@ -11,11 +11,13 @@ using namespace cast;
 using namespace cast::test;
 
 static double prob_from_host_sv(const std::vector<std::complex<double>>& svHost,
-                                int nQubits, int physBit) {
+                                int nQubits,
+                                int physBit) {
   const size_t N = svHost.size();
   double sum = 0.0;
   for (size_t idx = 0; idx < N; ++idx) {
-    if ((idx >> physBit) & 1ull) sum += std::norm(svHost[idx]);
+    if ((idx >> physBit) & 1ull)
+      sum += std::norm(svHost[idx]);
   }
   return sum;
 }
@@ -26,7 +28,7 @@ static void f(const std::vector<int>& targetQubits) {
                         std::to_string(nQubits) + " qubits)");
 
   CUDAKernelManager kernelMgrCUDA;
-  cast::CPUStatevector<double>  svCPU(nQubits, cast::CPUSimdWidth::W0);
+  cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
   cast::CUDAStatevector<double> svCUDA0(nQubits), svCUDA1(nQubits);
 
   const auto randomizeSV = [&]() {
@@ -45,7 +47,7 @@ static void f(const std::vector<int>& targetQubits) {
   CUDAKernelGenConfig cudaGenConfig;
   cudaGenConfig.precision = Precision::F64;
   cudaGenConfig.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
-  cudaGenConfig.assumeContiguousTargets = false;  // ← key change
+  cudaGenConfig.assumeContiguousTargets = false; // ← key change
 
   for (size_t i = 0; i < gates.size(); i++) {
     auto funcName = "gateImm_" + std::to_string(targetQubits.size()) + "q_" +
@@ -54,8 +56,8 @@ static void f(const std::vector<int>& targetQubits) {
         .consumeError();
   }
 
-  kernelMgrCUDA.emitPTX(gates.size(), llvm::OptimizationLevel::O1, 0);
-  kernelMgrCUDA.initCUJIT(gates.size(), 0);
+  kernelMgrCUDA.emitPTX(llvm::OptimizationLevel::O1, 0);
+  kernelMgrCUDA.initCUJIT(0);
 
   for (size_t i = 0; i < gates.size(); i++) {
     randomizeSV();
@@ -82,16 +84,19 @@ static void f(const std::vector<int>& targetQubits) {
                cudaMemcpyDeviceToHost);
 
     double hostNorm = 0.0;
-    for (const auto& c : svCUDA0_data) hostNorm += std::norm(c);
-    suite.assertCloseF64(hostNorm, 1.0,
-                         "CUDA SV norm equals to 1", GET_INFO());
+    for (const auto& c : svCUDA0_data)
+      hostNorm += std::norm(c);
+    suite.assertCloseF64(hostNorm, 1.0, "CUDA SV norm equals to 1", GET_INFO());
 
     svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gates[i].get()));
     for (int q : targetQubits) {
-      double cudaProb = prob_from_host_sv(svCUDA0_data, svCUDA0.nQubits(), /*physBit=*/q);
-      double cpuProb  = svCPU.prob(q);
-      suite.assertCloseF64(cudaProb, cpuProb,
-                           "CUDA and CPU SV prob match for qubit " + std::to_string(q),
+      double cudaProb =
+          prob_from_host_sv(svCUDA0_data, svCUDA0.nQubits(), /*physBit=*/q);
+      double cpuProb = svCPU.prob(q);
+      suite.assertCloseF64(cudaProb,
+                           cpuProb,
+                           "CUDA and CPU SV prob match for qubit " +
+                               std::to_string(q),
                            GET_INFO());
     }
   }
@@ -115,6 +120,6 @@ static void f(const std::vector<int>& targetQubits) {
 //   // Test 5: 6-qubit system, 3-qubit gate on non-contiguous qubits {2, 4, 5}
 //   f<6>({2, 4, 5});
 
-//   // Test 6: 10-qubit system, 4-qubit gate on non-contiguous qubits {0, 2, 3, 6}
-//   f<10>({0, 2, 3, 6});
+//   // Test 6: 10-qubit system, 4-qubit gate on non-contiguous qubits {0, 2, 3,
+//   6} f<10>({0, 2, 3, 6});
 // }

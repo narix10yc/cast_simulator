@@ -9,6 +9,7 @@
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 
+#include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
 #include "utils/MaybeError.h"
 
 #include <span>
@@ -16,13 +17,9 @@
 // TODO: We may not need cuda_runtime (also no need to link CUDA::cudart)
 #include <algorithm>
 #include <cuda.h>
-#include <cuda_runtime.h>
 #include <map>
-#include <memory>
 #include <numeric>
-#include <string>
 #include <unordered_map>
-#include <vector>
 
 namespace cast {
 
@@ -169,6 +166,7 @@ class CUDAKernelManager : public KernelManagerBase {
 
   enum JITState { JIT_Uninited, JIT_PTXEmitted, JIT_CUFunctionLoaded };
   JITState jitState;
+  int nWorkerThreads_;
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
@@ -183,22 +181,25 @@ class CUDAKernelManager : public KernelManagerBase {
   MaybeError<KernelInfoPtr> genCUDAGate_(const CUDAKernelGenConfig& config,
                                          ConstQuantumGatePtr gate,
                                          const std::string& funcName);
-                                         
+
   MaybeError<KernelPair> genCUDAGateVariants_(const CUDAKernelGenConfig& config,
                                               ConstQuantumGatePtr gate,
                                               const std::string& baseName);
 
 public:
-  CUDAKernelManager()
-      : KernelManagerBase(), standaloneKernels_(), jitState(JIT_Uninited) {}
+  CUDAKernelManager(int nWorkerThreads = -1)
+      : KernelManagerBase(), standaloneKernels_(), jitState(JIT_Uninited),
+        nWorkerThreads_(nWorkerThreads) {
+    if (nWorkerThreads <= 0)
+      this->nWorkerThreads_ = cast::get_cpu_num_threads();
+  }
 
   std::unordered_map<KernelKey, KernelInfoCompiled, KernelKeyHash> kernelCache_;
   MaybeError<void> genStandaloneGate(const CUDAKernelGenConfig& config,
                                      ConstQuantumGatePtr gate,
                                      const std::string& funcName);
 
-  void emitPTX(int nThreads = 1,
-               llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
+  void emitPTX(llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
                int verbose = 0);
 
   std::string getPTXString(int idx) const {
@@ -260,7 +261,7 @@ public:
   /// @brief Initialize CUDA JIT session by loading PTX strings into CUDA
   /// context and module. This function can only be called once and cannot be
   /// undone. This function assumes \c emitPTX is already called.
-  void initCUJIT(int nThreads = 1, int verbose = 0);
+  void initCUJIT(int verbose = 0);
 
   /* Get Kernels */
 
@@ -290,7 +291,7 @@ public:
                              const CUDAKernelInfo& kernelInfo,
                              void* dMatPtr,
                              int blockSize = 64);
-                             
+
   std::vector<CUDAKernelInfo*> orderedKernels_;
 
   void rebuildOrderedKernelIndex_();

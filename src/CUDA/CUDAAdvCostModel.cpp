@@ -1,6 +1,7 @@
 #ifdef CAST_USE_CUDA
 
-#include "cast/CUDA/CUDACostModel.h"
+#include "cast/CUDA/CUDAAdvCostModel.h"
+#include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
 #include "cast/CUDA/CUDAKernelManager.h"
 #include "cast/CUDA/CUDAStatevector.h"
 
@@ -43,7 +44,7 @@ static AccessPattern classifyPatternVec(const std::vector<int>& qs) {
   return AccessPattern::Strided;
 }
 
-// best-of-N event timing wrapper
+// best-of-N event timing wrapper using cudaEvent
 static double timeKernelSeconds(const std::function<void()>& launch,
                                 int repeats = 5) {
   cudaEvent_t start;
@@ -169,13 +170,11 @@ static double percentile(std::vector<double> v, double q01) {
 
 // ----------------------- CUDAPerformanceCache -----------------------
 
-void CUDAPerformanceCache::runPreliminaryExperiments(
-    const CUDAKernelGenConfig& cfg,
-    const CUDADeviceInfo& /*dev*/,
-    int nQubits,
-    int nRunsHint,
-    std::vector<int>& weights,
-    int verbose) {
+void CUDAAdvPerfCache::runPreliminaryExperiments(const CUDAKernelGenConfig& cfg,
+                                                 int nQubits,
+                                                 int nRunsHint,
+                                                 std::vector<int>& weights,
+                                                 int verbose) {
   // Build 2*{k=1..5} dense gates and measure GB/s to bias weights to transition
   // region.
   CUDAKernelManager km;
@@ -195,10 +194,12 @@ void CUDAPerformanceCache::runPreliminaryExperiments(
   }
 
   // compile & JIT
-  km.emitPTX(/*threads*/ 1, llvm::OptimizationLevel::O1, /*verbose*/ 0);
-  km.initCUJIT(/*threads*/ 1, /*verbose*/ 0);
+  km.emitPTX(llvm::OptimizationLevel::O1, /* progressBar */ verbose > 1);
+  km.initCUJIT(/* progressBar */ verbose > 1);
 
-  CUDAStatevector<double> sv(nQubits);
+  // Just allocate enough memory (for both f32 and f64 experiments)
+  // We don't care about simulation correctness here
+  CUDAStatevectorF64 sv(nQubits);
   sv.randomize();
 
   const double S = bytesState(nQubits, cfg.precision);
@@ -257,17 +258,20 @@ void CUDAPerformanceCache::runPreliminaryExperiments(
   }
 }
 
-void CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& cfg,
-                                          const CUDADeviceInfo& dev,
-                                          int nQubits,
-                                          int nRuns,
-                                          int verbose) {
+void CUDAAdvPerfCache::runExperiments(const CUDAKernelGenConfig& cfg,
+                                      const CUDADeviceInfo& dev,
+                                      int nQubits,
+                                      int nRuns,
+                                      int verbose) {
   std::vector<StandardQuantumGatePtr> gates;
   gates.reserve(nRuns);
 
   // 1) pre-pass weights
+  if (verbose > 0) {
+    std::cerr << "Running preliminary tests...\n";
+  }
   std::vector<int> nQubitsWeights;
-  runPreliminaryExperiments(cfg, dev, nQubits, nRuns, nQubitsWeights, verbose);
+  runPreliminaryExperiments(cfg, nQubits, nRuns, nQubitsWeights, verbose);
 
   auto addRandomGate = [&](float erasureProb) {
     int sum = std::accumulate(nQubitsWeights.begin(), nQubitsWeights.end(), 0);
@@ -307,10 +311,12 @@ void CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& cfg,
     km.genStandaloneGate(cfg, g, "bench_gate_" + std::to_string(idx++))
         .consumeError();
   }
-  km.emitPTX(/*threads*/ 1, llvm::OptimizationLevel::O3, /*verbose*/ 0);
-  km.initCUJIT(/*threads*/ 1, /*verbose*/ 0);
+  km.emitPTX(llvm::OptimizationLevel::O3, /* progressBar */ verbose > 1);
+  km.initCUJIT(/* progressBar */ verbose > 1);
 
-  CUDAStatevector<double> sv(nQubits);
+  // We always use f64 sv here -- we only care about speed, not simulation
+  // correctness
+  CUDAStatevectorF64 sv(nQubits);
   sv.randomize();
 
   // 4) Benchmark
@@ -375,7 +381,7 @@ void CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& cfg,
                 << " BW=" << item.Bach_GBs << " GB/s"
                 << " GF=" << item.Pach_GFLOPs << " GF/s\n";
     }
-    items.emplace_back(std::move(item));
+    items_.emplace_back(std::move(item));
   }
 
   if (verbose) {
@@ -385,17 +391,17 @@ void CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& cfg,
   }
 }
 
-void CUDAPerformanceCache::writeResults(std::ostream& os) const {
-  for (const auto& item : items) {
+void CUDAAdvPerfCache::writeResults(std::ostream& os) const {
+  for (const auto& item : items_) {
     item.write(os);
     os << "\n";
   }
 }
 
-// --------------------------- CUDACostModel ---------------------------
-CUDACostModel::CUDACostModel(std::unique_ptr<CUDAPerformanceCache> cache,
-                             double zeroTol)
-    : CostModel(CM_CUDA), cache_(std::move(cache)), zeroTol_(zeroTol) {
+// --------------------------- CUDAAdvCostModel ---------------------------
+CUDAAdvCostModel::CUDAAdvCostModel(std::unique_ptr<CUDAAdvPerfCache> cache,
+                                   double zeroTol)
+    : CostModel(CM_CUDA_Adv), cache_(std::move(cache)), zeroTol_(zeroTol) {
   fitFromCache();
 }
 
@@ -403,15 +409,14 @@ static double safeDiv(double num, double den, double def = 0.0) {
   return (den > 0.0) ? (num / den) : def;
 }
 
-void CUDACostModel::fitFromCache() {
-  // 1) Bucket achieved GB/s by (precision, variant) and GF/s by (precision,
-  // path)
+void CUDAAdvCostModel::fitFromCache() {
+  // 1) Bucket achieved GB/s and GF/s
   std::map<Precision, std::vector<double>> B_buckets;
   std::map<Precision, std::vector<double>> F_buckets;
   std::map<AccessPattern, std::vector<double>> B_by_pattern;
   std::map<int, std::vector<double>> gB_bins, gF_bins;
 
-  for (const auto& it : cache_->items) {
+  for (const auto& it : cache_->items()) {
     B_buckets[it.precision].push_back(it.Bach_GBs);
     F_buckets[it.precision].push_back(it.Pach_GFLOPs);
     B_by_pattern[it.pattern].push_back(it.Bach_GBs);
@@ -479,8 +484,8 @@ void CUDACostModel::fitFromCache() {
     t_launch_s_ = t_us * 1e-6;
   } else {
     std::vector<double> tiny;
-    tiny.reserve(cache_->items.size());
-    for (const auto& it : cache_->items)
+    tiny.reserve(cache_->items().size());
+    for (const auto& it : cache_->items())
       if (it.bytes < 1e7)
         tiny.push_back(it.time_s);
     if (!tiny.empty())
@@ -489,8 +494,8 @@ void CUDACostModel::fitFromCache() {
 }
 
 double
-CUDACostModel::interpLUT(const std::vector<std::pair<double, double>>& lut,
-                         double x) {
+CUDAAdvCostModel::interpLUT(const std::vector<std::pair<double, double>>& lut,
+                            double x) {
   if (lut.empty())
     return 1.0;
   if (x <= lut.front().first)
@@ -508,20 +513,20 @@ CUDACostModel::interpLUT(const std::vector<std::pair<double, double>>& lut,
   return lut.back().second;
 }
 
-AccessPattern CUDACostModel::classifyPattern(const QuantumGate* g) {
+AccessPattern CUDAAdvCostModel::classifyPattern(const QuantumGate* g) {
   return classifyPatternVec(g->qubits());
 }
 
-double CUDACostModel::estimateBytes(
+double CUDAAdvCostModel::estimateBytes(
     int nQubits, Precision p, double coverage, int nSweeps, double bytesFixup) {
   const double S = (p == Precision::F32 ? 8.0 : 16.0) * double(1ULL << nQubits);
   return 2.0 * S * std::clamp(coverage, 0.0, 1.0) * std::max(1, nSweeps) +
          std::max(0.0, bytesFixup);
 }
 
-double CUDACostModel::estimateFlops(const QuantumGate* g,
-                                    int nQubits,
-                                    double zeroTol) {
+double CUDAAdvCostModel::estimateFlops(const QuantumGate* g,
+                                       int nQubits,
+                                       double zeroTol) {
   const int k = g->nQubits();
   const int opCount = g->opCount(zeroTol);
   const double groups = double(1ULL << (nQubits - k));
@@ -529,8 +534,8 @@ double CUDACostModel::estimateFlops(const QuantumGate* g,
   return double(opCount) * groups * FLOPS_PER_OP;
 }
 
-double CUDACostModel::computeTime(const QuantumGate* gate,
-                                  const CUDACostQuery& q) const {
+double CUDAAdvCostModel::computeTime(const QuantumGate* gate,
+                                     const CUDAAdvCostQuery& q) const {
   assert(gate);
   assert(q.precision == Precision::F32 || q.precision == Precision::F64);
 
@@ -570,10 +575,10 @@ double CUDACostModel::computeTime(const QuantumGate* gate,
 
 // Backward-compat API (GiBTime & probing placeholders)
 
-double CUDACostModel::computeGiBTime(const QuantumGate* gate) const {
+double CUDAAdvCostModel::computeGiBTime(const QuantumGate* gate) const {
   // Use pattern + mid occupancy to get seconds/GiB (binary) for this gate
   // shape.
-  CUDACostQuery q;
+  CUDAAdvCostQuery q;
   q.nQubits = std::max(0, 0); // not used directly for per-GiB cost
   q.precision = (queryPrecision_ == Precision::Unknown) ? Precision::F64
                                                         : queryPrecision_;
@@ -613,7 +618,7 @@ double CUDACostModel::computeGiBTime(const QuantumGate* gate) const {
   return std::max(t_mem_perGiB, t_cmp_perGiB);
 }
 
-double CUDACostModel::computeGiBTimeStage1(const QuantumGate* g) const {
+double CUDAAdvCostModel::computeGiBTimeStage1(const QuantumGate* g) const {
   // cheap scaling from B_peak; keep for compatibility
   Precision p = (queryPrecision_ == Precision::Unknown) ? Precision::F64
                                                         : queryPrecision_;
@@ -632,9 +637,9 @@ double CUDACostModel::computeGiBTimeStage1(const QuantumGate* g) const {
   return 1.0 / (Beff_GBs * GiB_per_GB) + params.launchOH;
 }
 
-double CUDACostModel::refineWithProbe(const QuantumGate* g,
-                                      int /*blockSize*/,
-                                      const SkeletonStats& sk) const {
+double CUDAAdvCostModel::refineWithProbe(const QuantumGate* g,
+                                         int /*blockSize*/,
+                                         const SkeletonStats& sk) const {
   // Mild occupancy correction (kept for compat with older logic).
   const double base = computeGiBTimeStage1(g) - params.launchOH;
   const double effGiBps = (base > 1e-12) ? (1.0 / base) : 1e12;
@@ -643,7 +648,8 @@ double CUDACostModel::refineWithProbe(const QuantumGate* g,
   return 1.0 / std::max(1e-9, effGiBpsAdj) + params.launchOH;
 }
 
-std::ostream& CUDACostModel::displayInfo(std::ostream& os, int verbose) const {
+std::ostream& CUDAAdvCostModel::displayInfo(std::ostream& os,
+                                            int verbose) const {
   os << "CUDA Cost Model (roofline)\n";
   os << "  t_launch ~ " << t_launch_s_ << " s\n";
   os << "  B_peak (GB/s):\n";

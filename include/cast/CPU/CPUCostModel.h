@@ -7,13 +7,13 @@
 #include "utils/CSVParsable.h"
 
 #include <fstream>
+#include <span>
 
 namespace cast {
 
 struct CPUKernelGenConfig;
 
 class CPUPerformanceCache {
-public:
   struct Item : utils::CSVParsable<Item> {
     int nQubits;
     double opCount;
@@ -35,7 +35,7 @@ public:
     CSV_DATA_FIELD(nQubits, opCount, precision, nThreads, memUpdateSpeed);
   };
 
-  std::vector<Item> items;
+  std::vector<Item> items_;
   // private:
   using WeightType = std::array<int, CPU_GLOBAL_MAX_SIZE>;
   void runPreliminaryExperiments(const CPUKernelGenConfig& cpuConfig,
@@ -47,21 +47,24 @@ public:
 public:
   CPUPerformanceCache() = default;
 
-  CPUPerformanceCache(const std::string& fileName) {
+  std::span<const Item> items() const { return items_; }
+
+  bool loadFromFile(const std::string& fileName) {
     std::ifstream ifs(fileName);
     if (!ifs.is_open()) {
-      assert(false && "Failed to open CPUPerformanceCache file");
-      return;
+      return false;
     }
     std::string line;
     std::getline(ifs, line); // Read header
-    assert(line == Item::CSV_TITLE);
+    if (line != Item::CSV_TITLE) {
+      return false;
+    }
 
     while (std::getline(ifs, line)) {
-      Item item;
-      item.parse(line);
-      items.push_back(std::move(item));
+      items_.emplace_back();
+      items_.back().parse(line);
     }
+    return true;
   }
 
   void runExperiments(const CPUKernelGenConfig& cpuConfig,

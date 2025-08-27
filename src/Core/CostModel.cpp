@@ -275,7 +275,7 @@ double SizeOnlyCostModel::computeGiBTime(const QuantumGate* gate) const {
 //   return 1.0 / std::max(0.05, occLimit);
 // }
 
-// double CUDACostModel::computeGiBTime(const legacy::QuantumGate& gate,
+// double CUDAAdvCostModel::computeGiBTime(const legacy::QuantumGate& gate,
 //                                      Precision precision,
 //                                      int) const {
 //   const double gpuPeakTFLOPs = (precision == 32 ? 35.6 : 0.556); // RTX‑3090
@@ -343,13 +343,13 @@ double SizeOnlyCostModel::computeGiBTime(const QuantumGate* gate) const {
 //   return execCore + launchOverhead;
 // }
 
-// double CUDACostModel::calculateOccupancyPenalty(
+// double CUDAAdvCostModel::calculateOccupancyPenalty(
 //     const CUDAPerformanceCache::Item& item) const {
 //   // Quadratic penalty
 //   return 1.0 / (item.occupancy * item.occupancy);
 // }
 
-// double CUDACostModel::calculateCoalescingPenalty(
+// double CUDAAdvCostModel::calculateCoalescingPenalty(
 //     const CUDAPerformanceCache::Item& item) const {
 //   // Exponential penalty for memory access patterns
 //   const double exponent = 1.5;

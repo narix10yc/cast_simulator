@@ -24,7 +24,7 @@
 #include "cast/CUDA/CUDAPermute.h"
 #include "cast/CUDA/CUDAOptimizer.h"
 #include "cast/CUDA/CUDAFusionConfig.h"
-#include "cast/CUDA/CUDACostModel.h"
+#include "cast/CUDA/CUDAAdvCostModel.h"
 
 using namespace cast;
 
@@ -213,8 +213,8 @@ int main(int argc, char** argv) {
     if (!args.perfCSV.empty()) {
       try {
         // Load GPU performance data → build CUDA cost model
-        auto cache = std::make_unique<CUDAPerformanceCache>(args.perfCSV);
-        auto model = std::make_unique<CUDACostModel>(std::move(cache), /*zeroTol*/1e-8);
+        auto cache = std::make_unique<CUDAAdvPerfCache>(args.perfCSV);
+        auto model = std::make_unique<CUDAAdvCostModel>(std::move(cache), /*zeroTol*/1e-8);
         model->setQueryBlockSize(args.blockSize);
         model->setQueryPrecision(prec);
 

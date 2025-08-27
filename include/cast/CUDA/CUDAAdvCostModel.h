@@ -1,7 +1,5 @@
-#ifndef CAST_CUDA_CUDACOSTMODEL_H
-#define CAST_CUDA_CUDACOSTMODEL_H
-
-#ifdef CAST_USE_CUDA
+#ifndef CAST_CUDA_CUDAADVCOSTMODEL_H
+#define CAST_CUDA_CUDAADVCOSTMODEL_H
 
 #include "cast/CUDA/CUDAKernelManager.h"
 #include "cast/CUDA/Config.h"
@@ -11,8 +9,8 @@
 #include "utils/CSVParsable.h"
 #include "llvm/Passes/OptimizationLevel.h"
 
+#include <fstream>
 #include <map>
-#include <ostream>
 #include <utility>
 
 namespace cast {
@@ -70,7 +68,7 @@ struct CUDADeviceInfo {
   int smCount = 0;
 };
 
-struct CUDAPerformanceCache {
+class CUDAAdvPerfCache {
   struct Item : utils::CSVParsable<Item> {
     // gate/kernel shape
     int nQubitsGate = 0; // k
@@ -102,15 +100,19 @@ struct CUDAPerformanceCache {
     // clang-format on
   };
 
-  std::vector<Item> items;
+  std::vector<Item> items_;
 
   // Calibration runs: generate, JIT, measure
   void runPreliminaryExperiments(const CUDAKernelGenConfig& cfg,
-                                 const CUDADeviceInfo& dev,
                                  int nQubits,
                                  int nRunsHint,
                                  std::vector<int>& weights,
                                  int verbose);
+
+public:
+  CUDAAdvPerfCache() = default;
+
+  std::span<const Item> items() const { return items_; }
 
   void runExperiments(const CUDAKernelGenConfig& cfg,
                       const CUDADeviceInfo& dev,
@@ -119,10 +121,28 @@ struct CUDAPerformanceCache {
                       int verbose);
 
   void writeResults(std::ostream& os) const;
+
+  bool loadFromFile(const std::string& fileName) {
+    std::ifstream ifs(fileName);
+    if (!ifs.is_open()) {
+      return false;
+    }
+    std::string line;
+    std::getline(ifs, line); // Read header
+    if (line != Item::CSV_TITLE) {
+      return false;
+    }
+
+    while (std::getline(ifs, line)) {
+      items_.emplace_back();
+      items_.back().parse(line);
+    }
+    return true;
+  }
 };
 
 // ----------------------------- query & model -----------------------------
-struct CUDACostQuery {
+struct CUDAAdvCostQuery {
   int nQubits = 0;
   Precision precision = Precision::Unknown;
 
@@ -138,7 +158,7 @@ struct CUDACostQuery {
   double bytesFixup = 0.0;       // extra bytes for explicit transposes
 };
 
-class CUDACostModel : public CostModel {
+class CUDAAdvCostModel : public CostModel {
 public:
   // ---- Backward-compat penalty knob set (optional) ----
   struct Params {
@@ -151,14 +171,14 @@ public:
 
   // Construct from an empty performance cache (to be populated via
   // runExperiments)
-  explicit CUDACostModel(std::unique_ptr<CUDAPerformanceCache> cache,
-                         double zeroTol = 1e-8);
+  explicit CUDAAdvCostModel(std::unique_ptr<CUDAAdvPerfCache> cache,
+                            double zeroTol = 1e-8);
 
-  ~CUDACostModel() override = default;
+  ~CUDAAdvCostModel() override = default;
 
   // --------- Primary roofline API (recommended in new code) ----------
   // Predict wall-time (seconds) for a gate or fused block
-  double computeTime(const QuantumGate* gate, const CUDACostQuery& q) const;
+  double computeTime(const QuantumGate* gate, const CUDAAdvCostQuery& q) const;
 
   // --------- Backward-compat API (used by existing passes) ----------
   // seconds per GiB memory for this gate shape (roofline-based)
@@ -166,6 +186,7 @@ public:
 
   // very-cheap predictor (kept for compatibility; uses anchor scaling)
   double computeGiBTimeStage1(const QuantumGate* g) const;
+
   // refine with probed occupancy (optional)
   struct SkeletonStats {
     int regsPerThread = 0;
@@ -189,7 +210,9 @@ public:
 
   std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
 
-  static bool classof(const CostModel* m) { return m->getKind() == CM_CUDA; }
+  static bool classof(const CostModel* base) {
+    return base->getKind() == CM_CUDA;
+  }
 
 private:
   // calibration fit
@@ -209,7 +232,7 @@ private:
   estimateFlops(const QuantumGate* g, int nQubits, double zeroTol);
 
   // measured data
-  std::unique_ptr<CUDAPerformanceCache> cache_;
+  std::unique_ptr<CUDAAdvPerfCache> cache_;
   double zeroTol_;
 
   // fitted params
@@ -230,9 +253,8 @@ private:
   llvm::OptimizationLevel probeOpt_ = llvm::OptimizationLevel::O1;
 };
 
-using PenaltyParams = CUDACostModel::Params;
+using PenaltyParams = CUDAAdvCostModel::Params;
 
 } // namespace cast
 
-#endif // CAST_USE_CUDA
-#endif // CAST_CUDA_CUDACOSTMODEL_H
+#endif // CAST_CUDA_CUDAADVCOSTMODEL_H

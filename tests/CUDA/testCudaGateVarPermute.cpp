@@ -3,59 +3,68 @@
 #include "cast/CUDA/CUDAStatevector.h"
 #include "tests/TestKit.h"
 
+#include "cast/CUDA/CUDAPermute.h"
 #include <algorithm>
 #include <complex>
 #include <cuda_runtime.h>
-#include "cast/CUDA/CUDAPermute.h"
 
 using namespace cast;
 using namespace cast::test;
 
-static inline void set_layout_LSB(cast::BitLayout& layout,
-                                  const std::vector<int>& Q,
-                                  int nSys) {
+static inline void
+set_layout_LSB(cast::BitLayout& layout, const std::vector<int>& Q, int nSys) {
   const int k = (int)Q.size();
   std::vector<char> isTarget(nSys, 0);
-  for (int b = 0; b < k; ++b) isTarget[Q[b]] = 1;
+  for (int b = 0; b < k; ++b)
+    isTarget[Q[b]] = 1;
 
   // non-targets in ascending old physical order
-  std::vector<std::pair<int,int>> others;
+  std::vector<std::pair<int, int>> others;
   others.reserve(std::max(0, nSys - k));
   for (int l = 0; l < nSys; ++l)
-    if (!isTarget[l]) others.emplace_back(layout.phys_of_log[l], l);
+    if (!isTarget[l])
+      others.emplace_back(layout.phys_of_log[l], l);
   std::sort(others.begin(), others.end());
 
-  for (int b = 0; b < k; ++b) layout.phys_of_log[Q[b]] = b;
+  for (int b = 0; b < k; ++b)
+    layout.phys_of_log[Q[b]] = b;
   for (int i = 0; i < (int)others.size(); ++i)
     layout.phys_of_log[others[i].second] = k + i;
 
-  for (int p = 0; p < nSys; ++p) layout.log_of_phys[p] = -1;
-  for (int l = 0; l < nSys; ++l) layout.log_of_phys[layout.phys_of_log[l]] = l;
+  for (int p = 0; p < nSys; ++p)
+    layout.log_of_phys[p] = -1;
+  for (int l = 0; l < nSys; ++l)
+    layout.log_of_phys[layout.phys_of_log[l]] = l;
 }
 
-template<typename ScalarType>
-static inline void permute_to_LSBs_if_needed(
-    ScalarType*& dCurrent,
-    ScalarType*  dScratch,
-    int          nSys,
-    const std::vector<int>& logicalQubits,
-    cast::BitLayout& layout,
-    cudaStream_t stream = 0)
-{
+template <typename ScalarType>
+static inline void
+permute_to_LSBs_if_needed(ScalarType*& dCurrent,
+                          ScalarType* dScratch,
+                          int nSys,
+                          const std::vector<int>& logicalQubits,
+                          cast::BitLayout& layout,
+                          cudaStream_t stream = 0) {
   const int k = (int)logicalQubits.size();
-  if (k == 0) return;
+  if (k == 0)
+    return;
 
   bool lsbOK = true;
   for (int b = 0; b < k; ++b)
-    if (layout.phys_of_log[logicalQubits[b]] != b) { lsbOK = false; break; }
-  if (lsbOK) return;
+    if (layout.phys_of_log[logicalQubits[b]] != b) {
+      lsbOK = false;
+      break;
+    }
+  if (lsbOK)
+    return;
 
   uint64_t maskLow = 0;
   for (int b = 0; b < k; ++b)
     maskLow |= (1ull << layout.phys_of_log[logicalQubits[b]]);
 
   // Reorder interleaved (re,im) pairs so that 'logicalQubits' occupy the LSBs
-  cast_permute_lowbits<ScalarType>(dCurrent, dScratch, nSys, maskLow, k, stream);
+  cast_permute_lowbits<ScalarType>(
+      dCurrent, dScratch, nSys, maskLow, k, stream);
   std::swap(dCurrent, dScratch);
 
   set_layout_LSB(layout, logicalQubits, nSys);
@@ -63,11 +72,13 @@ static inline void permute_to_LSBs_if_needed(
 
 /* compute Pr(q=1) from a host copy of the SV, given the *physical* bit index */
 static double prob_from_host_sv(const std::vector<std::complex<double>>& svHost,
-                                int nQubits, int physBit) {
+                                int nQubits,
+                                int physBit) {
   const size_t N = svHost.size();
   double sum = 0.0;
   for (size_t idx = 0; idx < N; ++idx) {
-    if ((idx >> physBit) & 1ull) sum += std::norm(svHost[idx]);
+    if ((idx >> physBit) & 1ull)
+      sum += std::norm(svHost[idx]);
   }
   return sum;
 }
@@ -97,7 +108,8 @@ static void f(const std::vector<int>& targetQubits) {
   CUDAKernelGenConfig cudaGenConfig;
   cudaGenConfig.precision = Precision::F64;
   cudaGenConfig.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
-  cudaGenConfig.assumeContiguousTargets = true;  // kernels expect targets on LSBs
+  // kernels expect targets on LSBs
+  cudaGenConfig.assumeContiguousTargets = true;
 
   for (size_t i = 0; i < gates.size(); i++) {
     auto funcName = "gateImm_" + std::to_string(targetQubits.size()) + "q_" +
@@ -106,22 +118,22 @@ static void f(const std::vector<int>& targetQubits) {
         .consumeError();
   }
 
-  kernelMgrCUDA.emitPTX(
-      gates.size(), llvm::OptimizationLevel::O1, /* verbose */ 0);
-  kernelMgrCUDA.initCUJIT(gates.size(), /* verbose */ 0);
+  kernelMgrCUDA.emitPTX(llvm::OptimizationLevel::O1, /* verbose */ 0);
+  kernelMgrCUDA.initCUJIT(/* verbose */ 0);
 
   // layout + scratch used by permutation
-  BitLayout layout; layout.init(nQubits);
+  BitLayout layout;
+  layout.init(nQubits);
   double* dScratch = nullptr;
   {
-    const uint64_t nComplex = 1ull << nQubits;             // number of complex amplitudes
-    const size_t   nScalars = size_t(2) * nComplex;        // interleaved re/im
+    const uint64_t nComplex = 1ull << nQubits; // number of complex amplitudes
+    const size_t nScalars = size_t(2) * nComplex; // interleaved re/im
     cudaMalloc(&dScratch, nScalars * sizeof(double));
   }
 
   for (size_t i = 0; i < gates.size(); i++) {
     randomizeSV();
-    layout.init(nQubits);  // reset mapping for each fresh randomized state
+    layout.init(nQubits); // reset mapping for each fresh randomized state
 
     // Reset dCurrent to the actual SV buffer for this iteration
     double* dCurrent = reinterpret_cast<double*>(svCUDA0.dData());
@@ -141,7 +153,7 @@ static void f(const std::vector<int>& targetQubits) {
     // std::cerr << "Initial CUDA Statevector:\n";
     std::vector<std::complex<double>> svCUDA0_data(1 << svCUDA0.nQubits());
     cudaMemcpy(svCUDA0_data.data(),
-               dCurrent,                        // <-- read from *current* buffer
+               dCurrent, // <-- read from *current* buffer
                svCUDA0.sizeInBytes(),
                cudaMemcpyDeviceToHost);
     // for (size_t j = 0; j < svCUDA0_data.size(); j++) {
@@ -170,10 +182,10 @@ static void f(const std::vector<int>& targetQubits) {
     // ====== permute so that target qubits occupy LSBs for this kernel ======
     {
       const CUDAKernelInfo* KInfo =
-          kernelMgrCUDA.getAllStandaloneKernels()[i].get();   // <-- .get() !
-      const auto& Q = KInfo->gate->qubits();                  // logical indices of the gate
-      permute_to_LSBs_if_needed<double>(dCurrent, dScratch, svCUDA0.nQubits(),
-                                        Q, layout, /*stream*/0);
+          kernelMgrCUDA.getAllStandaloneKernels()[i].get(); // <-- .get() !
+      const auto& Q = KInfo->gate->qubits(); // logical indices of the gate
+      permute_to_LSBs_if_needed<double>(
+          dCurrent, dScratch, svCUDA0.nQubits(), Q, layout, /*stream*/ 0);
     }
 
     // Launch on the *current* buffer (which may now be the scratch)
@@ -186,7 +198,7 @@ static void f(const std::vector<int>& targetQubits) {
     // Print final CUDA statevector
     // std::cerr << "Final CUDA Statevector:\n";
     cudaMemcpy(svCUDA0_data.data(),
-               dCurrent,                        // <-- read from *current* buffer
+               dCurrent, // <-- read from *current* buffer
                svCUDA0.sizeInBytes(),
                cudaMemcpyDeviceToHost);
     // for (size_t j = 0; j < svCUDA0_data.size(); j++) {
@@ -194,9 +206,11 @@ static void f(const std::vector<int>& targetQubits) {
     //     " << svCUDA0_data[j].imag() << ")\n";
     // }
 
-    // Compute norm from the host copy (the SV object still points to the original buffer)
+    // Compute norm from the host copy (the SV object still points to the
+    // original buffer)
     double hostNorm = 0.0;
-    for (const auto& c : svCUDA0_data) hostNorm += std::norm(c);
+    for (const auto& c : svCUDA0_data)
+      hostNorm += std::norm(c);
     suite.assertCloseF64(
         hostNorm, 1.0, ss.str() + "CUDA SV norm equals to 1", GET_INFO());
 
@@ -208,9 +222,11 @@ static void f(const std::vector<int>& targetQubits) {
     // }
 
     for (int q : targetQubits) {
-      // CUDA prob: interpret logical q using the *current* layout (physical bit position)
+      // CUDA prob: interpret logical q using the *current* layout (physical bit
+      // position)
       const int phys = layout.phys_of_log[q];
-      double cudaProb = prob_from_host_sv(svCUDA0_data, svCUDA0.nQubits(), phys);
+      double cudaProb =
+          prob_from_host_sv(svCUDA0_data, svCUDA0.nQubits(), phys);
 
       double cpuProb = svCPU.prob(q);
       // std::cerr << "Qubit " << q << ": CUDA prob=" << cudaProb << ", CPU
@@ -223,7 +239,8 @@ static void f(const std::vector<int>& targetQubits) {
     }
   }
 
-  if (dScratch) cudaFree(dScratch);
+  if (dScratch)
+    cudaFree(dScratch);
   suite.displayResult();
 }
 

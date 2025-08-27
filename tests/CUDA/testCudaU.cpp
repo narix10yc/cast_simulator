@@ -35,8 +35,7 @@ template <unsigned nQubits> static void f() {
 
   CUDAKernelGenConfig cudaGenConfig;
   cudaGenConfig.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
-  // cudaGenConfig.forceDenseKernel = true;
-  cudaGenConfig.enableTilingGateSize = 9999; // enable tiling
+  cudaGenConfig.enableTilingGateSize = 9999; // disable tiling
   cudaGenConfig.precision = Precision::F64;
 
   for (int q = 0; q < nQubits; q++) {
@@ -49,15 +48,8 @@ template <unsigned nQubits> static void f() {
     }
   }
 
-  // cudaGenConfig.forceDenseKernel = true;
-  // cudaGenConfig.matrixLoadMode = CUDAKernelGenConfig::LoadInConstMemSpace;
-  // for (int q = 0; q < nQubits; q++) {
-  //   kernelMgrCUDA.genCUDAGate(
-  //     cudaGenConfig, gates[q], "gateConstMemSpace_" + std::to_string(q));
-  // }
-
-  kernelMgrCUDA.emitPTX(2, llvm::OptimizationLevel::O1, /* verbose */ 0);
-  kernelMgrCUDA.initCUJIT(2, /* verbose */ 0);
+  kernelMgrCUDA.emitPTX(llvm::OptimizationLevel::O1, /* verbose */ 0);
+  kernelMgrCUDA.initCUJIT(/* verbose */ 0);
   for (unsigned q = 0; q < nQubits; q++) {
     std::stringstream ss;
     assert(q == gates[q]->qubits()[0]);

@@ -23,7 +23,7 @@
 #include "cast/CUDA/CUDAStatevector.h"
 #include "cast/CUDA/Config.h"
 
-#include "cast/CUDA/CUDACostModel.h"
+#include "cast/CUDA/CUDAAdvCostModel.h"
 #include "cast/CUDA/CUDAFusionConfig.h"
 #include "cast/CUDA/CUDAOptimizer.h"
 
@@ -167,10 +167,10 @@ static AccessPattern parsePatternToken(std::string t) {
   return AccessPattern::Contiguous;
 }
 
-static std::unique_ptr<cast::CUDAPerformanceCache>
+static std::unique_ptr<cast::CUDAAdvPerfCache>
 loadGpuPerfCSV(const std::string& path) {
-  using Cache = cast::CUDAPerformanceCache;
-  using Item = cast::CUDAPerformanceCache::Item;
+  using Cache = cast::CUDAAdvPerfCache;
+  using Item = cast::CUDAAdvPerfCache::Item;
 
   std::ifstream ifs(path);
   if (!ifs.is_open()) {
@@ -372,7 +372,7 @@ int main(int argc, char** argv) {
         // Load GPU performance data → build CUDA cost model
         auto cache = loadGpuPerfCSV(args.perfCSV);
         auto model =
-            std::make_unique<CUDACostModel>(std::move(cache), /*zeroTol*/ 1e-8);
+            std::make_unique<CUDAAdvCostModel>(std::move(cache), /*zeroTol*/ 1e-8);
         model->setQueryBlockSize(args.blockSize);
         model->setQueryPrecision(prec);
 

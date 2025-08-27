@@ -28,7 +28,7 @@ void CUDAOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
         int fusedThisSize = 0;
         auto graphs = circuit.getAllCircuitGraphs();
         if (auto* cm =
-                llvm::dyn_cast<CUDACostModel>(fusionConfig->costModel.get())) {
+                llvm::dyn_cast<CUDAAdvCostModel>(fusionConfig->costModel.get())) {
           cm->enableProbing(true);
           cm->resetProbeBudget(/*topK*/ 4);
           cm->setProbeThreads(std::max(1, /* pick a number */ 2));

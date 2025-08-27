@@ -110,7 +110,7 @@ loadPerfCacheFromCSV(const std::string& path,
 
     Precision prec = parsePrecisionToken(precTok, defaultPrecForRows);
 
-    cache->items.emplace_back(static_cast<int>(nQ),
+    cache->items_.emplace_back(static_cast<int>(nQ),
                               static_cast<uint64_t>(opCount),
                               prec,
                               static_cast<int>(nThreads),
@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
       constexpr double swapTol = 1e-8;
       auto cache = loadPerfCacheFromCSV(args.perfCSV, prec, 1);
 
-      if (!cache->items.empty()) {
+      if (!cache->items_.empty()) {
         auto model = std::make_unique<CPUCostModel>(std::move(cache), zeroTol);
 
         auto fcfg = std::make_unique<CPUFusionConfig>(

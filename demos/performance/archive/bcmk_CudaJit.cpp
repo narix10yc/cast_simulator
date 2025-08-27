@@ -92,7 +92,7 @@ void applyFusionStrategy(cast::legacy::CircuitGraph& graph,
   case FusionStrategy::Cuda: {
     if (!cudaModelPath.empty()) {
       auto cudaCache = CUDAPerformanceCache::LoadFromCSV(cudaModelPath);
-      CUDACostModel cudaModel(&cudaCache);
+      CUDAAdvCostModel cudaModel(&cudaCache);
       applyGateFusion(fusionConfig, &cudaModel, graph);
     } else {
       std::cerr << "[Warning] CUDA requested but no cudaModelPath provided.\n";

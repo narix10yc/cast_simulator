@@ -89,10 +89,10 @@ int main(int argc, const char** argv) {
 
   if (ArgRunCudaFuse && ArgCUDAModelPath != "") {
     auto cudaCache = CUDAPerformanceCache::LoadFromCSV(ArgCUDAModelPath);
-    CUDACostModel cudaCostModel(&cudaCache);
-    cudaCostModel.setBlockSize(ArgBlockSize);
+    CUDAAdvCostModel CUDAAdvCostModel(&cudaCache);
+    CUDAAdvCostModel.setBlockSize(ArgBlockSize);
     // standardCostModel.display(std::cerr);
-    applyGateFusion(fusionConfigAggresive, &cudaCostModel, graphCudaFuse);
+    applyGateFusion(fusionConfigAggresive, &CUDAAdvCostModel, graphCudaFuse);
   }
 
   CUDAKernelManager kernelMgr;

@@ -49,9 +49,8 @@ template <unsigned nQubits> void runU2qTest() {
         .genStandaloneGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i))
         .consumeError();
   }
-  kernelMgrCUDA.emitPTX(
-      gates.size(), llvm::OptimizationLevel::O1, /*verbose*/ 0);
-  kernelMgrCUDA.initCUJIT(gates.size(), /*verbose*/ 0);
+  kernelMgrCUDA.emitPTX(llvm::OptimizationLevel::O1, /*verbose*/ 0);
+  kernelMgrCUDA.initCUJIT(/*verbose*/ 0);
 
   /* main test loop */
   for (std::size_t i = 0; i < gates.size(); ++i) {
