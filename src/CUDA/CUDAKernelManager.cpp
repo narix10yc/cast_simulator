@@ -46,7 +46,77 @@ std::ostream& CUDAKernelGenConfig::displayInfo(std::ostream& os) const {
   return os << CYAN("================================\n");
 }
 
-void CUDAKernelManager::emitPTX(OptimizationLevel optLevel, int verbose) {
+std::ostream& CUDAKernelInfo::displayInfo(std::ostream& os) const {
+  os << CYAN("=== Info of CUDA Kernel @ " << (void*)this << " ===\n")
+     << "Function Name    : " << llvmFuncName << "\n"
+     << "Precision        : f" << static_cast<int>(precision) << "\n"
+     << "Gate             : " << gate.get() << "\n"
+     << "PTX              : ";
+  if (ptxString.empty())
+    os << "No\n";
+  else
+    os << "Yes, with size " << utils::fmt_mem(ptxString.size()) << "\n";
+
+  os << "CUBIN            : ";
+  if (cubinData.empty())
+    os << "No\n";
+  else
+    os << "Yes, with size " << utils::fmt_mem(cubinData.size()) << "\n";
+
+  os << "LLVM Context     : " << llvmContext << "\n"
+     << "LLVM Module      : " << llvmModule << "\n"
+     << "CU Context       : " << cuContext << "\n"
+     << "CU Module        : " << cuModule << "\n"
+     << "CU Function      : " << cuFunction << "\n";
+  return os << CYAN("================================\n");
+}
+
+std::ostream& CUDAKernelManager::displayInfo(std::ostream& os) const {
+  os << CYAN("=== Info of CUDA Kernel Manager @ " << (void*)this << " ===\n")
+     << "Num Worker Threads : " << nWorkerThreads_ << "\n"
+     << "JIT State          : " << static_cast<int>(jitState) << "\n"
+     << "Primary CU Context : " << primaryCuCtx << "\n"
+     << "Num CU Modules     : " << cuModules.size() << "\n";
+
+  int nKernels = 0;
+  size_t totalPTXSize = 0, totalCUBINSize = 0;
+  for (const auto& kernel : *this) {
+    ++nKernels;
+    totalPTXSize += kernel.ptxString.size();
+    totalCUBINSize += kernel.cubinData.size();
+  }
+  os << "Num Kernels        : " << nKernels << "\n"
+     << "Total PTX Size     : " << utils::fmt_mem(totalPTXSize) << "\n"
+     << "Total CUBIN Size   : " << utils::fmt_mem(totalCUBINSize) << "\n";
+  return os << CYAN("================================\n");
+}
+
+namespace {
+
+class raw_pwrite_vector_ostream : public llvm::raw_pwrite_stream {
+  std::string& out;
+
+  void write_impl(const char* Ptr, size_t Size) override {
+    out.append(Ptr, Size);
+  }
+
+  void pwrite_impl(const char* Ptr, size_t Size, uint64_t Offset) override {
+    if (out.size() < Offset + Size)
+      out.resize(static_cast<size_t>(Offset + Size));
+    std::memcpy(out.data() + Offset, Ptr, Size);
+  }
+
+  uint64_t current_pos() const override { return out.size(); }
+
+public:
+  explicit raw_pwrite_vector_ostream(std::string& str) : out(str) {
+    SetUnbuffered();
+  }
+  ~raw_pwrite_vector_ostream() override { flush(); }
+};
+} // namespace
+
+void CUDAKernelManager::compileToPTX(int llvmOptLevel, int verbose) {
   assert(nWorkerThreads_ > 0);
 
   InitializeAllTargets();
@@ -54,8 +124,28 @@ void CUDAKernelManager::emitPTX(OptimizationLevel optLevel, int verbose) {
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
 
-  applyLLVMOptimization(
-      nWorkerThreads_, optLevel, /* progressBar */ verbose > 0);
+  llvm::OptimizationLevel optLevel;
+  switch (llvmOptLevel) {
+  case 0:
+    optLevel = llvm::OptimizationLevel::O0;
+    break;
+  case 1:
+    optLevel = llvm::OptimizationLevel::O1;
+    break;
+  case 2:
+    optLevel = llvm::OptimizationLevel::O2;
+    break;
+  case 3:
+    optLevel = llvm::OptimizationLevel::O3;
+    break;
+  default:
+    assert(false && "Invalid LLVM optimization level");
+    // Default to O1
+    optLevel = llvm::OptimizationLevel::O1;
+    break;
+  }
+
+  applyLLVMOptimization(nWorkerThreads_, optLevel, verbose > 0);
 
   std::string targetTriple = "nvptx64-nvidia-cuda";
   std::string err;
@@ -94,50 +184,97 @@ void CUDAKernelManager::emitPTX(OptimizationLevel optLevel, int verbose) {
 
   utils::TaskDispatcher dispatcher(nWorkerThreads_);
 
-  for (auto& kernel : standaloneKernels_) {
+  for (auto& kernel : *this) {
     dispatcher.enqueue([&]() {
-      raw_svector_ostream sstream(kernel->ptxString);
+      raw_pwrite_vector_ostream vecStream(kernel.ptxString);
       legacy::PassManager passManager;
       if (createTargetMachine()->addPassesToEmitFile(
-              passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
+              passManager, vecStream, nullptr, CodeGenFileType::AssemblyFile)) {
         llvm::errs() << "The target machine can't emit a file of this type\n";
         return;
       }
-      passManager.run(*(kernel->llvmModule));
+      passManager.run(*(kernel.llvmModule));
     });
-  }
-  for (auto& [name, kernels] : graphKernels_) {
-    for (auto& kernel : kernels) {
-      dispatcher.enqueue([&]() {
-        raw_svector_ostream sstream(kernel->ptxString);
-        legacy::PassManager passManager;
-        if (createTargetMachine()->addPassesToEmitFile(
-                passManager, sstream, nullptr, CodeGenFileType::AssemblyFile)) {
-          llvm::errs() << "The target machine can't emit a file of this type\n";
-          return;
-        }
-        passManager.run(*(kernel->llvmModule));
-      });
-    }
   }
 
   if (verbose > 0)
-    std::cerr << "Emitting PTX codes...\n";
+    std::cerr << "Generating PTX codes...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
   jitState = JIT_PTXEmitted;
 }
 
-void CUDAKernelManager::initCUJIT(int verbose) {
-  assert(jitState == JIT_PTXEmitted);
-  assert(nWorkerThreads_ > 0);
+static MaybeError<void> compile_ptx_to_cubin(int cuOptLevel,
+                                             CUDAKernelInfo* kernel) {
+  // JIT/link options
+  constexpr size_t LOG_SZ = 1 << 15;
+  std::vector<char> info(LOG_SZ, 0), err(LOG_SZ, 0);
+  float wallTime = 0.0f;
 
-  size_t nKernels = getAllStandaloneKernels().size();
-  if (nKernels == 0) {
-    std::cerr << RED("[Error] ") << "No kernels to JIT.\n";
-    return;
+  unsigned int fastCompile = 1;
+  unsigned int targetFromCtx = 1;
+
+  CUjit_option options[] = {CU_JIT_OPTIMIZATION_LEVEL,
+                            CU_JIT_FAST_COMPILE,
+                            CU_JIT_TARGET_FROM_CUCONTEXT,
+                            CU_JIT_INFO_LOG_BUFFER,
+                            CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
+                            CU_JIT_ERROR_LOG_BUFFER,
+                            CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
+                            CU_JIT_WALL_TIME,
+                            CU_JIT_LOG_VERBOSE};
+
+  void* optionVals[] = {(void*)(uintptr_t)cuOptLevel,
+                        (void*)(uintptr_t)fastCompile,
+                        (void*)(uintptr_t)targetFromCtx,
+                        info.data(),
+                        (void*)(uintptr_t)LOG_SZ,
+                        err.data(),
+                        (void*)(uintptr_t)LOG_SZ,
+                        &wallTime,
+                        (void*)(uintptr_t)1};
+
+  CUlinkState linkState = nullptr;
+
+  CU_CHECK(cuLinkCreate((unsigned int)(sizeof(options) / sizeof(options[0])),
+                        options,
+                        optionVals,
+                        &linkState));
+
+  // PTX MUST be NUL-terminated
+  CU_CHECK(cuLinkAddData(linkState,
+                         CU_JIT_INPUT_PTX,
+                         (void*)kernel->ptxString.c_str(),
+                         kernel->ptxString.size() + 1,
+                         kernel->llvmFuncName.c_str(),
+                         0,
+                         nullptr,
+                         nullptr));
+
+  void* cubinOut = nullptr;
+  size_t cubinSize = 0;
+  CUresult completeRes = cuLinkComplete(linkState, &cubinOut, &cubinSize);
+
+  if (completeRes != CUDA_SUCCESS) {
+    cuLinkDestroy(linkState);
+    return cast::makeError<void>(std::string(err.data()));
   }
 
-  cuInit(0);
+  // copy cubinOut to the kernel info
+  // cubinOut is owned by the link state, so will be invalidated after
+  // calling cuLinkDestroy
+  kernel->cubinData.assign(static_cast<uint8_t*>(cubinOut),
+                           static_cast<uint8_t*>(cubinOut) + cubinSize);
+
+  cuLinkDestroy(linkState);
+  return {}; // success
+}
+
+void CUDAKernelManager::compileToCUBIN(int cuOptLevel, int verbose) {
+  assert(jitState == JIT_PTXEmitted);
+  assert(nWorkerThreads_ > 0);
+  assert(0 <= cuOptLevel && cuOptLevel <= 4);
+
+  CU_CHECK(cuInit(0));
   /* cuDeviceGet expects logical index.
    * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
    * physical device 2.
@@ -146,120 +283,30 @@ void CUDAKernelManager::initCUJIT(int verbose) {
    */
   int deviceIdx = 0;
   CUdevice cuDevice;
-  CU_CALL(cuDeviceGet(&cuDevice, deviceIdx), "Get CUDA device");
-
-  // Create CUDA contexts
-  cuContexts.resize(nWorkerThreads_, nullptr);
-  for (unsigned t = 0; t < nWorkerThreads_; ++t) {
-    CU_CALL(cuCtxCreate(&cuContexts[t], 0, cuDevice), "Create CUDA context");
-  }
+  CU_CHECK(cuDeviceGet(&cuDevice, deviceIdx));
+  // create primary cuda context
+  CU_CHECK(cuCtxCreate(&primaryCuCtx, 0, cuDevice));
+  CU_CHECK(cuDevicePrimaryCtxRetain(&primaryCuCtx, cuDevice));
 
   utils::TaskDispatcher dispatcher(nWorkerThreads_);
-  std::vector<size_t> sharedMemValues(nKernels);
-
-  for (unsigned i = 0; i < nKernels; ++i) {
-    // capture values needed per kernel
-    auto& kernel = getAllStandaloneKernels()[i];
-    // TODO: Currently ptxString is captured by value. This seems to be due
-    // to the property of llvm::SmallVector<char, 0> -- calling str() returns an
-    // empty StringRef. One fix is to replace PTXStringType from
-    // SmallVector<char, 0> to std::string. Then we need to adjust emitPTX
-    // accordingly.
-    std::string ptxString(kernel->ptxString.str());
-    CUcontext* cuContextPtr = &(kernel->cuTuple.cuContext);
-    CUmodule* cuModulePtr = &(kernel->cuTuple.cuModule);
-    CUfunction* cuFunctionPtr = &(kernel->cuTuple.cuFunction);
-    const char* funcName = kernel->llvmFuncName.c_str();
-
-    dispatcher.enqueue([=, this, &dispatcher]() {
-      auto workerID = dispatcher.getWorkerID();
-
-      CU_CHECK(cuCtxSetCurrent(cuContexts[workerID]));
-      *cuContextPtr = cuContexts[workerID];
-      CU_CHECK(cuModuleLoadData(cuModulePtr, ptxString.c_str()));
-      CU_CHECK(cuModuleGetFunction(cuFunctionPtr, *cuModulePtr, funcName));
+  for (auto& kernel : *this) {
+    dispatcher.enqueue([=, this, &kernel]() {
+      kernel.cuContext = primaryCuCtx;
+      CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
+      auto r = compile_ptx_to_cubin(cuOptLevel, &kernel);
+      if (!r) {
+        std::cerr << "Error in ptx -> cubin JIT: " << r.takeError();
+        std::terminate();
+      }
     });
   }
 
   if (verbose > 0)
-    std::cerr << "Loading CUDA Modules...\n";
+    std::cerr << "JIT Compile PTX to CUBIN...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
 
-  jitState = JIT_CUFunctionLoaded;
+  jitState = JIT_CUBIN;
 }
-
-// void CUDAKernelManager::initCUJIT_New(int cuOptLevel, int verbose) {
-//   assert(jitState == JIT_PTXEmitted);
-//   assert(nWorkerThreads_ > 0);
-
-//   CU_CHECK(cuInit(0));
-//   /* cuDeviceGet expects logical index.
-//    * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
-//    * physical device 2.
-//    * Therefore, we always choose deviceIdx to be 0, and ask users to control
-//    * via environment variable CUDA_VISIBLE_DEVICES
-//    */
-//   int deviceIdx = 0;
-//   CUdevice cuDevice;
-//   CU_CHECK(cuDeviceGet(&cuDevice, deviceIdx));
-//   CUcontext cuCtx;
-//   CU_CHECK(cuDevicePrimaryCtxRetain(&cuCtx, cuDevice));
-
-//   utils::TaskDispatcher dispatcher(nWorkerThreads_);
-//   for (auto& kernel : getAllStandaloneKernels()) {
-//     std::string ptxString(kernel->ptxString.str());
-
-//     // Capture ptx string by value
-//     dispatcher.enqueue([&, ptx = ptxString, cuCtx = cuCtx]() {
-//       CU_CHECK(cuCtxSetCurrent(cuCtx));
-//       // --- JIT compile (PTX -> CUBIN) ---
-//       CUlinkState link;
-//       std::vector<CUjit_option> opts;
-//       std::vector<void*> vals;
-//       // Use device from current context
-//       opts.push_back(CU_JIT_TARGET_FROM_CUCONTEXT);
-//       vals.push_back(nullptr);
-
-//       // Lower opt level compiles faster (0..4)
-//       opts.push_back(CU_JIT_OPTIMIZATION_LEVEL);
-//       vals.push_back((void*)(uintptr_t)cuOptLevel);
-
-//       // Optional: collect logs (helpful if something fails)
-//       char infoLog[1 << 16] = {0}, errLog[1 << 16] = {0};
-//       opts.push_back(CU_JIT_INFO_LOG_BUFFER);
-//       vals.push_back(infoLog);
-//       opts.push_back(CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES);
-//       vals.push_back((void*)(uintptr_t)sizeof(infoLog));
-//       opts.push_back(CU_JIT_ERROR_LOG_BUFFER);
-//       vals.push_back(errLog);
-//       opts.push_back(CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES);
-//       vals.push_back((void*)(uintptr_t)sizeof(errLog));
-
-//       CU_CHECK(
-//           cuLinkCreate((unsigned)opts.size(), opts.data(), vals.data(),
-//           &link));
-
-//       CU_CHECK(cuLinkAddData(link,
-//                              CU_JIT_INPUT_PTX,
-//                              (void*)ptx.data(),
-//                              ptx.size(),
-//                              "unit.ptx",
-//                              0,
-//                              nullptr,
-//                              nullptr));
-
-//       void* cubin = nullptr;
-//       size_t cubinSize = 0;
-//       CUresult c = cuLinkComplete(link, &cubin, &cubinSize);
-//       if (c != CUDA_SUCCESS) {
-//         fprintf(
-//             stderr, "Link failed:\nINFO:\n%s\nERROR:\n%s\n", infoLog,
-//             errLog);
-//         std::exit(1);
-//       }
-//     });
-//   }
-// }
 
 const CUDAKernelInfo*
 CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) const {
@@ -284,7 +331,7 @@ void CUDAKernelManager::dumpPTX(std::ostream& os,
        << "' not found.\n";
     return;
   }
-  os << kernelInfo->ptxString.str().str() << "\n";
+  os << kernelInfo->ptxString << "\n";
 }
 
 void CUDAKernelManager::launchCUDAKernel(void* dData,
@@ -292,8 +339,8 @@ void CUDAKernelManager::launchCUDAKernel(void* dData,
                                          const CUDAKernelInfo& kernelInfo,
                                          int blockDim) {
   assert(dData != nullptr);
-  assert(kernelInfo.cuTuple.cuContext && kernelInfo.cuTuple.cuFunction);
-  cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
+  assert(kernelInfo.cuContext && kernelInfo.cuFunction);
+  cuCtxSetCurrent(kernelInfo.cuContext);
 
   unsigned nCombos = 1U << (nQubits - kernelInfo.gate->nQubits());
   unsigned gridDim = (nCombos + blockDim - 1) / blockDim;
@@ -302,7 +349,7 @@ void CUDAKernelManager::launchCUDAKernel(void* dData,
   void* kernelParams[2] = {&dData, &nCombos};
 
   // clang-format off
-  CU_CALL(cuLaunchKernel(kernelInfo.cuTuple.cuFunction,
+  CU_CALL(cuLaunchKernel(kernelInfo.cuFunction,
                          gridDim, 1, 1,
                          blockDim, 1, 1,
                          /*sharedMemBytes*/ 0,
@@ -313,41 +360,41 @@ void CUDAKernelManager::launchCUDAKernel(void* dData,
   // clangt-format on
 }
 
-void CUDAKernelManager::launchCUDAKernelParam(
-    void* dData, // pointer to device statevector
-    int nQubits,
-    const CUDAKernelInfo& kernelInfo,
-    void* dMatPtr, // pointer to device matrix
-    int blockSize  // ignored if fixed TILE is used
-) {
-  assert(dData != nullptr);
-  assert(dMatPtr != nullptr);
-  assert(kernelInfo.cuTuple.cuContext != nullptr);
-  assert(kernelInfo.cuTuple.cuModule != nullptr);
-  assert(kernelInfo.cuTuple.cuFunction != nullptr);
-  cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
+// void CUDAKernelManager::launchCUDAKernelParam(
+//     void* dData, // pointer to device statevector
+//     int nQubits,
+//     const CUDAKernelInfo& kernelInfo,
+//     void* dMatPtr, // pointer to device matrix
+//     int blockSize  // ignored if fixed TILE is used
+// ) {
+//   assert(dData != nullptr);
+//   assert(dMatPtr != nullptr);
+//   assert(kernelInfo.cuTuple.cuContext != nullptr);
+//   assert(kernelInfo.cuTuple.cuModule != nullptr);
+//   assert(kernelInfo.cuTuple.cuFunction != nullptr);
+//   cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
 
-  // Define tile size to match kernel expectations
-  unsigned nGateQubits = kernelInfo.gate->nQubits();
-  unsigned N = 1u << nGateQubits; // Size of gate matrix (2^nGateQubits)
-  unsigned TILE = std::min(256u, N);
-  unsigned combos =
-      (nQubits > nGateQubits) ? (1u << (nQubits - nGateQubits)) : 1;
-  unsigned tilesPerGate = (N + TILE - 1) / TILE;
-  unsigned gridDimX = combos * tilesPerGate;
+//   // Define tile size to match kernel expectations
+//   unsigned nGateQubits = kernelInfo.gate->nQubits();
+//   unsigned N = 1u << nGateQubits; // Size of gate matrix (2^nGateQubits)
+//   unsigned TILE = std::min(256u, N);
+//   unsigned combos =
+//       (nQubits > nGateQubits) ? (1u << (nQubits - nGateQubits)) : 1;
+//   unsigned tilesPerGate = (N + TILE - 1) / TILE;
+//   unsigned gridDimX = combos * tilesPerGate;
 
-  void* kernelParams[] = {&dData, &dMatPtr, &combos};
+//   void* kernelParams[] = {&dData, &dMatPtr, &combos};
 
-  // clang-format off
-  CU_CALL(cuLaunchKernel(kernelInfo.cuTuple.cuFunction,
-                         gridDimX, 1, 1,                    // grid dim
-                         TILE, 1, 1,                        // block dim
-    0,
-                         0,                                 // stream
-                         kernelParams,                      // kernel arguments
-                         nullptr),
-          "launchCUDAKernelParam");
-  // clang-format on
-}
+//   // clang-format off
+//   CU_CALL(cuLaunchKernel(kernelInfo.cuTuple.cuFunction,
+//                          gridDimX, 1, 1,                    // grid dim
+//                          TILE, 1, 1,                        // block dim
+//     0,
+//                          0,                                 // stream
+//                          kernelParams,                      // kernel arguments
+//                          nullptr),
+//           "launchCUDAKernelParam");
+//   // clang-format on
+// }
 
 #undef DEBUG_TYPE

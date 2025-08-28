@@ -293,7 +293,7 @@ int main(int argc, char** argv) {
       if (!r) std::exit(4);
     },
     // timed:
-    [&](){ kmPTX->emitPTX(args.nThreads, args.opt, 0); },
+    [&](){ kmPTX->compileToPTX(args.nThreads, args.opt, 0); },
     // post:
     [&](){ kmPTX.reset(); },
     [](){}, [](){}
@@ -309,10 +309,10 @@ int main(int argc, char** argv) {
       kmJIT = std::make_unique<cast::CUDAKernelManager>();
       auto r = kmJIT->genGraphGates(genCfg, *graph, args.graphName);
       if (!r) std::exit(5);
-      kmJIT->emitPTX(args.nThreads, args.opt, 0);
+      kmJIT->compileToPTX(args.nThreads, args.opt, 0);
     },
     // timed:
-    [&](){ kmJIT->initCUJIT(args.nThreads, 0); },
+    [&](){ kmJIT->compileToCUBIN(args.nThreads, 0); },
     // post:
     [&](){ kmJIT.reset(); },
     [](){}, [](){}

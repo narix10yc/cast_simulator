@@ -50,8 +50,8 @@ template <unsigned nQubits> void runU2qTest() {
     km.genStandaloneGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i))
         .consumeError();
   }
-  km.emitPTX(llvm::OptimizationLevel::O1, /*verbose*/ 0);
-  km.initCUJIT(/*verbose*/ 0);
+  km.compileToPTX(llvm::OptimizationLevel::O1, /*verbose*/ 0);
+  km.compileToCUBIN(/*verbose*/ 0);
 
   /* main test loop */
   for (std::size_t i = 0; i < gates.size(); ++i) {

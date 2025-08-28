@@ -24,31 +24,24 @@ enum class CUDAMatrixLoadMode {
   LoadInConstMemSpace
 };
 
+// cuContext, cuModule, and cuFunction are internally pointers. CUDAKernelInfo
+// does not own their allocation state. Allocation states are managed by
+// - cuContext: via CUDAKernelManager::primaryCuCtx
+// - cuModule: via CUDAKernelManager::cuModules (a vector of CUmodule)
+// - cuFunction: living in its own CUmodule
 struct CUDAKernelInfo {
-  /// Every CUDA module will contain exactly one CUDA function. Multiple CUDA
-  /// modules may share the same CUDA context. For multi-threading JIT session,
-  /// we create \c nThread number of CUDA contexts.
-  /// CUcontext internally is just a pointer. So multiple \c CUDATuple may have
-  /// the same \c cuContext. The collection of unique \c cuContext is stored in
-  /// \c cuContexts (only available if CAST_USE_CUDA is defined).
-  struct CUDATuple {
-    CUcontext cuContext;
-    CUmodule cuModule;
-    CUfunction cuFunction;
-    CUDATuple()
-        : cuContext(nullptr), cuModule(nullptr), cuFunction(nullptr) {}
-  };
-  // We expect large stream writes anyway, so always trigger heap allocation.
-  using PTXStringType = llvm::SmallString<0>;
-  PTXStringType ptxString;
+  std::string ptxString;
+  std::vector<uint8_t> cubinData;
+  ConstQuantumGatePtr gate;
   Precision precision;
   llvm::LLVMContext* llvmContext;
   llvm::Module* llvmModule;
   std::string llvmFuncName;
-  ConstQuantumGatePtr gate;
-  CUDATuple cuTuple;
-  double opCount;
+  CUcontext cuContext;
+  CUmodule cuModule;
+  CUfunction cuFunction;
 
+  std::ostream& displayInfo(std::ostream& os) const;
 }; // struct CUDAKernelInfo
 
 struct CUDAKernelGenConfig {
@@ -67,9 +60,17 @@ class CUDAKernelManager : public KernelManagerBase {
   std::vector<KernelInfoPtr> standaloneKernels_;
   std::map<std::string, std::vector<KernelInfoPtr>> graphKernels_;
 
-  enum JITState { JIT_Uninited, JIT_PTXEmitted, JIT_CUFunctionLoaded };
+  enum JITState {
+    JIT_Uninited,
+    JIT_PTXEmitted,
+    JIT_CUBIN,
+    JIT_CUFunctionLoaded
+  };
   JITState jitState;
   int nWorkerThreads_;
+
+  CUcontext primaryCuCtx;
+  std::vector<CUmodule> cuModules;
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
@@ -93,18 +94,25 @@ public:
       this->nWorkerThreads_ = cast::get_cpu_num_threads();
   }
 
+  CUDAKernelManager(const CUDAKernelManager&) = delete;
+  CUDAKernelManager(CUDAKernelManager&&) = delete;
+  CUDAKernelManager& operator=(const CUDAKernelManager&) = delete;
+  CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
+
+  ~CUDAKernelManager() {
+    for (const auto& kernel : *this) {
+      if (kernel.cuModule)
+        cuModuleUnload(kernel.cuModule);
+    }
+    if (primaryCuCtx)
+      cuCtxDestroy(primaryCuCtx);
+  }
+
+  std::ostream& displayInfo(std::ostream& os) const;
+
   MaybeError<void> genStandaloneGate(const CUDAKernelGenConfig& config,
                                      ConstQuantumGatePtr gate,
                                      const std::string& funcName);
-
-  void emitPTX(llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
-               int verbose = 0);
-
-  std::string getPTXString(int idx) const {
-    return std::string(standaloneKernels_[idx]->ptxString.str());
-  }
-
-  void dumpPTX(std::ostream& os, const std::string& kernelName) const;
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
@@ -114,45 +122,13 @@ public:
                                  const ir::CircuitGraphNode& graph,
                                  const std::string& graphName);
 
-private:
-  /// \c cuContexts stores a vector of unique \c CUContext. Every thread will
-  /// manage its own CUcontext. These \c CUContext 's will be destructed upon
-  /// the destruction of this class.
-  std::vector<CUcontext> cuContexts;
+  // llvmOptLevel: 0, 1, 2, 3
+  void compileToPTX(int llvmOptLevel = 1, int verbose = 0);
 
-public:
-  CUDAKernelManager(const CUDAKernelManager&) = delete;
-  CUDAKernelManager(CUDAKernelManager&&) = delete;
-  CUDAKernelManager& operator=(const CUDAKernelManager&) = delete;
-  CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
+  void dumpPTX(std::ostream& os, const std::string& kernelName) const;
 
-  ~CUDAKernelManager() {
-    for (auto& kernel : standaloneKernels_) {
-      if (kernel->cuTuple.cuModule) {
-        cuModuleUnload(kernel->cuTuple.cuModule);
-      }
-    }
-    for (auto& [name, kernels] : graphKernels_) {
-      for (auto& kernel : kernels) {
-        if (kernel->cuTuple.cuModule) {
-          cuModuleUnload(kernel->cuTuple.cuModule);
-        }
-      }
-    }
-    for (auto& ctx : cuContexts) {
-      if (ctx) {
-        cuCtxDestroy(ctx);
-      }
-    }
-  }
-
-  /// @brief Initialize CUDA JIT session by loading PTX strings into CUDA
-  /// context and module. This function can only be called once and cannot be
-  /// undone. This function assumes \c emitPTX is already called.
-  void initCUJIT(int verbose = 0);
-
-  // cuOptLevel: 0 .. 4
-  void initCUJIT_New(int cuOptLevel = 1, int verbose = 0);
+  // cuOptLevel: 0, 1, 2, 3, 4
+  void compileToCUBIN(int cuOptLevel = 1, int verbose = 0);
 
   /* Get Kernels */
 
@@ -182,6 +158,152 @@ public:
                              const CUDAKernelInfo& kernelInfo,
                              void* dMatPtr,
                              int blockDim = 64);
+
+  /* --- iterator ---*/
+public:
+  class iterator {
+    using VecOfKernel = std::vector<KernelInfoPtr>;
+    using MapOfKernels = std::map<std::string, VecOfKernel>;
+    VecOfKernel::iterator vecIt, vecEnd;
+    MapOfKernels::iterator mapIt, mapEnd;
+
+    void proceedToNextMap() {
+      while (mapIt != mapEnd) {
+        vecIt = mapIt->second.begin();
+        vecEnd = mapIt->second.end();
+        if (vecIt != vecEnd) // found a non-empty one
+          return;
+        ++mapIt;
+      }
+      // reached the end
+      vecIt = VecOfKernel::iterator();
+      vecEnd = VecOfKernel::iterator();
+    }
+
+  public:
+    using value_type = CUDAKernelInfo;
+    iterator() = default;
+
+    iterator(VecOfKernel::iterator vecIt,
+             VecOfKernel::iterator vecEnd,
+             MapOfKernels::iterator mapIt,
+             MapOfKernels::iterator mapEnd)
+        : vecIt(vecIt), vecEnd(vecEnd), mapIt(mapIt), mapEnd(mapEnd) {
+      if (vecIt == vecEnd)
+        proceedToNextMap();
+    }
+
+    value_type& operator*() const { return *(vecIt->get()); }
+    value_type* operator->() const { return &**this; }
+
+    iterator& operator++() {
+      ++vecIt;
+      if (vecIt == vecEnd)
+        proceedToNextMap();
+
+      return *this;
+    }
+
+    iterator operator++(int) {
+      auto tmp = *this;
+      ++*this;
+      return tmp;
+    }
+
+    bool operator==(const iterator& other) const {
+      return vecIt == other.vecIt && mapIt == other.mapIt;
+    }
+
+    bool operator!=(const iterator& other) const { return !(*this == other); }
+  }; // iterator
+
+  iterator begin() {
+    return iterator(standaloneKernels_.begin(),
+                    standaloneKernels_.end(),
+                    graphKernels_.begin(),
+                    graphKernels_.end());
+  }
+
+  iterator end() {
+    return iterator(standaloneKernels_.end(),
+                    standaloneKernels_.end(),
+                    graphKernels_.end(),
+                    graphKernels_.end());
+  }
+
+  /* --- const iterator ---*/
+public:
+  class const_iterator {
+    using VecOfKernel = std::vector<KernelInfoPtr>;
+    using MapOfKernels = std::map<std::string, VecOfKernel>;
+    VecOfKernel::const_iterator vecIt, vecEnd;
+    MapOfKernels::const_iterator mapIt, mapEnd;
+
+    void proceedToNextMap() {
+      while (mapIt != mapEnd) {
+        vecIt = mapIt->second.begin();
+        vecEnd = mapIt->second.end();
+        if (vecIt != vecEnd) // found a non-empty one
+          return;
+        ++mapIt;
+      }
+      // reached the end
+      vecIt = VecOfKernel::const_iterator();
+      vecEnd = VecOfKernel::const_iterator();
+    }
+
+  public:
+    using value_type = const CUDAKernelInfo;
+    const_iterator() = default;
+
+    const_iterator(VecOfKernel::const_iterator vecIt,
+                   VecOfKernel::const_iterator vecEnd,
+                   MapOfKernels::const_iterator mapIt,
+                   MapOfKernels::const_iterator mapEnd)
+        : vecIt(vecIt), vecEnd(vecEnd), mapIt(mapIt), mapEnd(mapEnd) {
+      if (vecIt == vecEnd)
+        proceedToNextMap();
+    }
+
+    value_type& operator*() const { return *(vecIt->get()); }
+    value_type* operator->() const { return &**this; }
+
+    const_iterator& operator++() {
+      ++vecIt;
+      if (vecIt == vecEnd)
+        proceedToNextMap();
+
+      return *this;
+    }
+
+    const_iterator operator++(int) {
+      auto tmp = *this;
+      ++*this;
+      return tmp;
+    }
+
+    bool operator==(const const_iterator& other) const {
+      return vecIt == other.vecIt && mapIt == other.mapIt;
+    }
+
+    bool operator!=(const const_iterator& other) const {
+      return !(*this == other);
+    }
+  }; // const _iterator
+
+  const_iterator begin() const {
+    return const_iterator(standaloneKernels_.begin(),
+                          standaloneKernels_.end(),
+                          graphKernels_.begin(),
+                          graphKernels_.end());
+  }
+
+  const_iterator end() const {
+    return const_iterator(standaloneKernels_.end(),
+                          standaloneKernels_.end(),
+                          graphKernels_.end(),
+                          graphKernels_.end());
+  }
 };
 
 } // namespace cast

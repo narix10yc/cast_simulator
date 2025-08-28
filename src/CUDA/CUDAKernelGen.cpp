@@ -1330,16 +1330,27 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
         << " with name " << funcName;
     return cast::makeError<KernelInfoPtr>(oss.str());
   }
-
-  CUDAKernelInfo::CUDATuple cuTuple;
-  auto ki = std::make_unique<CUDAKernelInfo>(CUDAKernelInfo::PTXStringType(),
+  
+  // std::string ptxString;
+  // std::vector<uint8_t> cubinData;
+  // ConstQuantumGatePtr gate;
+  // Precision precision;
+  // llvm::LLVMContext* llvmContext;
+  // llvm::Module* llvmModule;
+  // std::string llvmFuncName;
+  // CUcontext cuContext;
+  // CUmodule cuModule;
+  // CUfunction cuFunction;
+  auto ki = std::make_unique<CUDAKernelInfo>(std::string(),
+                                             std::vector<uint8_t>(),
+                                             gate,
                                              config.precision,
                                              &func->getContext(),
                                              func->getParent(),
                                              func->getName().str(),
-                                             gate,
-                                             cuTuple,
-                                             gate->opCount(config.zeroTol));
+                                             nullptr,
+                                             nullptr,
+                                             nullptr);
 
   return ki;
 }

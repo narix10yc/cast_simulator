@@ -116,6 +116,24 @@ public:
   }
 }; // class fmt_time
 
+//
+class fmt_mem {
+  size_t memInBytes;
+
+public:
+  explicit fmt_mem(size_t memInBytes) : memInBytes(memInBytes) {}
+
+  friend std::ostream& operator<<(std::ostream& os, const fmt_mem& fmt) {
+    if (fmt.memInBytes >= (1ULL << 30))
+      return os << fmt.memInBytes / (1 << 30) << " GiB";
+    if (fmt.memInBytes >= (1ULL << 20))
+      return os << fmt.memInBytes / (1 << 20) << " MiB";
+    if (fmt.memInBytes >= (1ULL << 10))
+      return os << fmt.memInBytes / (1 << 10) << " KiB";
+    return os << fmt.memInBytes << " B";
+  }
+};
+
 /// Format a number in the range [1.0, 1000.0) to a string with specified width.
 /// For example, fmt_1_to_1e3(123.45678, 5) will print "123.5",
 class fmt_1_to_1e3 {
@@ -139,6 +157,8 @@ public:
   }
 };
 
+// Format a span of elements with a separator and square brakets. For example,
+// std::cerr << fmt_span(std::span<int>{1, 2, 3}) will give "[1,2,3]"
 template <typename T> class fmt_span {
   std::span<T> s;
   char separator;
