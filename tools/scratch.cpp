@@ -18,11 +18,14 @@ int main(int argc, char** argv) {
         .consumeError();
   }
 
-  utils::timedExecute([&]() { km.compileLLVMIRToPTX(1, 1); }, "Compile to PTX");
-
-  utils::timedExecute([&]() { km.compilePTXToCubin(1, 1); }, "Compile to CUBIN");
-
-  utils::timedExecute([&]() { km.loadCubin(1); }, "Load Cubin");
+  utils::timedExecute(
+      [&]() {
+        auto r = km.initJIT(1, 1);
+        if (!r) {
+          std::cerr << "Failed to initialize JIT: " << r.takeError() << "\n";
+        }
+      },
+      "Initialize JIT");
 
   km.getKernelByName("gate_3")->displayInfo(std::cerr);
 

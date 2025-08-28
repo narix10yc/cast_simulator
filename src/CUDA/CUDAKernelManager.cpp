@@ -116,7 +116,8 @@ public:
 };
 } // namespace
 
-void CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel, int verbose) {
+MaybeError<void> CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel,
+                                                       int verbose) {
   assert(nWorkerThreads_ > 0);
 
   InitializeAllTargets();
@@ -124,6 +125,10 @@ void CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel, int verbose) {
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
 
+  if (llvmOptLevel < 0)
+    llvmOptLevel = 1;
+  if (llvmOptLevel > 3)
+    llvmOptLevel = 3;
   llvm::OptimizationLevel optLevel;
   switch (llvmOptLevel) {
   case 0:
@@ -140,9 +145,6 @@ void CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel, int verbose) {
     break;
   default:
     assert(false && "Invalid LLVM optimization level");
-    // Default to O1
-    optLevel = llvm::OptimizationLevel::O1;
-    break;
   }
 
   applyLLVMOptimization(nWorkerThreads_, optLevel, verbose > 0);
@@ -151,20 +153,16 @@ void CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel, int verbose) {
   std::string err;
   const auto* target = TargetRegistry::lookupTarget(targetTriple, err);
   if (!target) {
-    errs() << RED("[Error]: ")
-           << "Failed to lookup target. Error trace: " << err << "\n";
-    return;
+    std::ostringstream oss;
+    oss << "Failed to lookup target. Error trace: " << err << "\n";
+    return cast::makeError(oss.str());
   }
 
-#ifdef CAST_USE_CUDA
   int major = 0, minor = 0;
   cast::getCudaComputeCapability(major, minor);
   std::ostringstream archOss;
   archOss << "sm_" << major << minor;
   std::string archString = archOss.str();
-#else
-  std::string archString = "sm_76";
-#endif
 
   const auto createTargetMachine = [&]() -> TargetMachine* {
     return target->createTargetMachine(
@@ -176,23 +174,20 @@ void CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel, int verbose) {
     llvm::Module* mod = pair.llvmModule.get();
     mod->setTargetTriple(targetTriple);
     mod->setDataLayout(createTargetMachine()->createDataLayout());
-    if (llvm::verifyModule(*mod, &llvm::errs())) {
-      llvm::errs() << "Module verification failed, attempting to proceed with "
-                      "PTX emission\n";
-    }
+    std::string errorStr;
+    llvm::raw_string_ostream sstream(errorStr);
+    if (llvm::verifyModule(*mod, &sstream))
+      return cast::makeError("Module verification failed: " + errorStr);
   }
 
   utils::TaskDispatcher dispatcher(nWorkerThreads_);
-
   for (auto& kernel : *this) {
     dispatcher.enqueue([&]() {
       raw_pwrite_vector_ostream vecStream(kernel.ptxString);
       legacy::PassManager passManager;
-      if (createTargetMachine()->addPassesToEmitFile(
-              passManager, vecStream, nullptr, CodeGenFileType::AssemblyFile)) {
-        llvm::errs() << "The target machine can't emit a file of this type\n";
-        return;
-      }
+      auto r = createTargetMachine()->addPassesToEmitFile(
+          passManager, vecStream, nullptr, CodeGenFileType::AssemblyFile);
+      assert(!r && "LLVM target machine can't emit a file of this type");
       passManager.run(*(kernel.llvmModule));
     });
   }
@@ -200,7 +195,8 @@ void CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel, int verbose) {
   if (verbose > 0)
     std::cerr << "Generating PTX codes...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
-  jitState = JIT_PTXEmitted;
+  jitState = JIT_CompiledPTX;
+  return {}; // success
 }
 
 static void compileToCubin_work(int cuOptLevel, CUDAKernelInfo& kernel) {
@@ -277,10 +273,18 @@ static void loadCubin_work(CUDAKernelInfo& kernel) {
       &kernel.cuFunction, kernel.cuModule, kernel.llvmFuncName.c_str()));
 }
 
-void CUDAKernelManager::compilePTXToCubin(int cuOptLevel, int verbose) {
-  assert(jitState == JIT_PTXEmitted);
+MaybeError<void> CUDAKernelManager::compilePTXToCubin(int cuOptLevel,
+                                                      int verbose) {
   assert(nWorkerThreads_ > 0);
-  assert(0 <= cuOptLevel && cuOptLevel <= 4);
+  if (cuOptLevel < 0)
+    cuOptLevel = 1;
+  if (cuOptLevel > 4)
+    cuOptLevel = 4;
+
+  if (jitState != JIT_CompiledPTX) {
+    return cast::makeError(
+        "PTX must be available when calling compilePTXToCubin");
+  }
 
   CU_CHECK(cuInit(0));
   /* cuDeviceGet expects logical index.
@@ -309,11 +313,12 @@ void CUDAKernelManager::compilePTXToCubin(int cuOptLevel, int verbose) {
     std::cerr << "JIT Compile PTX to CUBIN...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
 
-  jitState = JIT_CUBIN;
+  jitState = JIT_CompiledCubin;
+  return {}; // success
 }
 
-void CUDAKernelManager::loadCubin(int verbose) {
-  assert(jitState == JIT_CUBIN);
+MaybeError<void> CUDAKernelManager::loadCubin(int verbose) {
+  assert(jitState == JIT_CompiledCubin);
   assert(nWorkerThreads_ > 0);
 
   utils::TaskDispatcher dispatcher(nWorkerThreads_);
@@ -333,6 +338,38 @@ void CUDAKernelManager::loadCubin(int verbose) {
   if (verbose > 0)
     std::cerr << "Load CUBIN...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
+  return {}; // success
+}
+
+MaybeError<void> CUDAKernelManager::initJIT(int optLevel, int verbose) {
+
+  if (jitState != JIT_Uninited) {
+    return cast::makeError("The kernel manager must be in JIT-uninitialized "
+                           "state when calling initJIT");
+  }
+
+  {
+    auto r = compileLLVMIRToPTX(optLevel, verbose);
+    if (!r)
+      return cast::makeError("Failed to compile LLVM IR to PTX: " +
+                             r.takeError());
+  }
+
+  {
+    auto r = compilePTXToCubin(1, verbose);
+    if (!r)
+      return cast::makeError("Failed to compile PTX to CUBIN: " +
+                             r.takeError());
+  }
+
+  {
+    auto r = loadCubin(verbose);
+    if (!r)
+      return cast::makeError("Failed to load CUBIN: " + r.takeError());
+  }
+
+  jitState = JIT_CubinLoaded;
+  return {}; // success
 }
 
 const CUDAKernelInfo*

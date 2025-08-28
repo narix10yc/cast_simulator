@@ -62,9 +62,9 @@ class CUDAKernelManager : public KernelManagerBase {
 
   enum JITState {
     JIT_Uninited,
-    JIT_PTXEmitted,
-    JIT_CUBIN,
-    JIT_CUFunctionLoaded
+    JIT_CompiledPTX,
+    JIT_CompiledCubin,
+    JIT_CubinLoaded
   };
   JITState jitState;
   int nWorkerThreads_;
@@ -123,14 +123,16 @@ public:
                                  const std::string& graphName);
 
   // llvmOptLevel: 0, 1, 2, 3
-  void compileLLVMIRToPTX(int llvmOptLevel = 1, int verbose = 0);
+  MaybeError<void> compileLLVMIRToPTX(int llvmOptLevel = 1, int verbose = 0);
 
   void dumpPTX(std::ostream& os, const std::string& kernelName) const;
 
   // cuOptLevel: 0, 1, 2, 3, 4
-  void compilePTXToCubin(int cuOptLevel = 1, int verbose = 0);
+  MaybeError<void> compilePTXToCubin(int cuOptLevel = 1, int verbose = 0);
 
-  void loadCubin(int verbose = 0);
+  MaybeError<void> loadCubin(int verbose = 0);
+
+  MaybeError<void> initJIT(int optLevel = 1, int verbose = 0);
 
   void clearPTX() {
     for (auto& kernel : *this)

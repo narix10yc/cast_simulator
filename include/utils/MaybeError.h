@@ -143,7 +143,7 @@ public:
 
 // Because we disallow MaybeError to be copied, we need a helper class to
 // initialize with an error message.
-template <typename T>
+template <typename T = void>
 impl::MaybeErrorInitializer<T> makeError(const std::string& errorMsg) {
   return impl::MaybeErrorInitializer<T>(errorMsg);
 }
