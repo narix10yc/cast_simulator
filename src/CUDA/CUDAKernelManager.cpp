@@ -116,7 +116,7 @@ public:
 };
 } // namespace
 
-void CUDAKernelManager::compileToPTX(int llvmOptLevel, int verbose) {
+void CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel, int verbose) {
   assert(nWorkerThreads_ > 0);
 
   InitializeAllTargets();
@@ -203,8 +203,11 @@ void CUDAKernelManager::compileToPTX(int llvmOptLevel, int verbose) {
   jitState = JIT_PTXEmitted;
 }
 
-static MaybeError<void> compile_ptx_to_cubin(int cuOptLevel,
-                                             CUDAKernelInfo* kernel) {
+static void compileToCubin_work(int cuOptLevel, CUDAKernelInfo& kernel) {
+  assert(kernel.cuContext != nullptr);
+  assert(!kernel.ptxString.empty());
+
+  CU_CHECK(cuCtxSetCurrent(kernel.cuContext));
   // JIT/link options
   constexpr size_t LOG_SZ = 1 << 15;
   std::vector<char> info(LOG_SZ, 0), err(LOG_SZ, 0);
@@ -243,33 +246,38 @@ static MaybeError<void> compile_ptx_to_cubin(int cuOptLevel,
   // PTX MUST be NUL-terminated
   CU_CHECK(cuLinkAddData(linkState,
                          CU_JIT_INPUT_PTX,
-                         (void*)kernel->ptxString.c_str(),
-                         kernel->ptxString.size() + 1,
-                         kernel->llvmFuncName.c_str(),
+                         (void*)kernel.ptxString.c_str(),
+                         kernel.ptxString.size() + 1,
+                         kernel.llvmFuncName.c_str(),
                          0,
                          nullptr,
                          nullptr));
 
   void* cubinOut = nullptr;
   size_t cubinSize = 0;
-  CUresult completeRes = cuLinkComplete(linkState, &cubinOut, &cubinSize);
-
-  if (completeRes != CUDA_SUCCESS) {
-    cuLinkDestroy(linkState);
-    return cast::makeError<void>(std::string(err.data()));
-  }
+  CU_CHECK(cuLinkComplete(linkState, &cubinOut, &cubinSize));
 
   // copy cubinOut to the kernel info
   // cubinOut is owned by the link state, so will be invalidated after
   // calling cuLinkDestroy
-  kernel->cubinData.assign(static_cast<uint8_t*>(cubinOut),
-                           static_cast<uint8_t*>(cubinOut) + cubinSize);
+  kernel.cubinData.assign(static_cast<uint8_t*>(cubinOut),
+                          static_cast<uint8_t*>(cubinOut) + cubinSize);
 
   cuLinkDestroy(linkState);
-  return {}; // success
 }
 
-void CUDAKernelManager::compileToCUBIN(int cuOptLevel, int verbose) {
+static void loadCubin_work(CUDAKernelInfo& kernel) {
+  assert(kernel.cuContext != nullptr);
+  assert(!kernel.cubinData.empty());
+
+  CU_CHECK(cuCtxSetCurrent(kernel.cuContext));
+
+  CU_CHECK(cuModuleLoadData(&kernel.cuModule, kernel.cubinData.data()));
+  CU_CHECK(cuModuleGetFunction(
+      &kernel.cuFunction, kernel.cuModule, kernel.llvmFuncName.c_str()));
+}
+
+void CUDAKernelManager::compilePTXToCubin(int cuOptLevel, int verbose) {
   assert(jitState == JIT_PTXEmitted);
   assert(nWorkerThreads_ > 0);
   assert(0 <= cuOptLevel && cuOptLevel <= 4);
@@ -291,13 +299,9 @@ void CUDAKernelManager::compileToCUBIN(int cuOptLevel, int verbose) {
   utils::TaskDispatcher dispatcher(nWorkerThreads_);
   for (auto& kernel : *this) {
     dispatcher.enqueue([=, this, &kernel]() {
+      // must set cuContext before calling compileToCubin_work
       kernel.cuContext = primaryCuCtx;
-      CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
-      auto r = compile_ptx_to_cubin(cuOptLevel, &kernel);
-      if (!r) {
-        std::cerr << "Error in ptx -> cubin JIT: " << r.takeError();
-        std::terminate();
-      }
+      compileToCubin_work(cuOptLevel, kernel);
     });
   }
 
@@ -306,6 +310,29 @@ void CUDAKernelManager::compileToCUBIN(int cuOptLevel, int verbose) {
   dispatcher.sync(/* progressBar */ verbose > 0);
 
   jitState = JIT_CUBIN;
+}
+
+void CUDAKernelManager::loadCubin(int verbose) {
+  assert(jitState == JIT_CUBIN);
+  assert(nWorkerThreads_ > 0);
+
+  utils::TaskDispatcher dispatcher(nWorkerThreads_);
+
+  // this->cuModules takes the ownership of all cuda modules created in
+  // loadCubin_work
+  cuModules.resize(this->numKernels());
+  CUmodule* cuModulePtr = cuModules.data();
+  for (auto& kernel : *this) {
+    dispatcher.enqueue([=, this, &kernel]() {
+      loadCubin_work(kernel);
+      *cuModulePtr = kernel.cuModule;
+    });
+    ++cuModulePtr;
+  }
+
+  if (verbose > 0)
+    std::cerr << "Load CUBIN...\n";
+  dispatcher.sync(/* progressBar */ verbose > 0);
 }
 
 const CUDAKernelInfo*
@@ -340,7 +367,6 @@ void CUDAKernelManager::launchCUDAKernel(void* dData,
                                          int blockDim) {
   assert(dData != nullptr);
   assert(kernelInfo.cuContext && kernelInfo.cuFunction);
-  cuCtxSetCurrent(kernelInfo.cuContext);
 
   unsigned nCombos = 1U << (nQubits - kernelInfo.gate->nQubits());
   unsigned gridDim = (nCombos + blockDim - 1) / blockDim;
@@ -348,6 +374,7 @@ void CUDAKernelManager::launchCUDAKernel(void* dData,
   // the second arg is supposed to be &combos
   void* kernelParams[2] = {&dData, &nCombos};
 
+  cuCtxSetCurrent(kernelInfo.cuContext);
   // clang-format off
   CU_CALL(cuLaunchKernel(kernelInfo.cuFunction,
                          gridDim, 1, 1,

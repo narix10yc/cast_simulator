@@ -50,22 +50,14 @@ template <unsigned nQubits> void runU2qTest() {
     km.genStandaloneGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i))
         .consumeError();
   }
-  km.compileToPTX(llvm::OptimizationLevel::O1, /*verbose*/ 0);
-  km.compileToCUBIN(/*verbose*/ 0);
+  km.compileLLVMIRToPTX(1, /*verbose*/ 0);
+  km.compilePTXToCubin(1, /*verbose*/ 0);
 
   /* main test loop */
   for (std::size_t i = 0; i < gates.size(); ++i) {
     randomizeSV();
     auto& qubits = gates[i]->qubits(); // {q, q+1}
 
-    /* diagnostics: gate matrix */
-    // std::cerr << "\n---------------------------------------------\n";
-    // std::cerr << "Gate " << i << " acting on qubits {"
-    //           << qubits[0] << "," << qubits[1] << "}\n";
-    // std::cerr << "Expected gate matrix:\n";
-    // gates[i]->gateMatrix.printCMat(std::cerr) << "\n";
-
-    /* diagnostics: initial CUDA statevector */
     std::vector<std::complex<double>> hostSV(1ULL << svCUDA0.nQubits());
     cudaMemcpy(hostSV.data(),
                svCUDA0.dData(),
@@ -92,21 +84,10 @@ template <unsigned nQubits> void runU2qTest() {
     /* Apply same gate on CPU for cross-check */
     svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gates[i].get()));
 
-    /* diagnostics: final CPU statevector */
-    // std::cerr << "Final CPU statevector:\n";
-    // for (std::size_t j = 0; j < (1ULL << svCPU.nQubits()); ++j) {
-    //   std::cerr << "  State[" << j << "] = (" << svCPU.data()[2*j]
-    //             << ", " << svCPU.data()[2*j+1] << ")\n";
-    // }
-
-    /* compare per-qubit probabilities */
+    // compare per-qubit probabilities
     for (int q : qubits) {
-      double pCUDA = svCUDA0.prob(q);
-      double pCPU = svCPU.prob(q);
-      // std::cerr << "Qubit " << q << ": CUDA prob = " << pCUDA
-      //            << ", CPU prob = " << pCPU << "\n";
-      suite.assertCloseF64(pCUDA,
-                           pCPU,
+      suite.assertCloseF64(svCUDA0.prob(q),
+                           svCPU.prob(q),
                            "CUDA vs CPU probability match for qubit " +
                                std::to_string(q),
                            GET_INFO());

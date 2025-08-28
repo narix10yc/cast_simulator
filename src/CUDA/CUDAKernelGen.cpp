@@ -1,17 +1,14 @@
 #include "cast/CUDA/CUDAKernelManager.h"
 #include "cast/Core/KernelGenInternal.h"
 
-#include "llvm/IR/IntrinsicsNVPTX.h"
-#include "llvm/IR/Verifier.h"
-
 #include "utils/Formats.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
-#include <numeric>
-
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/TargetSelect.h"
@@ -1330,7 +1327,7 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
         << " with name " << funcName;
     return cast::makeError<KernelInfoPtr>(oss.str());
   }
-  
+
   // std::string ptxString;
   // std::vector<uint8_t> cubinData;
   // ConstQuantumGatePtr gate;

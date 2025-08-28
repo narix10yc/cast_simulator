@@ -45,8 +45,8 @@ template <unsigned nQubits> static void f() {
     }
   }
 
-  km.compileToPTX(llvm::OptimizationLevel::O1, /* verbose */ 0);
-  km.compileToCUBIN(/* verbose */ 0);
+  km.compileLLVMIRToPTX(1, /* verbose */ 0);
+  km.compilePTXToCubin(1, /* verbose */ 0);
   for (unsigned q = 0; q < nQubits; q++) {
     std::stringstream ss;
     assert(q == gates[q]->qubits()[0]);

@@ -25,8 +25,8 @@ enum class CUDAMatrixLoadMode {
 };
 
 // cuContext, cuModule, and cuFunction are internally pointers. CUDAKernelInfo
-// does not own their allocation state. Allocation states are managed by
-// - cuContext: via CUDAKernelManager::primaryCuCtx
+// does not own their allocation state. The ownerships of these objects are
+// - cuContext: via CUDAKernelManager::primaryCuCtx (a single CUcontext)
 // - cuModule: via CUDAKernelManager::cuModules (a vector of CUmodule)
 // - cuFunction: living in its own CUmodule
 struct CUDAKernelInfo {
@@ -123,14 +123,33 @@ public:
                                  const std::string& graphName);
 
   // llvmOptLevel: 0, 1, 2, 3
-  void compileToPTX(int llvmOptLevel = 1, int verbose = 0);
+  void compileLLVMIRToPTX(int llvmOptLevel = 1, int verbose = 0);
 
   void dumpPTX(std::ostream& os, const std::string& kernelName) const;
 
   // cuOptLevel: 0, 1, 2, 3, 4
-  void compileToCUBIN(int cuOptLevel = 1, int verbose = 0);
+  void compilePTXToCubin(int cuOptLevel = 1, int verbose = 0);
+
+  void loadCubin(int verbose = 0);
+
+  void clearPTX() {
+    for (auto& kernel : *this)
+      kernel.ptxString.clear();
+  }
+
+  void clearCubin() {
+    for (auto& kernel : *this)
+      kernel.cubinData.clear();
+  }
 
   /* Get Kernels */
+
+  unsigned numKernels() {
+    unsigned count = standaloneKernels_.size();
+    for (const auto& [name, kernels] : graphKernels_)
+      count += kernels.size();
+    return count;
+  }
 
   std::span<const KernelInfoPtr> getAllStandaloneKernels() const {
     return std::span<const KernelInfoPtr>(standaloneKernels_);
@@ -153,6 +172,7 @@ public:
                         const CUDAKernelInfo& kernelInfo,
                         int blockDim = 64);
 
+  // TODO: not implemented yet
   void launchCUDAKernelParam(void* dData,
                              int nQubits,
                              const CUDAKernelInfo& kernelInfo,
