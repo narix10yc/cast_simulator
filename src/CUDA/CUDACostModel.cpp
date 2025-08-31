@@ -36,8 +36,7 @@ static void runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
           .consumeError();
     }
     // only show progress bar if verbose >= 2
-    km.compileLLVMIRToPTX(1, verbose - 1);
-    km.compilePTXToCubin(1, verbose - 1);
+    km.initJIT(1, verbose >= 2).consumeError();
   };
 
   if (verbose >= 1) {

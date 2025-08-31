@@ -67,9 +67,6 @@ public:
       : nQubits_(nQubits), dData_(nullptr), hData_(nullptr) {
     cudaSetDevice(deviceOrdinal);
     cudaFree(0);
-    CUcontext ctx = nullptr;
-    cuCtxGetCurrent(&ctx);
-    std::cerr << "From CUDAStatevector: current context is " << ctx << "\n";
   }
 
   ~CUDAStatevector() {

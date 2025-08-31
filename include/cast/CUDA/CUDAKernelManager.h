@@ -24,13 +24,8 @@ enum class CUDAMatrixLoadMode {
   LoadInConstMemSpace
 };
 
-// cuContext, cuModule, and cuFunction are internally pointers. CUDAKernelInfo
-// does not own their allocation state. The ownerships of these objects are
-// - cuContext: via CUDAKernelManager::primaryCuCtx (a single CUcontext shared
-//              across kernels)
-// - cuModule: owned by CUDAKernelInfo::cuModule (one CUmodule per kernel)
-// - cuFunction: living in its own CUmodule
 struct CUDAKernelInfo {
+
   std::string ptxString;
   std::vector<uint8_t> cubinData;
   ConstQuantumGatePtr gate;
@@ -92,9 +87,6 @@ private:
 
   public:
     CUmodule cuModule = nullptr;
-    // cuFunction is used to check if this kernel is launch-able
-    // After the executer thread launches this kernel, cuModule and cuFunction
-    // should be set to null
     CUfunction cuFunction = nullptr;
 
     CUevent startEvent = nullptr;
@@ -135,27 +127,57 @@ private:
         kernelParams_.push_back(static_cast<void*>(p.get()));
       return kernelParams_.data();
     }
-  };
-  struct Window {
+  }; // struct LaunchTask
+
+  struct LaunchWindow {
     static constexpr int WS = 1; // window size
     std::array<LaunchTask, WS> tasks_;
 
     LaunchTask& operator[](unsigned i) { return tasks_[i % WS]; }
     const LaunchTask& operator[](unsigned i) const { return tasks_[i % WS]; }
-  };
+  }; // struct LaunchWindow
 
-  std::deque<CUDAKernelInfo*> pending_; // kernels waiting to be loaded
-  Window window_;
+  LaunchWindow window_;
+
+  // Clean up CUmodule and CUevents in the window. This function should only
+  // be called after all kernels finishes execution. i.e. after
+  // cuStreamSynchronize. It will also reset the LaunchTask status to
+  // Uninited.
+  void clearWindow_();
+
   // We do not need atomic here because launchIdx and loadIdx are only modified
   // in the exec thread.
   unsigned launchIdx = 0; // monotonically increasing index
   unsigned loadIdx = 0;   // monotonically increasing index
+
+  /* Multi-threading task dispatching model:
+  The main thread poses tasks via enqueueKernelLaunch. It enqueues a kernel
+  loading task to the task dispatcher (loading thread pool).
+
+  Each loading thread picks up kernels from the pending_ queue along with a
+  launch window position (given by loadIdx, when notified by the execution
+  thread), loads the kernels, waits for the previous launch task to finish,
+  unloads the previous task's module and emplaces the new task's module. Loading
+  threads cannot directly launch kernels because we need to maintain the launch
+  order. After doing all this, the loading thread sets the launch task status as
+  'Ready' and notifies the execution thread that it has prepared the function
+  and kernel parameters inside the launch window.
+
+  The execution thread will launch ordered kernels. Every time it wakes up (via
+  execCV_), it launches every task whose status is Ready. Kernel launch order is
+  controlled by launchIdx.
+
+  From the kernels perspective, every kernel will be added
+
+  */
+
+  // execution thread
   std::thread execTh_;
   bool stopFlag_ = false;
   std::mutex execMtx_;
   std::condition_variable execCV_;
-
   std::condition_variable loadCV_;
+  std::condition_variable syncCV_;
 
   struct LaunchConfig {
     CUdeviceptr dData = 0;
@@ -165,50 +187,18 @@ private:
 
   LaunchConfig launchConfig_;
 
-  void execThreadWork();
+  // execution thread work
+  void execTh_work_();
 
 public:
-  CUDAKernelManager(int nWorkerThreads = -1, int deviceOrdinal = 0)
-      : KernelManagerBase((nWorkerThreads > 0) ? nWorkerThreads
-                                               : cast::get_cpu_num_threads()) {
-    CU_CHECK(cuInit(0));
-    CU_CHECK(cuDeviceGet(&cuDevice, deviceOrdinal));
-    CU_CHECK(cuDevicePrimaryCtxRetain(&primaryCuCtx, cuDevice));
-    CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
-    CU_CHECK(cuStreamCreate(&primaryCuStream, CU_STREAM_DEFAULT));
-
-    // initialize exec thread
-    execTh_ = std::thread(&CUDAKernelManager::execThreadWork, this);
-  }
+  CUDAKernelManager(int nWorkerThreads = -1, int deviceOrdinal = 0);
 
   CUDAKernelManager(const CUDAKernelManager&) = delete;
   CUDAKernelManager(CUDAKernelManager&&) = delete;
   CUDAKernelManager& operator=(const CUDAKernelManager&) = delete;
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
-  ~CUDAKernelManager() {
-    dispatcher.sync();
-    stopFlag_ = true;
-    execCV_.notify_one();
-    assert(execTh_.joinable());
-    execTh_.join();
-    // manually unload CUDA resources
-    assert(primaryCuStream != nullptr);
-    CU_CHECK(cuStreamSynchronize(primaryCuStream));
-    CU_CHECK(cuStreamDestroy(primaryCuStream));
-
-    for (auto& task : window_.tasks_) {
-      if (task.startEvent)
-        CU_CHECK(cuEventDestroy(task.startEvent));
-      if (task.finishEvent)
-        CU_CHECK(cuEventDestroy(task.finishEvent));
-      if (task.cuModule)
-        CU_CHECK(cuModuleUnload(task.cuModule));
-    }
-
-    // release the primary context
-    CU_CHECK(cuDevicePrimaryCtxRelease(cuDevice));
-  }
+  ~CUDAKernelManager();
 
   std::ostream& displayInfo(std::ostream& os) const;
 
@@ -261,6 +251,9 @@ public:
   }
 
   // Get kernel by name. Return nullptr if not found.
+  CUDAKernelInfo* getKernelByName(const std::string& llvmFuncName);
+
+  // Get kernel by name. Return nullptr if not found.
   const CUDAKernelInfo* getKernelByName(const std::string& llvmFuncName) const;
 
   std::span<const KernelInfoPtr>
@@ -280,14 +273,15 @@ public:
     launchConfig_.blockSize = blockSize;
   }
 
-  ///
-  void enqueueKernelLaunch(CUDAKernelInfo& kernel) {
-    {
-      std::unique_lock lk(execMtx_);
-      pending_.push_back(&kernel);
-    }
-    execCV_.notify_one();
-  }
+  // Enqueue a kernel for launch. This is a non-blocking function and should
+  // only be called by the main thread. The order of kernel execution will align
+  // with the order of calling this function. Use \c syncKernelExecution() to
+  // wait for all kernels to finish running.
+  void enqueueKernelLaunch(CUDAKernelInfo& kernel);
+
+  /// Wait for all enqueued kernels to finish execution. This should only be
+  /// called by the main thread.
+  void syncKernelExecution();
 
   // TODO: not implemented yet
   void launchCUDAKernelParam(void* dData,

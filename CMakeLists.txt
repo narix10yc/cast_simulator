@@ -78,20 +78,20 @@ else()
   # the second case (CAST_LLVM_RELEASE_ROOT is defined)
   message(STATUS "Using CAST_LLVM_RELEASE_ROOT: ${CAST_LLVM_RELEASE_ROOT}")
   message(STATUS "Notice that In debug builds, "
-                 "LLVM-related debug infos will NOT be available.")
+    "LLVM-related debug infos will NOT be available.")
 endif()
 
 # check if clang is installed along with LLVM
 if(EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang" AND
-   EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
+  EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
   message(STATUS "Using compilers under LLVM release-install at: "
-                 "${CAST_LLVM_RELEASE_ROOT}")
+    "${CAST_LLVM_RELEASE_ROOT}")
   set(CMAKE_C_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang")
   set(CMAKE_CXX_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
   add_link_options("-fuse-ld=${CAST_LLVM_RELEASE_ROOT}/bin/ld.lld")
 else()
   message(STATUS "No clang install found along with LLVM release-install. "
-                 "Using system compilers.")
+    "Using system compilers.")
 endif()
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 
@@ -110,10 +110,10 @@ if(LIBCXX_LIB_PATHS)
 endif()
 
 if(EXISTS "${LIBCXX_INCLUDE_DIR}/vector" AND
-   DEFINED LIBCXX_LIB_DIR)
+  DEFINED LIBCXX_LIB_DIR)
   message(STATUS "Found libc++ at ${LIBCXX_LIB_DIR}")
   add_compile_options(-stdlib=libc++ -I"${LIBCXX_INCLUDE_DIR}")
-  if (NOT APPLE)
+  if(NOT APPLE)
     # On macOS, -stdlib=libc++ automatically links libc++, libc++abi, and
     # unwind. Specifying them will cause annoying warnings.
     link_libraries(c++ c++abi unwind)
@@ -121,7 +121,7 @@ if(EXISTS "${LIBCXX_INCLUDE_DIR}/vector" AND
   link_directories("${LIBCXX_LIB_DIR}")
 else()
   message(STATUS "No libc++ found along with LLVM release-install, "
-                 "using system defaults.")
+    "using system defaults.")
 endif()
 
 # Number of threads
@@ -142,7 +142,7 @@ add_compile_options("-fno-rtti")
 # show colored diagnostics in the terminal
 add_compile_options("-fdiagnostics-color=always")
 
-if (CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
+if(CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
   add_compile_options("-Wall")
 endif()
 
@@ -188,9 +188,9 @@ if(CAST_USE_CUDA)
   link_directories(BEFORE ${CUDAToolkit_LIBRARY_DIR})
   link_directories(BEFORE ${CUDAToolkit_LIBRARY_DIRS})
   message(STATUS "CUDAToolkit_rt_LIBRARY: ${CUDAToolkit_rt_LIBRARY}")
-  
+
   get_cmake_property(_variableNames VARIABLES)
-  foreach (_variableName ${_variableNames})
+  foreach(_variableName ${_variableNames})
     if(_variableName MATCHES "^CUDAToolkit")
       message(STATUS "${_variableName}=${${_variableName}}")
     endif()
@@ -222,7 +222,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/drafts")
   add_subdirectory(drafts)
 endif()
 
-if (CAST_PYTHON_BIND)
+if(CAST_PYTHON_BIND)
   message(STATUS "Building Python bindings...")
   add_subdirectory(python)
 endif()

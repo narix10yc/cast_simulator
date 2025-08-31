@@ -5,6 +5,8 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/TargetParser/Host.h"
@@ -88,6 +90,43 @@ std::ostream& CUDAKernelManager::displayInfo(std::ostream& os) const {
      << "Total PTX Size     : " << utils::fmt_mem(totalPTXSize) << "\n"
      << "Total CUBIN Size   : " << utils::fmt_mem(totalCUBINSize) << "\n";
   return os << CYAN("================================\n");
+}
+
+CUDAKernelManager::CUDAKernelManager(int nWorkerThreads, int deviceOrdinal)
+    : KernelManagerBase((nWorkerThreads > 0) ? nWorkerThreads
+                                             : cast::get_cpu_num_threads()) {
+  CU_CHECK(cuInit(0));
+  CU_CHECK(cuDeviceGet(&cuDevice, deviceOrdinal));
+  CU_CHECK(cuDevicePrimaryCtxRetain(&primaryCuCtx, cuDevice));
+  CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
+  CU_CHECK(cuStreamCreate(&primaryCuStream, CU_STREAM_DEFAULT));
+
+  // initialize exec thread
+  execTh_ = std::thread(&CUDAKernelManager::execTh_work_, this);
+}
+
+CUDAKernelManager::~CUDAKernelManager() {
+  syncKernelExecution();
+  stopFlag_ = true;
+  execCV_.notify_one();
+  assert(execTh_.joinable());
+  execTh_.join();
+  // manually unload CUDA resources
+  assert(primaryCuStream != nullptr);
+  CU_CHECK(cuStreamSynchronize(primaryCuStream));
+  CU_CHECK(cuStreamDestroy(primaryCuStream));
+
+  for (auto& task : window_.tasks_) {
+    if (task.startEvent)
+      CU_CHECK(cuEventDestroy(task.startEvent));
+    if (task.finishEvent)
+      CU_CHECK(cuEventDestroy(task.finishEvent));
+    if (task.cuModule)
+      CU_CHECK(cuModuleUnload(task.cuModule));
+  }
+
+  // release the primary context
+  CU_CHECK(cuDevicePrimaryCtxRelease(cuDevice));
 }
 
 namespace {
@@ -190,8 +229,94 @@ MaybeError<void> CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel,
   return {}; // success
 }
 
-static void compileLLVMIRToPTX_work(int llvmOptLevel, CUDAKernelInfo& kernel) {
+static inline llvm::OptimizationLevel wrapLLVMOptLevel(int llvmOptLevel) {
+  if (llvmOptLevel == 0)
+    return llvm::OptimizationLevel::O0;
+  if (llvmOptLevel == 1 || llvmOptLevel < 0)
+    return llvm::OptimizationLevel::O1;
+  if (llvmOptLevel == 2)
+    return llvm::OptimizationLevel::O2;
+  // llvmOptLevel >= 3
+  return llvm::OptimizationLevel::O3;
+}
 
+// TODO: Current each call to this function creates a new set of analysis
+// managers. We could try to make these things thread-local for better
+// performance
+static void optimizeLLVMIR_work(int llvmOptLevel, CUDAKernelInfo& kernel) {
+  auto optLevel = wrapLLVMOptLevel(llvmOptLevel);
+
+  // --- Analysis managers (must be constructed in this order) ---
+  LoopAnalysisManager LAM;
+  FunctionAnalysisManager FAM;
+  CGSCCAnalysisManager CGAM;
+  ModuleAnalysisManager MAM;
+
+  // --- Pass instrumentation (debug hooks, timers, etc.) ---
+  PassInstrumentationCallbacks PIC;
+  StandardInstrumentations SI(*kernel.llvmContext, /*DebugLogging=*/false);
+  SI.registerCallbacks(PIC, &MAM);
+
+  // Use the PassBuilder ctor that takes PIC (portable for LLVM 20.x).
+  PipelineTuningOptions PTO;
+  PassBuilder PB(/*TM=*/nullptr, PTO, /*PGO=*/std::nullopt, &PIC);
+
+  // Register analyses and cross-proxies.
+  PB.registerLoopAnalyses(LAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerModuleAnalyses(MAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+  // Wrap default pipeline with verifiers (pre & post).
+  ModulePassManager MPM;
+  MPM.addPass(VerifierPass()); // verify pre
+  MPM.addPass(PB.buildPerModuleDefaultPipeline(optLevel));
+  MPM.addPass(VerifierPass()); // verify post
+
+  // Run the pipeline for this module.
+  MPM.run(*kernel.llvmModule, MAM);
+}
+
+static MaybeError<void> compileLLVMIRToPTX_work(CUDAKernelInfo& kernel) {
+  std::string targetTriple = "nvptx64-nvidia-cuda";
+  std::string err;
+  const auto* target = TargetRegistry::lookupTarget(targetTriple, err);
+  if (!target) {
+    std::ostringstream oss;
+    oss << "Failed to lookup target. Error trace: " << err << "\n";
+    return cast::makeError(oss.str());
+  }
+
+  int major = 0, minor = 0;
+  cast::getCudaComputeCapability(major, minor);
+  std::ostringstream archOss;
+  archOss << "sm_" << major << minor;
+  std::string archString = archOss.str();
+
+  const auto createTargetMachine = [&]() -> TargetMachine* {
+    return target->createTargetMachine(
+        targetTriple, archString, "", {}, std::nullopt);
+  };
+
+  // Prepare modules (DL, verify)
+  kernel.llvmModule->setTargetTriple(targetTriple);
+  kernel.llvmModule->setDataLayout(createTargetMachine()->createDataLayout());
+  std::string errorStr;
+  llvm::raw_string_ostream sstream(errorStr);
+  if (llvm::verifyModule(*kernel.llvmModule, &sstream))
+    return cast::makeError("Module verification failed: " + errorStr);
+
+  raw_pwrite_vector_ostream vecStream(kernel.ptxString);
+  legacy::PassManager passManager;
+  // this function returns false on success
+  auto r = createTargetMachine()->addPassesToEmitFile(
+      passManager, vecStream, nullptr, CodeGenFileType::AssemblyFile);
+  if (r)
+    return cast::makeError("LLVM target machine can't emit PTX");
+
+  passManager.run(*(kernel.llvmModule));
+  return {}; // success
 }
 
 // Must call cuCtxSetCurrent before calling this function
@@ -284,169 +409,189 @@ MaybeError<void> CUDAKernelManager::compilePTXToCubin(int cuOptLevel,
   return {}; // success
 }
 
-void CUDAKernelManager::execThreadWork() {
-  // Bind Driver (primary) in THIS thread
-  static thread_local CUcontext bound = nullptr;
-  if (bound != primaryCuCtx) {
-    CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
-    bound = primaryCuCtx;
-  }
+void CUDAKernelManager::execTh_work_() {
+  CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
 
-  // Attach Runtime in THIS thread to the same device’s primary
-  cudaSetDevice(0);
-  cudaFree(0); // forces attach; cheap no-op allocation/free
-
-  // CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
   while (true) {
     {
       std::unique_lock<std::mutex> lk(execMtx_);
-      // resumes when either
-      // - there exists window seats and pending_ is not empty, or
-      // - there are kernels available to be launched
-      std::cerr << "Exec thread waiting...\n";
       execCV_.wait(lk, [this]() {
-        // loadIdx is atomic, launchIdx and pending_ are only accessed by the
-        // exec thread
-        auto nWindowSeats = loadIdx - launchIdx;
-        bool caseA = (nWindowSeats < Window::WS && !pending_.empty());
+        // caseB: we have a kernel ready to launch
         bool caseB = window_[launchIdx].status.load() == LaunchTask::Ready;
+        // caseC: stop flag is set
         bool caseC = (stopFlag_ == true);
-        return (caseA || caseB || caseC);
+        return (caseB || caseC);
       });
-      std::cerr << "Exec thread resuming\n";
     }
     if (stopFlag_ == true) {
-      std::cerr << "Exec thread stopping\n";
       return;
     }
 
     // launch as many kernels as we can
+    int nLaunched = 0;
     while (true) {
-      auto& window = window_[launchIdx]; // launch config
-      // kernel is not available. End here
-      if (window.status != LaunchTask::Ready)
+      auto& task = window_[launchIdx];
+      // task is not ready to launch. End here
+      if (task.status != LaunchTask::Ready)
         break;
 
-      // From now on we do not need locks because no loading thread will be
-      // working on this until this thread (exec thread) pose another task later
-      // Launch the kernel
+      // task is ready to launch. Launch it
       ++launchIdx;
-      void** kernelParams = window.getKernelParams();
-      if (window.startEvent == nullptr)
-        CU_CHECK(cuEventCreate(&window.startEvent, CU_EVENT_DEFAULT));
-      if (window.finishEvent == nullptr)
-        CU_CHECK(cuEventCreate(&window.finishEvent, CU_EVENT_DEFAULT));
+      void** kernelParams = task.getKernelParams();
+      if (task.startEvent == nullptr)
+        CU_CHECK(cuEventCreate(&task.startEvent, CU_EVENT_DEFAULT));
+      if (task.finishEvent == nullptr)
+        CU_CHECK(cuEventCreate(&task.finishEvent, CU_EVENT_DEFAULT));
 
-      CU_CHECK(cuEventRecord(window.startEvent, primaryCuStream));
+      CU_CHECK(cuEventRecord(task.startEvent, primaryCuStream));
       // clang-format off
-      CU_CHECK(cuLaunchKernel(window.cuFunction,
-                              window.gridSize, 1, 1,
-                              window.blockSize, 1, 1,
+      CU_CHECK(cuLaunchKernel(task.cuFunction,
+                              task.gridSize, 1, 1,
+                              task.blockSize, 1, 1,
                               0, /* shared memory size */
                               primaryCuStream, /* stream */
                               kernelParams,
                               nullptr));
       // clang-format on
-
-      CU_CHECK(cuEventRecord(window.finishEvent, primaryCuStream));
-      window.status.store(LaunchTask::Running);
-      loadCV_.notify_all();
-    }
-
-    // pose loading requests
-    assert(launchConfig_.dData);
-    while (true) {
-      CUDAKernelInfo* kernel;
+      CU_CHECK(cuEventRecord(task.finishEvent, primaryCuStream));
+      ++nLaunched;
       {
         std::unique_lock lock(execMtx_);
-        if (pending_.empty())
-          break;
-        kernel = pending_.front();
-        pending_.pop_front();
+        std::cerr << "Exec thread launched cuFunction " << task.cuFunction
+                  << "\n";
       }
 
-      // A loading worker thread will be accessing this kernel info
-      // When finishes, it marks ready as true and notify the exec thread.
-      auto* window = &window_[loadIdx];
-      ++loadIdx;
-      dispatcher.enqueue([=, this]() {
-        CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
-        if (kernel->cubinData.empty())
-          compileToCubin_work(1, *kernel);
+      // mark task status as 'Running' and notify loading threads that they may
+      // start loading subsequent kernels
+      task.status.store(LaunchTask::Running);
+    }
 
-        {
-          // When the status is Ready, we need to wait for the exec thread to
-          // launch it
-          std::unique_lock lock(execMtx_);
-          loadCV_.wait(lock, [=] {
-            auto status = window->status.load();
-            return status != LaunchTask::Ready;
-          });
-        }
-        // wait for the previous kernel to finish
-        if (window->status != LaunchTask::Uninited) {
-          // if the kernel is running or finished, we sync it and report the
-          // execution time
-          assert(window->startEvent != nullptr);
-          assert(window->finishEvent != nullptr);
-          CU_CHECK(cuEventSynchronize(window->startEvent));
-          CU_CHECK(cuEventSynchronize(window->finishEvent));
-          float ms;
-          CU_CHECK(
-              cuEventElapsedTime(&ms, window->startEvent, window->finishEvent));
+    if (nLaunched > 0)
+      loadCV_.notify_all();
+    if (launchIdx == loadIdx)
+      syncCV_.notify_all();
 
-          assert(window->cuModule != nullptr);
-          CU_CHECK(cuModuleUnload(window->cuModule));
-          window->cuModule = nullptr;
-          window->status = LaunchTask::Finished;
-        }
+  } // while (true)
+}
 
-        assert(window->cuModule == nullptr);
-        assert(kernel->cubinData.size() > 0);
-        CU_CHECK(cuModuleLoadData(&window->cuModule, kernel->cubinData.data()));
-        CU_CHECK(cuModuleGetFunction(&window->cuFunction,
-                                     window->cuModule,
-                                     kernel->llvmFuncName.c_str()));
-        unsigned nCombos = 1U
-                           << (launchConfig_.nQubits - kernel->gate->nQubits());
-        unsigned gridDim =
-            (nCombos + launchConfig_.blockSize - 1) / launchConfig_.blockSize;
+void CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
+  // A loading worker thread will be accessing this kernel info
+  // When finishes, it marks the status as Ready and notify the exec thread.
+  auto* task = &window_[loadIdx];
+  ++loadIdx;
+  auto* kernel = &kernel_;
+  dispatcher.enqueue([=, this]() {
+    CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
 
-        window->resetParams();
-        window->addParam(launchConfig_.dData);
-        window->addParam(nCombos);
-        window->gridSize = gridDim;
-        window->blockSize = launchConfig_.blockSize;
+    // Prepares cubin (if not already available)
+    if (kernel->cubinData.empty()) {
+      // If PTX is not available, we optimize LLVM IR and generate PTX
+      if (kernel->ptxString.empty()) {
+        optimizeLLVMIR_work(1, *kernel);
+        compileLLVMIRToPTX_work(*kernel).consumeError();
+      }
+      // PTX is now available. Compile to cubin
+      compileToCubin_work(1, *kernel);
+    }
 
-        window->status.store(LaunchTask::Ready);
-        execCV_.notify_one();
+    // There are two cases the loading thread would continue:
+    // - Task status is Uninited. No previous task would be running.
+    // - Task status is Running. The loading thread syncs this task (and marks
+    // it as 'Finished'), optionally reports execution time, then replaces its
+    // module with a new one
+    {
+      std::unique_lock lock(execMtx_);
+      loadCV_.wait(lock, [=] {
+        auto status = task->status.load();
+        assert(status != LaunchTask::Finished);
+        return status == LaunchTask::Uninited || status == LaunchTask::Running;
       });
     }
+
+    // wait for the previous kernel to finish
+    if (task->status == LaunchTask::Running) {
+      assert(task->startEvent != nullptr);
+      assert(task->finishEvent != nullptr);
+      CU_CHECK(cuEventSynchronize(task->finishEvent));
+
+      assert(cuEventQuery(task->startEvent) == CUDA_SUCCESS);
+      assert(cuEventQuery(task->finishEvent) == CUDA_SUCCESS);
+
+      float ms;
+      CU_CHECK(cuEventElapsedTime(&ms, task->startEvent, task->finishEvent));
+
+      assert(task->cuModule != nullptr);
+      CU_CHECK(cuModuleUnload(task->cuModule));
+      task->cuModule = nullptr;
+      task->status = LaunchTask::Finished;
+    }
+
+    assert(task->cuModule == nullptr);
+    assert(kernel->cubinData.size() > 0);
+    CU_CHECK(cuModuleLoadData(&task->cuModule, kernel->cubinData.data()));
+    CU_CHECK(cuModuleGetFunction(
+        &task->cuFunction, task->cuModule, kernel->llvmFuncName.c_str()));
+    unsigned nCombos = 1U << (launchConfig_.nQubits - kernel->gate->nQubits());
+    unsigned gridDim =
+        (nCombos + launchConfig_.blockSize - 1) / launchConfig_.blockSize;
+
+    task->resetParams();
+    task->addParam(launchConfig_.dData);
+    task->addParam(nCombos);
+    task->gridSize = gridDim;
+    task->blockSize = launchConfig_.blockSize;
+
+    {
+      std::unique_lock lock(execMtx_);
+      std::cerr << "Loading thread " << dispatcher.getWorkerID()
+                << " prepared kernel " << kernel->llvmFuncName
+                << "\n - cuFunction: " << task->cuFunction << "\n";
+    }
+
+    // mark the task as 'Ready' and notify the exec thread that it may try to
+    // launch kernels
+    task->status.store(LaunchTask::Ready);
+    execCV_.notify_one();
+  });
+}
+
+void CUDAKernelManager::syncKernelExecution() {
+  execCV_.notify_one();
+  {
+    std::unique_lock lock(execMtx_);
+    syncCV_.wait(lock, [this] { return launchIdx == loadIdx; });
+  }
+  CU_CHECK(cuStreamSynchronize(primaryCuStream));
+  clearWindow_();
+}
+
+void CUDAKernelManager::clearWindow_() {
+  assert(cuStreamQuery(primaryCuStream) == CUDA_SUCCESS &&
+         "CUDA stream is not idle");
+
+  for (auto& task : window_.tasks_) {
+    if (task.cuModule != nullptr) {
+      CU_CHECK(cuModuleUnload(task.cuModule));
+      task.cuModule = nullptr;
+    }
+
+    task.cuFunction = nullptr;
+
+    if (task.startEvent != nullptr) {
+      CU_CHECK(cuEventDestroy(task.startEvent));
+      task.startEvent = nullptr;
+    }
+
+    if (task.finishEvent != nullptr) {
+      CU_CHECK(cuEventDestroy(task.finishEvent));
+      task.finishEvent = nullptr;
+    }
+
+    task.resetParams();
+
+    task.status.store(LaunchTask::Uninited);
   }
 }
-// MaybeError<void> CUDAKernelManager::loadCubin(int verbose) {
-//   assert(jitState == JIT_CompiledCubin);
-//   assert(nWorkerThreads_ > 0);
-
-//   utils::TaskDispatcher dispatcher(nWorkerThreads_);
-
-//   // this->cuModules takes the ownership of all cuda modules created in
-//   // loadCubin_work
-//   cuModules.resize(this->numKernels());
-//   CUmodule* cuModulePtr = cuModules.data();
-//   for (auto& kernel : *this) {
-//     dispatcher.enqueue([=, this, &kernel]() {
-//       loadCubin_work(kernel);
-//       *cuModulePtr = kernel.cuModule;
-//     });
-//     ++cuModulePtr;
-//   }
-
-//   if (verbose > 0)
-//     std::cerr << "Load CUBIN...\n";
-//   dispatcher.sync(/* progressBar */ verbose > 0);
-//   return {}; // success
-// }
 
 MaybeError<void> CUDAKernelManager::initJIT(int optLevel, int verbose) {
   if (jitState != JIT_Uninited) {
@@ -470,17 +615,20 @@ MaybeError<void> CUDAKernelManager::initJIT(int optLevel, int verbose) {
   return {}; // success
 }
 
+CUDAKernelInfo*
+CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) {
+  for (auto& kernel : *this) {
+    if (kernel.llvmFuncName == llvmFuncName)
+      return &kernel;
+  }
+  return nullptr;
+}
+
 const CUDAKernelInfo*
 CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) const {
-  for (const auto& kernel : standaloneKernels_) {
-    if (kernel->llvmFuncName == llvmFuncName)
-      return kernel.get();
-  }
-  for (const auto& [graphName, kernels] : graphKernels_) {
-    for (const auto& kernel : kernels) {
-      if (kernel->llvmFuncName == llvmFuncName)
-        return kernel.get();
-    }
+  for (const auto& kernel : *this) {
+    if (kernel.llvmFuncName == llvmFuncName)
+      return &kernel;
   }
   return nullptr;
 }
