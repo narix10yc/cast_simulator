@@ -416,7 +416,7 @@ int main(int argc, char** argv) {
               genKernels.push_back(k2);
             }
             for (auto* k2 : genKernels) {
-              km.launchCUDAKernel(sv.dData(), sv.nQubits(), *k2, args.blockSize);
+              km.enqueueKernelLaunch(sv.dData(), sv.nQubits(), *k2, args.blockSize);
             }
             cudaDeviceSynchronize();
             return;
@@ -426,14 +426,14 @@ int main(int argc, char** argv) {
           const auto& Q = k->gate->qubits();
           permute_to_LSBs_if_needed<float>(dCurrent, dScratch, sv.nQubits(),
                                            Q, layout, /*stream*/0);
-          km.launchCUDAKernel(static_cast<void*>(dCurrent),
+          km.enqueueKernelLaunch(static_cast<void*>(dCurrent),
                               sv.nQubits(), *k, args.blockSize);
         }
         cudaDeviceSynchronize();
         cudaFree(dScratch);
       } else {
         for (auto* k : kernels)
-          km.launchCUDAKernel(sv.dData(), sv.nQubits(), *k, args.blockSize);
+          km.enqueueKernelLaunch(sv.dData(), sv.nQubits(), *k, args.blockSize);
         cudaDeviceSynchronize();
       }
     } else {
@@ -482,7 +482,7 @@ int main(int argc, char** argv) {
               genKernels.push_back(k2);
             }
             for (auto* k2 : genKernels) {
-              km.launchCUDAKernel(sv.dData(), sv.nQubits(), *k2, args.blockSize);
+              km.enqueueKernelLaunch(sv.dData(), sv.nQubits(), *k2, args.blockSize);
             }
             cudaDeviceSynchronize();
             return;
@@ -495,14 +495,14 @@ int main(int argc, char** argv) {
           const auto& Q = k->gate->qubits();
           permute_to_LSBs_if_needed<double>(dCurrent, dScratch, sv.nQubits(),
                                             Q, layout, /*stream*/0);
-          km.launchCUDAKernel(static_cast<void*>(dCurrent),
+          km.enqueueKernelLaunch(static_cast<void*>(dCurrent),
                               sv.nQubits(), *k, args.blockSize);
         }
         cudaDeviceSynchronize();
         cudaFree(dScratch);
       } else {
         for (auto* k : kernels)
-          km.launchCUDAKernel(sv.dData(), sv.nQubits(), *k, args.blockSize);
+          km.enqueueKernelLaunch(sv.dData(), sv.nQubits(), *k, args.blockSize);
         cudaDeviceSynchronize();
       }
     }

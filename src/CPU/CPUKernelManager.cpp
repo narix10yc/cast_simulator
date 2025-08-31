@@ -88,19 +88,7 @@ void CPUKernelManager::ensureExecutable(CPUKernelInfo& kernel) {
   }
 }
 
-void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
-  assert(nThreads > 0);
-  if (nThreads == 1) {
-    for (auto& kernel : standaloneKernels_)
-      ensureExecutable(*kernel);
-    for (auto& [graphName, kernels] : graphKernels_) {
-      for (auto& kernel : kernels)
-        ensureExecutable(*kernel);
-    }
-  }
-
-  // multi-thread compile
-  utils::TaskDispatcher dispatcher(nThreads);
+void CPUKernelManager::ensureAllExecutable(bool progressBar) {
   for (auto& kernel : standaloneKernels_) {
     dispatcher.enqueue([this, &kernel]() { ensureExecutable(*kernel); });
   }
@@ -114,14 +102,9 @@ void CPUKernelManager::ensureAllExecutable(int nThreads, bool progressBar) {
   dispatcher.sync(progressBar);
 }
 
-MaybeError<void> CPUKernelManager::initJIT(int nThreads,
-                                           OptimizationLevel optLevel,
+MaybeError<void> CPUKernelManager::initJIT(OptimizationLevel optLevel,
                                            bool useLazyJIT,
                                            int verbose) {
-  if (nThreads <= 0) {
-    return cast::makeError<void>("Invalid number of threads: " +
-                                 std::to_string(nThreads));
-  }
   if (isJITed()) {
     return cast::makeError<void>("JIT has already been initialized.");
   }
@@ -131,12 +114,12 @@ MaybeError<void> CPUKernelManager::initJIT(int nThreads,
   InitializeAllAsmPrinters();
   InitializeAllAsmParsers();
 
-  applyLLVMOptimization(nThreads, optLevel, /* progressBar */ verbose > 0);
+  applyLLVMOptimization(optLevel, /* progressBar */ verbose > 0);
 
   if (useLazyJIT) {
     // lazy JIT engine
     orc::LLLazyJITBuilder jitBuilder;
-    jitBuilder.setNumCompileThreads(nThreads);
+    jitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
     auto lazyJIT = cantFail(jitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
       auto err = lazyJIT->addLazyIRModule(
@@ -147,11 +130,11 @@ MaybeError<void> CPUKernelManager::initJIT(int nThreads,
       }
     }
     this->llvmJIT = std::move(lazyJIT);
-    ensureAllExecutable(nThreads, /* progressBar */ verbose > 0);
+    ensureAllExecutable(/* progressBar */ verbose > 0);
   } else {
     // eager JIT engine
     orc::LLJITBuilder eagerJitBuilder;
-    eagerJitBuilder.setNumCompileThreads(nThreads);
+    eagerJitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
     auto eagerJIT = cantFail(eagerJitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
       auto err = eagerJIT->addIRModule(
@@ -162,7 +145,7 @@ MaybeError<void> CPUKernelManager::initJIT(int nThreads,
       }
     }
     this->llvmJIT = std::move(eagerJIT);
-    ensureAllExecutable(nThreads, /* progressBar */ verbose > 0);
+    ensureAllExecutable(/* progressBar */ verbose > 0);
   }
   this->llvmContextModulePairs.clear();
   return {}; // success

@@ -64,7 +64,7 @@ template <unsigned nQubits> static void f() {
     // Apply CUDA gate
     auto* kernelInfo = km.getKernelByName("gateImm_" + std::to_string(q));
     assert(kernelInfo != nullptr);
-    km.launchCUDAKernel(svCUDA0.dData(), svCUDA0.nQubits(), *kernelInfo);
+    km.enqueueKernelLaunch(svCUDA0.dData(), svCUDA0.nQubits(), *kernelInfo);
 
     suite.assertCloseF64(
         svCUDA0.norm(), 1.0, ss.str() + "CUDA SV norm equals to 1", GET_INFO());

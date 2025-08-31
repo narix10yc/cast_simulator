@@ -3,12 +3,12 @@
 
 #include "cast/CUDA/Config.h"
 
-#include <iostream>
 #include <cassert>
 #include <cmath>
 #include <cstring> // for std::memcpy
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <iostream>
 
 namespace cast {
 namespace internal {
@@ -37,11 +37,12 @@ extern template struct HelperCUDAKernels<double>;
 /// @tparam ScalarType
 template <typename ScalarType> class CUDAStatevector {
 private:
-  int _nQubits;
+public:
+  int nQubits_;
   // device data
-  ScalarType* _dData;
+  ScalarType* dData_;
   // host data
-  mutable ScalarType* _hData;
+  mutable ScalarType* hData_;
 
   // This function will call \c cudaDeviceSynchronize() after \c cudaMalloc()
   void mallocDeviceData();
@@ -50,28 +51,34 @@ private:
   void freeDeviceData();
 
   void mallocHostData() const {
-    assert(_hData == nullptr && "Host data is not null when trying malloc it");
-    _hData = new ScalarType[size()];
+    assert(hData_ == nullptr && "Host data is not null when trying malloc it");
+    hData_ = new ScalarType[size()];
   }
 
   void freeHostData() {
-    assert(_hData != nullptr &&
+    assert(hData_ != nullptr &&
            "Host data is already null when trying to free it");
-    delete[] _hData;
-    _hData = nullptr;
+    delete[] hData_;
+    hData_ = nullptr;
   }
 
 public:
-  CUDAStatevector(int nQubits)
-      : _nQubits(nQubits), _dData(nullptr), _hData(nullptr) {}
+  CUDAStatevector(int nQubits, int deviceOrdinal = 0)
+      : nQubits_(nQubits), dData_(nullptr), hData_(nullptr) {
+    cudaSetDevice(deviceOrdinal);
+    cudaFree(0);
+    CUcontext ctx = nullptr;
+    cuCtxGetCurrent(&ctx);
+    std::cerr << "From CUDAStatevector: current context is " << ctx << "\n";
+  }
 
   ~CUDAStatevector() {
-    if (_dData != nullptr)
+    if (dData_ != nullptr)
       freeDeviceData();
-    if (_hData != nullptr)
+    if (hData_ != nullptr)
       freeHostData();
-    assert(_dData == nullptr);
-    assert(_hData == nullptr);
+    assert(dData_ == nullptr);
+    assert(hData_ == nullptr);
   }
 
   CUDAStatevector(const CUDAStatevector&);
@@ -79,14 +86,18 @@ public:
   CUDAStatevector& operator=(const CUDAStatevector&);
   CUDAStatevector& operator=(CUDAStatevector&&);
 
-  int nQubits() const { return _nQubits; }
-  ScalarType* dData() const { return _dData; }
-  ScalarType* hData() const { return _hData; }
+  int nQubits() const { return nQubits_; }
+  ScalarType* dData() const { return dData_; }
 
-  size_t sizeInBytes() const { return (2ULL << _nQubits) * sizeof(ScalarType); }
+  CUdeviceptr getDevicePtr() const {
+    return reinterpret_cast<CUdeviceptr>(dData_);
+  }
+  ScalarType* hData() const { return hData_; }
+
+  size_t sizeInBytes() const { return (2ULL << nQubits_) * sizeof(ScalarType); }
 
   // The size of statevector array, equaling to 2ULL << nQubits.
-  size_t size() const { return 2ULL << _nQubits; }
+  size_t size() const { return 2ULL << nQubits_; }
 
   void initialize();
 
@@ -105,7 +116,7 @@ public:
   std::ostream& display(std::ostream& os = std::cerr) const;
 
   void clearHostData() {
-    if (_hData != nullptr)
+    if (hData_ != nullptr)
       freeHostData();
   }
 };

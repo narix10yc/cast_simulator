@@ -11,27 +11,27 @@ using namespace cast;
 
 template <typename ScalarType>
 CUDAStatevector<ScalarType>::CUDAStatevector(const CUDAStatevector& other)
-    : _nQubits(other._nQubits), _dData(nullptr), _hData(nullptr) {
+    : nQubits_(other.nQubits_), dData_(nullptr), hData_(nullptr) {
   // copy device data
-  if (other._dData != nullptr) {
+  if (other.dData_ != nullptr) {
     mallocDeviceData();
     CUDA_CALL(
         cudaMemcpy(
-            _dData, other._dData, sizeInBytes(), cudaMemcpyDeviceToDevice),
+            dData_, other.dData_, sizeInBytes(), cudaMemcpyDeviceToDevice),
         "Failed to copy array device to device");
   }
   // copy host data
-  if (other._hData != nullptr) {
+  if (other.hData_ != nullptr) {
     mallocHostData();
-    std::memcpy(_hData, other._hData, sizeInBytes());
+    std::memcpy(hData_, other.hData_, sizeInBytes());
   }
 }
 
 template <typename ScalarType>
 CUDAStatevector<ScalarType>::CUDAStatevector(CUDAStatevector&& other)
-    : _nQubits(other._nQubits), _dData(other._dData), _hData(other._hData) {
-  other._dData = nullptr;
-  other._hData = nullptr;
+    : nQubits_(other.nQubits_), dData_(other.dData_), hData_(other.hData_) {
+  other.dData_ = nullptr;
+  other.hData_ = nullptr;
 }
 
 template <typename ScalarType>
@@ -56,68 +56,67 @@ CUDAStatevector<ScalarType>::operator=(CUDAStatevector&& other) {
 
 template <typename ScalarType>
 void CUDAStatevector<ScalarType>::mallocDeviceData() {
-  assert(_dData == nullptr && "Device data is already allocated");
-  CUDA_CALL(cudaMalloc(&_dData, sizeInBytes()),
+  assert(dData_ == nullptr && "Device data is already allocated");
+  CUDA_CALL(cudaMalloc(&dData_, sizeInBytes()),
             "Failed to allocate device data");
   CUDA_CALL(cudaDeviceSynchronize(), "Failed to synchronize device");
 }
 
 template <typename ScalarType>
 void CUDAStatevector<ScalarType>::freeDeviceData() {
-  assert(_dData != nullptr &&
+  assert(dData_ != nullptr &&
          "Device data is not allocated when trying to free it");
-  // For safety, we always synchronize the device before freeing memory
   CUDA_CALL(cudaDeviceSynchronize(), "Failed to synchronize device");
-  CUDA_CALL(cudaFree(_dData), "Failed to free device data");
-  _dData = nullptr;
+  CUDA_CALL(cudaFree(dData_), "Failed to free device data");
+  dData_ = nullptr;
 }
 
 template <typename ScalarType> void CUDAStatevector<ScalarType>::initialize() {
-  if (_dData == nullptr)
+  if (dData_ == nullptr)
     mallocDeviceData();
-  CUDA_CALL(cudaMemset(_dData, 0, sizeInBytes()),
+  CUDA_CALL(cudaMemset(dData_, 0, sizeInBytes()),
             "Failed to zero statevector on the device");
   ScalarType one = 1.0;
   CUDA_CALL(
-      cudaMemcpy(_dData, &one, sizeof(ScalarType), cudaMemcpyHostToDevice),
+      cudaMemcpy(dData_, &one, sizeof(ScalarType), cudaMemcpyHostToDevice),
       "Failed to set the first element of the statevector to 1");
 }
 
 template <typename ScalarType>
 ScalarType CUDAStatevector<ScalarType>::normSquared() const {
   using Helper = cast::internal::HelperCUDAKernels<ScalarType>;
-  assert(_dData != nullptr && "Device statevector is not initialized");
-  return Helper::reduceSquared(_dData, size());
+  assert(dData_ != nullptr && "Device statevector is not initialized");
+  return Helper::reduceSquared(dData_, size());
 }
 
 template <typename ScalarType> void CUDAStatevector<ScalarType>::randomize() {
   using Helper = cast::internal::HelperCUDAKernels<ScalarType>;
-  if (_dData == nullptr)
+  if (dData_ == nullptr)
     mallocDeviceData();
-  Helper::randomizeStatevector(_dData, size());
+  Helper::randomizeStatevector(dData_, size());
 
   // normalize the statevector
   auto c = 1.0 / norm();
-  Helper::multiplyByConstant(_dData, c, size());
+  Helper::multiplyByConstant(dData_, c, size());
   cudaDeviceSynchronize();
 }
 
 template <typename ScalarType>
 ScalarType CUDAStatevector<ScalarType>::prob(int qubit) const {
   using Helper = cast::internal::HelperCUDAKernels<ScalarType>;
-  assert(_dData != nullptr);
+  assert(dData_ != nullptr);
 
-  return 1.0 - Helper::reduceSquaredOmittingBit(_dData, size(), qubit + 1);
+  return 1.0 - Helper::reduceSquaredOmittingBit(dData_, size(), qubit + 1);
 }
 
 template <typename ScalarType> void CUDAStatevector<ScalarType>::sync() const {
   CUDA_CALL(cudaDeviceSynchronize(), "Failed to synchronize device");
-  assert(_dData != nullptr && "Device statevector is not initialized");
+  assert(dData_ != nullptr && "Device statevector is not initialized");
 
-  if (_hData == nullptr)
+  if (hData_ == nullptr)
     mallocHostData();
 
-  CUDA_CALL(cudaMemcpy(_hData, _dData, sizeInBytes(), cudaMemcpyDeviceToHost),
+  CUDA_CALL(cudaMemcpy(hData_, dData_, sizeInBytes(), cudaMemcpyDeviceToHost),
             "Failed to copy statevector from device to host");
   CUDA_CALL(cudaDeviceSynchronize(), "Failed to synchronize device");
 }
@@ -125,10 +124,10 @@ template <typename ScalarType> void CUDAStatevector<ScalarType>::sync() const {
 template <typename ScalarType>
 std::ostream& CUDAStatevector<ScalarType>::display(std::ostream& os) const {
   sync();
-  unsigned l = std::min(32U, 1U << _nQubits);
+  unsigned l = std::min(32U, 1U << nQubits_);
   for (unsigned i = 0; i < l; ++i)
     os << utils::fmt_0b(i, 5) << " : "
-       << utils::fmt_complex(_hData[2 * i], _hData[2 * i + 1]) << "\n";
+       << utils::fmt_complex(hData_[2 * i], hData_[2 * i + 1]) << "\n";
   return os;
 }
 

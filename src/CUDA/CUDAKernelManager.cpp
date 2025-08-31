@@ -18,6 +18,8 @@
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include "llvm/Support/Debug.h"
+
+#include <cuda_runtime.h>
 // #define LLVM_DEBUG(X) X
 
 using namespace cast;
@@ -64,19 +66,16 @@ std::ostream& CUDAKernelInfo::displayInfo(std::ostream& os) const {
     os << "Yes, with size " << utils::fmt_mem(cubinData.size()) << "\n";
 
   os << "LLVM Context     : " << llvmContext << "\n"
-     << "LLVM Module      : " << llvmModule << "\n"
-     << "CU Context       : " << cuContext << "\n"
-     << "CU Module        : " << cuModule << "\n"
-     << "CU Function      : " << cuFunction << "\n";
+     << "LLVM Module      : " << llvmModule << "\n";
   return os << CYAN("================================\n");
 }
 
 std::ostream& CUDAKernelManager::displayInfo(std::ostream& os) const {
   os << CYAN("=== Info of CUDA Kernel Manager @ " << (void*)this << " ===\n")
-     << "Num Worker Threads : " << nWorkerThreads_ << "\n"
+     << "Num Worker Threads : " << dispatcher.getNumWorkers() << "\n"
      << "JIT State          : " << static_cast<int>(jitState) << "\n"
      << "Primary CU Context : " << primaryCuCtx << "\n"
-     << "Num CU Modules     : " << cuModules.size() << "\n";
+     << "Primary CU Stream  : " << primaryCuStream << "\n";
 
   int nKernels = 0;
   size_t totalPTXSize = 0, totalCUBINSize = 0;
@@ -118,13 +117,6 @@ public:
 
 MaybeError<void> CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel,
                                                        int verbose) {
-  assert(nWorkerThreads_ > 0);
-
-  InitializeAllTargets();
-  InitializeAllTargetMCs();
-  InitializeAllAsmParsers();
-  InitializeAllAsmPrinters();
-
   if (llvmOptLevel < 0)
     llvmOptLevel = 1;
   if (llvmOptLevel > 3)
@@ -147,7 +139,7 @@ MaybeError<void> CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel,
     assert(false && "Invalid LLVM optimization level");
   }
 
-  applyLLVMOptimization(nWorkerThreads_, optLevel, verbose > 0);
+  applyLLVMOptimization(optLevel, verbose > 0);
 
   std::string targetTriple = "nvptx64-nvidia-cuda";
   std::string err;
@@ -180,7 +172,6 @@ MaybeError<void> CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel,
       return cast::makeError("Module verification failed: " + errorStr);
   }
 
-  utils::TaskDispatcher dispatcher(nWorkerThreads_);
   for (auto& kernel : *this) {
     dispatcher.enqueue([&]() {
       raw_pwrite_vector_ostream vecStream(kernel.ptxString);
@@ -199,11 +190,14 @@ MaybeError<void> CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel,
   return {}; // success
 }
 
+static void compileLLVMIRToPTX_work(int llvmOptLevel, CUDAKernelInfo& kernel) {
+
+}
+
+// Must call cuCtxSetCurrent before calling this function
 static void compileToCubin_work(int cuOptLevel, CUDAKernelInfo& kernel) {
-  assert(kernel.cuContext != nullptr);
   assert(!kernel.ptxString.empty());
 
-  CU_CHECK(cuCtxSetCurrent(kernel.cuContext));
   // JIT/link options
   constexpr size_t LOG_SZ = 1 << 15;
   std::vector<char> info(LOG_SZ, 0), err(LOG_SZ, 0);
@@ -259,23 +253,11 @@ static void compileToCubin_work(int cuOptLevel, CUDAKernelInfo& kernel) {
   kernel.cubinData.assign(static_cast<uint8_t*>(cubinOut),
                           static_cast<uint8_t*>(cubinOut) + cubinSize);
 
-  cuLinkDestroy(linkState);
-}
-
-static void loadCubin_work(CUDAKernelInfo& kernel) {
-  assert(kernel.cuContext != nullptr);
-  assert(!kernel.cubinData.empty());
-
-  CU_CHECK(cuCtxSetCurrent(kernel.cuContext));
-
-  CU_CHECK(cuModuleLoadData(&kernel.cuModule, kernel.cubinData.data()));
-  CU_CHECK(cuModuleGetFunction(
-      &kernel.cuFunction, kernel.cuModule, kernel.llvmFuncName.c_str()));
+  CU_CHECK(cuLinkDestroy(linkState));
 }
 
 MaybeError<void> CUDAKernelManager::compilePTXToCubin(int cuOptLevel,
                                                       int verbose) {
-  assert(nWorkerThreads_ > 0);
   if (cuOptLevel < 0)
     cuOptLevel = 1;
   if (cuOptLevel > 4)
@@ -286,25 +268,10 @@ MaybeError<void> CUDAKernelManager::compilePTXToCubin(int cuOptLevel,
         "PTX must be available when calling compilePTXToCubin");
   }
 
-  CU_CHECK(cuInit(0));
-  /* cuDeviceGet expects logical index.
-   * So if CUDA_VISIBLE_DEVICES="2,3", cuDeviceGet(&cuDevice, 0) selects
-   * physical device 2.
-   * Therefore, we always choose deviceIdx to be 0, and ask users to control
-   * via environment variable CUDA_VISIBLE_DEVICES
-   */
-  int deviceIdx = 0;
-  CUdevice cuDevice;
-  CU_CHECK(cuDeviceGet(&cuDevice, deviceIdx));
-  // create primary cuda context
-  CU_CHECK(cuCtxCreate(&primaryCuCtx, 0, cuDevice));
-  CU_CHECK(cuDevicePrimaryCtxRetain(&primaryCuCtx, cuDevice));
-
-  utils::TaskDispatcher dispatcher(nWorkerThreads_);
   for (auto& kernel : *this) {
     dispatcher.enqueue([=, this, &kernel]() {
       // must set cuContext before calling compileToCubin_work
-      kernel.cuContext = primaryCuCtx;
+      CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
       compileToCubin_work(cuOptLevel, kernel);
     });
   }
@@ -317,32 +284,171 @@ MaybeError<void> CUDAKernelManager::compilePTXToCubin(int cuOptLevel,
   return {}; // success
 }
 
-MaybeError<void> CUDAKernelManager::loadCubin(int verbose) {
-  assert(jitState == JIT_CompiledCubin);
-  assert(nWorkerThreads_ > 0);
-
-  utils::TaskDispatcher dispatcher(nWorkerThreads_);
-
-  // this->cuModules takes the ownership of all cuda modules created in
-  // loadCubin_work
-  cuModules.resize(this->numKernels());
-  CUmodule* cuModulePtr = cuModules.data();
-  for (auto& kernel : *this) {
-    dispatcher.enqueue([=, this, &kernel]() {
-      loadCubin_work(kernel);
-      *cuModulePtr = kernel.cuModule;
-    });
-    ++cuModulePtr;
+void CUDAKernelManager::execThreadWork() {
+  // Bind Driver (primary) in THIS thread
+  static thread_local CUcontext bound = nullptr;
+  if (bound != primaryCuCtx) {
+    CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
+    bound = primaryCuCtx;
   }
 
-  if (verbose > 0)
-    std::cerr << "Load CUBIN...\n";
-  dispatcher.sync(/* progressBar */ verbose > 0);
-  return {}; // success
+  // Attach Runtime in THIS thread to the same device’s primary
+  cudaSetDevice(0);
+  cudaFree(0); // forces attach; cheap no-op allocation/free
+
+  // CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
+  while (true) {
+    {
+      std::unique_lock<std::mutex> lk(execMtx_);
+      // resumes when either
+      // - there exists window seats and pending_ is not empty, or
+      // - there are kernels available to be launched
+      std::cerr << "Exec thread waiting...\n";
+      execCV_.wait(lk, [this]() {
+        // loadIdx is atomic, launchIdx and pending_ are only accessed by the
+        // exec thread
+        auto nWindowSeats = loadIdx - launchIdx;
+        bool caseA = (nWindowSeats < Window::WS && !pending_.empty());
+        bool caseB = window_[launchIdx].status.load() == LaunchTask::Ready;
+        bool caseC = (stopFlag_ == true);
+        return (caseA || caseB || caseC);
+      });
+      std::cerr << "Exec thread resuming\n";
+    }
+    if (stopFlag_ == true) {
+      std::cerr << "Exec thread stopping\n";
+      return;
+    }
+
+    // launch as many kernels as we can
+    while (true) {
+      auto& window = window_[launchIdx]; // launch config
+      // kernel is not available. End here
+      if (window.status != LaunchTask::Ready)
+        break;
+
+      // From now on we do not need locks because no loading thread will be
+      // working on this until this thread (exec thread) pose another task later
+      // Launch the kernel
+      ++launchIdx;
+      void** kernelParams = window.getKernelParams();
+      if (window.startEvent == nullptr)
+        CU_CHECK(cuEventCreate(&window.startEvent, CU_EVENT_DEFAULT));
+      if (window.finishEvent == nullptr)
+        CU_CHECK(cuEventCreate(&window.finishEvent, CU_EVENT_DEFAULT));
+
+      CU_CHECK(cuEventRecord(window.startEvent, primaryCuStream));
+      // clang-format off
+      CU_CHECK(cuLaunchKernel(window.cuFunction,
+                              window.gridSize, 1, 1,
+                              window.blockSize, 1, 1,
+                              0, /* shared memory size */
+                              primaryCuStream, /* stream */
+                              kernelParams,
+                              nullptr));
+      // clang-format on
+
+      CU_CHECK(cuEventRecord(window.finishEvent, primaryCuStream));
+      window.status.store(LaunchTask::Running);
+      loadCV_.notify_all();
+    }
+
+    // pose loading requests
+    assert(launchConfig_.dData);
+    while (true) {
+      CUDAKernelInfo* kernel;
+      {
+        std::unique_lock lock(execMtx_);
+        if (pending_.empty())
+          break;
+        kernel = pending_.front();
+        pending_.pop_front();
+      }
+
+      // A loading worker thread will be accessing this kernel info
+      // When finishes, it marks ready as true and notify the exec thread.
+      auto* window = &window_[loadIdx];
+      ++loadIdx;
+      dispatcher.enqueue([=, this]() {
+        CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
+        if (kernel->cubinData.empty())
+          compileToCubin_work(1, *kernel);
+
+        {
+          // When the status is Ready, we need to wait for the exec thread to
+          // launch it
+          std::unique_lock lock(execMtx_);
+          loadCV_.wait(lock, [=] {
+            auto status = window->status.load();
+            return status != LaunchTask::Ready;
+          });
+        }
+        // wait for the previous kernel to finish
+        if (window->status != LaunchTask::Uninited) {
+          // if the kernel is running or finished, we sync it and report the
+          // execution time
+          assert(window->startEvent != nullptr);
+          assert(window->finishEvent != nullptr);
+          CU_CHECK(cuEventSynchronize(window->startEvent));
+          CU_CHECK(cuEventSynchronize(window->finishEvent));
+          float ms;
+          CU_CHECK(
+              cuEventElapsedTime(&ms, window->startEvent, window->finishEvent));
+
+          assert(window->cuModule != nullptr);
+          CU_CHECK(cuModuleUnload(window->cuModule));
+          window->cuModule = nullptr;
+          window->status = LaunchTask::Finished;
+        }
+
+        assert(window->cuModule == nullptr);
+        assert(kernel->cubinData.size() > 0);
+        CU_CHECK(cuModuleLoadData(&window->cuModule, kernel->cubinData.data()));
+        CU_CHECK(cuModuleGetFunction(&window->cuFunction,
+                                     window->cuModule,
+                                     kernel->llvmFuncName.c_str()));
+        unsigned nCombos = 1U
+                           << (launchConfig_.nQubits - kernel->gate->nQubits());
+        unsigned gridDim =
+            (nCombos + launchConfig_.blockSize - 1) / launchConfig_.blockSize;
+
+        window->resetParams();
+        window->addParam(launchConfig_.dData);
+        window->addParam(nCombos);
+        window->gridSize = gridDim;
+        window->blockSize = launchConfig_.blockSize;
+
+        window->status.store(LaunchTask::Ready);
+        execCV_.notify_one();
+      });
+    }
+  }
 }
+// MaybeError<void> CUDAKernelManager::loadCubin(int verbose) {
+//   assert(jitState == JIT_CompiledCubin);
+//   assert(nWorkerThreads_ > 0);
+
+//   utils::TaskDispatcher dispatcher(nWorkerThreads_);
+
+//   // this->cuModules takes the ownership of all cuda modules created in
+//   // loadCubin_work
+//   cuModules.resize(this->numKernels());
+//   CUmodule* cuModulePtr = cuModules.data();
+//   for (auto& kernel : *this) {
+//     dispatcher.enqueue([=, this, &kernel]() {
+//       loadCubin_work(kernel);
+//       *cuModulePtr = kernel.cuModule;
+//     });
+//     ++cuModulePtr;
+//   }
+
+//   if (verbose > 0)
+//     std::cerr << "Load CUBIN...\n";
+//   dispatcher.sync(/* progressBar */ verbose > 0);
+//   return {}; // success
+// }
 
 MaybeError<void> CUDAKernelManager::initJIT(int optLevel, int verbose) {
-
   if (jitState != JIT_Uninited) {
     return cast::makeError("The kernel manager must be in JIT-uninitialized "
                            "state when calling initJIT");
@@ -354,7 +460,6 @@ MaybeError<void> CUDAKernelManager::initJIT(int optLevel, int verbose) {
       return cast::makeError("Failed to compile LLVM IR to PTX: " +
                              r.takeError());
   }
-
   {
     auto r = compilePTXToCubin(1, verbose);
     if (!r)
@@ -362,13 +467,6 @@ MaybeError<void> CUDAKernelManager::initJIT(int optLevel, int verbose) {
                              r.takeError());
   }
 
-  {
-    auto r = loadCubin(verbose);
-    if (!r)
-      return cast::makeError("Failed to load CUBIN: " + r.takeError());
-  }
-
-  jitState = JIT_CubinLoaded;
   return {}; // success
 }
 
@@ -396,32 +494,6 @@ void CUDAKernelManager::dumpPTX(std::ostream& os,
     return;
   }
   os << kernelInfo->ptxString << "\n";
-}
-
-void CUDAKernelManager::launchCUDAKernel(void* dData,
-                                         int nQubits,
-                                         const CUDAKernelInfo& kernelInfo,
-                                         int blockDim) {
-  assert(dData != nullptr);
-  assert(kernelInfo.cuContext && kernelInfo.cuFunction);
-
-  unsigned nCombos = 1U << (nQubits - kernelInfo.gate->nQubits());
-  unsigned gridDim = (nCombos + blockDim - 1) / blockDim;
-
-  // the second arg is supposed to be &combos
-  void* kernelParams[2] = {&dData, &nCombos};
-
-  cuCtxSetCurrent(kernelInfo.cuContext);
-  // clang-format off
-  CU_CALL(cuLaunchKernel(kernelInfo.cuFunction,
-                         gridDim, 1, 1,
-                         blockDim, 1, 1,
-                         /*sharedMemBytes*/ 0,
-                         /*stream*/ 0,
-                         kernelParams,
-                         nullptr),
-          "cuLaunchKernel");
-  // clangt-format on
 }
 
 // void CUDAKernelManager::launchCUDAKernelParam(
@@ -455,8 +527,8 @@ void CUDAKernelManager::launchCUDAKernel(void* dData,
 //                          TILE, 1, 1,                        // block dim
 //     0,
 //                          0,                                 // stream
-//                          kernelParams,                      // kernel arguments
-//                          nullptr),
+//                          kernelParams,                      // kernel
+//                          arguments nullptr),
 //           "launchCUDAKernelParam");
 //   // clang-format on
 // }

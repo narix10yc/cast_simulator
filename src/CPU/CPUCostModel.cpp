@@ -154,8 +154,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
       kernelMgr.genStandaloneGate(cpuConfig, gate, "gate_k" + std::to_string(k))
           .consumeError();
     }
-    kernelMgr.initJIT(nThreads, llvm::OptimizationLevel::O1, false, 0)
-        .consumeError();
+    kernelMgr.initJIT(llvm::OptimizationLevel::O1, false, 0).consumeError();
   };
 
   if (verbose > 0) {
@@ -303,11 +302,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
 
   utils::timedExecute(
       [&]() {
-        kernelMgr
-            .initJIT(nThreads,
-                     llvm::OptimizationLevel::O1,
-                     /* useLazyJIT */ false,
-                     /* verbose */ 1)
+        kernelMgr.initJIT(llvm::OptimizationLevel::O1, false, 1)
             .consumeError(); // ignore possible errors
       },
       "Initialize JIT Engine");

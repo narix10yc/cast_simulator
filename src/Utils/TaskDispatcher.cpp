@@ -8,6 +8,15 @@
 
 using namespace utils;
 
+TaskDispatcher::TaskDispatcher(int nWorkers)
+    : tasks(), workers(), mtx(), cv(), syncCV(), nTotalTasks(0),
+      nActiveWorkers(0), stopFlag(false) {
+  workers.reserve(nWorkers);
+  for (int i = 0; i < nWorkers; ++i) {
+    workers.emplace_back([this]() { workerThread(); });
+  }
+}
+
 void TaskDispatcher::enqueue(const std::function<void()>& task) {
   ++nTotalTasks;
   {
@@ -39,20 +48,11 @@ void TaskDispatcher::workerThread() {
       } else {
         continue;
       }
+      ++nActiveWorkers;
     }
-    ++nActiveWorkers;
     task();
     --nActiveWorkers;
     syncCV.notify_one();
-  }
-}
-
-TaskDispatcher::TaskDispatcher(int nWorkers)
-    : tasks(), workers(), mtx(), cv(), syncCV(), nTotalTasks(0),
-      nActiveWorkers(0), stopFlag(false) {
-  workers.reserve(nWorkers);
-  for (int i = 0; i < nWorkers; ++i) {
-    workers.emplace_back([this]() { workerThread(); });
   }
 }
 
@@ -62,11 +62,11 @@ int TaskDispatcher::getWorkerID() const {
     if (workers[i].get_id() == threadID)
       return i;
   }
-  assert(false && "Unreachable");
   return -1;
 }
 
 void TaskDispatcher::sync(bool progressBar) {
+  assert(getWorkerID() == -1 && "Cannot sync() inside a worker thread");
   {
     std::unique_lock lock(mtx);
     syncCV.wait(lock, [this, progressBar]() {

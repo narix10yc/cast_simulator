@@ -1335,19 +1335,13 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
   // llvm::LLVMContext* llvmContext;
   // llvm::Module* llvmModule;
   // std::string llvmFuncName;
-  // CUcontext cuContext;
-  // CUmodule cuModule;
-  // CUfunction cuFunction;
   auto ki = std::make_unique<CUDAKernelInfo>(std::string(),
                                              std::vector<uint8_t>(),
                                              gate,
                                              config.precision,
                                              &func->getContext(),
                                              func->getParent(),
-                                             func->getName().str(),
-                                             nullptr,
-                                             nullptr,
-                                             nullptr);
+                                             func->getName().str());
 
   return ki;
 }

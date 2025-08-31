@@ -26,8 +26,9 @@ enum class CUDAMatrixLoadMode {
 
 // cuContext, cuModule, and cuFunction are internally pointers. CUDAKernelInfo
 // does not own their allocation state. The ownerships of these objects are
-// - cuContext: via CUDAKernelManager::primaryCuCtx (a single CUcontext)
-// - cuModule: via CUDAKernelManager::cuModules (a vector of CUmodule)
+// - cuContext: via CUDAKernelManager::primaryCuCtx (a single CUcontext shared
+//              across kernels)
+// - cuModule: owned by CUDAKernelInfo::cuModule (one CUmodule per kernel)
 // - cuFunction: living in its own CUmodule
 struct CUDAKernelInfo {
   std::string ptxString;
@@ -37,9 +38,6 @@ struct CUDAKernelInfo {
   llvm::LLVMContext* llvmContext;
   llvm::Module* llvmModule;
   std::string llvmFuncName;
-  CUcontext cuContext;
-  CUmodule cuModule;
-  CUfunction cuFunction;
 
   std::ostream& displayInfo(std::ostream& os) const;
 }; // struct CUDAKernelInfo
@@ -66,11 +64,11 @@ class CUDAKernelManager : public KernelManagerBase {
     JIT_CompiledCubin,
     JIT_CubinLoaded
   };
-  JITState jitState;
-  int nWorkerThreads_;
+  JITState jitState = JIT_Uninited;
 
-  CUcontext primaryCuCtx;
-  std::vector<CUmodule> cuModules;
+  CUdevice cuDevice;
+  CUcontext primaryCuCtx = nullptr;
+  CUstream primaryCuStream = nullptr;
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
@@ -86,12 +84,101 @@ class CUDAKernelManager : public KernelManagerBase {
                                          ConstQuantumGatePtr gate,
                                          const std::string& funcName);
 
+private:
+  struct LaunchTask {
+  private:
+    std::vector<std::unique_ptr<std::byte[]>> kernelParamsStorage_;
+    mutable std::vector<void*> kernelParams_;
+
+  public:
+    CUmodule cuModule = nullptr;
+    // cuFunction is used to check if this kernel is launch-able
+    // After the executer thread launches this kernel, cuModule and cuFunction
+    // should be set to null
+    CUfunction cuFunction = nullptr;
+
+    CUevent startEvent = nullptr;
+    CUevent finishEvent = nullptr;
+
+    unsigned gridSize = 0;
+    unsigned blockSize = 0;
+
+    enum Status : int {
+      Uninited = 0, // The task is not initialized
+      Ready = 1,    // The task is ready to be launched
+      Running = 2,  // The task is currently running
+      Finished = 3  // The task has finished
+    };
+
+    std::atomic<Status> status = Uninited;
+
+    LaunchTask() = default;
+
+    template <typename T> void addParam(T param) {
+      kernelParams_.clear();
+      auto paramPtr = std::make_unique<std::byte[]>(sizeof(T));
+      std::memcpy(paramPtr.get(), &param, sizeof(T));
+      kernelParamsStorage_.push_back(std::move(paramPtr));
+    }
+
+    void resetParams() {
+      kernelParamsStorage_.clear();
+      kernelParams_.clear();
+    }
+
+    void** getKernelParams() const {
+      if (!kernelParams_.empty())
+        return kernelParams_.data();
+
+      kernelParams_.reserve(kernelParamsStorage_.size());
+      for (auto& p : kernelParamsStorage_)
+        kernelParams_.push_back(static_cast<void*>(p.get()));
+      return kernelParams_.data();
+    }
+  };
+  struct Window {
+    static constexpr int WS = 1; // window size
+    std::array<LaunchTask, WS> tasks_;
+
+    LaunchTask& operator[](unsigned i) { return tasks_[i % WS]; }
+    const LaunchTask& operator[](unsigned i) const { return tasks_[i % WS]; }
+  };
+
+  std::deque<CUDAKernelInfo*> pending_; // kernels waiting to be loaded
+  Window window_;
+  // We do not need atomic here because launchIdx and loadIdx are only modified
+  // in the exec thread.
+  unsigned launchIdx = 0; // monotonically increasing index
+  unsigned loadIdx = 0;   // monotonically increasing index
+  std::thread execTh_;
+  bool stopFlag_ = false;
+  std::mutex execMtx_;
+  std::condition_variable execCV_;
+
+  std::condition_variable loadCV_;
+
+  struct LaunchConfig {
+    CUdeviceptr dData = 0;
+    int nQubits = 0;
+    unsigned blockSize = 0;
+  };
+
+  LaunchConfig launchConfig_;
+
+  void execThreadWork();
+
 public:
-  CUDAKernelManager(int nWorkerThreads = -1)
-      : KernelManagerBase(), standaloneKernels_(), jitState(JIT_Uninited),
-        nWorkerThreads_(nWorkerThreads) {
-    if (nWorkerThreads <= 0)
-      this->nWorkerThreads_ = cast::get_cpu_num_threads();
+  CUDAKernelManager(int nWorkerThreads = -1, int deviceOrdinal = 0)
+      : KernelManagerBase((nWorkerThreads > 0) ? nWorkerThreads
+                                               : cast::get_cpu_num_threads()) {
+    CU_CHECK(cuInit(0));
+    CU_CHECK(cuDeviceGet(&cuDevice, deviceOrdinal));
+    CU_CHECK(cuDevicePrimaryCtxRetain(&primaryCuCtx, cuDevice));
+    CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
+    CU_CHECK(cuStreamCreate(&primaryCuStream, CU_STREAM_DEFAULT));
+
+    // initialize exec thread
+    execTh_ = std::thread(&CUDAKernelManager::execThreadWork, this);
   }
 
   CUDAKernelManager(const CUDAKernelManager&) = delete;
@@ -100,12 +187,27 @@ public:
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
   ~CUDAKernelManager() {
-    for (const auto& kernel : *this) {
-      if (kernel.cuModule)
-        cuModuleUnload(kernel.cuModule);
+    dispatcher.sync();
+    stopFlag_ = true;
+    execCV_.notify_one();
+    assert(execTh_.joinable());
+    execTh_.join();
+    // manually unload CUDA resources
+    assert(primaryCuStream != nullptr);
+    CU_CHECK(cuStreamSynchronize(primaryCuStream));
+    CU_CHECK(cuStreamDestroy(primaryCuStream));
+
+    for (auto& task : window_.tasks_) {
+      if (task.startEvent)
+        CU_CHECK(cuEventDestroy(task.startEvent));
+      if (task.finishEvent)
+        CU_CHECK(cuEventDestroy(task.finishEvent));
+      if (task.cuModule)
+        CU_CHECK(cuModuleUnload(task.cuModule));
     }
-    if (primaryCuCtx)
-      cuCtxDestroy(primaryCuCtx);
+
+    // release the primary context
+    CU_CHECK(cuDevicePrimaryCtxRelease(cuDevice));
   }
 
   std::ostream& displayInfo(std::ostream& os) const;
@@ -130,8 +232,6 @@ public:
   // cuOptLevel: 0, 1, 2, 3, 4
   MaybeError<void> compilePTXToCubin(int cuOptLevel = 1, int verbose = 0);
 
-  MaybeError<void> loadCubin(int verbose = 0);
-
   MaybeError<void> initJIT(int optLevel = 1, int verbose = 0);
 
   void clearPTX() {
@@ -143,6 +243,9 @@ public:
     for (auto& kernel : *this)
       kernel.cubinData.clear();
   }
+
+  CUcontext getPrimaryCUContext() const { return primaryCuCtx; }
+  CUstream getPrimaryCUStream() const { return primaryCuStream; }
 
   /* Get Kernels */
 
@@ -168,11 +271,23 @@ public:
     return std::span<const KernelInfoPtr>(it->second);
   }
 
+  /* --- Kernel Launch --- */
+
+  void
+  setLaunchConfig(CUdeviceptr dData, int nQubits, unsigned blockSize = 64) {
+    launchConfig_.dData = dData;
+    launchConfig_.nQubits = nQubits;
+    launchConfig_.blockSize = blockSize;
+  }
+
   ///
-  void launchCUDAKernel(void* dData,
-                        int nQubits,
-                        const CUDAKernelInfo& kernelInfo,
-                        int blockDim = 64);
+  void enqueueKernelLaunch(CUDAKernelInfo& kernel) {
+    {
+      std::unique_lock lk(execMtx_);
+      pending_.push_back(&kernel);
+    }
+    execCV_.notify_one();
+  }
 
   // TODO: not implemented yet
   void launchCUDAKernelParam(void* dData,

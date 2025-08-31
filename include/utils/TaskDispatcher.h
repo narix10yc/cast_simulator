@@ -42,6 +42,8 @@ public:
   // Add a new task to the queue
   void enqueue(const std::function<void()>& task);
 
+  int getNumWorkers() const { return workers.size(); }
+
   int getWorkerID() const;
 
   /// @brief A blocking method that waits until all tasks are finished.

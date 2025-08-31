@@ -85,11 +85,13 @@ class CPUKernelManager : public KernelManagerBase {
                                         const std::string& funcName);
 
   void ensureExecutable(CPUKernelInfo& kernel);
-  void ensureAllExecutable(int nThreads = 1, bool progressBar = false);
+  void ensureAllExecutable(bool progressBar = false);
 
 public:
-  CPUKernelManager()
-      : KernelManagerBase(), standaloneKernels_(), llvmJIT(nullptr) {}
+  CPUKernelManager(int nWorkerThreads = -1)
+      : KernelManagerBase(nWorkerThreads > 0 ? nWorkerThreads
+                                             : cast::get_cpu_num_threads()),
+        standaloneKernels_(), llvmJIT(nullptr) {}
 
   std::ostream& displayInfo(std::ostream& os) const;
 
@@ -103,8 +105,7 @@ public:
   /// called. If set to false, all kernels are ready to be executed when this
   /// function returns (good for benchmarks).
   MaybeError<void>
-  initJIT(int nThreads = 1,
-          llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
+  initJIT(llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
           bool useLazyJIT = false,
           int verbose = 0);
 

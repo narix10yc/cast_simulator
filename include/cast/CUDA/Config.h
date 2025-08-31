@@ -1,6 +1,8 @@
 #ifndef CAST_CUDA_CONFIG_H
 #define CAST_CUDA_CONFIG_H
 
+#include <cstdint>
+
 #ifndef NDEBUG
 // Driver API
 #define CU_CALL(FUNC, MSG)                                                     \
@@ -42,6 +44,7 @@
       std::cerr << "\033[31m[CUDA Driver Error]\033[0m " << errStr             \
                 << " (code " << err << ")" << " at " << __FILE__ << ":"        \
                 << __LINE__ << " in CALL: " << #CALL << "\n";                  \
+      std::terminate();                                                        \
     }                                                                          \
   } while (0)
 #else
@@ -53,6 +56,16 @@
 
 #endif // #ifndef NDEBUG
 namespace cast {
+
+#ifdef CAST_USE_CUDA
+static constexpr int kWarpSize = 32;
+static constexpr int kWarpBits = 5;
+static constexpr uint32_t kFullMask = 0xFFFFFFFFu;
+
+#ifndef GPU_BACKEND_CUDA
+#define GPU_BACKEND_CUDA 1
+#endif
+#endif
 
 void displayCUDA();
 

@@ -66,7 +66,7 @@ template <unsigned nQubits> void runU2qTest() {
     // dumpStatevector("Initial CUDA statevector:", hostSV);
 
     /* apply gate on GPU */
-    km.launchCUDAKernel(
+    km.enqueueKernelLaunch(
         svCUDA0.dData(), svCUDA0.nQubits(), *km.getAllStandaloneKernels()[i]);
     cudaDeviceSynchronize();
 

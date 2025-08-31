@@ -360,12 +360,12 @@ int main(int argc, char** argv) {
       cast::CUDAStatevector<float> sv(graph->nQubits());
       sv.initialize();
       for (auto* k : kernels)
-        km.launchCUDAKernel(sv.dData(), sv.nQubits(), *k, args.blockSize);
+        km.enqueueKernelLaunch(sv.dData(), sv.nQubits(), *k, args.blockSize);
     } else {
       cast::CUDAStatevector<double> sv(graph->nQubits());
       sv.initialize();
       for (auto* k : kernels)
-        km.launchCUDAKernel(sv.dData(), sv.nQubits(), *k, args.blockSize);
+        km.enqueueKernelLaunch(sv.dData(), sv.nQubits(), *k, args.blockSize);
     }
     cudaDeviceSynchronize();
   });

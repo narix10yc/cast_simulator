@@ -6,11 +6,11 @@
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 
-#include <cstdlib>
-#include "llvm/IR/Verifier.h"
 #include "llvm/IR/OptBisect.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/StandardInstrumentations.h"
+#include <cstdlib>
 
 #include <ranges>
 
@@ -47,15 +47,10 @@ KernelManagerBase::createNewLLVMContextModulePair(const std::string& name) {
   return llvmContextModulePairs.back();
 }
 
-
-void KernelManagerBase::applyLLVMOptimization(int nThreads,
-                                              OptimizationLevel optLevel,
+void KernelManagerBase::applyLLVMOptimization(llvm::OptimizationLevel optLevel,
                                               bool progressBar) {
-  assert(nThreads > 0);
-  if (optLevel == OptimizationLevel::O0)
+  if (optLevel == llvm::OptimizationLevel::O0)
     return;
-
-  utils::TaskDispatcher dispatcher(nThreads);
 
   // Capture Module* by value per task; avoid [&] captures.
   for (auto& [ctxUPtr, modUPtr] : llvmContextModulePairs) {
@@ -88,9 +83,9 @@ void KernelManagerBase::applyLLVMOptimization(int nThreads,
 
       // Wrap default pipeline with verifiers (pre & post).
       ModulePassManager MPM;
-      MPM.addPass(VerifierPass());                          // verify pre
+      MPM.addPass(VerifierPass()); // verify pre
       MPM.addPass(PB.buildPerModuleDefaultPipeline(optLevel));
-      MPM.addPass(VerifierPass());                          // verify post
+      MPM.addPass(VerifierPass()); // verify post
 
       // Run the pipeline for this module.
       MPM.run(*M, MAM);
@@ -99,6 +94,5 @@ void KernelManagerBase::applyLLVMOptimization(int nThreads,
 
   if (progressBar)
     std::cerr << "Applying LLVM Optimization....\n";
-
   dispatcher.sync(progressBar);
 }
