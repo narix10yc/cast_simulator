@@ -31,10 +31,10 @@ struct ErrorCodeAndMsg {
   int code;
 };
 
-template <typename T> class MaybeErrorInitializer {
+class Error {
 public:
   std::unique_ptr<ErrorCodeAndMsg> err;
-  MaybeErrorInitializer(const std::string& msg, int code = -1)
+  Error(const std::string& msg, int code = -1)
       : err(std::make_unique<ErrorCodeAndMsg>(msg, code)) {}
 };
 } // namespace impl
@@ -58,7 +58,7 @@ public:
     requires(!NotVoid)
       : status(impl::ErrorAbsentNotChecked) {}
 
-  MaybeError(impl::MaybeErrorInitializer<T>&& i)
+  MaybeError(impl::Error&& i)
       : err_(std::move(i.err)), status(impl::ErrorPresentNotChecked) {}
 
   MaybeError(const value_type& value)
@@ -161,10 +161,8 @@ public:
 
 // Because we disallow MaybeError to be copied, we need a helper class to
 // initialize with an error message.
-template <typename T = void>
-impl::MaybeErrorInitializer<T> makeError(const std::string& errorMsg,
-                                         int errorCode = -1) {
-  return impl::MaybeErrorInitializer<T>(errorMsg, errorCode);
+impl::Error makeError(const std::string& errorMsg, int errorCode = -1) {
+  return impl::Error(errorMsg, errorCode);
 }
 
 } // namespace cast
