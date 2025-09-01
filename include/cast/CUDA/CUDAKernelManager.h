@@ -53,14 +53,6 @@ class CUDAKernelManager : public KernelManagerBase {
   std::vector<KernelInfoPtr> standaloneKernels_;
   std::map<std::string, std::vector<KernelInfoPtr>> graphKernels_;
 
-  enum JITState {
-    JIT_Uninited,
-    JIT_CompiledPTX,
-    JIT_CompiledCubin,
-    JIT_CubinLoaded
-  };
-  JITState jitState = JIT_Uninited;
-
   CUdevice cuDevice;
   CUcontext primaryCuCtx = nullptr;
   CUstream primaryCuStream = nullptr;
@@ -81,11 +73,9 @@ class CUDAKernelManager : public KernelManagerBase {
 
 private:
   struct LaunchTask {
-  private:
     std::vector<std::unique_ptr<std::byte[]>> kernelParamsStorage_;
     mutable std::vector<void*> kernelParams_;
 
-  public:
     CUmodule cuModule = nullptr;
     CUfunction cuFunction = nullptr;
 
@@ -154,20 +144,17 @@ private:
   The main thread poses tasks via enqueueKernelLaunch. It enqueues a kernel
   loading task to the task dispatcher (loading thread pool).
 
-  Each loading thread picks up kernels from the pending_ queue along with a
-  launch window position (given by loadIdx, when notified by the execution
-  thread), loads the kernels, waits for the previous launch task to finish,
-  unloads the previous task's module and emplaces the new task's module. Loading
-  threads cannot directly launch kernels because we need to maintain the launch
-  order. After doing all this, the loading thread sets the launch task status as
+  Each loading thread gets allocated with a launch window (given by loadIdx),
+  loads the kernels, waits for the previous launch task to finish, unloads the
+  previous task's module and emplaces the new task's module. Loading threads
+  cannot directly launch kernels because we need to maintain the launch order.
+  After doing all this, the loading thread sets the launch task status as
   'Ready' and notifies the execution thread that it has prepared the function
   and kernel parameters inside the launch window.
 
   The execution thread will launch ordered kernels. Every time it wakes up (via
   execCV_), it launches every task whose status is Ready. Kernel launch order is
   controlled by launchIdx.
-
-  From the kernels perspective, every kernel will be added
 
   */
 
@@ -180,7 +167,7 @@ private:
   std::condition_variable syncCV_;
 
   struct LaunchConfig {
-    CUdeviceptr dData = 0;
+    CUdeviceptr devicePtr = 0;
     int nQubits = 0;
     unsigned blockSize = 0;
   };
@@ -268,7 +255,7 @@ public:
 
   void
   setLaunchConfig(CUdeviceptr dData, int nQubits, unsigned blockSize = 64) {
-    launchConfig_.dData = dData;
+    launchConfig_.devicePtr = dData;
     launchConfig_.nQubits = nQubits;
     launchConfig_.blockSize = blockSize;
   }

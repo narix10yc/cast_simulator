@@ -115,7 +115,7 @@ static void unwrapArguments(Precision& precision,
     std::cerr << BOLDRED("[Err] ")
               << "Failed to parse circuit from file: " << ArgInputFilename
               << "\n"
-              << "Error: " << circuitOrErr.takeError() << "\n";
+              << "Error: " << circuitOrErr.what() << "\n";
     std::exit(1);
   }
   circuit = circuitOrErr.takeValue();
@@ -191,7 +191,7 @@ int main(int argc, const char** argv) {
     auto r = opt.loadCPUCostModel(ArgModelPath, nThreads, precision);
     if (!r) {
       std::cerr << BOLDRED("[Err] ")
-                << "Optimizer initialization failed: " << r.takeError() << "\n";
+                << "Optimizer initialization failed: " << r.what() << "\n";
       std::exit(1);
     }
 
@@ -317,7 +317,7 @@ int main(int argc, const char** argv) {
                                         /* verbose */ 1);
         if (!result) {
           std::cerr << BOLDRED("[Err] ")
-                    << "Failed to initialize JIT: " << result.takeError()
+                    << "Failed to initialize JIT: " << result.what()
                     << "\n";
           std::exit(1);
         }

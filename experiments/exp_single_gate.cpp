@@ -190,7 +190,7 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
         auto r = kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false, 1);
         if (!r) {
           std::cerr << BOLDRED("[Error]: ")
-                    << "In initializing JIT engine: " << r.takeError() << "\n";
+                    << "In initializing JIT engine: " << r.what() << "\n";
           std::exit(EXIT_FAILURE);
         }
       },

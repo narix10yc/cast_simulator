@@ -78,7 +78,7 @@ CPUKernelManager::genStandaloneGate(const CPUKernelGenConfig& config,
 
   auto result = genCPUGate_(config, gate, funcName);
   if (!result) {
-    return cast::makeError<void>("Err: " + result.takeError());
+    return cast::makeError<void>("Err: " + result.what());
   }
   standaloneKernels_.emplace_back(result.takeValue());
   return {}; // success
@@ -110,7 +110,7 @@ CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
     if (!result) {
       std::ostringstream oss;
       oss << "Failed to generate kernel for gate " << (void*)(gate.get())
-          << ": " << result.takeError() << "\n";
+          << ": " << result.what() << "\n";
       return cast::makeError<void>(oss.str());
     }
     kernels.emplace_back(result.takeValue());

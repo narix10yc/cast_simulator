@@ -1,6 +1,8 @@
 #ifndef UTILS_MAYBE_ERROR_H
 #define UTILS_MAYBE_ERROR_H
 
+#include <cassert>
+#include <memory> // for std::unique_ptr
 #include <string>
 
 namespace cast {
@@ -24,28 +26,30 @@ static constexpr uint8_t ErrorAbsentChecked = 0b01;
 static constexpr uint8_t ErrorPresentNotChecked = 0b10;
 static constexpr uint8_t ErrorPresentChecked = 0b11;
 
+struct ErrorCodeAndMsg {
+  std::string msg;
+  int code;
+};
+
 template <typename T> class MaybeErrorInitializer {
 public:
-  std::string errMsg;
-  MaybeErrorInitializer(const std::string& msg) : errMsg(msg) {}
+  std::unique_ptr<ErrorCodeAndMsg> err;
+  MaybeErrorInitializer(const std::string& msg, int code = -1)
+      : err(std::make_unique<ErrorCodeAndMsg>(msg, code)) {}
 };
 } // namespace impl
 
 template <typename T> class [[nodiscard]] MaybeError {
+  static_assert(!std::is_reference_v<T>,
+                "MaybeError<T> does not support references");
   static constexpr bool NotVoid = !std::is_void_v<T>;
   struct Dummy {};
-  // In debug mode, MaybeError<T> is allowed to be destroyed only when
-  // _errorMsg is a std::nullopt.
-  using value_type = std::conditional_t<
-      NotVoid,
-      std::conditional_t<std::is_reference_v<T>,
-                         std::reference_wrapper<std::remove_reference_t<T>>,
-                         T>,
-      Dummy>;
-  using error_msg_type = std::string;
+  using value_type = std::conditional_t<NotVoid, T, Dummy>;
+
+  using error_type = std::unique_ptr<impl::ErrorCodeAndMsg>;
   union {
     value_type value_;
-    error_msg_type errMsg_;
+    error_type err_;
   };
   mutable impl::MaybeErrorStatus status;
 
@@ -54,10 +58,8 @@ public:
     requires(!NotVoid)
       : status(impl::ErrorAbsentNotChecked) {}
 
-  MaybeError(const impl::MaybeErrorInitializer<T>& i)
-      : status(impl::ErrorPresentNotChecked) {
-    new (&errMsg_) error_msg_type(std::move(i.errMsg));
-  }
+  MaybeError(impl::MaybeErrorInitializer<T>&& i)
+      : err_(std::move(i.err)), status(impl::ErrorPresentNotChecked) {}
 
   MaybeError(const value_type& value)
     requires(NotVoid)
@@ -75,7 +77,7 @@ public:
     assert(status.isErrorChecked() &&
            "MaybeError must be checked before destruction");
     if (status.isErrorPresent())
-      errMsg_.~error_msg_type();
+      err_.~error_type();
     else if constexpr (NotVoid)
       value_.~value_type();
   }
@@ -89,7 +91,7 @@ public:
     if (this == &other)
       return;
     if (other.status.isErrorPresent())
-      new (&errMsg_) error_msg_type(std::move(other.errMsg_));
+      new (&err_) error_type(std::move(other.err_));
     else if constexpr (NotVoid)
       new (&value_) value_type(std::move(other.value_));
     // set check the other status to indicate it has been moved.
@@ -103,7 +105,7 @@ public:
     if (status.isErrorPresent() == other.status.isErrorPresent()) {
       // If both are in the same state, we can just move the value.
       if (status.isErrorPresent())
-        errMsg_ = std::move(other.errMsg_);
+        err_ = std::move(other.err_);
       else if constexpr (NotVoid)
         value_ = std::move(other.value_);
       status.setErrorChecked();
@@ -114,8 +116,9 @@ public:
     return *this;
   }
 
-  // Consume (ignore) the error message. This function will not check if error
-  // is present.
+  // Consume (ignore) the error. In non-debug builds this function will
+  // not check if error is present. In debug builds this function asserts no
+  // error is present.
   void consumeError() {
     assert(!status.isErrorPresent() &&
            "Consuming a MaybeError<T> when error is actually present");
@@ -136,10 +139,21 @@ public:
     return std::move(value_);
   }
 
-  std::string takeError() {
-    assert(hasError() && "No error to take");
-    status.setErrorChecked();
-    return std::move(errMsg_);
+  std::string what() const {
+    assert(status.isErrorChecked() &&
+           "MaybeError is not checked when trying to get the error message");
+    if (status.isErrorPresent())
+      return err_->msg;
+    return {}; // empty string
+  }
+
+  // Get the error code. Returns 0 when no error is present.
+  int err_code() const {
+    assert(status.isErrorChecked() &&
+           "MaybeError is not checked when trying to get the error code");
+    if (status.isErrorPresent())
+      return err_->code;
+    return 0;
   }
 
   operator bool() const { return hasValue(); }
@@ -148,8 +162,9 @@ public:
 // Because we disallow MaybeError to be copied, we need a helper class to
 // initialize with an error message.
 template <typename T = void>
-impl::MaybeErrorInitializer<T> makeError(const std::string& errorMsg) {
-  return impl::MaybeErrorInitializer<T>(errorMsg);
+impl::MaybeErrorInitializer<T> makeError(const std::string& errorMsg,
+                                         int errorCode = -1) {
+  return impl::MaybeErrorInitializer<T>(errorMsg, errorCode);
 }
 
 } // namespace cast

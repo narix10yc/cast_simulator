@@ -33,7 +33,7 @@ template <CPUSimdWidth SimdWidth> static void f() {
 
     auto circuitOrErr = cast::parseCircuitFromQASMFile(p.path().string());
     if (!circuitOrErr) {
-      suite.assertFalse(circuitOrErr.takeError(), GET_INFO());
+      suite.assertFalse(circuitOrErr.what(), GET_INFO());
       continue;
     }
     auto circuit = circuitOrErr.takeValue();

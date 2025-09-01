@@ -1,41 +1,19 @@
-#include "cast/CUDA/CUDAKernelManager.h"
-#include "cast/CUDA/CUDAStatevector.h"
-
-#include "cuda.h"
-
-#include "utils/utils.h"
+#include "utils/MaybeError.h"
+#include <iostream>
 
 using namespace cast;
 
+MaybeError<void> funcMayThrow(int x) {
+  if (x < 0)
+    return makeError("Negative value error");
+  return {}; // success
+}
+
 int main(int argc, char** argv) {
-  constexpr int nQubits = 28;
-
-  CUDAStatevectorF64 sv(nQubits);
-  sv.initialize();
-  CUDAKernelGenConfig config;
-  CUDAKernelManager km(2);
-
-  for (int i = 0; i < 10; ++i) {
-    QuantumGate::TargetQubitsType qubits;
-    utils::sampleNoReplacement(nQubits, 2, qubits);
-    km.genStandaloneGate(config,
-                         StandardQuantumGate::RandomUnitary(qubits),
-                         "gate_" + std::to_string(i))
-        .consumeError();
+  if (auto r = funcMayThrow(-1)) {
+    std::cerr << "Success\n";
+  } else {
+    std::cerr << "Error: " << r.what() << "\n";
   }
-
-  km.setLaunchConfig(sv.getDevicePtr(), nQubits);
-  for (auto& kernel : km)
-    km.enqueueKernelLaunch(kernel);
-
-  std::cerr << "Main thread: all kernel launches enqueued\n";
-  km.syncKernelExecution();
-  std::cerr << "Main thread Round 1: primary stream synced\n";
-
-  for (auto& kernel : km) {
-    km.enqueueKernelLaunch(kernel);
-    km.syncKernelExecution();
-  }
-
   return 0;
 }

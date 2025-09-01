@@ -114,7 +114,7 @@ CPUKernelManager::applyCPUKernel(void* sv,
   }
   auto rst = applyCPUKernel(sv, nQubits, *kernel, nThreads);
   if (!rst) {
-    return cast::makeError<void>(rst.takeError());
+    return cast::makeError<void>(rst.what());
   }
   return {}; // success
 }
@@ -142,7 +142,7 @@ MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraph(
     if (!result) {
       std::ostringstream oss;
       oss << "Failed to apply kernel '" << kernel->llvmFuncName
-          << "': " << result.takeError();
+          << "': " << result.what();
       return cast::makeError<void>(oss.str());
     }
   }

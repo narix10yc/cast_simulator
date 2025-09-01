@@ -95,7 +95,7 @@ template <typename ScalarType> static void benchmark() {
             );
         if (!r) {
           std::cerr << BOLDRED("[Error]: ")
-                    << "In initializing JIT engine: " << r.takeError() << "\n";
+                    << "In initializing JIT engine: " << r.what() << "\n";
           std::exit(EXIT_FAILURE);
         }
       },

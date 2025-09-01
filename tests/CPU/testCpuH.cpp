@@ -31,7 +31,7 @@ template <CPUSimdWidth SimdWidth> static void f() {
   auto rst = cpuKernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), "gate_h_0");
   if (!rst) {
     std::cerr << BOLDRED("[ERR]: ")
-              << "Failed to apply kernel gate_h_0: " << rst.takeError()
+              << "Failed to apply kernel gate_h_0: " << rst.what()
               << std::endl;
   }
   suite.assertCloseF64(sv.norm(), 1.0, "Apply H at 0: Norm", GET_INFO());

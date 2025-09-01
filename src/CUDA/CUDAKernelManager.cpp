@@ -75,20 +75,27 @@ std::ostream& CUDAKernelInfo::displayInfo(std::ostream& os) const {
 std::ostream& CUDAKernelManager::displayInfo(std::ostream& os) const {
   os << CYAN("=== Info of CUDA Kernel Manager @ " << (void*)this << " ===\n")
      << "Num Worker Threads : " << dispatcher.getNumWorkers() << "\n"
-     << "JIT State          : " << static_cast<int>(jitState) << "\n"
+     << "CU Device          : " << cuDevice << "\n"
      << "Primary CU Context : " << primaryCuCtx << "\n"
      << "Primary CU Stream  : " << primaryCuStream << "\n";
 
   int nKernels = 0;
   size_t totalPTXSize = 0, totalCUBINSize = 0;
+  unsigned nActivePTX = 0, nActiveCUBIN = 0;
   for (const auto& kernel : *this) {
     ++nKernels;
+    if (!kernel.ptxString.empty())
+      ++nActivePTX;
+    if (!kernel.cubinData.empty())
+      ++nActiveCUBIN;
     totalPTXSize += kernel.ptxString.size();
     totalCUBINSize += kernel.cubinData.size();
   }
   os << "Num Kernels        : " << nKernels << "\n"
-     << "Total PTX Size     : " << utils::fmt_mem(totalPTXSize) << "\n"
-     << "Total CUBIN Size   : " << utils::fmt_mem(totalCUBINSize) << "\n";
+     << "PTX     : " << nActivePTX << " availables\n"
+     << "  Total PTX Size   : " << utils::fmt_mem(totalPTXSize) << "\n"
+     << "CUBIN   : " << nActiveCUBIN << " availables\n"
+     << "  Total CUBIN Size : " << utils::fmt_mem(totalCUBINSize) << "\n";
   return os << CYAN("================================\n");
 }
 
@@ -225,7 +232,6 @@ MaybeError<void> CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel,
   if (verbose > 0)
     std::cerr << "Generating PTX codes...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
-  jitState = JIT_CompiledPTX;
   return {}; // success
 }
 
@@ -388,11 +394,6 @@ MaybeError<void> CUDAKernelManager::compilePTXToCubin(int cuOptLevel,
   if (cuOptLevel > 4)
     cuOptLevel = 4;
 
-  if (jitState != JIT_CompiledPTX) {
-    return cast::makeError(
-        "PTX must be available when calling compilePTXToCubin");
-  }
-
   for (auto& kernel : *this) {
     dispatcher.enqueue([=, this, &kernel]() {
       // must set cuContext before calling compileToCubin_work
@@ -405,7 +406,6 @@ MaybeError<void> CUDAKernelManager::compilePTXToCubin(int cuOptLevel,
     std::cerr << "JIT Compile PTX to CUBIN...\n";
   dispatcher.sync(/* progressBar */ verbose > 0);
 
-  jitState = JIT_CompiledCubin;
   return {}; // success
 }
 
@@ -536,7 +536,7 @@ void CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
         (nCombos + launchConfig_.blockSize - 1) / launchConfig_.blockSize;
 
     task->resetParams();
-    task->addParam(launchConfig_.dData);
+    task->addParam(launchConfig_.devicePtr);
     task->addParam(nCombos);
     task->gridSize = gridDim;
     task->blockSize = launchConfig_.blockSize;
@@ -594,22 +594,15 @@ void CUDAKernelManager::clearWindow_() {
 }
 
 MaybeError<void> CUDAKernelManager::initJIT(int optLevel, int verbose) {
-  if (jitState != JIT_Uninited) {
-    return cast::makeError("The kernel manager must be in JIT-uninitialized "
-                           "state when calling initJIT");
-  }
-
   {
     auto r = compileLLVMIRToPTX(optLevel, verbose);
     if (!r)
-      return cast::makeError("Failed to compile LLVM IR to PTX: " +
-                             r.takeError());
+      return cast::makeError("Failed to compile LLVM IR to PTX: " + r.what());
   }
   {
     auto r = compilePTXToCubin(1, verbose);
     if (!r)
-      return cast::makeError("Failed to compile PTX to CUBIN: " +
-                             r.takeError());
+      return cast::makeError("Failed to compile PTX to CUBIN: " + r.what());
   }
 
   return {}; // success

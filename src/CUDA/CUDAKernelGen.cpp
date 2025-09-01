@@ -1364,7 +1364,7 @@ CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
 
   auto result = genCUDAGate_(config, gate, funcName);
   if (!result) {
-    return cast::makeError<void>("Err: " + result.takeError());
+    return cast::makeError("Err: " + result.what());
   }
 
   standaloneKernels_.emplace_back(result.takeValue());
@@ -1398,7 +1398,7 @@ CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
     if (!result) {
       std::ostringstream oss;
       oss << "Failed to generate kernel for gate " << (void*)(gate.get())
-          << ": " << result.takeError() << "\n";
+          << ": " << result.what() << "\n";
       return cast::makeError<void>(oss.str());
     }
     kernels.emplace_back(result.takeValue());
