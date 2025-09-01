@@ -52,7 +52,6 @@ void KernelManagerBase::applyLLVMOptimization(llvm::OptimizationLevel optLevel,
   if (optLevel == llvm::OptimizationLevel::O0)
     return;
 
-  // Capture Module* by value per task; avoid [&] captures.
   for (auto& [ctxUPtr, modUPtr] : llvmContextModulePairs) {
     llvm::Module* M = modUPtr.get();
 

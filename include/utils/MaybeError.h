@@ -31,13 +31,14 @@ struct ErrorCodeAndMsg {
   int code;
 };
 
+} // namespace impl
+
 class Error {
 public:
-  std::unique_ptr<ErrorCodeAndMsg> err;
+  std::unique_ptr<impl::ErrorCodeAndMsg> err;
   Error(const std::string& msg, int code = -1)
-      : err(std::make_unique<ErrorCodeAndMsg>(msg, code)) {}
+      : err(std::make_unique<impl::ErrorCodeAndMsg>(msg, code)) {}
 };
-} // namespace impl
 
 template <typename T> class [[nodiscard]] MaybeError {
   static_assert(!std::is_reference_v<T>,
@@ -46,7 +47,7 @@ template <typename T> class [[nodiscard]] MaybeError {
   struct Dummy {};
   using value_type = std::conditional_t<NotVoid, T, Dummy>;
 
-  using error_type = std::unique_ptr<impl::ErrorCodeAndMsg>;
+  using error_type = Error;
   union {
     value_type value_;
     error_type err_;
@@ -58,20 +59,16 @@ public:
     requires(!NotVoid)
       : status(impl::ErrorAbsentNotChecked) {}
 
-  MaybeError(impl::Error&& i)
-      : err_(std::move(i.err)), status(impl::ErrorPresentNotChecked) {}
+  MaybeError(Error&& i)
+      : err_(std::move(i)), status(impl::ErrorPresentNotChecked) {}
 
   MaybeError(const value_type& value)
     requires(NotVoid)
-      : status(impl::ErrorAbsentNotChecked) {
-    new (&value_) value_type(value);
-  }
+      : value_(value), status(impl::ErrorAbsentNotChecked) {}
 
   MaybeError(value_type&& value) noexcept
     requires(NotVoid)
-      : status(impl::ErrorAbsentNotChecked) {
-    new (&value_) value_type(std::move(value));
-  }
+      : value_(std::move(value)), status(impl::ErrorAbsentNotChecked) {}
 
   ~MaybeError() {
     assert(status.isErrorChecked() &&
@@ -143,7 +140,7 @@ public:
     assert(status.isErrorChecked() &&
            "MaybeError is not checked when trying to get the error message");
     if (status.isErrorPresent())
-      return err_->msg;
+      return err_.err->msg;
     return {}; // empty string
   }
 
@@ -152,17 +149,15 @@ public:
     assert(status.isErrorChecked() &&
            "MaybeError is not checked when trying to get the error code");
     if (status.isErrorPresent())
-      return err_->code;
+      return err_.err->code;
     return 0;
   }
 
   operator bool() const { return hasValue(); }
 }; // class MaybeError
 
-// Because we disallow MaybeError to be copied, we need a helper class to
-// initialize with an error message.
-impl::Error makeError(const std::string& errorMsg, int errorCode = -1) {
-  return impl::Error(errorMsg, errorCode);
+static inline Error makeError(const std::string& errorMsg, int errorCode = -1) {
+  return Error(errorMsg, errorCode);
 }
 
 } // namespace cast

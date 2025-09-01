@@ -106,7 +106,7 @@ MaybeError<void> CPUKernelManager::initJIT(OptimizationLevel optLevel,
                                            bool useLazyJIT,
                                            int verbose) {
   if (isJITed()) {
-    return cast::makeError<void>("JIT has already been initialized.");
+    return cast::makeError("JIT has already been initialized.");
   }
 
   InitializeAllTargets();
@@ -125,7 +125,7 @@ MaybeError<void> CPUKernelManager::initJIT(OptimizationLevel optLevel,
       auto err = lazyJIT->addLazyIRModule(
           orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
       if (err) {
-        return cast::makeError<void>("Failed to add lazy IR module: " +
+        return cast::makeError("Failed to add lazy IR module: " +
                                      llvm::toString(std::move(err)));
       }
     }
@@ -140,7 +140,7 @@ MaybeError<void> CPUKernelManager::initJIT(OptimizationLevel optLevel,
       auto err = eagerJIT->addIRModule(
           orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
       if (err) {
-        return cast::makeError<void>("Failed to add IR module: " +
+        return cast::makeError("Failed to add IR module: " +
                                      llvm::toString(std::move(err)));
       }
     }

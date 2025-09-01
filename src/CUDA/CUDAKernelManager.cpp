@@ -21,7 +21,6 @@
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include "llvm/Support/Debug.h"
 
-#include <cuda_runtime.h>
 // #define LLVM_DEBUG(X) X
 
 using namespace cast;

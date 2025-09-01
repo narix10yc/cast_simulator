@@ -46,7 +46,7 @@ CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
     std::ostringstream oss;
     oss << "Failed to generate kernel for gate " << (void*)(gate.get())
         << " with name " << funcName;
-    return cast::makeError<KernelInfoPtr>(oss.str());
+    return cast::makeError(oss.str());
   }
 
   return std::make_unique<CPUKernelInfo>(
@@ -71,14 +71,14 @@ CPUKernelManager::genStandaloneGate(const CPUKernelGenConfig& config,
   // check for name conflicts
   for (const auto& kernel : standaloneKernels_) {
     if (kernel->llvmFuncName == funcName) {
-      return cast::makeError<void>("Kernel with name '" + funcName +
+      return cast::makeError("Kernel with name '" + funcName +
                                    "' already exists.");
     }
   }
 
   auto result = genCPUGate_(config, gate, funcName);
   if (!result) {
-    return cast::makeError<void>("Err: " + result.what());
+    return cast::makeError("Err: " + result.what());
   }
   standaloneKernels_.emplace_back(result.takeValue());
   return {}; // success
@@ -94,7 +94,7 @@ CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
     std::ostringstream oss;
     oss << "Graph with name '" << graphName
         << "' already has generated kernels. Please use a different name.";
-    return cast::makeError<void>(oss.str());
+    return cast::makeError(oss.str());
   }
 
   auto mangledGraphName = internal::mangleGraphName(graphName);
@@ -111,7 +111,7 @@ CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
       std::ostringstream oss;
       oss << "Failed to generate kernel for gate " << (void*)(gate.get())
           << ": " << result.what() << "\n";
-      return cast::makeError<void>(oss.str());
+      return cast::makeError(oss.str());
     }
     kernels.emplace_back(result.takeValue());
   }

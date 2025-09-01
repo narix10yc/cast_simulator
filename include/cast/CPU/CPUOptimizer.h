@@ -32,13 +32,13 @@ public:
                                     Precision queryPrecision) {
     auto fc = CPUFusionConfig::LoadFromFile(filename);
     if (fc == nullptr) {
-      return cast::makeError<void>("Unable to load cost model from " +
+      return cast::makeError("Unable to load cost model from " +
                                    filename);
     }
     // Fusion configs do not have queries. Cost models do.
     auto* cm = llvm::dyn_cast_or_null<CPUCostModel>(fc->getCostModel());
     if (cm == nullptr) {
-      return cast::makeError<void>("No CPU Cost Model found");
+      return cast::makeError("No CPU Cost Model found");
     }
     cm->setQueryNThreads(queryNThreads);
     cm->setQueryPrecision(queryPrecision);

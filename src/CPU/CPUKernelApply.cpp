@@ -50,11 +50,11 @@ MaybeError<void> CPUKernelManager::applyCPUKernel(void* sv,
                                                   const CPUKernelInfo& kernel,
                                                   int nThreads) const {
   if (!isJITed()) {
-    return cast::makeError<void>(
+    return cast::makeError(
         "Must initialize JIT session before applying CPU kernel.");
   }
   if (kernel.executable == nullptr) {
-    return cast::makeError<void>("Kernel executable not available.");
+    return cast::makeError("Kernel executable not available.");
   }
   int simd_s = cast::get_simd_s(kernel.simdWidth, kernel.precision);
   int tmp = nQubits - kernel.gate->nQubits() - simd_s;
@@ -63,14 +63,14 @@ MaybeError<void> CPUKernelManager::applyCPUKernel(void* sv,
     oss << "Invalid number of qubits for the kernel '" << kernel.llvmFuncName
         << "'. This kernel must act on statevectors with at least "
         << (kernel.gate->nQubits() + simd_s) << "qubits.";
-    return cast::makeError<void>(oss.str());
+    return cast::makeError(oss.str());
   }
   uint64_t nTasks = 1ULL << tmp;
   void* pMat = nullptr;
   if (kernel.matrixLoadMode == CPUMatrixLoadMode::StackLoadMatElems) {
     pMat = mallocGatePointer(kernel.gate.get(), kernel.precision);
     if (pMat == nullptr) {
-      return cast::makeError<void>(
+      return cast::makeError(
           "Failed to allocate memory for gate matrix.");
     }
   }
@@ -110,11 +110,11 @@ CPUKernelManager::applyCPUKernel(void* sv,
                                  int nThreads) const {
   const auto* kernel = getKernelByName(llvmFuncName);
   if (kernel == nullptr) {
-    return cast::makeError<void>("Kernel not found: " + llvmFuncName);
+    return cast::makeError("Kernel not found: " + llvmFuncName);
   }
   auto rst = applyCPUKernel(sv, nQubits, *kernel, nThreads);
   if (!rst) {
-    return cast::makeError<void>(rst.what());
+    return cast::makeError(rst.what());
   }
   return {}; // success
 }
@@ -122,18 +122,18 @@ CPUKernelManager::applyCPUKernel(void* sv,
 MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraph(
     void* sv, int nQubits, const std::string& graphName, int nThreads) const {
   if (!isJITed()) {
-    return cast::makeError<void>(
+    return cast::makeError(
         "Must initialize JIT session before applying CPU kernel.");
   }
   if (!graphKernels_.contains(graphName)) {
-    return cast::makeError<void>("Graph not found: " + graphName);
+    return cast::makeError("Graph not found: " + graphName);
   }
   const auto& kernels = graphKernels_.at(graphName);
   for (const auto& kernel : kernels) {
     if (kernel->executable == nullptr) {
       std::ostringstream oss;
       oss << "Kernel '" << kernel->llvmFuncName << "' has no executable.";
-      return cast::makeError<void>(oss.str());
+      return cast::makeError(oss.str());
     }
   }
 
@@ -143,7 +143,7 @@ MaybeError<void> CPUKernelManager::applyCPUKernelsFromGraph(
       std::ostringstream oss;
       oss << "Failed to apply kernel '" << kernel->llvmFuncName
           << "': " << result.what();
-      return cast::makeError<void>(oss.str());
+      return cast::makeError(oss.str());
     }
   }
 

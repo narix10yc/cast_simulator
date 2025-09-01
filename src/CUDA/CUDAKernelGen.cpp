@@ -1303,7 +1303,9 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
   if (stdQuGate != nullptr && stdQuGate->noiseChannel() == nullptr) {
     // a normal gate, no noise channel
     const auto scalarGM = stdQuGate->getScalarGM();
-    assert(scalarGM != nullptr && "Only supporting scalar GM for now");
+    if (scalarGM == nullptr) {
+      return cast::makeError("Only supporting scalar GM for now");
+    }
     func = gen_(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
   } else {
     // super op gates are treated as normal gates with twice the number of
@@ -1325,7 +1327,7 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
     std::ostringstream oss;
     oss << "Failed to generate kernel for gate " << (void*)(gate.get())
         << " with name " << funcName;
-    return cast::makeError<KernelInfoPtr>(oss.str());
+    return cast::makeError(oss.str());
   }
 
   // std::string ptxString;
@@ -1357,17 +1359,16 @@ CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
   // check for name conflicts
   for (const auto& kernel : standaloneKernels_) {
     if (kernel->llvmFuncName == funcName) {
-      return cast::makeError<void>("Kernel with name '" + funcName +
-                                   "' already exists.");
+      return cast::makeError("Kernel with name '" + funcName +
+                             "' already exists.");
     }
   }
 
-  auto result = genCUDAGate_(config, gate, funcName);
-  if (!result) {
-    return cast::makeError("Err: " + result.what());
-  }
+  if (auto r = genCUDAGate_(config, gate, funcName))
+    standaloneKernels_.emplace_back(r.takeValue());
+  else
+    return cast::makeError("Err: " + r.what());
 
-  standaloneKernels_.emplace_back(result.takeValue());
   return {}; // success
 }
 
@@ -1381,7 +1382,7 @@ CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
     std::ostringstream oss;
     oss << "Graph with name '" << graphName
         << "' already has generated kernels. Please use a different name.";
-    return cast::makeError<void>(oss.str());
+    return cast::makeError(oss.str());
   }
 
   auto mangledGraphName = internal::mangleGraphName(graphName);
@@ -1394,16 +1395,15 @@ CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
   for (const auto& gate : allGates) {
     auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    auto result = genCUDAGate_(config, gate, name);
-    if (!result) {
+    if (auto r = genCUDAGate_(config, gate, name)) {
+      kernels.emplace_back(r.takeValue());
+    } else {
       std::ostringstream oss;
       oss << "Failed to generate kernel for gate " << (void*)(gate.get())
-          << ": " << result.what() << "\n";
-      return cast::makeError<void>(oss.str());
+          << ": " << r.what() << "\n";
+      return cast::makeError(oss.str());
     }
-    kernels.emplace_back(result.takeValue());
   }
-
   // Store the generated kernels in the map
   graphKernels_[graphName] = std::move(kernels);
   return {}; // success
