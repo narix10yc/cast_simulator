@@ -71,6 +71,33 @@ class CUDAKernelManager : public KernelManagerBase {
                                          ConstQuantumGatePtr gate,
                                          const std::string& funcName);
 
+  /* Kernel Execution Result */
+public:
+  struct ExecutionResult {
+    using clock_t = std::chrono::steady_clock;
+    using time_point_t = clock_t::time_point;
+
+    cast::Error err;
+    std::string kernelName;
+
+    // when the loading thread starts preparing the kernel
+    time_point_t t_cubinPrepareStart;
+    // when the loading thread finishes preparing the kernel
+    time_point_t t_cubinPrepareFinish;
+
+    // kernel execution time in milliseconds
+    float kernelTime_ms{};
+
+    ExecutionResult() = default;
+
+    std::ostream& displayInfo(std::ostream& os) const;
+  };
+
+private:
+  std::deque<ExecutionResult> execResults_;
+
+public:
+  /* Launch Task Management */
 private:
   struct LaunchTask {
     std::vector<std::unique_ptr<std::byte[]>> kernelParamsStorage_;
@@ -86,15 +113,26 @@ private:
     unsigned blockSize = 0;
 
     enum Status : int {
-      Uninited = 0, // The task is not initialized
-      Ready = 1,    // The task is ready to be launched
-      Running = 2,  // The task is currently running
-      Finished = 3  // The task has finished
+      // The task window is idle. This happens at the beginning of kernel
+      // launch.
+      Idle = 0,
+      // The task window is being prepared by some loading thread. If some
+      // loading thread find its allocated task window is in status Compiling,
+      // it should wait till it turns to Running.
+      Compiling = 1,
+      // The task window is ready to be launched. A loading thread will set its
+      // status to Ready, notify the execution thread, and fetch the next kernel
+      // and task window.
+      Ready = 2,
+      // The task window is currently running. The execution thread launches a
+      // Ready task and set its status to Running.
+      Running = 3,
     };
 
-    std::atomic<Status> status = Uninited;
+    std::atomic<Status> status = Idle;
 
-    LaunchTask() = default;
+    // history will only be accessed by one loading thread at the same time.
+    ExecutionResult* history = nullptr;
 
     template <typename T> void addParam(T param) {
       kernelParams_.clear();
@@ -120,18 +158,25 @@ private:
   }; // struct LaunchTask
 
   struct LaunchWindow {
-    static constexpr int WS = 1; // window size
-    std::array<LaunchTask, WS> tasks_;
+    unsigned windowSize;
+    // This vector is initialized on the ctor of the kernel manager and should
+    // never be resized during its lifetime.
+    std::vector<LaunchTask> tasks_;
 
-    LaunchTask& operator[](unsigned i) { return tasks_[i % WS]; }
-    const LaunchTask& operator[](unsigned i) const { return tasks_[i % WS]; }
+    LaunchTask& operator[](unsigned i) { return tasks_[i % windowSize]; }
+    const LaunchTask& operator[](unsigned i) const {
+      return tasks_[i % windowSize];
+    }
+
+    LaunchWindow(unsigned windowSize = 0)
+        : windowSize(windowSize), tasks_(windowSize) {}
   }; // struct LaunchWindow
 
   LaunchWindow window_;
 
   // Clean up CUmodule and CUevents in the window. This function should only
   // be called after all kernels finishes execution. i.e. after
-  // cuStreamSynchronize. It will also reset the LaunchTask status to
+  // cuStreamSynchronize. It will also reset all LaunchTask status to
   // Uninited.
   void clearWindow_();
 
@@ -260,15 +305,22 @@ public:
     launchConfig_.blockSize = blockSize;
   }
 
-  // Enqueue a kernel for launch. This is a non-blocking function and should
-  // only be called by the main thread. The order of kernel execution will align
-  // with the order of calling this function. Use \c syncKernelExecution() to
-  // wait for all kernels to finish running.
-  void enqueueKernelLaunch(CUDAKernelInfo& kernel);
+  /// Enqueue a kernel for launch. This is a non-blocking function and should
+  /// only be called by the main thread. The order of kernel execution will
+  /// align with the order of calling this function. Use \c
+  /// syncKernelExecution() to wait for all kernels to finish running.
+  /// The returned object is read-only, and should only be accessed after
+  /// syncKernelExecution(). The returned object is invalidated upon the
+  /// destruction of this kernel manager.
+  /// @remark: We do not embed the ExecutionResult
+  /// inside CUDAKernelInfo because users are allowed to launch the same kernel
+  /// multiple times (for example, in benchmarking).
+  const ExecutionResult* enqueueKernelLaunch(CUDAKernelInfo& kernel,
+                                             int verbosity = 0);
 
-  /// Wait for all enqueued kernels to finish execution. This should only be
-  /// called by the main thread.
-  void syncKernelExecution();
+  /// A blocking method that waits for all enqueued kernels to finish execution.
+  /// This should only be called by the main thread.
+  void syncKernelExecution(bool progressBar = false);
 
   // TODO: not implemented yet
   void launchCUDAKernelParam(void* dData,

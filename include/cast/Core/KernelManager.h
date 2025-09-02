@@ -42,8 +42,7 @@ protected:
   void applyLLVMOptimization(llvm::OptimizationLevel optLevel,
                              bool progressBar);
 
-  explicit KernelManagerBase(int nWorkerThreads)
-      : llvmContextModulePairs(), mtx(), dispatcher(nWorkerThreads) {
+  explicit KernelManagerBase(int nWorkerThreads) : dispatcher(nWorkerThreads) {
     llvm::InitializeAllTargets();
     llvm::InitializeAllTargetMCs();
     llvm::InitializeAllAsmParsers();

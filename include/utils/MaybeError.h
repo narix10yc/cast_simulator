@@ -36,6 +36,9 @@ struct ErrorCodeAndMsg {
 class Error {
 public:
   std::unique_ptr<impl::ErrorCodeAndMsg> err;
+
+  Error() : err(std::make_unique<impl::ErrorCodeAndMsg>("", 0)) {}
+
   Error(const std::string& msg, int code = -1)
       : err(std::make_unique<impl::ErrorCodeAndMsg>(msg, code)) {}
 };

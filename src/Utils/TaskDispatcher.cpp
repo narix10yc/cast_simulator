@@ -12,12 +12,12 @@ thread_local int TaskDispatcher::tls_local_version_ = 0;
 thread_local TaskDispatcher::tls_instance_t
     TaskDispatcher::tls_local_instance_(nullptr, +[](void*) {});
 
-TaskDispatcher::TaskDispatcher(int nWorkers)
+TaskDispatcher::TaskDispatcher(unsigned nWorkers)
     : tasks(), workers(), mtx(), cv(), syncCV(), nTotalTasks(0),
       nActiveWorkers(0), stopFlag(false) {
   assert(nWorkers > 0);
   workers.reserve(nWorkers);
-  for (int i = 0; i < nWorkers; ++i)
+  for (unsigned i = 0; i < nWorkers; ++i)
     workers.emplace_back(&TaskDispatcher::worker_work, this);
 }
 
@@ -105,6 +105,9 @@ void TaskDispatcher::sync(bool progressBar) {
   if (progressBar)
     std::cerr << std::endl;
   cv.notify_all();
+
+  // reset for reuse
+  nTotalTasks = 0;
 }
 
 void TaskDispatcher::join() {

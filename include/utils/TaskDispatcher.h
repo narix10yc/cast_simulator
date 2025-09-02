@@ -26,7 +26,7 @@ class TaskDispatcher {
   void worker_work();
 
 public:
-  TaskDispatcher(int nWorkers);
+  explicit TaskDispatcher(unsigned nWorkers);
 
   TaskDispatcher(const TaskDispatcher&) = delete;
   TaskDispatcher(TaskDispatcher&&) = delete;

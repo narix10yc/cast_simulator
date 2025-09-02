@@ -1,35 +1,39 @@
-#include "utils/MaybeError.h"
-#include "utils/TaskDispatcher.h"
-#include <iostream>
+#include "cast/CUDA/CUDAKernelManager.h"
+#include "cast/CUDA/CUDAStatevector.h"
+
+#include "utils/utils.h"
+#include <random>
 
 using namespace cast;
 
+constexpr int nQubits = 29;
+
 int main(int argc, char** argv) {
 
-  utils::TaskDispatcher dispatcher(4);
-  std::mutex mtx;
+  CUDAKernelManager km(12);
+  CUDAKernelGenConfig config;
 
-  struct TLS {
-    int id;
-  };
-
-  dispatcher.installTLS<TLS>();
-
-  for (int i = 0; i < 10; ++i) {
-    dispatcher.enqueue([&, i]() {
-      if (auto* tls = dispatcher.tls<TLS>()) {
-        std::lock_guard lock(mtx);
-        tls->id++;
-        std::cout << "TLS ID for thread " << dispatcher.getWorkerID() << ": "
-                  << tls->id << "\n";
-      }
-      std::lock_guard lock(mtx);
-      std::cout << "Processing task " << i << " on thread "
-                << dispatcher.getWorkerID() << "\n";
-    });
+  for (int i = 0; i < 1000; ++i) {
+    std::string name = "gate_" + std::to_string(i);
+    QuantumGate::TargetQubitsType qubits;
+    std::random_device rd;
+    std::uniform_int_distribution<int> dist(1, 4);
+    utils::sampleNoReplacement(nQubits, dist(rd), qubits);
+    km.genStandaloneGate(
+          config, StandardQuantumGate::RandomUnitary(qubits), name)
+        .consumeError();
   }
 
-  dispatcher.sync();
+  CUDAStatevectorF64 sv(nQubits);
+  sv.initialize();
+  km.setLaunchConfig(sv.getDevicePtr(), nQubits);
+
+  const CUDAKernelManager::ExecutionResult* lastKernelLaunchInfo = nullptr;
+  for (auto& kernel : km)
+    lastKernelLaunchInfo = km.enqueueKernelLaunch(kernel, 2);
+
+  km.syncKernelExecution(true);
+  lastKernelLaunchInfo->displayInfo(std::cerr);
 
   return 0;
 }
