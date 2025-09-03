@@ -50,7 +50,7 @@ ArgF32("f32", cl::cat(ArgCategory),
 static cl::opt<bool>
 ArgF64("f64", cl::cat(ArgCategory),
     cl::desc("Enable double-precision (f64) kernels"),
-    cl::init(true));
+    cl::init(false));
 
 static cl::opt<int>
 ArgVerbose("verbose", cl::cat(ArgCategory),
@@ -64,9 +64,14 @@ int main(int argc, char** argv) {
   cl::ParseCommandLineOptions(argc, argv);
 
   // Unwrap arguments
-  int nQubits = ArgNQubits;
+  int nQubitsSV = ArgNQubits;
   int nWorkerThreads = (ArgNWorkerThreads <= 0) ? cast::get_cpu_num_threads()
                                                 : ArgNWorkerThreads;
+  if (!ArgF32 && !ArgF64) {
+    std::cerr << BOLDRED("[Error]: ")
+              << "At least one of -f32 or -f64 must be specified.\n";
+    return 1;
+  }
 
   std::ifstream inFile;
   std::ofstream outFile;
@@ -93,8 +98,7 @@ int main(int argc, char** argv) {
               << "Running single-precision experiments.\n";
     CUDAKernelGenConfig cudaConfig(Precision::F32);
     if (auto err = cache.runExperiments(
-            cudaConfig, ArgNQubits, nWorkerThreads, ArgNTests);
-        !err) {
+            cudaConfig, nQubitsSV, nWorkerThreads, ArgNTests)) {
       std::cerr << BOLDRED("[Error]: ") << "Failed to run f32 experiments: "
                 << llvm::toString(std::move(err)) << "\n";
       return 1;
@@ -105,8 +109,7 @@ int main(int argc, char** argv) {
               << "Running double-precision experiments.\n";
     CUDAKernelGenConfig cudaConfig(Precision::F64);
     if (auto err = cache.runExperiments(
-            cudaConfig, nQubits, nWorkerThreads, ArgNTests);
-        !err) {
+            cudaConfig, nQubitsSV, nWorkerThreads, ArgNTests)) {
       std::cerr << BOLDRED("[Error]: ") << "Failed to run f64 experiments: "
                 << llvm::toString(std::move(err)) << "\n";
       return 1;

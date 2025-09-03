@@ -103,20 +103,20 @@ createRandomSizedGate(int nQubitsSV,
 
 llvm::Error
 CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
-                                     int nQubits,
+                                     int nQubitsSV,
                                      int nWorkerThreads,
                                      int nRuns,
                                      int verbose) {
   impl::CostModelWeightType weights;
   if (auto r = runPreliminaryExperiments(
-          kernelConfig, nQubits, nWorkerThreads, verbose, weights);
+          kernelConfig, nQubitsSV, nWorkerThreads, verbose, weights);
       !r) {
     return llvm::createStringError("Failed to run preliminary experiments: " +
                                    r.what());
   }
 
   CUDAKernelManager km(nWorkerThreads);
-  CUDAStatevectorF64 sv(nQubits);
+  CUDAStatevectorF64 sv(nQubitsSV);
   sv.initialize();
   km.setLaunchConfig(sv.getDevicePtr(), sv.nQubits());
 
@@ -126,9 +126,9 @@ CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
   int count = 0;
   for (int k = 1; k < 5; ++k) {
     QuantumGate::TargetQubitsType qubits;
-    utils::sampleNoReplacement(nQubits, k, qubits);
+    utils::sampleNoReplacement(nQubitsSV, k, qubits);
     auto gate1 = StandardQuantumGate::RandomUnitary(qubits);
-    utils::sampleNoReplacement(nQubits, k, qubits);
+    utils::sampleNoReplacement(nQubitsSV, k, qubits);
     auto gate2 = StandardQuantumGate::RandomUnitary(qubits);
 
     if (auto expected = km.genStandaloneGate(
@@ -148,7 +148,7 @@ CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
   std::uniform_real_distribution<float> dist(0.0f, 0.8f);
   for (; count < nRuns; ++count) {
     auto erasureProb = dist(rng);
-    auto gate = createRandomSizedGate(nQubits, weights, erasureProb);
+    auto gate = createRandomSizedGate(nQubitsSV, weights, erasureProb);
     assert(gate);
     if (auto expected = km.genStandaloneGate(
             kernelConfig, gate, "gate_" + std::to_string(count)))
@@ -172,7 +172,7 @@ CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
         kernel.gate->nQubits(),
         kernel.gate->opCount(kernelConfig.zeroTol),
         kernel.precision,
-        internal::calculateMemUpdateSpeed(nQubits, kernel.precision, t));
+        internal::calculateMemUpdateSpeed(nQubitsSV, kernel.precision, t));
     if (verbose >= 1) {
       std::cerr << std::fixed << std::setprecision(2);
       std::cerr << "Gate on " << kernel.gate->nQubits()
@@ -189,4 +189,45 @@ void CUDAPerformanceCache::writeResults(std::ostream& os) const {
     item.write(os);
     os << "\n";
   }
+}
+
+/* CUDA Cost Model */
+
+CUDACostModel::CUDACostModel(const CUDAPerformanceCache& cache)
+    : CostModel(CM_CUDA) {
+  struct TmpBucketValue {
+    float totalGiBTimePerOpCount;
+    int count;
+  };
+  SortedVectorMap<BucketKey, TmpBucketValue> tmpBucket;
+
+  for (const auto& item : cache.items()) {
+    BucketKey key{item.k, item.precision};
+    if (bucket_.find(key) == bucket_.end()) {
+      tmpBucket[key] = TmpBucketValue{
+          1.0f / static_cast<float>(item.memUpdateSpeed * item.opCount), 1};
+    } else {
+      tmpBucket[key].totalGiBTimePerOpCount +=
+          1.0f / static_cast<float>(item.memUpdateSpeed * item.opCount);
+      tmpBucket[key].count += 1;
+    }
+  }
+
+  for (const auto& [key, value] : tmpBucket)
+    bucket_[key] = value.totalGiBTimePerOpCount / value.count;
+}
+
+std::ostream& CUDACostModel::displayInfo(std::ostream& os,
+                                         int verbosity) const {
+  int nToDisplay = std::min<int>(bucket_.size(), 5 * (verbosity + 1));
+  os << "k | Precision | Dense (GiB/s) | Per Op Per Sec\n";
+  for (const auto& [key, value] : bucket_) {
+    auto denseGateGiBTime = 1.0f / (value * (1U << (key.k + 2)));
+    os << key.k << " | " << (key.precision == Precision::F32 ? "F32" : "F64")
+       << " | " << utils::fmt_1_to_1e3(denseGateGiBTime) << " | "
+       << utils::fmt_mem(value * 1e6) << "\n";
+    if (--nToDisplay <= 0)
+      break;
+  }
+  return os;
 }
