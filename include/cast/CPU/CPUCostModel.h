@@ -47,6 +47,8 @@ class CPUPerformanceCache {
 public:
   CPUPerformanceCache() = default;
 
+  static constexpr auto CSVTitle() { return Item::CSV_TITLE; }
+
   // Returns null if we cannot find performance cache or the cache is empty
   static std::unique_ptr<CPUPerformanceCache>
   LoadFromFile(const std::string& filename) {

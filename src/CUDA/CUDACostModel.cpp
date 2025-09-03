@@ -1,59 +1,192 @@
 #include "cast/CUDA/CUDACostModel.h"
+#include "cast/CUDA/CUDAStatevector.h"
 #include "cast/Core/Config.h"
+#include "cast/Internal/PerfCacheHelper.h"
 
+#include "timeit/timeit.h"
+#include "utils/Formats.h"
+#include "utils/iocolor.h"
 #include "utils/utils.h"
+
+#include <numeric> // for std::reduce
+#include <random>
 
 using namespace cast;
 
-using WeightType = std::array<float, GLOBAL_MAX_GATE_SIZE>;
-
-static void runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
-                                      int nQubits,
-                                      int nWorkerThreads,
-                                      int nRuns,
-                                      int verbose,
-                                      WeightType& weights) {
+static MaybeError<void>
+runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
+                          int nQubits,
+                          int nWorkerThreads,
+                          int verbose,
+                          impl::CostModelWeightType& weights) {
   CUDAKernelManager km(nWorkerThreads);
+  CUDAStatevectorF64 sv(nQubits);
+  sv.initialize();
 
-  struct GateNamePair {
-    QuantumGatePtr gate;
-    std::string name;
-  };
-
-  std::vector<GateNamePair> gateNamePairs;
-  const auto generateGatesAndInitJit = [&]() {
-    gateNamePairs.reserve(5);
+  std::array<std::string, 5> gateNames;
+  const auto generateGatesAndInitJit = [&]() -> void {
     // generate {1,2,3,4,5}-qubit gates acting on MSB qubits
     for (int k = 1; k <= 5; ++k) {
       QuantumGate::TargetQubitsType qubits;
-      qubits.reserve(k);
-      for (int i = 0; i < k; ++i)
-        qubits.push_back(nQubits - i);
-      gateNamePairs.emplace_back(StandardQuantumGate::RandomUnitary(qubits),
-                                 "gate_k" + std::to_string(k));
-      km.genStandaloneGate(
-            kernelConfig, gateNamePairs.back().gate, gateNamePairs.back().name)
-          .consumeError();
+      utils::sampleNoReplacement(nQubits, k, qubits);
+      gateNames[k - 1] = "gate_k" + std::to_string(k);
+      llvm::cantFail(
+          km.genStandaloneGate(kernelConfig,
+                               StandardQuantumGate::RandomUnitary(qubits),
+                               gateNames[k - 1]));
     }
-    // only show progress bar if verbose >= 2
     km.initJIT(1, verbose >= 2).consumeError();
   };
 
   if (verbose >= 1) {
-    utils::timedExecute(generateGatesAndInitJit,
-                        "Code Generation and JIT Initialization");
+    auto t = timeit::once(generateGatesAndInitJit);
+    std::cerr << "(" << utils::fmt_time(t) << ") JIT Initialization\n";
   } else {
     generateGatesAndInitJit();
   }
+
+  // Launch every kernel 5 times
+  km.setLaunchConfig(sv.getDevicePtr(), nQubits);
+  std::array<const CUDAKernelManager::ExecutionResult*, 5> results;
+  for (int i = 0; i < 5; ++i) {
+    auto* kernelInfo = km.getKernelByName(gateNames[i]);
+    assert(kernelInfo != nullptr);
+    // Warmup run
+    (void)km.enqueueKernelLaunch(*kernelInfo, /* verbosity */ 2);
+    // Time this run
+    results[i] = km.enqueueKernelLaunch(*kernelInfo, /* verbosity */ 2);
+  }
+  km.syncKernelExecution();
+
+  for (int k = 1; k <= 5; ++k) {
+    auto t = results[k - 1]->kernelTime_ms * 1e-3;
+    std::cerr << k << "-qubit dense gate takes " << utils::fmt_time(t) << "\n";
+  }
+
+  std::array<float, 5> tarr;
+  for (int k = 1; k <= 5; ++k)
+    tarr[k - 1] = results[k - 1]->getKernelTime();
+  impl::computeGateWeights(tarr, weights);
+  if (verbose >= 2) {
+    auto sum = std::accumulate(weights.begin(), weights.end(), 0.0f);
+    std::cerr << "Frequencies of gates in tests:\n"
+              << std::fixed << std::setprecision(2);
+    for (int k = 1; k <= weights.size(); ++k) {
+      std::cerr << k << "-qubit gate: " << 100.f * weights[k - 1] / sum
+                << "%\n";
+    }
+  }
+
+  return {}; // success
 }
 
-void CUDAPerformanceCache::runExperiments(
-    const CUDAKernelGenConfig& kernelConfig,
-    int nQubits,
-    int nWorkerThreads,
-    int nRuns,
-    int verbose) {
-  WeightType weights;
-  runPreliminaryExperiments(
-      kernelConfig, nQubits, nWorkerThreads, nRuns, verbose, weights);
+static QuantumGatePtr
+createRandomSizedGate(int nQubitsSV,
+                      const impl::CostModelWeightType& weights,
+                      float erasureProb) {
+  std::mt19937 rng(std::random_device{}());
+  std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+  float r = dist(rng) * std::accumulate(weights.begin(), weights.end(), 0.0f);
+  float acc = 0;
+  for (int i = 0; i < weights.size(); ++i) {
+    acc += weights[i];
+    if (r <= acc) {
+      QuantumGate::TargetQubitsType qubits;
+      utils::sampleNoReplacement(nQubitsSV, i + 1, qubits);
+      auto gate = StandardQuantumGate::RandomUnitary(qubits);
+      internal::randRemoveQuantumGate(gate.get(), erasureProb);
+      return gate;
+    }
+  }
+  return nullptr;
+}
+
+llvm::Error
+CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
+                                     int nQubits,
+                                     int nWorkerThreads,
+                                     int nRuns,
+                                     int verbose) {
+  impl::CostModelWeightType weights;
+  if (auto r = runPreliminaryExperiments(
+          kernelConfig, nQubits, nWorkerThreads, verbose, weights);
+      !r) {
+    return llvm::createStringError("Failed to run preliminary experiments: " +
+                                   r.what());
+  }
+
+  CUDAKernelManager km(nWorkerThreads);
+  CUDAStatevectorF64 sv(nQubits);
+  sv.initialize();
+  km.setLaunchConfig(sv.getDevicePtr(), sv.nQubits());
+
+  std::vector<const CUDAKernelInfo*> kernels;
+  kernels.reserve(nRuns);
+
+  int count = 0;
+  for (int k = 1; k < 5; ++k) {
+    QuantumGate::TargetQubitsType qubits;
+    utils::sampleNoReplacement(nQubits, k, qubits);
+    auto gate1 = StandardQuantumGate::RandomUnitary(qubits);
+    utils::sampleNoReplacement(nQubits, k, qubits);
+    auto gate2 = StandardQuantumGate::RandomUnitary(qubits);
+
+    if (auto expected = km.genStandaloneGate(
+            kernelConfig, gate1, "gate_" + std::to_string(count++)))
+      kernels.push_back(*expected);
+    else
+      return expected.takeError();
+
+    if (auto expected = km.genStandaloneGate(
+            kernelConfig, gate2, "gate_" + std::to_string(count++)))
+      kernels.push_back(*expected);
+    else
+      return expected.takeError();
+  }
+
+  std::mt19937 rng(std::random_device{}());
+  std::uniform_real_distribution<float> dist(0.0f, 0.8f);
+  for (; count < nRuns; ++count) {
+    auto erasureProb = dist(rng);
+    auto gate = createRandomSizedGate(nQubits, weights, erasureProb);
+    assert(gate);
+    if (auto expected = km.genStandaloneGate(
+            kernelConfig, gate, "gate_" + std::to_string(count)))
+      kernels.push_back(*expected);
+    else
+      return expected.takeError();
+  }
+
+  constexpr int nReplications = 3;
+  for (auto& kernel : km) {
+    float t = 1e6f;
+    for (int rep = 0; rep < nReplications; ++rep) {
+      auto* result = km.enqueueKernelLaunch(kernel, /* verbosity */ 2);
+      km.syncKernelExecution();
+      t = std::min(t, result->getKernelTime());
+      if (t > 0.5f)
+        break; // no replicate if the time of each run > 0.5 second
+    }
+
+    items_.emplace_back(
+        kernel.gate->nQubits(),
+        kernel.gate->opCount(kernelConfig.zeroTol),
+        kernel.precision,
+        internal::calculateMemUpdateSpeed(nQubits, kernel.precision, t));
+    if (verbose >= 1) {
+      std::cerr << std::fixed << std::setprecision(2);
+      std::cerr << "Gate on " << kernel.gate->nQubits()
+                << " qubits with opCount=" << items_.back().opCount << ": "
+                << items_.back().memUpdateSpeed << " GiB/s\n";
+    }
+  }
+
+  return llvm::Error::success();
+}
+
+void CUDAPerformanceCache::writeResults(std::ostream& os) const {
+  for (const auto& item : items_) {
+    item.write(os);
+    os << "\n";
+  }
 }

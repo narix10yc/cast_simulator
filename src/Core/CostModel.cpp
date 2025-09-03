@@ -11,3 +11,38 @@ double SizeOnlyCostModel::computeGiBTime(const QuantumGate* gate) const {
   // effectively 0.0
   return 1e-10;
 }
+
+std::ostream& SizeOnlyCostModel::displayInfo(std::ostream& os,
+                                             int verbose) const {
+  os << "SizeOnlyCostModel: maxSize=" << maxSize << ", maxOp=" << maxOp
+     << ", zeroTol=" << zeroTol;
+  return os;
+}
+
+void cast::impl::computeGateWeights(const std::array<float, 5>& tarr,
+                                    impl::CostModelWeightType& weights) {
+  // The ratio decides the scaling of weights when time[k+1] doubles compared to
+  // time[k]. Set to a larger value to focus more on the transition region.
+  constexpr float ratio = 1.1f;
+
+  constexpr float T = 15.f;
+  constexpr float eps = 0.1f;
+
+  // Exponentially decays the weights for >=5 qubit gates
+  constexpr float decayLargeGates = 0.45f;
+
+  // weights[k] is the weight of k-qubit gates
+  // initialize the weight of 1-qubit gates to 100.0f
+  weights[0] = 100.0f;
+  for (int k = 2; k <= 5; ++k) {
+    // Lorentzian bump
+    auto x = tarr[k - 1] / tarr[k - 2] - 1;
+    auto y = 1 - (T - 1) * eps + (T - 1) * eps * (1 + eps) / (x * x + eps);
+    weights[k - 1] = weights[k - 2] * y;
+  }
+
+  // Exponentially decay weights for >=5 qubit gates
+  for (int k = 5; k <= weights.size(); ++k) {
+    weights[k - 1] = weights[k - 2] * decayLargeGates;
+  }
+}

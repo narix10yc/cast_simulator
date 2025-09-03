@@ -12,6 +12,8 @@
 #include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
 #include "utils/MaybeError.h"
 
+#include "llvm/Support/Error.h"
+
 #include <cuda.h>
 #include <map>
 #include <span>
@@ -91,6 +93,14 @@ public:
     ExecutionResult() = default;
 
     std::ostream& displayInfo(std::ostream& os) const;
+
+    // Get the compilation time in seconds
+    float getCompileTime() const {
+      return (t_cubinPrepareFinish - t_cubinPrepareStart).count() * 1e-3f;
+    }
+
+    // Get the kernel time in seconds (from CUevent)
+    float getKernelTime() const { return kernelTime_ms * 1e-3f; }
   };
 
 private:
@@ -234,9 +244,10 @@ public:
 
   std::ostream& displayInfo(std::ostream& os) const;
 
-  MaybeError<void> genStandaloneGate(const CUDAKernelGenConfig& config,
-                                     ConstQuantumGatePtr gate,
-                                     const std::string& funcName);
+  llvm::Expected<const CUDAKernelInfo*>
+  genStandaloneGate(const CUDAKernelGenConfig& config,
+                    ConstQuantumGatePtr gate,
+                    const std::string& funcName);
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the

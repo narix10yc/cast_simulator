@@ -132,19 +132,20 @@ public:
 
   bool hasValue() const { return !hasError(); }
 
-  value_type&& takeValue()
+  value_type takeValue()
     requires(NotVoid)
   {
     assert(hasValue() && "No value present in MaybeError");
     return std::move(value_);
   }
 
-  std::string what() const {
+  const std::string& what() const {
     assert(status.isErrorChecked() &&
            "MaybeError is not checked when trying to get the error message");
     if (status.isErrorPresent())
       return err_.err->msg;
-    return {}; // empty string
+    static const std::string emptyString;
+    return emptyString;
   }
 
   // Get the error code. Returns 0 when no error is present.
@@ -156,7 +157,7 @@ public:
     return 0;
   }
 
-  operator bool() const { return hasValue(); }
+  explicit operator bool() const { return hasValue(); }
 }; // class MaybeError
 
 static inline Error makeError(const std::string& errorMsg, int errorCode = -1) {

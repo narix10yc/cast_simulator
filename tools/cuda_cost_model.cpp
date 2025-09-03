@@ -1,4 +1,4 @@
-#include "cast/CUDA/CUDAAdvCostModel.h"
+#include "cast/CUDA/CUDACostModel.h"
 #include "cast/CUDA/CUDAKernelManager.h"
 
 #include "utils/iocolor.h"
@@ -30,14 +30,10 @@ static cl::opt<int>
 ArgNQubits("nqubits", cl::cat(ArgCategory),
     cl::desc("Number of qubits"), cl::init(28));
 
-static cl::opt<int>
-ArgBlockSize("block-size", cl::cat(ArgCategory),
-    cl::desc("CUDA block size (power of two ≤ 1024)"),
-    cl::init(256));
 
 static cl::opt<int> 
-ArgWorkerThreads("worker-threads", cl::cat(ArgCategory),
-    cl::desc("CPU threads used for JIT compilation (if applicable)"),
+ArgNWorkerThreads("worker-threads", cl::cat(ArgCategory),
+    cl::desc("CPU threads used for JIT compilation (0 to auto-detect)"),
     cl::init(0));
 
 static cl::opt<int>
@@ -63,59 +59,17 @@ ArgVerbose("verbose", cl::cat(ArgCategory),
 
 // clang-format on
 
-// ---- helpers ----------------------------------------------------------------
-
-static bool validateBlockSize(int blk) {
-  if (blk < 32 || blk > 1024 || (blk & (blk - 1)) != 0) {
-    std::cerr << BOLDRED("[Error]: ")
-              << "Block size must be a power-of-two in [32, 1024].\n";
-    return false;
-  }
-  return true;
-}
-
-static void ensureCsvHeader(std::ofstream& ofs) {
-  ofs << CUDAAdvPerfCache::Item::CSV_TITLE << '\n';
-}
-
-static CUDADeviceInfo getDeviceInfo(int device, bool verbose) {
-  CUDADeviceInfo dev{};
-  dev.device = device;
-
-  cudaDeviceProp props{};
-  cudaError_t st = cudaGetDeviceProperties(&props, device);
-  if (st != cudaSuccess) {
-    std::cerr << BOLDRED("[Error]: ") << "cudaGetDeviceProperties(" << device
-              << ") failed: " << cudaGetErrorString(st) << "\n";
-    // Provide safe fallbacks to avoid UB
-    dev.warpSize = 32;
-    dev.maxThreadsPerSM = 2048;
-    dev.smCount = 1;
-    return dev;
-  }
-
-  dev.warpSize = props.warpSize;
-  dev.maxThreadsPerSM = props.maxThreadsPerMultiProcessor;
-  dev.smCount = props.multiProcessorCount;
-
-  if (verbose) {
-    std::cerr << BOLDCYAN("[Info]: ") << "GPU " << device << " = " << props.name
-              << " | SMs=" << dev.smCount << " | warp=" << dev.warpSize
-              << " | maxThreads/SM=" << dev.maxThreadsPerSM << "\n";
-  }
-  return dev;
-}
-
 int main(int argc, char** argv) {
   cl::HideUnrelatedOptions({&ArgCategory});
   cl::ParseCommandLineOptions(argc, argv);
 
-  if (!validateBlockSize(ArgBlockSize))
-    return 1;
+  // Unwrap arguments
+  int nQubits = ArgNQubits;
+  int nWorkerThreads = (ArgNWorkerThreads <= 0) ? cast::get_cpu_num_threads()
+                                                : ArgNWorkerThreads;
 
   std::ifstream inFile;
   std::ofstream outFile;
-
   if (ArgOverwriteMode)
     outFile.open(ArgOutputFilename, std::ios::out | std::ios::trunc);
   else
@@ -123,44 +77,43 @@ int main(int argc, char** argv) {
 
   inFile.open(ArgOutputFilename, std::ios::in);
   if (!outFile || !inFile) {
-    std::cerr << BOLDRED("[Error]: ") << "Unable to open '" << ArgOutputFilename
-              << "'.\n";
+    std::cerr << BOLDRED("[Error]: ") << "Unable to open file '"
+              << ArgOutputFilename << "'.\n";
     return 1;
   }
+
+  // If the file is empty (new cost model), write the CSV title
   if (inFile.peek() == std::ifstream::traits_type::eof())
-    ensureCsvHeader(outFile);
+    outFile << CUDAPerformanceCache::CSVTitle() << "\n";
   inFile.close();
 
-  // Build device info (measurement-based; we read real device caps once)
-  int devId = 0;
-  (void)cudaGetDevice(&devId); // if not set, default to 0
-  const bool verboseDevice = true;
-  CUDADeviceInfo dev = getDeviceInfo(devId, verboseDevice);
-
-  CUDAAdvPerfCache cache;
-  CUDAKernelGenConfig cfg;
-  cfg.blockSize = ArgBlockSize;
-
-  std::cerr << BOLDCYAN("[Info]: ") << "Benchmarking " << ArgNTests
-            << " kernels on " << ArgNQubits << " qubits - block "
-            << ArgBlockSize << ", worker threads " << ArgWorkerThreads << ".\n";
-
-  // Each precision is measured independently and appended to the CSV
+  CUDAPerformanceCache cache;
   if (ArgF32) {
-    std::cerr << BOLDCYAN("[Info]: ") << "  • Single precision (f32)\n";
-    cfg.precision = Precision::F32;
-    cache.runExperiments(cfg, dev, ArgNQubits, ArgNTests, ArgVerbose);
+    std::cerr << BOLDCYAN("[Info]: ")
+              << "Running single-precision experiments.\n";
+    CUDAKernelGenConfig cudaConfig(Precision::F32);
+    if (auto err = cache.runExperiments(
+            cudaConfig, ArgNQubits, nWorkerThreads, ArgNTests);
+        !err) {
+      std::cerr << BOLDRED("[Error]: ") << "Failed to run f32 experiments: "
+                << llvm::toString(std::move(err)) << "\n";
+      return 1;
+    }
   }
   if (ArgF64) {
-    std::cerr << BOLDCYAN("[Info]: ") << "  • Double precision (f64)\n";
-    cfg.precision = Precision::F64;
-    cache.runExperiments(cfg, dev, ArgNQubits, ArgNTests, ArgVerbose);
+    std::cerr << BOLDCYAN("[Info]: ")
+              << "Running double-precision experiments.\n";
+    CUDAKernelGenConfig cudaConfig(Precision::F64);
+    if (auto err = cache.runExperiments(
+            cudaConfig, nQubits, nWorkerThreads, ArgNTests);
+        !err) {
+      std::cerr << BOLDRED("[Error]: ") << "Failed to run f64 experiments: "
+                << llvm::toString(std::move(err)) << "\n";
+      return 1;
+    }
   }
-
   cache.writeResults(outFile);
-  outFile.close();
 
-  std::cerr << BOLDCYAN("[Info]: ") << "Results appended to '"
-            << ArgOutputFilename << "'.\n";
+  outFile.close();
   return 0;
 }

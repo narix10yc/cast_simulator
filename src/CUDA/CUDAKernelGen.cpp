@@ -1348,7 +1348,7 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
   return ki;
 }
 
-MaybeError<void>
+llvm::Expected<const CUDAKernelInfo*>
 CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
                                      ConstQuantumGatePtr gate,
                                      const std::string& _funcName) {
@@ -1359,17 +1359,18 @@ CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
   // check for name conflicts
   for (const auto& kernel : standaloneKernels_) {
     if (kernel->llvmFuncName == funcName) {
-      return cast::makeError("Kernel with name '" + funcName +
-                             "' already exists.");
+      return llvm::createStringError("Kernel with name '" + funcName +
+                                     "' already exists.");
     }
   }
 
-  if (auto r = genCUDAGate_(config, gate, funcName))
-    standaloneKernels_.emplace_back(r.takeValue());
-  else
-    return cast::makeError("Err: " + r.what());
-
-  return {}; // success
+  if (auto r = genCUDAGate_(config, gate, funcName)) {
+    auto kernel(r.takeValue());
+    const auto* kernelRet = kernel.get();
+    standaloneKernels_.emplace_back(std::move(kernel));
+    return kernelRet;
+  } else
+    return llvm::createStringError("Err: " + r.what());
 }
 
 MaybeError<void>

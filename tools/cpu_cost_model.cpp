@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
 
   // If the file is empty (new cost model), write the CSV title
   if (inFile.peek() == std::ifstream::traits_type::eof())
-    outFile << CPUPerformanceCache::Item::CSV_TITLE << "\n";
+    outFile << CPUPerformanceCache::CSVTitle() << "\n";
   inFile.close();
 
   CPUPerformanceCache cache;

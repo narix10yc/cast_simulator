@@ -1,11 +1,20 @@
 #ifndef CAST_CORE_COSTMODEL_H
 #define CAST_CORE_COSTMODEL_H
 
+#include "cast/Core/Config.h"
 #include "cast/Core/Precision.h"
 #include "cast/Core/QuantumGate.h"
 #include <string>
 
 namespace cast {
+
+namespace impl {
+
+using CostModelWeightType = std::array<float, GLOBAL_MAX_GATE_SIZE>;
+
+void computeGateWeights(const std::array<float, 5>& tarr,
+                        CostModelWeightType& weights);
+} // namespace impl
 
 // An abstract class for all cost models.
 class CostModel {
