@@ -7,7 +7,7 @@
 namespace cast {
 
 class FusionConfig {
-public:
+protected:
   enum FusionConfigKind {
     FC_Base,     // Base fusion config
     FC_SizeOnly, // Size only fusion config
@@ -16,7 +16,6 @@ public:
     FC_End
   };
 
-protected:
   FusionConfigKind kind_;
   std::unique_ptr<CostModel> costModel_ = nullptr;
 
@@ -27,7 +26,12 @@ public:
 
   FusionConfigKind getKind() const { return kind_; }
 
+  void setCostModel(std::unique_ptr<CostModel> cm) {
+    costModel_ = std::move(cm);
+  }
+
   CostModel* getCostModel() { return costModel_.get(); }
+
   const CostModel* getCostModel() const { return costModel_.get(); }
 
   // Zero tolerance. This mainly affects calculating the operation count.

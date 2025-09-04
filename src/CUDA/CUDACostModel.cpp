@@ -215,11 +215,24 @@ CUDACostModel::CUDACostModel(const CUDAPerformanceCache& cache)
 
   for (const auto& [key, value] : tmpBucket)
     bucket_[key] = value.totalGiBTimePerOpCount / value.count;
+
+  // setup minGiBTimeCap
+  if (bucket_.empty())
+    minGiBTimeCap = 0.0f;
+  else {
+    minGiBTimeCap = std::numeric_limits<float>::max();
+    for (const auto& [key, value] : bucket_) {
+      float gbt = value * (1U << (key.k + 2));
+      minGiBTimeCap = std::min(minGiBTimeCap, gbt);
+    }
+  }
 }
 
 std::ostream& CUDACostModel::displayInfo(std::ostream& os,
                                          int verbosity) const {
   int nToDisplay = std::min<int>(bucket_.size(), 5 * (verbosity + 1));
+  os << "Two-way Bandwidth Cap: " << utils::fmt_mem(1.0f / minGiBTimeCap * 1e9)
+     << "\n";
   os << "k | Precision | Dense (GiB/s) | Per Op Per Sec\n";
   for (const auto& [key, value] : bucket_) {
     auto denseGateGiBTime = 1.0f / (value * (1U << (key.k + 2)));
@@ -230,4 +243,47 @@ std::ostream& CUDACostModel::displayInfo(std::ostream& os,
       break;
   }
   return os;
+}
+
+double CUDACostModel::computeGiBTime(const QuantumGate* gate) const {
+  assert(queryPrecision_ != Precision::Unknown);
+  if (bucket_.empty())
+    return minGiBTimeCap;
+
+  // exact match
+  if (auto it = bucket_.find(BucketKey{gate->nQubits(), queryPrecision_});
+      it != bucket_.end()) {
+    return std::max(static_cast<double>(it->second) * gate->opCount(1e-8),
+                    static_cast<double>(this->minGiBTimeCap));
+  }
+
+  // no exact match, make an estimation
+  // priority: precision > k
+  auto gateNQubits = gate->nQubits();
+  auto gateOpCount = gate->opCount(1e-8);
+  auto bestMatchIt = bucket_.begin();
+
+  auto it = bucket_.begin();
+  const auto end = bucket_.end();
+  while (++it != end) {
+    // priority: precision > k
+    if (queryPrecision_ == bestMatchIt->first.precision)
+      continue;
+    if (queryPrecision_ == it->first.precision) {
+      bestMatchIt = it;
+      continue;
+    }
+
+    const int bestKDiff = std::abs(gateNQubits - bestMatchIt->first.k);
+    const int thisKDiff = std::abs(gateNQubits - it->first.k);
+    if (thisKDiff > bestKDiff)
+      continue;
+    if (thisKDiff < bestKDiff) {
+      bestMatchIt = it;
+      continue;
+    }
+  }
+
+  return std::max(static_cast<double>(bestMatchIt->second) * gateOpCount,
+                  static_cast<double>(this->minGiBTimeCap));
 }

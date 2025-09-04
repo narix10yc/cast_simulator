@@ -2,14 +2,16 @@
 #define CAST_CUDA_CUDAFUSIONCONFIG_H
 
 #include "cast/Core/FusionConfig.h"
-#include "llvm/Support/Casting.h"
-#include <memory>
 
 namespace cast {
 
 class CUDAFusionConfig : public FusionConfig {
 public:
   CUDAFusionConfig() : FusionConfig(FC_CUDA) {}
+
+  std::ostream& displayInfo(std::ostream& os, int verbose) const override {
+    return os << "CUDA Fusion Config\n";
+  }
 
   static bool classof(const FusionConfig* base) {
     return base->getKind() == FC_CUDA;

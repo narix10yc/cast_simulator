@@ -29,7 +29,7 @@ ArgNQubits("nqubits", cl::cat(ArgCategory),
     cl::desc("Number of qubits"), cl::init(28));
 
 static cl::opt<int>
-ArgNThreads("T", cl::cat(ArgCategory),
+ArgNWorkerThreads("T", cl::cat(ArgCategory),
     cl::desc("Number of threads"), cl::Prefix, cl::init(0));
 
 static cl::opt<bool>
@@ -50,10 +50,10 @@ ArgNTests("N", cl::cat(ArgCategory),
 static void
 unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
   nQubits = ArgNQubits;
-  if (ArgNThreads <= 0)
+  if (ArgNWorkerThreads <= 0)
     nThreads = cast::get_cpu_num_threads();
   else
-    nThreads = ArgNThreads;
+    nThreads = ArgNWorkerThreads;
 
   if (ArgSimdWidth == 128)
     simdWidth = CPUSimdWidth::W128;

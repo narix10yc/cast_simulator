@@ -329,6 +329,24 @@ public:
   const ExecutionResult* enqueueKernelLaunch(CUDAKernelInfo& kernel,
                                              int verbosity = 0);
 
+  std::vector<const ExecutionResult*>
+  enqueueKernelLaunchFromGraph(const std::string& graphName,
+                               int verbosity = 0) {
+    auto it = graphKernels_.find(graphName);
+    if (it == graphKernels_.end())
+      return {}; // empty vector
+
+    std::vector<const ExecutionResult*> results;
+    results.reserve(it->second.size());
+
+    for (auto& kernel : it->second) {
+      auto* res = enqueueKernelLaunch(*kernel, verbosity);
+      if (res != nullptr)
+        results.push_back(res);
+    }
+    return results;
+  }
+
   /// A blocking method that waits for all enqueued kernels to finish execution.
   /// This should only be called by the main thread.
   void syncKernelExecution(bool progressBar = false);

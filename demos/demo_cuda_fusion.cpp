@@ -1,0 +1,314 @@
+#include "cast/CUDA/CUDAKernelManager.h"
+#include "cast/CUDA/CUDAOptimizer.h"
+#include "cast/CUDA/CUDAStatevector.h"
+
+#include "timeit/timeit.h"
+#include "utils/Formats.h"
+#include "utils/iocolor.h"
+#include "utils/utils.h"
+
+#include "llvm/Support/CommandLine.h"
+
+namespace cl = llvm::cl;
+
+using namespace cast;
+
+#pragma region Command line arguments
+// clang-format off
+cl::opt<std::string>
+ArgInputFilename("i",
+  cl::desc("Input file name"), cl::Positional, cl::Required);
+
+cl::opt<std::string>
+ArgModelPath("model", cl::desc("Path to performance model"), cl::init(""));
+
+cl::opt<int>
+ArgPrecision("precision",
+  cl::desc("Precision for the simulation (32 or 64)"), cl::init(64));
+
+cl::opt<int>
+ArgNWorkerThreads("worker-threads",
+  cl::desc("Number of worker threads (0 to auto-detect)"), cl::init(0));
+
+cl::opt<bool>
+ArgRunNoFuse("run-no-fuse", cl::desc("Run no-fuse circuit"), cl::init(false));
+
+cl::opt<bool>
+ArgRunSizeOnlyFuse("run-sizeonly-fuse",
+  cl::desc("Run size-only-fuse circuit"), cl::init(true));
+
+cl::opt<bool>
+ArgRunAdaptiveFuse("run-adaptive-fuse",
+  cl::desc("Run adaptive-fuse circuit"), cl::init(false));
+
+cl::opt<int>
+ArgSizeonlySize("sizeonly-size",
+  cl::desc("The max size of gates in size-only fusion"), cl::init(3));
+
+cl::opt<bool>
+ArgRunDenseKernel("run-dense-kernel",
+  cl::desc("Run dense kernel"), cl::init(false));
+
+cl::opt<int>
+ArgReplication("replication", cl::desc("Number of replications"), cl::init(1));
+
+cl::opt<int>
+ArgVerbose("verbose", cl::desc("Verbosity level"), cl::init(1));
+
+// clang-format on
+#pragma endregion
+
+static std::ostream& logerr() { return std::cerr << BOLDRED("[Err] "); }
+
+struct CircuitGraphs {
+  ir::CircuitGraphNode noFuse;
+  ir::CircuitGraphNode sizeOnly;
+  ir::CircuitGraphNode adaptive;
+
+  ir::CircuitGraphNode noFuseDense;
+  ir::CircuitGraphNode sizeOnlyDense;
+  ir::CircuitGraphNode adaptiveDense;
+
+  CircuitGraphs(const ir::CircuitGraphNode& cg) {
+    auto allGates = cg.getAllGatesShared();
+    for (const auto& gate : allGates) {
+      noFuse.insertGate(gate);
+      noFuseDense.insertGate(gate);
+      sizeOnly.insertGate(gate);
+      sizeOnlyDense.insertGate(gate);
+      adaptive.insertGate(gate);
+      adaptiveDense.insertGate(gate);
+    }
+  }
+};
+
+static CircuitGraphs
+unwrapArguments(Precision& precision, int& nWorkerThreads, int& nQubitsSV) {
+  if (ArgPrecision == 32)
+    precision = Precision::F32;
+  else if (ArgPrecision == 64)
+    precision = Precision::F64;
+  else {
+    std::cerr << BOLDRED("[Error]: ")
+              << "Invalid precision specified: " << ArgPrecision
+              << ". Valid values are 32 or 64.\n";
+    std::exit(1);
+  }
+  if (ArgNWorkerThreads <= 0)
+    nWorkerThreads = cast::get_cpu_num_threads();
+  else
+    nWorkerThreads = ArgNWorkerThreads;
+
+  if (ArgRunAdaptiveFuse && ArgModelPath == "") {
+    std::cerr
+        << BOLDRED("[Err] ")
+        << "--model=<path> must be specified when using adaptive fusion.\n";
+    std::exit(1);
+  }
+
+  if (!(ArgRunNoFuse || ArgRunSizeOnlyFuse || ArgRunAdaptiveFuse)) {
+    std::cerr << BOLDRED("[Err] ")
+              << "At least one of --run-no-fuse, --run-naive-fuse, "
+              << "--run-adaptive-fuse must be specified.\n";
+    std::exit(1);
+  }
+
+  // parse source QASM file
+  auto circuit = cast::parseCircuitFromQASMFile(ArgInputFilename);
+  if (!circuit) {
+    logerr() << "Failed to parse circuit from file: " << ArgInputFilename
+             << ": " << "Error: " << llvm::toString(circuit.takeError())
+             << "\n";
+    std::exit(1);
+  }
+  auto* cg = (*circuit)->getAllCircuitGraphs()[0];
+  nQubitsSV = cg->nQubits();
+  return CircuitGraphs(*cg);
+}
+
+int main(int argc, const char** argv) {
+  cl::ParseCommandLineOptions(argc, argv);
+
+  Precision precision;
+  int nWorkerThreads;
+  int nQubitsSV;
+  auto graphs = unwrapArguments(precision, nWorkerThreads, nQubitsSV);
+
+  /* Fusion */
+  // Fusion: size only
+  utils::Logger logger(std::cerr, ArgVerbose);
+  if (ArgRunSizeOnlyFuse) {
+    CUDAOptimizer opt;
+    opt.setSizeOnlyFusionConfig(ArgSizeonlySize).disableCFO();
+
+    opt.run(graphs.sizeOnly, logger);
+    if (ArgRunDenseKernel)
+      opt.run(graphs.sizeOnlyDense, logger);
+  }
+
+  // Fusion: adaptive
+  if (ArgRunAdaptiveFuse) {
+    CUDAOptimizer opt;
+    opt.disableCFO();
+    if (auto e = opt.loadCUDACostModelFromFile(ArgModelPath, precision)) {
+      logerr() << "Failed to load CUDA cost model from " << ArgModelPath << ": "
+               << llvm::toString(std::move(e)) << "\n";
+      std::exit(1);
+    }
+
+    opt.run(graphs.adaptive, logger);
+    if (ArgRunDenseKernel)
+      opt.run(graphs.adaptiveDense, logger);
+  }
+
+  /* Kernel Generation */
+  CUDAKernelGenConfig genCfg;
+  genCfg.precision = precision;
+  genCfg.displayInfo(std::cerr) << "\n";
+
+  auto genDenseCfg = genCfg;
+  genDenseCfg.zeroTol = 0.0;
+  genDenseCfg.oneTol = 0.0;
+
+  // Generate kernels
+  CUDAKernelManager km(ArgNWorkerThreads);
+  if (ArgRunNoFuse) {
+    utils::timedExecute(
+        [&]() {
+          auto r = km.genGraphGates(genCfg, graphs.noFuse, "graphNoFuse");
+          if (!r) {
+            std::cerr << BOLDRED("[Err] ")
+                      << "Failed to generate graphNoFuse\n";
+            std::exit(1);
+          }
+        },
+        "Generate No-fuse Kernels");
+  }
+  if (ArgRunSizeOnlyFuse) {
+    utils::timedExecute(
+        [&]() {
+          auto r =
+              km.genGraphGates(genCfg, graphs.sizeOnly, "graphSizeOnlyFuse");
+          if (!r) {
+            std::cerr << BOLDRED("[Err] ")
+                      << "Failed to generate graphSizeOnlyFuse\n";
+            std::exit(1);
+          }
+        },
+        "Generate Size-only Fused Kernels");
+  }
+  if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
+    utils::timedExecute(
+        [&]() {
+          auto r =
+              km.genGraphGates(genCfg, graphs.adaptive, "graphAdaptiveFuse");
+          if (!r) {
+            std::cerr << BOLDRED("[Err] ")
+                      << "Failed to generate graphAdaptiveFuse\n";
+            std::exit(1);
+          }
+        },
+        "Generate Adaptive-fused Kernels");
+  }
+  if (ArgRunNoFuse && ArgRunDenseKernel) {
+    utils::timedExecute(
+        [&]() {
+          auto r = km.genGraphGates(
+              genDenseCfg, graphs.noFuseDense, "graphNoFuseDense");
+          if (!r) {
+            std::cerr << BOLDRED("[Err] ")
+                      << "Failed to generate graphNoFuseDense\n";
+            std::exit(1);
+          }
+        },
+        "Generate No-fuse Dense Kernels");
+  }
+  if (ArgRunSizeOnlyFuse && ArgRunDenseKernel) {
+    utils::timedExecute(
+        [&]() {
+          auto r = km.genGraphGates(
+              genDenseCfg, graphs.sizeOnlyDense, "graphSizeOnlyFuseDense");
+          if (!r) {
+            std::cerr << BOLDRED("[Err] ")
+                      << "Failed to generate graphSizeOnlyFuseDense\n";
+            std::exit(1);
+          }
+        },
+        "Generate Size-only Fused Dense Kernels");
+  }
+  if (ArgModelPath != "" && ArgRunAdaptiveFuse && ArgRunDenseKernel) {
+    utils::timedExecute(
+        [&]() {
+          auto r = km.genGraphGates(
+              genDenseCfg, graphs.adaptiveDense, "graphAdaptiveFuseDense");
+          if (!r) {
+            std::cerr << BOLDRED("[Err] ")
+                      << "Failed to generate graphAdaptiveFuseDense\n";
+            std::exit(1);
+          }
+        },
+        "Generate Adaptive-fused Dense Kernels");
+  }
+
+  /* Launch and Time Kernels */
+  CUDAStatevectorF64 sv(nQubitsSV);
+  sv.randomize();
+  km.setLaunchConfig(sv.getDevicePtr(), sv.nQubits());
+
+  const auto runAndDisplayResult = [&](const std::string& graphName,
+                                       bool isDense) {
+    auto kernels = km.getKernelsFromGraphName(graphName);
+    double opCountTotal = 0.0;
+    for (const auto& kernel : kernels)
+      opCountTotal += kernel->gate->opCount(isDense ? 0.0 : 1e-8);
+
+    auto results = km.enqueueKernelLaunchFromGraph(graphName, 2);
+    km.syncKernelExecution();
+    float t = 0.0f;
+    for (const auto* r : results) {
+      t += r->getKernelTime();
+    }
+
+    double gflops =
+        static_cast<double>(1ULL << sv.nQubits()) * 1e-9 * opCountTotal;
+    double bandwidth = kernels.size() *
+                       static_cast<double>(1ULL << sv.nQubits()) *
+                       (precision == Precision::F32 ? 8.0 : 16.0) / t;
+    std::cerr << "- Num Kernels:    " << kernels.size() << "\n"
+              << "- Total Op Count: " << opCountTotal << "\n"
+              << "- Fastest Run:    "
+              << timeit::TimingResult::timeToString(t, 4) << " @ " << gflops
+              << " GFLOPs per second\n"
+              << "- Effective Bandwidth: " << utils::fmt_mem(bandwidth)
+              << " per sec\n";
+  };
+
+  std::cerr << BOLDCYAN("Running kernels:\n");
+  if (ArgRunNoFuse) {
+    std::cerr << "No-fuse Circuit:\n";
+    runAndDisplayResult("graphNoFuse", false);
+    if (ArgRunDenseKernel) {
+      std::cerr << "No-fuse Dense Circuit:\n";
+      runAndDisplayResult("graphNoFuseDense", true);
+    }
+  }
+
+  if (ArgRunSizeOnlyFuse) {
+    std::cerr << "Size-only-fuse Circuit:\n";
+    runAndDisplayResult("graphSizeOnlyFuse", false);
+    if (ArgRunDenseKernel) {
+      std::cerr << "Size-only-fuse Dense Circuit:\n";
+      runAndDisplayResult("graphSizeOnlyFuseDense", true);
+    }
+  }
+
+  if (ArgRunAdaptiveFuse) {
+    std::cerr << "Adaptive-fused Circuit:\n";
+    runAndDisplayResult("graphAdaptiveFuse", false);
+    if (ArgRunDenseKernel) {
+      std::cerr << "Adaptive-fused Dense Circuit:\n";
+      runAndDisplayResult("graphAdaptiveFuseDense", true);
+    }
+  }
+  return 0;
+}

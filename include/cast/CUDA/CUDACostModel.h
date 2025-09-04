@@ -40,7 +40,7 @@ public:
 
   void writeResults(std::ostream& os) const;
 
-  llvm::Error loadFromCSV(std::istream& is) {
+  llvm::Error loadFrom(std::istream& is) {
     items_.clear();
     std::string line;
     // Skip the title line
@@ -55,9 +55,9 @@ public:
     return llvm::Error::success();
   }
 
-  static llvm::Expected<CUDAPerformanceCache> LoadFromCSV(std::istream& is) {
+  static llvm::Expected<CUDAPerformanceCache> LoadFrom(std::istream& is) {
     CUDAPerformanceCache cache;
-    if (auto err = cache.loadFromCSV(is))
+    if (auto err = cache.loadFrom(is))
       return std::move(err);
     return cache;
   }
@@ -77,13 +77,21 @@ class CUDACostModel : public CostModel {
   };
   // Value: GiB time per op count
   SortedVectorMap<BucketKey, float> bucket_;
+  Precision queryPrecision_ = Precision::Unknown;
+
+  // The minimum time it will take to update 1GiB memory. Calculated by
+  // 1.0 / bandwidth. In the cost model initialization, this is set by the
+  // maximum memory update speed across buckets.
+  float minGiBTimeCap{};
 
 public:
   CUDACostModel() : CostModel(CM_CUDA) {}
 
   CUDACostModel(const CUDAPerformanceCache& cache);
 
-  double computeGiBTime(const QuantumGate* gate) const override { return 0.0; }
+  void setQueryPrecision(Precision p) { queryPrecision_ = p; }
+
+  double computeGiBTime(const QuantumGate* gate) const override;
 
   std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
 };

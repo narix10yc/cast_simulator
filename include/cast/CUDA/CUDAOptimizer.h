@@ -1,56 +1,33 @@
 #ifndef CAST_CUDA_CUDAOPTIMIZER_H
 #define CAST_CUDA_CUDAOPTIMIZER_H
 
+#include "cast/CUDA/CUDACostModel.h"
 #include "cast/CUDA/CUDAFusionConfig.h"
 #include "cast/Core/Optimizer.h"
 
 namespace cast {
 
-class CUDAOptimizer : public Optimizer {
-public:
-  std::unique_ptr<FusionConfig> fusionConfig;
-  bool enableCanonicalization_ = true;
-  bool enableFusion_ = true;
-  bool enableCFO_ = true;
-
+class CUDAOptimizer : public Optimizer<CUDAOptimizer> {
 public:
   CUDAOptimizer() = default;
 
-  CUDAOptimizer& setCUDAFusionConfig(std::unique_ptr<CUDAFusionConfig> cfg) {
-    fusionConfig = std::move(cfg);
-    return *this;
+  llvm::Error loadCUDACostModelFromFile(const std::string& filename,
+                                        Precision queryPrecision) {
+    std::ifstream ifile(filename);
+    auto expectedCache = CUDAPerformanceCache::LoadFrom(ifile);
+    if (!expectedCache) {
+      return llvm::joinErrors(
+          llvm::createStringError(
+              "Failed to load CUDA performance cache from " + filename),
+          expectedCache.takeError());
+    }
+    auto cm = std::make_unique<CUDACostModel>(*expectedCache);
+    cm->setQueryPrecision(queryPrecision);
+    auto fc = std::make_unique<CUDAFusionConfig>();
+    fc->setCostModel(std::move(cm));
+    this->setFusionConfig(std::move(fc));
+    return llvm::Error::success();
   }
-
-  CUDAOptimizer& enableCanonicalization() {
-    enableCanonicalization_ = true;
-    return *this;
-  }
-  CUDAOptimizer& disableCanonicalization() {
-    enableCanonicalization_ = false;
-    return *this;
-  }
-  CUDAOptimizer& enableFusion() {
-    enableFusion_ = true;
-    return *this;
-  }
-  CUDAOptimizer& disableFusion() {
-    enableFusion_ = false;
-    return *this;
-  }
-  CUDAOptimizer& enableCFO() {
-    enableCFO_ = true;
-    return *this;
-  }
-  CUDAOptimizer& disableCFO() {
-    enableCFO_ = false;
-    return *this;
-  }
-
-  void run(ir::CircuitNode& circuit,
-           utils::Logger logger = nullptr) const override;
-
-  void run(ir::CircuitGraphNode& graph,
-           utils::Logger logger = nullptr) const override;
 };
 
 } // namespace cast

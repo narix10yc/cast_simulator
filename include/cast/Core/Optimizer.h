@@ -7,25 +7,71 @@
 
 namespace cast {
 
-class Optimizer {
+// The base class for optimizers.
+class OptimizerBase {
+protected:
+  // Default is SizeOnlyFusionConfig with size 3.
+  std::unique_ptr<FusionConfig> fusionConfig_;
+
+  bool enableCanonicalization_ = true;
+  bool enableFusion_ = true;
+  bool enableCFO_ = false;
+
 public:
-  virtual ~Optimizer() = default;
+  virtual ~OptimizerBase() = default;
 
-  virtual void run(ir::CircuitNode& circuit, utils::Logger logger) const = 0;
+  void run(ir::CircuitNode& circuit, utils::Logger logger = nullptr) const;
 
-  virtual void run(ir::CircuitGraphNode& graph, utils::Logger logger) const = 0;
+  void run(ir::CircuitGraphNode& graph, utils::Logger logger = nullptr) const;
+}; // OptimizerBase
 
-  virtual std::ostream& displayInfo(std::ostream& os, int verbose = 1) const {
-    return os << "Optimizer @ " << this << "\n";
+// We use CRTP to allow method chaining.
+template <typename Derived> class Optimizer : public OptimizerBase {
+public:
+  Derived& setFusionConfig(std::unique_ptr<FusionConfig> cfg) {
+    fusionConfig_ = std::move(cfg);
+    return static_cast<Derived&>(*this);
+  }
+
+  std::unique_ptr<FusionConfig>& getFusionConfig() { return fusionConfig_; }
+
+  // Size-only fusion does not take any queries.
+  Derived& setSizeOnlyFusionConfig(int size) {
+    fusionConfig_ = std::make_unique<SizeOnlyFusionConfig>(size);
+    return static_cast<Derived&>(*this);
+  }
+
+  Derived& disableCanonicalization() {
+    enableCanonicalization_ = false;
+    return static_cast<Derived&>(*this);
+  }
+
+  Derived& disableFusion() {
+    enableFusion_ = false;
+    return static_cast<Derived&>(*this);
+  }
+
+  Derived& disableCFO() {
+    enableCFO_ = false;
+    return static_cast<Derived&>(*this);
+  }
+
+  Derived& enableCanonicalization() {
+    enableCanonicalization_ = true;
+    return static_cast<Derived&>(*this);
+  }
+
+  Derived& enableFusion() {
+    enableFusion_ = true;
+    return static_cast<Derived&>(*this);
+  }
+
+  Derived& enableCFO() {
+    enableCFO_ = true;
+    return static_cast<Derived&>(*this);
   }
 
 }; // class Optimizer
-
-/// @brief Optimize the circuit by trying to fuse away all single-qubit gates,
-/// including those in if statements.
-void applyCanonicalizationPass(ir::CircuitNode& circuit, double swapTol);
-
-void applyGateFusionPass(ir::CircuitNode& circuit, const FusionConfig* config);
 
 } // namespace cast
 

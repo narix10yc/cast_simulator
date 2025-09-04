@@ -1,4 +1,4 @@
-#include "cast/CPU/CPUOptimizer.h"
+#include "cast/Core/Optimizer.h"
 #include "cast/Core/ImplOptimize.h"
 
 #include "timeit/timeit.h"
@@ -6,8 +6,8 @@
 
 using namespace cast;
 
-void CPUOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
-  assert(fusionConfig != nullptr);
+void OptimizerBase::run(ir::CircuitNode& circuit, utils::Logger logger) const {
+  assert(fusionConfig_ != nullptr);
   // Step 1: Run canonicalization pass if enabled
   if (enableCanonicalization_) {
     // Canoicalization Block-wise Fusion Pass
@@ -15,7 +15,7 @@ void CPUOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
     double t = timeit::once([&]() {
       auto allCircuitGraphs = circuit.getAllCircuitGraphs();
       for (auto* graph : allCircuitGraphs)
-        nFused = cast::impl::applySizeTwoFusion(*graph, fusionConfig->swapTol);
+        nFused = cast::impl::applySizeTwoFusion(*graph, fusionConfig_->swapTol);
     });
     logger.log(1) << "Canoicalization Block-wise Fusion Pass: " << nFused
                   << " gates fused in " << utils::fmt_time(t) << "\n";
@@ -23,7 +23,7 @@ void CPUOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
       // Canonicalization CFO Fusion Pass
       double t = timeit::once([&]() {
         SizeOnlyFusionConfig cfoFusionConfig(2);
-        cfoFusionConfig.swapTol = fusionConfig->swapTol;
+        cfoFusionConfig.swapTol = fusionConfig_->swapTol;
         nFused = cast::impl::applyCFOFusion(circuit, &cfoFusionConfig, 2);
       });
       logger.log(1) << "Canonicalization CFO Fusion Pass: " << nFused
@@ -36,22 +36,22 @@ void CPUOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
     int nFused = 0;
     double t = timeit::once([&]() {
       auto allCircuitGraphs = circuit.getAllCircuitGraphs();
-      for (int cddSize = fusionConfig->sizeMin;
-           cddSize <= fusionConfig->sizeMax;
+      for (int cddSize = fusionConfig_->sizeMin;
+           cddSize <= fusionConfig_->sizeMax;
            ++cddSize) {
         int nFusedThisSize = 0;
         for (auto* graph : allCircuitGraphs) {
           int nFusedThisRound = 0;
           do {
             nFusedThisRound =
-                impl::applyGateFusion(*graph, fusionConfig.get(), cddSize);
+                impl::applyGateFusion(*graph, fusionConfig_.get(), cddSize);
             nFusedThisSize += nFusedThisRound;
-          } while (fusionConfig->enableMultiTraverse && nFusedThisRound > 0);
+          } while (fusionConfig_->enableMultiTraverse && nFusedThisRound > 0);
         } // for each graph
         // Processed every graph in this size. Run CFO fusion if enabled
         if (enableCFO_ && nFusedThisSize > 0) {
           nFusedThisSize +=
-              impl::applyCFOFusion(circuit, fusionConfig.get(), cddSize);
+              impl::applyCFOFusion(circuit, fusionConfig_.get(), cddSize);
         }
         nFused += nFusedThisSize;
         logger.log(2) << " At size " << cddSize << ", fused " << nFusedThisSize
@@ -63,12 +63,12 @@ void CPUOptimizer::run(ir::CircuitNode& circuit, utils::Logger logger) const {
   } // if enableFusion_
 }
 
-void CPUOptimizer::run(ir::CircuitGraphNode& graph,
-                       utils::Logger logger) const {
-  assert(fusionConfig != nullptr);
+void OptimizerBase::run(ir::CircuitGraphNode& graph,
+                        utils::Logger logger) const {
+  assert(fusionConfig_ != nullptr);
   // Step 1: Run canonicalization pass if enabled
   if (enableCanonicalization_) {
-    int nFused = cast::impl::applySizeTwoFusion(graph, fusionConfig->swapTol);
+    int nFused = cast::impl::applySizeTwoFusion(graph, fusionConfig_->swapTol);
     logger.log(1) << "Canoicalization Block-wise Fusion Pass: " << nFused
                   << " gates fused.\n";
   }
@@ -77,11 +77,11 @@ void CPUOptimizer::run(ir::CircuitGraphNode& graph,
   if (enableFusion_) {
     int nFused = 0;
     double t = timeit::once([&]() {
-      for (int maxCandidateSize = fusionConfig->sizeMin;
-           maxCandidateSize <= fusionConfig->sizeMax;
+      for (int maxCandidateSize = fusionConfig_->sizeMin;
+           maxCandidateSize <= fusionConfig_->sizeMax;
            ++maxCandidateSize) {
         int nFusedThisRound =
-            impl::applyGateFusion(graph, fusionConfig.get(), maxCandidateSize);
+            impl::applyGateFusion(graph, fusionConfig_.get(), maxCandidateSize);
         nFused += nFusedThisRound;
         logger.log(2) << " At size " << maxCandidateSize << ", fused "
                       << nFusedThisRound << " gates.\n";

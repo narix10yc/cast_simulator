@@ -28,11 +28,7 @@ ArgSimdWidth("simd-width",
   cl::desc("SIMD width (128, 256, 512, or 0 for auto-detect)"), cl::init(0));
 
 cl::opt<int>
-ArgNThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
-
-cl::opt<bool>
-ArgOverwriteMode("overwrite",
-  cl::desc("Overwrite the output file with new results"), cl::init(false));
+ArgNWorkerThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
 
 cl::opt<bool>
 ArgRunNoFuse("run-no-fuse", cl::desc("Run no-fuse circuit"), cl::init(false));
@@ -75,10 +71,10 @@ static void unwrapArguments(Precision& precision,
               << ". Valid values are 32 or 64.\n";
     std::exit(1);
   }
-  if (ArgNThreads <= 0)
+  if (ArgNWorkerThreads <= 0)
     nThreads = cast::get_cpu_num_threads();
   else
-    nThreads = ArgNThreads;
+    nThreads = ArgNWorkerThreads;
 
   if (ArgSimdWidth == 128)
     simdWidth = CPUSimdWidth::W128;
@@ -210,14 +206,13 @@ int main(int argc, const char** argv) {
   denseKernelGenConfig.oneTol = 0.0;
 
   // Generate kernels
-  CPUKernelManager kernelMgr;
+  CPUKernelManager km(nThreads);
   if (ArgRunNoFuse) {
     utils::timedExecute(
         [&]() {
-          auto r =
-              kernelMgr.genGraphGates(kernelGenConfig,
-                                      *noFuseCircuit.getAllCircuitGraphs()[0],
-                                      "graphNoFuse");
+          auto r = km.genGraphGates(kernelGenConfig,
+                                    *noFuseCircuit.getAllCircuitGraphs()[0],
+                                    "graphNoFuse");
           if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphNoFuse\n";
@@ -229,10 +224,10 @@ int main(int argc, const char** argv) {
   if (ArgRunSizeOnlyFuse) {
     utils::timedExecute(
         [&]() {
-          auto r = kernelMgr.genGraphGates(
-              kernelGenConfig,
-              *sizeOnlyFuseCircuit.getAllCircuitGraphs()[0],
-              "graphNaiveFuse");
+          auto r =
+              km.genGraphGates(kernelGenConfig,
+                               *sizeOnlyFuseCircuit.getAllCircuitGraphs()[0],
+                               "graphNaiveFuse");
           if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphNaiveFuse\n";
@@ -244,10 +239,10 @@ int main(int argc, const char** argv) {
   if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
     utils::timedExecute(
         [&]() {
-          auto r = kernelMgr.genGraphGates(
-              kernelGenConfig,
-              *adaptiveFuseCircuit.getAllCircuitGraphs()[0],
-              "graphAdaptiveFuse");
+          auto r =
+              km.genGraphGates(kernelGenConfig,
+                               *adaptiveFuseCircuit.getAllCircuitGraphs()[0],
+                               "graphAdaptiveFuse");
           if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphAdaptiveFuse\n";
@@ -259,10 +254,9 @@ int main(int argc, const char** argv) {
   if (ArgRunNoFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto r =
-              kernelMgr.genGraphGates(denseKernelGenConfig,
-                                      *noFuseCircuit.getAllCircuitGraphs()[0],
-                                      "graphNoFuseDense");
+          auto r = km.genGraphGates(denseKernelGenConfig,
+                                    *noFuseCircuit.getAllCircuitGraphs()[0],
+                                    "graphNoFuseDense");
           if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphNoFuseDense\n";
@@ -274,10 +268,10 @@ int main(int argc, const char** argv) {
   if (ArgRunSizeOnlyFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto r = kernelMgr.genGraphGates(
-              denseKernelGenConfig,
-              *sizeOnlyFuseCircuit.getAllCircuitGraphs()[0],
-              "graphNaiveFuseDense");
+          auto r =
+              km.genGraphGates(denseKernelGenConfig,
+                               *sizeOnlyFuseCircuit.getAllCircuitGraphs()[0],
+                               "graphNaiveFuseDense");
           if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphNaiveFuseDense\n";
@@ -289,10 +283,10 @@ int main(int argc, const char** argv) {
   if (ArgModelPath != "" && ArgRunAdaptiveFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto r = kernelMgr.genGraphGates(
-              denseKernelGenConfig,
-              *adaptiveFuseCircuit.getAllCircuitGraphs()[0],
-              "graphAdaptiveFuseDense");
+          auto r =
+              km.genGraphGates(denseKernelGenConfig,
+                               *adaptiveFuseCircuit.getAllCircuitGraphs()[0],
+                               "graphAdaptiveFuseDense");
           if (!r) {
             std::cerr << BOLDRED("[Err] ")
                       << "Failed to generate graphAdaptiveFuseDense\n";
@@ -311,14 +305,10 @@ int main(int argc, const char** argv) {
 
   utils::timedExecute(
       [&]() {
-        auto result = kernelMgr.initJIT(nThreads,
-                                        llvm::OptimizationLevel::O1,
-                                        /* useLazyJIT */ false,
-                                        /* verbose */ 1);
+        auto result = km.initJIT(llvm::OptimizationLevel::O1, false, 1);
         if (!result) {
           std::cerr << BOLDRED("[Err] ")
-                    << "Failed to initialize JIT: " << result.what()
-                    << "\n";
+                    << "Failed to initialize JIT: " << result.what() << "\n";
           std::exit(1);
         }
       },
@@ -334,14 +324,14 @@ int main(int argc, const char** argv) {
   std::cerr << BOLDCYAN("Running kernels:\n");
   if (ArgRunNoFuse) {
     runAndDisplayResult(std::cerr << "No-fuse Circuit:\n",
-                        kernelMgr,
+                        km,
                         "graphNoFuse",
                         sv,
                         nThreads,
                         false);
     if (ArgRunDenseKernel) {
       runAndDisplayResult(std::cerr << "No-fuse Dense Circuit:\n",
-                          kernelMgr,
+                          km,
                           "graphNoFuseDense",
                           sv,
                           nThreads,
@@ -351,14 +341,14 @@ int main(int argc, const char** argv) {
 
   if (ArgRunSizeOnlyFuse) {
     runAndDisplayResult(std::cerr << "Naive-fused Circuit:\n",
-                        kernelMgr,
+                        km,
                         "graphNaiveFuse",
                         sv,
                         nThreads,
                         false);
     if (ArgRunDenseKernel) {
       runAndDisplayResult(std::cerr << "Naive-fused Dense Circuit:\n",
-                          kernelMgr,
+                          km,
                           "graphNaiveFuseDense",
                           sv,
                           nThreads,
@@ -368,14 +358,14 @@ int main(int argc, const char** argv) {
 
   if (ArgRunAdaptiveFuse) {
     runAndDisplayResult(std::cerr << "Adaptive-fused Circuit:\n",
-                        kernelMgr,
+                        km,
                         "graphAdaptiveFuse",
                         sv,
                         nThreads,
                         false);
     if (ArgRunDenseKernel) {
       runAndDisplayResult(std::cerr << "Adaptive-fused Dense Circuit:\n",
-                          kernelMgr,
+                          km,
                           "graphAdaptiveFuseDense",
                           sv,
                           nThreads,

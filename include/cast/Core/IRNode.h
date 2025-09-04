@@ -2,7 +2,7 @@
 #define CAST_CORE_IRNODE_H
 
 #include "cast/Core/QuantumGate.h"
-#include "utils/MaybeError.h"
+#include "llvm/Support/Error.h"
 #include <iostream>
 #include <list>
 #include <unordered_map>
@@ -370,7 +370,7 @@ public:
 namespace cast {
 /// @brief Parse a QASM file and return a cast::ir::CircuitNode.
 /// The definition is in src/Core/IR/ParseCircuitFromQASM.cpp.
-cast::MaybeError<ir::CircuitNode>
+llvm::Expected<std::unique_ptr<ir::CircuitNode>>
 parseCircuitFromQASMFile(const std::string& fileName);
 }; // namespace cast
 
