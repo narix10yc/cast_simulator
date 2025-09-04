@@ -285,20 +285,29 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
     addRandomQuGate(prob);
   }
 
-  CPUKernelManager kernelMgr;
+  CPUKernelManager km;
   utils::timedExecute(
       [&]() {
         int i = 0;
         for (const auto& gate : gates) {
-
-          kernelMgr.genStandaloneGate(
-              cpuConfig, gate, "gate_" + std::to_string(i++));
+          if (auto e = km.genStandaloneGate(
+                  cpuConfig, gate, "gate_" + std::to_string(i++))) {
+            std::cerr << RED("Error: ") << "Failed to generate kernel for gate "
+                      << i - 1 << ": " << llvm::toString(std::move(e)) << "\n";
+            std::exit(1);
+          }
         }
       },
       "Code Generation");
 
   utils::timedExecute(
-      [&]() { kernelMgr.initJIT(llvm::OptimizationLevel::O1, false, 1); },
+      [&]() {
+        if (auto e = km.initJIT(llvm::OptimizationLevel::O1, false, 1)) {
+          std::cerr << RED("Error: ") << "Failed to initialize JIT engine: "
+                    << llvm::toString(std::move(e)) << "\n";
+          std::exit(1);
+        }
+      },
       "Initialize JIT Engine");
 
   timeit::Timer timer(3, /* verbose */ 0);
@@ -308,9 +317,10 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
   utils::timedExecute([&]() { sv.randomize(nThreads); },
                       "Initialize statevector");
 
-  for (const auto& kernel : kernelMgr.getAllStandaloneKernels()) {
+  for (const auto& kernel : km.getAllStandaloneKernels()) {
     tr = timer.timeit([&]() {
-      kernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), *kernel, nThreads);
+      llvm::cantFail(
+          km.applyCPUKernel(sv.data(), sv.nQubits(), *kernel, nThreads));
     });
     auto memSpd =
         internal::calculateMemUpdateSpeed(nQubits, kernel->precision, tr.min);

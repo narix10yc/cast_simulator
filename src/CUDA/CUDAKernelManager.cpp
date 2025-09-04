@@ -111,8 +111,8 @@ CUDAKernelManager::ExecutionResult::displayInfo(std::ostream& os) const {
 }
 
 CUDAKernelManager::CUDAKernelManager(int nWorkerThreads, int deviceOrdinal)
-    : KernelManagerBase((nWorkerThreads > 0) ? nWorkerThreads
-                                             : cast::get_cpu_num_threads()) {
+    : KernelManager<CUDAKernelInfo>(
+          nWorkerThreads > 0 ? nWorkerThreads : cast::get_cpu_num_threads()) {
   window_ = LaunchWindow(this->dispatcher.getNumWorkers());
   CU_CHECK(cuInit(0));
   CU_CHECK(cuDeviceGet(&cuDevice, deviceOrdinal));

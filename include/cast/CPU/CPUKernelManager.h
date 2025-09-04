@@ -63,11 +63,8 @@ struct CPUKernelGenConfig {
   std::ostream& displayInfo(std::ostream& os) const;
 };
 
-class CPUKernelManager : public KernelManagerBase {
-  using KernelInfoPtr = std::unique_ptr<CPUKernelInfo>;
-  std::vector<KernelInfoPtr> standaloneKernels_;
-  std::map<std::string, std::vector<KernelInfoPtr>> graphKernels_;
-  std::unique_ptr<llvm::orc::LLJIT> llvmJIT;
+class CPUKernelManager : public KernelManager<CPUKernelInfo> {
+  std::unique_ptr<llvm::orc::LLJIT> llvmJIT = nullptr;
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
@@ -88,9 +85,9 @@ class CPUKernelManager : public KernelManagerBase {
 
 public:
   CPUKernelManager(int nWorkerThreads = -1)
-      : KernelManagerBase(nWorkerThreads > 0 ? nWorkerThreads
-                                             : cast::get_cpu_num_threads()),
-        standaloneKernels_(), llvmJIT(nullptr) {}
+      : KernelManager<CPUKernelInfo>(
+            nWorkerThreads > 0 ? nWorkerThreads : cast::get_cpu_num_threads()) {
+  }
 
   std::ostream& displayInfo(std::ostream& os) const;
 

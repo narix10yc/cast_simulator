@@ -8,3 +8,7 @@ CAST has several components, each packed into a static library.
 - `libopenqasm` consists of basic support to the OpenQASM2.0 format of quantum circuits.
 - `libcast_utils` consists of utility functions such as formatter, printer, IO colors, etc.
 - `libcast` is the top-level library that statically links all aforementioned components.
+
+## Core Data Structure
+### Kernel Managers
+Kernel Managers are a central object in the CAST software. They manage kernel generation, JIT objects caching, and kernel execution/launching.
