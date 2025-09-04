@@ -69,19 +69,19 @@ template <typename ScalarType> static void benchmark() {
     kernelMgr
         .genStandaloneGate(
             kernelGenConfig, unitaryGate, "u_gate_" + std::to_string(k))
-        .consumeError(); // ignore possible error
+        ; 
     // And we relax forceDenseKernel for Hadamard and RZ gates
     kernelGenConfig.zeroTol = 1e-8;
     kernelGenConfig.oneTol = 1e-8;
     kernelMgr
         .genStandaloneGate(
             kernelGenConfig, hadamardGate, "h_gate_" + std::to_string(k))
-        .consumeError(); // ignore possible error
+        ; 
     kernelMgr
         .genStandaloneGate(kernelGenConfig,
                            sGate,
                            "s_gate_" + std::to_string(k))
-        .consumeError(); // ignore possible error
+        ; 
   }
 
   // Initialize JIT engine
@@ -118,7 +118,7 @@ template <typename ScalarType> static void benchmark() {
                           sv.nQubits(),
                           "u_gate_" + std::to_string(k),
                           NUM_THREADS)
-          .consumeError();
+          ;
     });
     std::cerr << "  Dense Gate: " << computeGiBps(sv.sizeInBytes(), tr.min)
               << " GiB/s\n";
@@ -130,7 +130,7 @@ template <typename ScalarType> static void benchmark() {
                           sv.nQubits(),
                           "h_gate_" + std::to_string(k),
                           NUM_THREADS)
-          .consumeError();
+          ;
     });
     std::cerr << "  H Gate:     " << computeGiBps(sv.sizeInBytes(), tr.min)
               << " GiB/s\n";
@@ -142,7 +142,7 @@ template <typename ScalarType> static void benchmark() {
                           sv.nQubits(),
                           "s_gate_" + std::to_string(k),
                           NUM_THREADS)
-          .consumeError();
+          ;
     });
     std::cerr << "  S Gate:     " << computeGiBps(sv.sizeInBytes(), tr.min)
               << " GiB/s\n";

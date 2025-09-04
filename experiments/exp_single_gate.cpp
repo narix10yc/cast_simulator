@@ -181,7 +181,7 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
     const auto& gate = gates[i];
     std::string funcName = "gate_" + std::to_string(i);
     kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName)
-        .consumeError(); // ignore possible error
+        ; 
   }
 
   // Initialize JIT engine
@@ -219,7 +219,7 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
       for (auto* kernelInfo : kernels) {
         kernelMgr
             .applyCPUKernel(sv.data(), sv.nQubits(), *kernelInfo, NUM_THREADS)
-            .consumeError();
+            ;
       }
     });
     // device,method,gate_type,nqubits,precision,time_per_gate
@@ -252,7 +252,7 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   for (int i = 0; i < gates.size(); ++i) {
     const auto& gate = gates[i];
     std::string funcName = "gate_" + std::to_string(i);
-    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName).consumeError();
+    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName);
   }
 
   // Initialize JIT engine

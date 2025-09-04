@@ -234,6 +234,7 @@ Function* getFunctionDeclarationCUDA(IRBuilder<>& B,
   return func;
 }
 
+[[maybe_unused]]
 Value* getGlobalTid(IRBuilder<>& B) {
   // thread index
   auto* tidV = B.CreateIntrinsic(
@@ -1293,7 +1294,7 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
   return func;
 }
 
-MaybeError<CUDAKernelManager::KernelInfoPtr>
+llvm::Expected<CUDAKernelManager::KernelInfoPtr>
 CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
                                 ConstQuantumGatePtr gate,
                                 const std::string& funcName) {
@@ -1304,8 +1305,9 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
     // a normal gate, no noise channel
     const auto scalarGM = stdQuGate->getScalarGM();
     if (scalarGM == nullptr) {
-      return cast::makeError("Only supporting scalar GM for now");
+      return llvm::createStringError("Only supporting scalar GM for now");
     }
+
     func = gen_(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
   } else {
     // super op gates are treated as normal gates with twice the number of
@@ -1324,10 +1326,7 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
   }
 
   if (func == nullptr) {
-    std::ostringstream oss;
-    oss << "Failed to generate kernel for gate " << (void*)(gate.get())
-        << " with name " << funcName;
-    return cast::makeError(oss.str());
+    return llvm::createStringError("Failed to generate kernel " + funcName);
   }
 
   // std::string ptxString;
@@ -1364,26 +1363,23 @@ CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
     }
   }
 
-  if (auto r = genCUDAGate_(config, gate, funcName)) {
-    auto kernel(r.takeValue());
-    const auto* kernelRet = kernel.get();
-    standaloneKernels_.emplace_back(std::move(kernel));
+  if (auto kernel = genCUDAGate_(config, gate, funcName)) {
+    const auto* kernelRet = (*kernel).get();
+    standaloneKernels_.emplace_back(std::move(*kernel));
     return kernelRet;
-  } else
-    return llvm::createStringError("Err: " + r.what());
+  } else {
+    return kernel.takeError();
+  }
 }
 
-MaybeError<void>
-CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
-                                 const ir::CircuitGraphNode& graph,
-                                 const std::string& graphName) {
+llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
+                                             const ir::CircuitGraphNode& graph,
+                                             const std::string& graphName) {
   assert(graph.checkConsistency());
 
   if (graphKernels_.contains(graphName)) {
-    std::ostringstream oss;
-    oss << "Graph with name '" << graphName
-        << "' already has generated kernels. Please use a different name.";
-    return cast::makeError(oss.str());
+    return llvm::createStringError("Graph with name '" + graphName +
+                                   "' already exists.");
   }
 
   auto mangledGraphName = internal::mangleGraphName(graphName);
@@ -1396,18 +1392,15 @@ CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
   for (const auto& gate : allGates) {
     auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    if (auto r = genCUDAGate_(config, gate, name)) {
-      kernels.emplace_back(r.takeValue());
+    if (auto kernel = genCUDAGate_(config, gate, name)) {
+      kernels.emplace_back(std::move(*kernel));
     } else {
-      std::ostringstream oss;
-      oss << "Failed to generate kernel for gate " << (void*)(gate.get())
-          << ": " << r.what() << "\n";
-      return cast::makeError(oss.str());
+      return kernel.takeError();
     }
   }
   // Store the generated kernels in the map
   graphKernels_[graphName] = std::move(kernels);
-  return {}; // success
+  return llvm::Error::success();
 }
 
 #undef DEBUG_TYPE

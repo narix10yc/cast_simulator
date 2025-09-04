@@ -21,10 +21,9 @@ std::ostream& SizeOnlyCostModel::displayInfo(std::ostream& os,
 
 void cast::impl::computeGateWeights(const std::array<float, 5>& tarr,
                                     impl::CostModelWeightType& weights) {
-  // The ratio decides the scaling of weights when time[k+1] doubles compared to
-  // time[k]. Set to a larger value to focus more on the transition region.
-  constexpr float ratio = 1.1f;
 
+  // The following two parameters decides the scaling of weights
+  // when mem speed halves according to a Lorentzian bump.
   constexpr float T = 15.f;
   constexpr float eps = 0.1f;
 

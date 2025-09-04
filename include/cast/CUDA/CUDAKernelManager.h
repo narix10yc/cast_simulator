@@ -10,7 +10,6 @@
 #include "cast/Core/QuantumGate.h"
 
 #include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
-#include "utils/MaybeError.h"
 
 #include "llvm/Support/Error.h"
 
@@ -69,9 +68,9 @@ class CUDAKernelManager : public KernelManagerBase {
   // Generate a CUDA kernel for the given gate. This function will wraps around
   // when gate is a StandardQuantumGate (with or without noise) or
   // SuperopQuantumGate, and call gen_ with a corresponding ComplexSquareMatrix.
-  MaybeError<KernelInfoPtr> genCUDAGate_(const CUDAKernelGenConfig& config,
-                                         ConstQuantumGatePtr gate,
-                                         const std::string& funcName);
+  llvm::Expected<KernelInfoPtr> genCUDAGate_(const CUDAKernelGenConfig& config,
+                                             ConstQuantumGatePtr gate,
+                                             const std::string& funcName);
 
   /* Kernel Execution Result */
 public:
@@ -79,7 +78,7 @@ public:
     using clock_t = std::chrono::steady_clock;
     using time_point_t = clock_t::time_point;
 
-    cast::Error err;
+    llvm::Error err = llvm::Error::success();
     std::string kernelName;
 
     // when the loading thread starts preparing the kernel
@@ -253,19 +252,19 @@ public:
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
   /// order of the gate in the circuit graph.
   // TODO: do we still need the order
-  MaybeError<void> genGraphGates(const CUDAKernelGenConfig& config,
-                                 const ir::CircuitGraphNode& graph,
-                                 const std::string& graphName);
+  llvm::Error genGraphGates(const CUDAKernelGenConfig& config,
+                            const ir::CircuitGraphNode& graph,
+                            const std::string& graphName);
 
   // llvmOptLevel: 0, 1, 2, 3
-  MaybeError<void> compileLLVMIRToPTX(int llvmOptLevel = 1, int verbose = 0);
+  llvm::Error compileLLVMIRToPTX(int llvmOptLevel = 1, int verbose = 0);
 
   void dumpPTX(std::ostream& os, const std::string& kernelName) const;
 
   // cuOptLevel: 0, 1, 2, 3, 4
-  MaybeError<void> compilePTXToCubin(int cuOptLevel = 1, int verbose = 0);
+  llvm::Error compilePTXToCubin(int cuOptLevel = 1, int verbose = 0);
 
-  MaybeError<void> initJIT(int optLevel = 1, int verbose = 0);
+  llvm::Error initJIT(int optLevel = 1, int verbose = 0);
 
   void clearPTX() {
     for (auto& kernel : *this)

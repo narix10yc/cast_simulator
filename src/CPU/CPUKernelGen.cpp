@@ -17,7 +17,7 @@
 using namespace cast;
 
 // Top-level entry
-MaybeError<CPUKernelManager::KernelInfoPtr>
+llvm::Expected<CPUKernelManager::KernelInfoPtr>
 CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
                               ConstQuantumGatePtr gate,
                               const std::string& funcName) {
@@ -43,10 +43,8 @@ CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
   }
 
   if (func == nullptr) {
-    std::ostringstream oss;
-    oss << "Failed to generate kernel for gate " << (void*)(gate.get())
-        << " with name " << funcName;
-    return cast::makeError(oss.str());
+    return llvm::createStringError("Failed to generate kernel for gate " +
+                                   funcName);
   }
 
   return std::make_unique<CPUKernelInfo>(
@@ -56,12 +54,10 @@ CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
       config.matrixLoadMode,
       gate,
       config.simdWidth,
-      gate->opCount(config.zeroTol) // TODO: zeroTol here is different from zTol
-                                    // used in sigMat
-  );
+      gate->opCount(config.zeroTol));
 }
 
-MaybeError<void>
+llvm::Error
 CPUKernelManager::genStandaloneGate(const CPUKernelGenConfig& config,
                                     ConstQuantumGatePtr gate,
                                     const std::string& _funcName) {
@@ -71,30 +67,31 @@ CPUKernelManager::genStandaloneGate(const CPUKernelGenConfig& config,
   // check for name conflicts
   for (const auto& kernel : standaloneKernels_) {
     if (kernel->llvmFuncName == funcName) {
-      return cast::makeError("Kernel with name '" + funcName +
-                                   "' already exists.");
+      return llvm::createStringError("Kernel with name '" + funcName +
+                                     "' already exists.");
     }
   }
 
-  auto result = genCPUGate_(config, gate, funcName);
-  if (!result) {
-    return cast::makeError("Err: " + result.what());
+  auto kernel = genCPUGate_(config, gate, funcName);
+  if (!kernel) {
+    return llvm::joinErrors(
+        llvm::createStringError("Failed to generate kernel for "
+                                "gate " +
+                                funcName),
+        kernel.takeError());
   }
-  standaloneKernels_.emplace_back(result.takeValue());
-  return {}; // success
+  standaloneKernels_.emplace_back(std::move(*kernel));
+  return llvm::Error::success();
 }
 
-MaybeError<void>
-CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
-                                const ir::CircuitGraphNode& graph,
-                                const std::string& graphName) {
+llvm::Error CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
+                                            const ir::CircuitGraphNode& graph,
+                                            const std::string& graphName) {
   assert(graph.checkConsistency());
 
   if (graphKernels_.contains(graphName)) {
-    std::ostringstream oss;
-    oss << "Graph with name '" << graphName
-        << "' already has generated kernels. Please use a different name.";
-    return cast::makeError(oss.str());
+    return llvm::createStringError("Kernels for graph '" + graphName +
+                                   "' already exist.");
   }
 
   auto mangledGraphName = internal::mangleGraphName(graphName);
@@ -106,19 +103,16 @@ CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
   for (const auto& gate : allGates) {
     auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    auto result = genCPUGate_(config, gate, name);
-    if (!result) {
-      std::ostringstream oss;
-      oss << "Failed to generate kernel for gate " << (void*)(gate.get())
-          << ": " << result.what() << "\n";
-      return cast::makeError(oss.str());
+    auto kernel = genCPUGate_(config, gate, name);
+    if (!kernel) {
+      return kernel.takeError();
     }
-    kernels.emplace_back(result.takeValue());
+    kernels.emplace_back(std::move(*kernel));
   }
   // Store the generated kernels in the map
   graphKernels_[graphName] = std::move(kernels);
 
-  return {}; // success
+  return llvm::Error::success();
 }
 
 namespace {

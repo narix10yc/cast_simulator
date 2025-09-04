@@ -5,7 +5,6 @@
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
-#include "utils/MaybeError.h"
 
 #include <span>
 
@@ -80,9 +79,9 @@ class CPUKernelManager : public KernelManagerBase {
   // Generate a CPU kernel for the given gate. This function will wraps around
   // when gate is a StandardQuantumGate (with or without noise) or
   // SuperopQuantumGate, and call gen_ with a corresponding ComplexSquareMatrix.
-  MaybeError<KernelInfoPtr> genCPUGate_(const CPUKernelGenConfig& config,
-                                        ConstQuantumGatePtr gate,
-                                        const std::string& funcName);
+  llvm::Expected<KernelInfoPtr> genCPUGate_(const CPUKernelGenConfig& config,
+                                            ConstQuantumGatePtr gate,
+                                            const std::string& funcName);
 
   void ensureExecutable(CPUKernelInfo& kernel);
   void ensureAllExecutable(bool progressBar = false);
@@ -104,7 +103,7 @@ public:
   /// ORC JIT engine. This means all kernels only get compiled just before being
   /// called. If set to false, all kernels are ready to be executed when this
   /// function returns (good for benchmarks).
-  MaybeError<void>
+  llvm::Error
   initJIT(llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O0,
           bool useLazyJIT = false,
           int verbose = 0);
@@ -122,17 +121,17 @@ public:
   /// conflicts and will not overwrite existing kernels.
   /// @param gate: The quantum gate. It needs to be in a shared pointer because
   /// the kernel manager keeps track of the gate.
-  MaybeError<void> genStandaloneGate(const CPUKernelGenConfig& config,
-                                     ConstQuantumGatePtr gate,
-                                     const std::string& funcName);
+  llvm::Error genStandaloneGate(const CPUKernelGenConfig& config,
+                                ConstQuantumGatePtr gate,
+                                const std::string& funcName);
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
   /// order of the gate in the circuit graph.
   // TODO: do we still need the order
-  MaybeError<void> genGraphGates(const CPUKernelGenConfig& config,
-                                 const ir::CircuitGraphNode& graph,
-                                 const std::string& graphName);
+  llvm::Error genGraphGates(const CPUKernelGenConfig& config,
+                            const ir::CircuitGraphNode& graph,
+                            const std::string& graphName);
 
   /* Get Kernels */
 
@@ -153,20 +152,20 @@ public:
 
   /* Apply Kernels */
 
-  MaybeError<void> applyCPUKernel(void* sv,
-                                  int nQubits,
-                                  const CPUKernelInfo& kernelInfo,
-                                  int nThreads = 1) const;
+  llvm::Error applyCPUKernel(void* sv,
+                             int nQubits,
+                             const CPUKernelInfo& kernelInfo,
+                             int nThreads = 1) const;
 
-  MaybeError<void> applyCPUKernel(void* sv,
-                                  int nQubits,
-                                  const std::string& llvmFuncName,
-                                  int nThreads = 1) const;
+  llvm::Error applyCPUKernel(void* sv,
+                             int nQubits,
+                             const std::string& llvmFuncName,
+                             int nThreads = 1) const;
 
-  MaybeError<void> applyCPUKernelsFromGraph(void* sv,
-                                            int nQubits,
-                                            const std::string& graphName,
-                                            int nThreads = 1) const;
+  llvm::Error applyCPUKernelsFromGraph(void* sv,
+                                       int nQubits,
+                                       const std::string& graphName,
+                                       int nThreads = 1) const;
 
   void dumpIR(const std::string& funcName,
               llvm::raw_ostream& os = llvm::errs());

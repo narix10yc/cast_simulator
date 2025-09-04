@@ -36,8 +36,8 @@ template <unsigned nQubits> static void f() {
   cfg.precision = Precision::F64;
 
   for (int q = 0; q < nQubits; q++) {
-    km.genStandaloneGate(cfg, gates[q], "gateImm_" + std::to_string(q))
-        .consumeError();
+    llvm::cantFail(
+        km.genStandaloneGate(cfg, gates[q], "gateImm_" + std::to_string(q)));
   }
 
   for (unsigned q = 0; q < nQubits; q++) {

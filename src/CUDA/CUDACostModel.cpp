@@ -13,7 +13,7 @@
 
 using namespace cast;
 
-static MaybeError<void>
+static llvm::Error
 runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
                           int nQubits,
                           int nWorkerThreads,
@@ -35,7 +35,7 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
                                StandardQuantumGate::RandomUnitary(qubits),
                                gateNames[k - 1]));
     }
-    km.initJIT(1, verbose >= 2).consumeError();
+    llvm::cantFail(km.initJIT(1, verbose >= 2));
   };
 
   if (verbose >= 1) {
@@ -77,7 +77,7 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
     }
   }
 
-  return {}; // success
+  return llvm::Error::success();
 }
 
 static QuantumGatePtr
@@ -108,11 +108,11 @@ CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
                                      int nRuns,
                                      int verbose) {
   impl::CostModelWeightType weights;
-  if (auto r = runPreliminaryExperiments(
-          kernelConfig, nQubitsSV, nWorkerThreads, verbose, weights);
-      !r) {
-    return llvm::createStringError("Failed to run preliminary experiments: " +
-                                   r.what());
+  if (auto e = runPreliminaryExperiments(
+          kernelConfig, nQubitsSV, nWorkerThreads, verbose, weights)) {
+    return llvm::joinErrors(
+        llvm::createStringError("Failed to run preliminary experiments"),
+        std::move(e));
   }
 
   CUDAKernelManager km(nWorkerThreads);

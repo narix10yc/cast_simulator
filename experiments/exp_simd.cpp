@@ -85,7 +85,7 @@ int main() {
     tr = timer.timeit([&]() {
       kernelMgr
           .applyCPUKernel(data, NQUBITS, "test_gate_" + std::to_string(k), 1)
-          .consumeError();
+          ;
     });
     memSpd = calculateMemSpd<double>(NQUBITS, tr.min);
     items.emplace_back("cast", k, memSpd);

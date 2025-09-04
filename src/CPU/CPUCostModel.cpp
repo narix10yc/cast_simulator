@@ -144,17 +144,17 @@ void CPUPerformanceCache::runPreliminaryExperiments(
     int nThreads,
     WeightType& weights,
     int verbose) {
-  CPUKernelManager kernelMgr;
+  CPUKernelManager km;
   std::vector<int> qubits;
 
   const auto generateGatesAndInitJit = [&]() {
     for (int k = 1; k <= 5; ++k) {
       utils::sampleNoReplacement(nQubits, k, qubits);
       auto gate = StandardQuantumGate::RandomUnitary(qubits);
-      kernelMgr.genStandaloneGate(cpuConfig, gate, "gate_k" + std::to_string(k))
-          .consumeError();
+      llvm::cantFail(
+          km.genStandaloneGate(cpuConfig, gate, "gate_k" + std::to_string(k)));
     }
-    kernelMgr.initJIT(llvm::OptimizationLevel::O1, false, 0).consumeError();
+    llvm::cantFail(km.initJIT(llvm::OptimizationLevel::O1, false, 0));
   };
 
   if (verbose > 0) {
@@ -171,10 +171,8 @@ void CPUPerformanceCache::runPreliminaryExperiments(
   std::array<double, 5> memSpds;
   for (int k = 1; k <= 5; ++k) {
     tr = timer.timeit([&]() {
-      kernelMgr
-          .applyCPUKernel(
-              sv.data(), nQubits, "gate_k" + std::to_string(k), nThreads)
-          .consumeError();
+      llvm::cantFail(km.applyCPUKernel(
+          sv.data(), nQubits, "gate_k" + std::to_string(k), nThreads));
     });
     memSpds[k - 1] =
         internal::calculateMemUpdateSpeed(nQubits, cpuConfig.precision, tr.min);
@@ -292,19 +290,15 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
       [&]() {
         int i = 0;
         for (const auto& gate : gates) {
-          // ignore possible errors
-          kernelMgr
-              .genStandaloneGate(cpuConfig, gate, "gate_" + std::to_string(i++))
-              .consumeError();
+
+          kernelMgr.genStandaloneGate(
+              cpuConfig, gate, "gate_" + std::to_string(i++));
         }
       },
       "Code Generation");
 
   utils::timedExecute(
-      [&]() {
-        kernelMgr.initJIT(llvm::OptimizationLevel::O1, false, 1)
-            .consumeError(); // ignore possible errors
-      },
+      [&]() { kernelMgr.initJIT(llvm::OptimizationLevel::O1, false, 1); },
       "Initialize JIT Engine");
 
   timeit::Timer timer(3, /* verbose */ 0);
@@ -316,9 +310,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
 
   for (const auto& kernel : kernelMgr.getAllStandaloneKernels()) {
     tr = timer.timeit([&]() {
-      // ignore possible errors
-      kernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), *kernel, nThreads)
-          .consumeError();
+      kernelMgr.applyCPUKernel(sv.data(), sv.nQubits(), *kernel, nThreads);
     });
     auto memSpd =
         internal::calculateMemUpdateSpeed(nQubits, kernel->precision, tr.min);

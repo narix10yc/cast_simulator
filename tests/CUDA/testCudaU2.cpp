@@ -37,8 +37,8 @@ template <int nQubits> void runU2qTest() {
   CUDAKernelGenConfig cgCfg;
   cgCfg.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
   for (std::size_t i = 0; i < gates.size(); ++i) {
-    km.genStandaloneGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i))
-        .consumeError();
+    llvm::cantFail(km.genStandaloneGate(
+        cgCfg, gates[i], "gateImm_2q_" + std::to_string(i)));
   }
 
   // Main test loop: check per-qubit prob match after each gate

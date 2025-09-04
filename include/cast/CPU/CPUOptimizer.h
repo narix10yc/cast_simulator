@@ -3,7 +3,6 @@
 
 #include "cast/CPU/CPUFusionConfig.h"
 #include "cast/Core/Optimizer.h"
-#include "utils/MaybeError.h"
 
 #include "llvm/Support/Casting.h"
 
@@ -14,22 +13,23 @@ class CPUOptimizer : public Optimizer<CPUOptimizer> {
 public:
   CPUOptimizer() = default;
 
-  MaybeError<void> loadCPUCostModel(const std::string& filename,
-                                    int queryNThreads,
-                                    Precision queryPrecision) {
+  llvm::Error loadCPUCostModel(const std::string& filename,
+                               int queryNThreads,
+                               Precision queryPrecision) {
     auto fc = CPUFusionConfig::LoadFromFile(filename);
     if (fc == nullptr) {
-      return cast::makeError("Unable to load cost model from " + filename);
+      return llvm::createStringError("Unable to load cost model from " +
+                                     filename);
     }
     // Fusion configs do not have queries. Cost models do.
     auto* cm = llvm::dyn_cast_or_null<CPUCostModel>(fc->getCostModel());
     if (cm == nullptr) {
-      return cast::makeError("No CPU Cost Model found");
+      return llvm::createStringError("No CPU Cost Model found");
     }
     cm->setQueryNThreads(queryNThreads);
     cm->setQueryPrecision(queryPrecision);
 
-    return {}; // success
+    return llvm::Error::success();
   }
 
 }; // class CPUOptimizer

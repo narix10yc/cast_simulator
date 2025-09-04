@@ -15,8 +15,8 @@ template <CPUSimdWidth SimdWidth> static void f() {
   cast::test::TestSuite suite("Fusion CPU (s = " + std::to_string(SimdWidth) +
                               ")");
 
-  cast::CPUKernelManager kernelMgr;
-  cast::CPUKernelGenConfig kernelGenConfig(SimdWidth, cast::Precision::F64);
+  cast::CPUKernelManager km;
+  cast::CPUKernelGenConfig genCfg(SimdWidth, cast::Precision::F64);
 
   cast::CPUOptimizer opt;
   opt.disableCFO().setSizeOnlyFusionConfig(3);
@@ -31,59 +31,47 @@ template <CPUSimdWidth SimdWidth> static void f() {
     if (!p.is_regular_file())
       continue;
 
-    auto circuitOrErr = cast::parseCircuitFromQASMFile(p.path().string());
-    if (!circuitOrErr) {
-      suite.assertFalse(circuitOrErr.what(), GET_INFO());
-      continue;
-    }
-    auto circuit = circuitOrErr.takeValue();
+    auto circuit =
+        llvm::cantFail(cast::parseCircuitFromQASMFile(p.path().string()));
 
-    auto circuitGraphs = circuit.getAllCircuitGraphs();
-    assert(circuitGraphs.size() == 1 &&
+    auto graphs = circuit->getAllCircuitGraphs();
+    assert(graphs.size() == 1 &&
            "Expected exactly one circuit graph in the test circuit");
 
     // generate gates before fusion
-    kernelMgr
-        .genGraphGates(kernelGenConfig, *circuitGraphs[0], "graphBeforeFusion")
-        .consumeError();
+    llvm::cantFail(km.genGraphGates(genCfg, *graphs[0], "graphBeforeFusion"));
 
-    opt.run(circuit, nullptr);
-    circuitGraphs = circuit.getAllCircuitGraphs();
+    opt.run(*circuit, nullptr);
+    graphs = circuit->getAllCircuitGraphs();
 
     // generate gates after fusion
-    kernelMgr
-        .genGraphGates(kernelGenConfig, *circuitGraphs[0], "graphAfterFusion")
-        .consumeError();
+    llvm::cantFail(km.genGraphGates(genCfg, *graphs[0], "graphAfterFusion"));
+    llvm::cantFail(km.initJIT());
 
-    kernelMgr.initJIT().consumeError(); // ignore possible error
-
-    cast::CPUStatevector<double> sv0(circuitGraphs[0]->nQubits(), SimdWidth);
-    cast::CPUStatevector<double> sv1(circuitGraphs[0]->nQubits(), SimdWidth);
+    cast::CPUStatevector<double> sv0(graphs[0]->nQubits(), SimdWidth);
+    cast::CPUStatevector<double> sv1(graphs[0]->nQubits(), SimdWidth);
     // sv0.randomize();
     sv0.initialize();
     sv1 = sv0;
 
-    kernelMgr
-        .applyCPUKernelsFromGraph(
-            sv0.data(), sv0.nQubits(), "graphBeforeFusion")
-        .consumeError();
-    kernelMgr
-        .applyCPUKernelsFromGraph(sv1.data(), sv1.nQubits(), "graphAfterFusion")
-        .consumeError();
+    llvm::cantFail(km.applyCPUKernelsFromGraph(
+        sv0.data(), sv0.nQubits(), "graphBeforeFusion"));
+    llvm::cantFail(km.applyCPUKernelsFromGraph(
+        sv1.data(), sv1.nQubits(), "graphAfterFusion"));
 
     suite.assertCloseF64(sv0.norm(),
-                      1.0,
-                      p.path().filename().string() + " no-fuse norm",
-                      GET_INFO());
+                         1.0,
+                         p.path().filename().string() + " no-fuse norm",
+                         GET_INFO());
     suite.assertCloseF64(sv1.norm(),
-                      1.0,
-                      p.path().filename().string() + " fuse norm",
-                      GET_INFO());
+                         1.0,
+                         p.path().filename().string() + " fuse norm",
+                         GET_INFO());
 
     suite.assertCloseF64(cast::fidelity(sv0, sv1),
-                      1.0,
-                      p.path().filename().string() + " fidelity",
-                      GET_INFO());
+                         1.0,
+                         p.path().filename().string() + " fidelity",
+                         GET_INFO());
   }
 
   suite.displayResult();
@@ -91,5 +79,5 @@ template <CPUSimdWidth SimdWidth> static void f() {
 
 void cast::test::test_fusionCPU() {
   f<W128>();
-  // f<W256>();
+  f<W256>();
 }

@@ -102,11 +102,11 @@ void CPUKernelManager::ensureAllExecutable(bool progressBar) {
   dispatcher.sync(progressBar);
 }
 
-MaybeError<void> CPUKernelManager::initJIT(OptimizationLevel optLevel,
-                                           bool useLazyJIT,
-                                           int verbose) {
+llvm::Error CPUKernelManager::initJIT(OptimizationLevel optLevel,
+                                      bool useLazyJIT,
+                                      int verbose) {
   if (isJITed()) {
-    return cast::makeError("JIT has already been initialized.");
+    return llvm::createStringError("JIT has already been initialized.");
   }
 
   InitializeAllTargets();
@@ -122,11 +122,11 @@ MaybeError<void> CPUKernelManager::initJIT(OptimizationLevel optLevel,
     jitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
     auto lazyJIT = cantFail(jitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
-      auto err = lazyJIT->addLazyIRModule(
-          orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
-      if (err) {
-        return cast::makeError("Failed to add lazy IR module: " +
-                                     llvm::toString(std::move(err)));
+      if (auto e = lazyJIT->addLazyIRModule(
+              orc::ThreadSafeModule(std::move(mod), std::move(ctx)))) {
+        return llvm::joinErrors(
+            llvm::createStringError("Failed to add lazy IR module"),
+            std::move(e));
       }
     }
     this->llvmJIT = std::move(lazyJIT);
@@ -137,18 +137,17 @@ MaybeError<void> CPUKernelManager::initJIT(OptimizationLevel optLevel,
     eagerJitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
     auto eagerJIT = cantFail(eagerJitBuilder.create());
     for (auto& [ctx, mod] : llvmContextModulePairs) {
-      auto err = eagerJIT->addIRModule(
-          orc::ThreadSafeModule(std::move(mod), std::move(ctx)));
-      if (err) {
-        return cast::makeError("Failed to add IR module: " +
-                                     llvm::toString(std::move(err)));
+      if (auto e = eagerJIT->addIRModule(
+              orc::ThreadSafeModule(std::move(mod), std::move(ctx)))) {
+        return llvm::joinErrors(
+            llvm::createStringError("Failed to add IR module"), std::move(e));
       }
     }
     this->llvmJIT = std::move(eagerJIT);
     ensureAllExecutable(/* progressBar */ verbose > 0);
   }
   this->llvmContextModulePairs.clear();
-  return {}; // success
+  return llvm::Error::success();
 }
 
 void CPUKernelManager::dumpIR(const std::string& funcName,
