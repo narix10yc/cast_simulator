@@ -1,4 +1,7 @@
 ## CAST Quantum Circuit Description Language
+
+The text format IR is supposed to serve as a serialization to the graph-like IR layer used in CAST compilation. Currently not fully functioning. We expect to complete and extend it soon.
+
 ### Grammer
 ```
 

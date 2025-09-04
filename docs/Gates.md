@@ -1,8 +1,8 @@
-## Gate Representations
+# Gate Representations
 
-### List of Gates used in CAST
+## List of Gates used in CAST
 
-#### Single-qubit Gates
+### Single-qubit Gates
 - Identity:
 $$\mathtt{I} = \begin{bmatrix}
 1 & 0 \\ 0 & 1

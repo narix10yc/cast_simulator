@@ -1,5 +1,5 @@
-## Update 22nd August, 2025
-Planning to refactor the custom `MaybeError<T>` to `llvm::Expected<T>`.
+## Update 4th September, 2025
+We might want to clean up `utils/utils.h` a little bit...
 
 ## Update 23th June, 2025
 Code refactoring in process. Python binding in progress. Check the yl5619-dev branch. Stay tuned... :)
