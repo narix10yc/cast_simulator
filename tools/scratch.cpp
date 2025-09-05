@@ -1,24 +1,39 @@
-#include "cast/CUDA/CUDACostModel.h"
+#include "cast/CUDA/CUDAKernelManager.h"
+#include "cast/CUDA/CUDAStatevector.h"
 #include "utils/PrintSpan.h"
-#include <numeric>
+#include "utils/utils.h"
 #include <fstream>
+#include <numeric>
 
 using namespace cast;
 
 int main(int argc, char** argv) {
-  assert(argc == 2 && "Usage: ./cuda_cost_model <input_csv_file>");
-  std::ifstream inFile(argv[1]);
-  auto cacheExpected = CUDAPerformanceCache::LoadFrom(inFile);
-  if (!cacheExpected) {
-    std::cerr << "Error: Failed to load CUDAPerformanceCache from file '"
-              << argv[1] << "': " << llvm::toString(cacheExpected.takeError())
-              << "\n";
-    return 1;
-  }
-  inFile.close();
 
-  CUDACostModel cudaCM(cacheExpected.get());
-  cudaCM.displayInfo(std::cerr, 2) << "\n";
+  CUDAKernelGenConfig genCfg;
+  CUDAKernelManager km(2);
+  constexpr int nQubitsSV = 28;
+  CUDAStatevectorF64 sv(nQubitsSV);
+  sv.initialize();
+  km.setLaunchConfig(sv.getDevicePtr(), nQubitsSV);
+
+  for (int i = 0; i < 10; ++i) {
+    QuantumGate::TargetQubitsType qubits;
+    utils::sampleNoReplacement(nQubitsSV, 2, qubits);
+    auto gate = StandardQuantumGate::RandomUnitary(qubits);
+    auto name = "g" + std::to_string(i);
+    if (auto k = km.genStandaloneGate(genCfg, gate, name); !k) {
+      std::cerr << "Failed to generate kernel: "
+                << llvm::toString(k.takeError()) << "\n";
+      std::exit(1);
+    }
+  }
+
+  for (auto& kernel : km) {
+    km.enqueueKernelLaunch(kernel, 999);
+  }
+
+  km.syncKernelExecution();
+  km.syncKernelExecution();
 
   return 0;
 }

@@ -28,6 +28,9 @@ enum class CUDAMatrixLoadMode {
 struct CUDAKernelInfo {
 
   std::string ptxString;
+  // cubinData will be written by loading threads and read by the execution
+  // thread. Loading threads and execution thread should store/load this
+  // cubinData via execMtx_
   std::vector<uint8_t> cubinData;
   ConstQuantumGatePtr gate;
   Precision precision;
@@ -74,7 +77,7 @@ public:
     using clock_t = std::chrono::steady_clock;
     using time_point_t = clock_t::time_point;
 
-    llvm::Error err = llvm::Error::success();
+    // llvm::Error err = llvm::Error::success();
     std::string kernelName;
 
     // when the loading thread starts preparing the kernel
@@ -84,6 +87,21 @@ public:
 
     // kernel execution time in milliseconds
     float kernelTime_ms{};
+
+    enum Status {
+      // The initial launch status
+      Pending,
+      // Marked by loading threads after cubin is ready
+      ReadyToLaunch,
+      // Marked by the exec thread after cuLaunchKernel
+      Running,
+      // Marked by the cuda callback thread after kernel finishes
+      Finished,
+      // Marked by the exec thread after unloading the module
+      CleanedUp
+    };
+
+    std::atomic<Status> status = Pending;
 
     ExecutionResult() = default;
 
@@ -108,36 +126,29 @@ private:
     std::vector<std::unique_ptr<std::byte[]>> kernelParamsStorage_;
     mutable std::vector<void*> kernelParams_;
 
+    CUDAKernelInfo* kernel = nullptr;
+    ExecutionResult* er = nullptr;
+
     CUmodule cuModule = nullptr;
     CUfunction cuFunction = nullptr;
 
     CUevent startEvent = nullptr;
     CUevent finishEvent = nullptr;
 
-    unsigned gridSize = 0;
-    unsigned blockSize = 0;
-
-    enum Status : int {
-      // The task window is idle. This happens at the beginning of kernel
-      // launch.
-      Idle = 0,
-      // The task window is being prepared by some loading thread. If some
-      // loading thread find its allocated task window is in status Compiling,
-      // it should wait till it turns to Running.
-      Compiling = 1,
-      // The task window is ready to be launched. A loading thread will set its
-      // status to Ready, notify the execution thread, and fetch the next kernel
-      // and task window.
-      Ready = 2,
-      // The task window is currently running. The execution thread launches a
-      // Ready task and set its status to Running.
-      Running = 3,
+    struct CallbackUserData {
+      decltype(ExecutionResult::status)* statusPtr;
+      std::condition_variable* cvPtr;
     };
 
-    std::atomic<Status> status = Idle;
+    CallbackUserData callbackUserData{};
 
-    // history will only be accessed by one loading thread at the same time.
-    ExecutionResult* history = nullptr;
+    LaunchTask() = default;
+    LaunchTask(CUDAKernelInfo* kernel, ExecutionResult* er)
+        : kernel(kernel), er(er) {}
+
+    bool isFinished() const {
+      return er != nullptr && er->status.load() == ExecutionResult::Finished;
+    }
 
     template <typename T> void addParam(T param) {
       kernelParams_.clear();
@@ -151,6 +162,8 @@ private:
       kernelParams_.clear();
     }
 
+    // The retained pointer remains valid until the next call to addParam
+    // or resetParams.
     void** getKernelParams() const {
       if (!kernelParams_.empty())
         return kernelParams_.data();
@@ -162,33 +175,79 @@ private:
     }
   }; // struct LaunchTask
 
-  struct LaunchWindow {
-    unsigned windowSize;
-    // This vector is initialized on the ctor of the kernel manager and should
-    // never be resized during its lifetime.
-    std::vector<LaunchTask> tasks_;
+  struct InitialLaunch {
+    CUDAKernelInfo* kernel;
+    ExecutionResult* er;
+  }; // struct InitialLaunch
 
-    LaunchTask& operator[](unsigned i) { return tasks_[i % windowSize]; }
-    const LaunchTask& operator[](unsigned i) const {
-      return tasks_[i % windowSize];
+  struct InitialLaunchQueue {
+  private:
+    std::mutex mtx_;
+    std::deque<InitialLaunch> queue_;
+
+  public:
+    void push(CUDAKernelInfo* kernel, ExecutionResult* er) {
+      std::lock_guard lock(mtx_);
+      queue_.emplace_back(kernel, er);
     }
 
-    LaunchWindow(unsigned windowSize = 0)
-        : windowSize(windowSize), tasks_(windowSize) {}
+    void pop(InitialLaunch& out) {
+      std::lock_guard lock(mtx_);
+      assert(!queue_.empty());
+      out = std::move(queue_.front());
+      queue_.pop_front();
+    }
+
+    bool hasReadyToLaunch() {
+      std::lock_guard lock(mtx_);
+      if (queue_.empty())
+        return false;
+      return queue_.front().er->status.load() == ExecutionResult::ReadyToLaunch;
+    }
+
+    bool empty() {
+      std::lock_guard lock(mtx_);
+      return queue_.empty();
+    }
+
+    size_t size() {
+      std::lock_guard lock(mtx_);
+      return queue_.size();
+    }
+
+    void clear() {
+      std::lock_guard lock(mtx_);
+      queue_.clear();
+    }
+  };
+
+  struct LaunchWindow {
+    // window size
+    static constexpr int WS = 4;
+    std::array<LaunchTask, WS> tasks_;
+
+    LaunchTask& operator[](int idx) { return tasks_[idx % WS]; }
   }; // struct LaunchWindow
 
+  std::deque<ExecutionResult> execResults;
+
+  InitialLaunchQueue initialLaunches_;
+
+  // When task status changes to Ready, the exec thread moves the task from
+  // initialLaunches_ to launchWindow_.
   LaunchWindow window_;
 
   // Clean up CUmodule and CUevents in the window. This function should only
   // be called after all kernels finishes execution. i.e. after
   // cuStreamSynchronize. It will also reset all LaunchTask status to
   // Uninited.
-  void clearWindow_();
+  // void clearWindow_();
 
-  // We do not need atomic here because launchIdx and loadIdx are only modified
-  // in the exec thread.
-  unsigned launchIdx = 0; // monotonically increasing index
-  unsigned loadIdx = 0;   // monotonically increasing index
+  // monotonically increasing index. Completely controlled by the exec thread.
+  unsigned launchIdx = 0;
+
+  // monotonically increasing index. Completely controlled by the exec thread.
+  int unloadedIdx = 0;
 
   /* Multi-threading task dispatching model:
   The main thread poses tasks via enqueueKernelLaunch. It enqueues a kernel
@@ -202,19 +261,21 @@ private:
   'Ready' and notifies the execution thread that it has prepared the function
   and kernel parameters inside the launch window.
 
-  The execution thread will launch ordered kernels. Every time it wakes up (via
-  execCV_), it launches every task whose status is Ready. Kernel launch order is
-  controlled by launchIdx.
+  The execution thread will launch ordered kernels. Every time it wakes up
+  (via execCV_), it launches every task whose status is Ready. Kernel launch
+  order is controlled by launchIdx.
 
   */
 
   // execution thread
   std::thread execTh_;
-  bool stopFlag_ = false;
+  bool execStopFlag_ = false;
   std::mutex execMtx_;
+
   std::condition_variable execCV_;
-  std::condition_variable loadCV_;
   std::condition_variable syncCV_;
+  // handles spurious wakeup
+  bool syncFlag_ = false;
 
   struct LaunchConfig {
     CUdeviceptr devicePtr = 0;
@@ -226,6 +287,9 @@ private:
 
   // execution thread work
   void execTh_work_();
+
+  // reaper thread work
+  void reaperTh_work_();
 
 public:
   CUDAKernelManager(int nWorkerThreads = -1, int deviceOrdinal = 0);
@@ -245,8 +309,8 @@ public:
                     const std::string& funcName);
 
   /// Generate kernels for all gates in the given circuit graph. The generated
-  /// kernels will be named as <graphName>_<order>_<gateId>, where order is the
-  /// order of the gate in the circuit graph.
+  /// kernels will be named as <graphName>_<order>_<gateId>, where order is
+  /// the order of the gate in the circuit graph.
   // TODO: do we still need the order
   llvm::Error genGraphGates(const CUDAKernelGenConfig& config,
                             const ir::CircuitGraphNode& graph,
@@ -319,8 +383,8 @@ public:
   /// syncKernelExecution(). The returned object is invalidated upon the
   /// destruction of this kernel manager.
   /// @remark: We do not embed the ExecutionResult
-  /// inside CUDAKernelInfo because users are allowed to launch the same kernel
-  /// multiple times (for example, in benchmarking).
+  /// inside CUDAKernelInfo because users are allowed to launch the same
+  /// kernel multiple times (for example, in benchmarking).
   const ExecutionResult* enqueueKernelLaunch(CUDAKernelInfo& kernel,
                                              int verbosity = 0);
 
@@ -342,8 +406,8 @@ public:
     return results;
   }
 
-  /// A blocking method that waits for all enqueued kernels to finish execution.
-  /// This should only be called by the main thread.
+  /// A blocking method that waits for all enqueued kernels to finish
+  /// execution. This should only be called by the main thread.
   void syncKernelExecution(bool progressBar = false);
 
   // TODO: not implemented yet
