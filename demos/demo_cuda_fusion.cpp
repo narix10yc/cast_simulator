@@ -207,11 +207,12 @@ int main(int argc, const char** argv) {
   if (ArgRunNoFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          if (auto e =
-                  km.genGraphGates(genDenseCfg, graphs.noFuseDense, "nofuse_d"))
+          if (auto e = km.genGraphGates(
+                  genDenseCfg, graphs.noFuseDense, "nofuse_d")) {
             logerr() << "Failed to generate no-fuse dense graph: "
                      << llvm::toString(std::move(e)) << "\n";
-          std::exit(1);
+            std::exit(1);
+          }
         },
         "Generate No-fuse Dense Kernels");
   }
