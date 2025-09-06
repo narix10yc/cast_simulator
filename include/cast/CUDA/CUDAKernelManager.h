@@ -28,15 +28,12 @@ enum class CUDAMatrixLoadMode {
 struct CUDAKernelInfo {
 
   std::string ptxString;
-  // cubinData will be written by loading threads and read by the execution
-  // thread. Loading threads and execution thread should store/load this
-  // cubinData via execMtx_
   std::vector<uint8_t> cubinData;
   ConstQuantumGatePtr gate;
   Precision precision;
-  llvm::LLVMContext* llvmContext;
-  llvm::Module* llvmModule;
-  std::string llvmFuncName;
+  llvm::Function* llvmFunc;
+
+  std::string_view getName() const { return llvmFunc->getName(); }
 
   std::ostream& displayInfo(std::ostream& os) const;
 }; // struct CUDAKernelInfo
@@ -59,10 +56,11 @@ class CUDAKernelManager : public KernelManager<CUDAKernelInfo> {
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
-  llvm::Function* gen_(const CUDAKernelGenConfig& config,
-                       const ComplexSquareMatrix& matrix,
-                       const QuantumGate::TargetQubitsType& qubits,
-                       const std::string& funcName);
+  llvm::Expected<llvm::Function*>
+  gen_(const CUDAKernelGenConfig& config,
+       const ComplexSquareMatrix& matrix,
+       const QuantumGate::TargetQubitsType& qubits,
+       const std::string& funcName);
 
   // Generate a CUDA kernel for the given gate. This function will wraps around
   // when gate is a StandardQuantumGate (with or without noise) or
@@ -119,83 +117,53 @@ public:
 private:
   std::deque<ExecutionResult> execResults_;
 
-public:
   /* Launch Task Management */
 private:
-  struct LaunchTask {
-    std::vector<std::unique_ptr<std::byte[]>> kernelParamsStorage_;
-    mutable std::vector<void*> kernelParams_;
-
-    CUDAKernelInfo* kernel = nullptr;
-    ExecutionResult* er = nullptr;
-
-    CUmodule cuModule = nullptr;
-    CUfunction cuFunction = nullptr;
-
-    CUevent startEvent = nullptr;
-    CUevent finishEvent = nullptr;
-
-    struct CallbackUserData {
-      decltype(ExecutionResult::status)* statusPtr;
-      std::condition_variable* cvPtr;
-    };
-
-    CallbackUserData callbackUserData{};
-
-    LaunchTask() = default;
-    LaunchTask(CUDAKernelInfo* kernel, ExecutionResult* er)
-        : kernel(kernel), er(er) {}
-
-    bool isFinished() const {
-      return er != nullptr && er->status.load() == ExecutionResult::Finished;
-    }
-
-    template <typename T> void addParam(T param) {
-      kernelParams_.clear();
-      auto paramPtr = std::make_unique<std::byte[]>(sizeof(T));
-      std::memcpy(paramPtr.get(), &param, sizeof(T));
-      kernelParamsStorage_.push_back(std::move(paramPtr));
-    }
-
-    void resetParams() {
-      kernelParamsStorage_.clear();
-      kernelParams_.clear();
-    }
-
-    // The retained pointer remains valid until the next call to addParam
-    // or resetParams.
-    void** getKernelParams() const {
-      if (!kernelParams_.empty())
-        return kernelParams_.data();
-
-      kernelParams_.reserve(kernelParamsStorage_.size());
-      for (auto& p : kernelParamsStorage_)
-        kernelParams_.push_back(static_cast<void*>(p.get()));
-      return kernelParams_.data();
-    }
-  }; // struct LaunchTask
-
   struct InitialLaunch {
     CUDAKernelInfo* kernel;
     ExecutionResult* er;
   }; // struct InitialLaunch
 
+  struct KernelSemaphore {
+    std::mutex mtx{};
+    std::condition_variable cv{};
+    enum Status { Pending, Compiling, Prepared };
+    Status status = Pending;
+    KernelSemaphore() = default;
+  };
+
   struct InitialLaunchQueue {
   private:
     std::mutex mtx_;
     std::deque<InitialLaunch> queue_;
+    struct Semaphore {
+      std::unique_ptr<KernelSemaphore> semaphore;
+      int refCount;
+    };
+    std::map<CUDAKernelInfo*, Semaphore> semaphores_;
 
   public:
-    void push(CUDAKernelInfo* kernel, ExecutionResult* er) {
+    KernelSemaphore* push(CUDAKernelInfo* kernel, ExecutionResult* er) {
       std::lock_guard lock(mtx_);
       queue_.emplace_back(kernel, er);
+      if (semaphores_.find(kernel) == semaphores_.end())
+        semaphores_[kernel] = {std::make_unique<KernelSemaphore>(), 1};
+      else
+        semaphores_[kernel].refCount += 1;
+      return semaphores_[kernel].semaphore.get();
     }
 
-    void pop(InitialLaunch& out) {
+    void pop(CUDAKernelInfo*& outKernel, ExecutionResult*& outEr) {
       std::lock_guard lock(mtx_);
       assert(!queue_.empty());
-      out = std::move(queue_.front());
+      outKernel = queue_.front().kernel;
+      outEr = queue_.front().er;
       queue_.pop_front();
+      auto spIt = semaphores_.find(outKernel);
+      assert(spIt != semaphores_.end());
+      spIt->second.refCount -= 1;
+      if (spIt->second.refCount == 0)
+        semaphores_.erase(spIt);
     }
 
     bool hasReadyToLaunch() {
@@ -221,51 +189,9 @@ private:
     }
   };
 
-  struct LaunchWindow {
-    // window size
-    static constexpr int WS = 4;
-    std::array<LaunchTask, WS> tasks_;
-
-    LaunchTask& operator[](int idx) { return tasks_[idx % WS]; }
-  }; // struct LaunchWindow
-
-  std::deque<ExecutionResult> execResults;
-
   InitialLaunchQueue initialLaunches_;
 
-  // When task status changes to Ready, the exec thread moves the task from
-  // initialLaunches_ to launchWindow_.
-  LaunchWindow window_;
-
-  // Clean up CUmodule and CUevents in the window. This function should only
-  // be called after all kernels finishes execution. i.e. after
-  // cuStreamSynchronize. It will also reset all LaunchTask status to
-  // Uninited.
-  // void clearWindow_();
-
-  // monotonically increasing index. Completely controlled by the exec thread.
-  unsigned launchIdx = 0;
-
-  // monotonically increasing index. Completely controlled by the exec thread.
-  int unloadedIdx = 0;
-
-  /* Multi-threading task dispatching model:
-  The main thread poses tasks via enqueueKernelLaunch. It enqueues a kernel
-  loading task to the task dispatcher (loading thread pool).
-
-  Each loading thread gets allocated with a launch window (given by loadIdx),
-  loads the kernels, waits for the previous launch task to finish, unloads the
-  previous task's module and emplaces the new task's module. Loading threads
-  cannot directly launch kernels because we need to maintain the launch order.
-  After doing all this, the loading thread sets the launch task status as
-  'Ready' and notifies the execution thread that it has prepared the function
-  and kernel parameters inside the launch window.
-
-  The execution thread will launch ordered kernels. Every time it wakes up
-  (via execCV_), it launches every task whose status is Ready. Kernel launch
-  order is controlled by launchIdx.
-
-  */
+  std::deque<ExecutionResult> execResults;
 
   // execution thread
   std::thread execTh_;
@@ -274,22 +200,27 @@ private:
 
   std::condition_variable execCV_;
   std::condition_variable syncCV_;
-  // handles spurious wakeup
-  bool syncFlag_ = false;
+
+  enum SyncStatus {
+    NotSyncing,
+    RequestSyncing,
+    Synced
+  };
+  // To load and store under execMtx_
+  SyncStatus syncFlag_ = NotSyncing;
 
   struct LaunchConfig {
     CUdeviceptr devicePtr = 0;
-    int nQubits = 0;
+    int nQubitsSV = 0;
     unsigned blockSize = 0;
   };
 
   LaunchConfig launchConfig_;
 
+  bool timingEnabled_ = false;
+
   // execution thread work
   void execTh_work_();
-
-  // reaper thread work
-  void reaperTh_work_();
 
 public:
   CUDAKernelManager(int nWorkerThreads = -1, int deviceOrdinal = 0);
@@ -303,7 +234,7 @@ public:
 
   std::ostream& displayInfo(std::ostream& os) const;
 
-  llvm::Expected<const CUDAKernelInfo*>
+  llvm::Expected<CUDAKernelInfo*>
   genStandaloneGate(const CUDAKernelGenConfig& config,
                     ConstQuantumGatePtr gate,
                     const std::string& funcName);
@@ -316,15 +247,7 @@ public:
                             const ir::CircuitGraphNode& graph,
                             const std::string& graphName);
 
-  // llvmOptLevel: 0, 1, 2, 3
-  llvm::Error compileLLVMIRToPTX(int llvmOptLevel = 1, int verbose = 0);
-
   void dumpPTX(std::ostream& os, const std::string& kernelName) const;
-
-  // cuOptLevel: 0, 1, 2, 3, 4
-  llvm::Error compilePTXToCubin(int cuOptLevel = 1, int verbose = 0);
-
-  llvm::Error initJIT(int optLevel = 1, int verbose = 0);
 
   void clearPTX() {
     for (auto& kernel : *this)
@@ -369,11 +292,15 @@ public:
   /* --- Kernel Launch --- */
 
   void
-  setLaunchConfig(CUdeviceptr dData, int nQubits, unsigned blockSize = 64) {
+  setLaunchConfig(CUdeviceptr dData, int nQubitsSV, unsigned blockSize = 64) {
     launchConfig_.devicePtr = dData;
-    launchConfig_.nQubits = nQubits;
+    launchConfig_.nQubitsSV = nQubitsSV;
     launchConfig_.blockSize = blockSize;
   }
+
+  void enableTiming(bool enable = true) { timingEnabled_ = enable; }
+
+  void clearExecutionResults() { execResults_.clear(); }
 
   /// Enqueue a kernel for launch. This is a non-blocking function and should
   /// only be called by the main thread. The order of kernel execution will
@@ -382,15 +309,13 @@ public:
   /// The returned object is read-only, and should only be accessed after
   /// syncKernelExecution(). The returned object is invalidated upon the
   /// destruction of this kernel manager.
-  /// @remark: We do not embed the ExecutionResult
-  /// inside CUDAKernelInfo because users are allowed to launch the same
-  /// kernel multiple times (for example, in benchmarking).
-  const ExecutionResult* enqueueKernelLaunch(CUDAKernelInfo& kernel,
-                                             int verbosity = 0);
+  /// @remark: We do not embed the ExecutionResult inside CUDAKernelInfo because
+  /// users are allowed to launch the same kernel multiple times (for example,
+  /// in benchmarking).
+  const ExecutionResult* enqueueKernelLaunch(CUDAKernelInfo& kernel);
 
   std::vector<const ExecutionResult*>
-  enqueueKernelLaunchFromGraph(const std::string& graphName,
-                               int verbosity = 0) {
+  enqueueKernelLaunchFromGraph(const std::string& graphName) {
     auto it = graphKernels_.find(graphName);
     if (it == graphKernels_.end())
       return {}; // empty vector
@@ -399,7 +324,7 @@ public:
     results.reserve(it->second.size());
 
     for (auto& kernel : it->second) {
-      auto* res = enqueueKernelLaunch(*kernel, verbosity);
+      const auto* res = enqueueKernelLaunch(*kernel);
       if (res != nullptr)
         results.push_back(res);
     }

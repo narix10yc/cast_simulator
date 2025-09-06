@@ -733,13 +733,7 @@ genMatrixVectorMultiply_InlineImm(IRBuilder<>& B,
                                   const std::vector<IRMatDataCUDA>& matData,
                                   Value* svPtrV,
                                   Type* scalarTy) {
-  llvm::FastMathFlags FMF;
-  FMF.setNoNaNs();
-  FMF.setNoInfs();
-  FMF.setNoSignedZeros();
-  FMF.setAllowContract(true);
-  FMF.setAllowReassoc(true);
-  B.setFastMathFlags(FMF);
+  B.setFastMathFlags(FastMathFlags::getFast());
 
   const unsigned k = qubits.size();
   const unsigned K = 1u << k;
@@ -1074,13 +1068,7 @@ void genMatrixVectorMultiplyFromConst(
     Value* matPtrV,
     Type* scalarTy,
     const std::vector<IRMatDataCUDA>& matData) {
-  llvm::FastMathFlags FMF;
-  FMF.setNoNaNs();
-  FMF.setNoInfs();
-  FMF.setNoSignedZeros();
-  FMF.setAllowContract(true);
-  FMF.setAllowReassoc(true);
-  B.setFastMathFlags(FMF);
+  B.setFastMathFlags(FastMathFlags::getFast());
 
   unsigned k = qubits.size();
   unsigned K = 1u << k;
@@ -1192,10 +1180,11 @@ getOrCreateConstMatGlobal(Module& M, Type* arrTy, StringRef globalName) {
 
 } // end of anonymous namespace
 
-Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
-                                  const ComplexSquareMatrix& matrix,
-                                  const QuantumGate::TargetQubitsType& qubits,
-                                  const std::string& funcName) {
+llvm::Expected<llvm::Function*>
+CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
+                        const ComplexSquareMatrix& matrix,
+                        const QuantumGate::TargetQubitsType& qubits,
+                        const std::string& funcName) {
   const unsigned k = qubits.size();
   const unsigned K = 1u << k;
   const unsigned KK = K * K;
@@ -1204,7 +1193,10 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
       createNewLLVMContextModulePair(funcName + "Module");
   IRBuilder<> B(*llvmContextModulePair.llvmContext);
 
-  assert(config.precision != Precision::Unknown);
+  if (config.precision == Precision::Unknown) {
+    return llvm::createStringError(
+        "KernelGenConfig specifies precision to be 'Unknown'");
+  }
   Type* scalarTy =
       (config.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
 
@@ -1290,7 +1282,12 @@ Function* CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
   }
 
   B.CreateRetVoid();
-  // func->print(errs());
+  std::string errInfo;
+  llvm::raw_string_ostream rso(errInfo);
+  if (llvm::verifyFunction(*func, &rso)) {
+    return llvm::createStringError("Function verification failed: " +
+                                   rso.str());
+  }
   return func;
 }
 
@@ -1308,7 +1305,12 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
       return llvm::createStringError("Only supporting scalar GM for now");
     }
 
-    func = gen_(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
+    if (auto expectedF =
+            gen_(config, scalarGM->matrix(), stdQuGate->qubits(), funcName)) {
+      func = *expectedF;
+    } else {
+      return expectedF.takeError();
+    }
   } else {
     // super op gates are treated as normal gates with twice the number of
     // qubits
@@ -1322,32 +1324,28 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
     for (const auto& q : qubits)
       qubits.push_back(q + nQubits);
 
-    func = gen_(config, scalarGM->matrix(), qubits, funcName);
+    if (auto expectedF = gen_(config, scalarGM->matrix(), qubits, funcName))
+      func = *expectedF;
+    else
+      return expectedF.takeError();
   }
 
   if (func == nullptr) {
-    return llvm::createStringError("Failed to generate kernel " + funcName);
+    return llvm::createStringError(funcName + " generates a null function");
   }
 
   // std::string ptxString;
   // std::vector<uint8_t> cubinData;
   // ConstQuantumGatePtr gate;
   // Precision precision;
-  // llvm::LLVMContext* llvmContext;
-  // llvm::Module* llvmModule;
-  // std::string llvmFuncName;
-  auto ki = std::make_unique<CUDAKernelInfo>(std::string(),
-                                             std::vector<uint8_t>(),
-                                             gate,
-                                             config.precision,
-                                             &func->getContext(),
-                                             func->getParent(),
-                                             func->getName().str());
+  // llvm::Function* llvmFunction;
+  auto ki = std::make_unique<CUDAKernelInfo>(
+      std::string(), std::vector<uint8_t>(), gate, config.precision, func);
 
   return ki;
 }
 
-llvm::Expected<const CUDAKernelInfo*>
+llvm::Expected<CUDAKernelInfo*>
 CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
                                      ConstQuantumGatePtr gate,
                                      const std::string& _funcName) {
@@ -1357,14 +1355,14 @@ CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
 
   // check for name conflicts
   for (const auto& kernel : standaloneKernels_) {
-    if (kernel->llvmFuncName == funcName) {
+    if (kernel->llvmFunc->getName() == funcName) {
       return llvm::createStringError("Kernel with name '" + funcName +
                                      "' already exists.");
     }
   }
 
   if (auto kernel = genCUDAGate_(config, gate, funcName)) {
-    const auto* kernelRet = (*kernel).get();
+    auto* kernelRet = (*kernel).get();
     standaloneKernels_.emplace_back(std::move(*kernel));
     return kernelRet;
   } else {

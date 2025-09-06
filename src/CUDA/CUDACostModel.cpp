@@ -23,19 +23,17 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
   CUDAStatevectorF64 sv(nQubits);
   sv.initialize();
 
-  std::array<std::string, 5> gateNames;
+  std::array<CUDAKernelInfo*, 5> kernels;
   const auto generateGatesAndInitJit = [&]() -> void {
     // generate {1,2,3,4,5}-qubit gates acting on MSB qubits
     for (int k = 1; k <= 5; ++k) {
       QuantumGate::TargetQubitsType qubits;
       utils::sampleNoReplacement(nQubits, k, qubits);
-      gateNames[k - 1] = "gate_k" + std::to_string(k);
-      llvm::cantFail(
+      kernels[k - 1] = llvm::cantFail(
           km.genStandaloneGate(kernelConfig,
                                StandardQuantumGate::RandomUnitary(qubits),
-                               gateNames[k - 1]));
+                               "gate_k" + std::to_string(k)));
     }
-    llvm::cantFail(km.initJIT(1, verbose >= 2));
   };
 
   if (verbose >= 1) {
@@ -47,14 +45,13 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
 
   // Launch every kernel 5 times
   km.setLaunchConfig(sv.getDevicePtr(), nQubits);
+  km.enableTiming();
   std::array<const CUDAKernelManager::ExecutionResult*, 5> results;
   for (int i = 0; i < 5; ++i) {
-    auto* kernelInfo = km.getKernelByName(gateNames[i]);
-    assert(kernelInfo != nullptr);
     // Warmup run
-    (void)km.enqueueKernelLaunch(*kernelInfo, /* verbosity */ 2);
+    km.enqueueKernelLaunch(*kernels[i]);
     // Time this run
-    results[i] = km.enqueueKernelLaunch(*kernelInfo, /* verbosity */ 2);
+    results[i] = km.enqueueKernelLaunch(*kernels[i]);
   }
   km.syncKernelExecution();
 
@@ -119,6 +116,7 @@ CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
   CUDAStatevectorF64 sv(nQubitsSV);
   sv.initialize();
   km.setLaunchConfig(sv.getDevicePtr(), sv.nQubits());
+  km.enableTiming();
 
   std::vector<const CUDAKernelInfo*> kernels;
   kernels.reserve(nRuns);
@@ -161,7 +159,7 @@ CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
   for (auto& kernel : km) {
     float t = 1e6f;
     for (int rep = 0; rep < nReplications; ++rep) {
-      auto* result = km.enqueueKernelLaunch(kernel, /* verbosity */ 2);
+      auto* result = km.enqueueKernelLaunch(kernel);
       km.syncKernelExecution();
       t = std::min(t, result->getKernelTime());
       if (t > 0.5f)

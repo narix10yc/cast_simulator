@@ -51,7 +51,7 @@ std::ostream& CUDAKernelGenConfig::displayInfo(std::ostream& os) const {
 
 std::ostream& CUDAKernelInfo::displayInfo(std::ostream& os) const {
   os << CYAN("=== Info of CUDA Kernel @ " << (void*)this << " ===\n")
-     << "Function Name    : " << llvmFuncName << "\n"
+     << "Function Name    : " << getName() << "\n"
      << "Precision        : f" << static_cast<int>(precision) << "\n"
      << "Gate             : " << gate.get() << "\n"
      << "PTX              : ";
@@ -66,8 +66,6 @@ std::ostream& CUDAKernelInfo::displayInfo(std::ostream& os) const {
   else
     os << "Yes, with size " << utils::fmt_mem(cubinData.size()) << "\n";
 
-  os << "LLVM Context     : " << llvmContext << "\n"
-     << "LLVM Module      : " << llvmModule << "\n";
   return os << CYAN("================================\n");
 }
 
@@ -164,77 +162,6 @@ public:
 };
 } // namespace
 
-llvm::Error CUDAKernelManager::compileLLVMIRToPTX(int llvmOptLevel,
-                                                  int verbose) {
-  if (llvmOptLevel < 0)
-    llvmOptLevel = 1;
-  if (llvmOptLevel > 3)
-    llvmOptLevel = 3;
-  llvm::OptimizationLevel optLevel;
-  switch (llvmOptLevel) {
-  case 0:
-    optLevel = llvm::OptimizationLevel::O0;
-    break;
-  case 1:
-    optLevel = llvm::OptimizationLevel::O1;
-    break;
-  case 2:
-    optLevel = llvm::OptimizationLevel::O2;
-    break;
-  case 3:
-    optLevel = llvm::OptimizationLevel::O3;
-    break;
-  default:
-    assert(false && "Invalid LLVM optimization level");
-  }
-
-  applyLLVMOptimization(optLevel, verbose > 0);
-
-  std::string targetTriple = "nvptx64-nvidia-cuda";
-  std::string err;
-  const auto* target = TargetRegistry::lookupTarget(targetTriple, err);
-  if (target == nullptr)
-    return llvm::createStringError("Failed to lookup target: " + err);
-
-  int major = 0, minor = 0;
-  cast::getCudaComputeCapability(major, minor);
-  std::ostringstream archOss;
-  archOss << "sm_" << major << minor;
-  std::string archString = archOss.str();
-
-  const auto createTargetMachine = [&]() -> TargetMachine* {
-    return target->createTargetMachine(
-        targetTriple, archString, "", {}, std::nullopt);
-  };
-
-  // Prepare modules (DL, verify)
-  for (auto& pair : llvmContextModulePairs) {
-    llvm::Module* mod = pair.llvmModule.get();
-    mod->setTargetTriple(targetTriple);
-    mod->setDataLayout(createTargetMachine()->createDataLayout());
-    std::string errorStr;
-    llvm::raw_string_ostream sstream(errorStr);
-    if (llvm::verifyModule(*mod, &sstream))
-      return llvm::createStringError("Module verification failed: " + errorStr);
-  }
-
-  for (auto& kernel : *this) {
-    dispatcher.enqueue([&]() {
-      raw_pwrite_vector_ostream vecStream(kernel.ptxString);
-      legacy::PassManager passManager;
-      auto r = createTargetMachine()->addPassesToEmitFile(
-          passManager, vecStream, nullptr, CodeGenFileType::AssemblyFile);
-      assert(!r && "LLVM target machine can't emit a file of this type");
-      passManager.run(*(kernel.llvmModule));
-    });
-  }
-
-  if (verbose > 0)
-    std::cerr << "Generating PTX codes...\n";
-  dispatcher.sync(/* progressBar */ verbose > 0);
-  return llvm::Error::success();
-}
-
 static inline llvm::OptimizationLevel wrapLLVMOptLevel(int llvmOptLevel) {
   if (llvmOptLevel == 0)
     return llvm::OptimizationLevel::O0;
@@ -249,7 +176,8 @@ static inline llvm::OptimizationLevel wrapLLVMOptLevel(int llvmOptLevel) {
 // TODO: Current each call to this function creates a new set of analysis
 // managers. We could try to make these things thread-local for better
 // performance
-static void optimizeLLVMIR_work(int llvmOptLevel, CUDAKernelInfo& kernel) {
+static llvm::Error optimizeLLVMIR_work(int llvmOptLevel,
+                                       CUDAKernelInfo& kernel) {
   auto optLevel = wrapLLVMOptLevel(llvmOptLevel);
 
   // --- Analysis managers (must be constructed in this order) ---
@@ -258,14 +186,8 @@ static void optimizeLLVMIR_work(int llvmOptLevel, CUDAKernelInfo& kernel) {
   CGSCCAnalysisManager CGAM;
   ModuleAnalysisManager MAM;
 
-  // --- Pass instrumentation (debug hooks, timers, etc.) ---
-  PassInstrumentationCallbacks PIC;
-  StandardInstrumentations SI(*kernel.llvmContext, /*DebugLogging=*/false);
-  SI.registerCallbacks(PIC, &MAM);
-
-  // Use the PassBuilder ctor that takes PIC (portable for LLVM 20.x).
-  PipelineTuningOptions PTO;
-  PassBuilder PB(/*TM=*/nullptr, PTO, /*PGO=*/std::nullopt, &PIC);
+  // TODO: pass an explicit TargetMachine
+  PassBuilder PB(/*TM=*/nullptr);
 
   // Register analyses and cross-proxies.
   PB.registerLoopAnalyses(LAM);
@@ -276,14 +198,20 @@ static void optimizeLLVMIR_work(int llvmOptLevel, CUDAKernelInfo& kernel) {
 
   // Wrap default pipeline with verifiers (pre & post).
   ModulePassManager MPM;
-  MPM.addPass(VerifierPass()); // verify pre
   MPM.addPass(PB.buildPerModuleDefaultPipeline(optLevel));
-  MPM.addPass(VerifierPass()); // verify post
 
   // Run the pipeline for this module.
-  MPM.run(*kernel.llvmModule, MAM);
+  MPM.run(*kernel.llvmFunc->getParent(), MAM);
+
+  std::string errLog;
+  llvm::raw_string_ostream rso(errLog);
+  if (llvm::verifyModule(*kernel.llvmFunc->getParent(), &rso))
+    return llvm::createStringError("Module verification failed: " + errLog);
+
+  return llvm::Error::success();
 }
 
+// TODO: use TLS to avoid creating target machine every time
 static llvm::Error compileLLVMIRToPTX_work(CUDAKernelInfo& kernel) {
   std::string targetTriple = "nvptx64-nvidia-cuda";
   std::string err;
@@ -303,23 +231,24 @@ static llvm::Error compileLLVMIRToPTX_work(CUDAKernelInfo& kernel) {
         targetTriple, archString, "", {}, std::nullopt);
   };
 
-  // Prepare modules (DL, verify)
-  kernel.llvmModule->setTargetTriple(targetTriple);
-  kernel.llvmModule->setDataLayout(createTargetMachine()->createDataLayout());
+  auto* llvmModule = kernel.llvmFunc->getParent();
+  llvmModule->setTargetTriple(targetTriple);
+  llvmModule->setDataLayout(createTargetMachine()->createDataLayout());
   std::string errorStr;
   llvm::raw_string_ostream sstream(errorStr);
-  if (llvm::verifyModule(*kernel.llvmModule, &sstream))
+  if (llvm::verifyModule(*llvmModule, &sstream))
     return llvm::createStringError("Module verification failed: " + errorStr);
 
   raw_pwrite_vector_ostream vecStream(kernel.ptxString);
-  legacy::PassManager passManager;
+  legacy::PassManager PM;
   // this function returns false on success
   auto r = createTargetMachine()->addPassesToEmitFile(
-      passManager, vecStream, nullptr, CodeGenFileType::AssemblyFile);
+      PM, vecStream, nullptr, CodeGenFileType::AssemblyFile);
   if (r)
     return llvm::createStringError("LLVM target machine can't emit PTX");
 
-  passManager.run(*(kernel.llvmModule));
+  PM.run(*llvmModule);
+
   return llvm::Error::success();
 }
 
@@ -367,7 +296,7 @@ static void compileToCubin_work(int cuOptLevel, CUDAKernelInfo& kernel) {
                          CU_JIT_INPUT_PTX,
                          (void*)kernel.ptxString.c_str(),
                          kernel.ptxString.size() + 1,
-                         kernel.llvmFuncName.c_str(),
+                         kernel.getName().data(),
                          0,
                          nullptr,
                          nullptr));
@@ -385,71 +314,137 @@ static void compileToCubin_work(int cuOptLevel, CUDAKernelInfo& kernel) {
   CU_CHECK(cuLinkDestroy(linkState));
 }
 
-llvm::Error CUDAKernelManager::compilePTXToCubin(int cuOptLevel, int verbose) {
-  if (cuOptLevel < 0)
-    cuOptLevel = 1;
-  if (cuOptLevel > 4)
-    cuOptLevel = 4;
+namespace {
+using ExecutionResult = CUDAKernelManager::ExecutionResult;
+struct LaunchTask {
+  std::vector<std::unique_ptr<std::byte[]>> kernelParamsStorage_;
+  mutable std::vector<void*> kernelParams_;
 
-  for (auto& kernel : *this) {
-    dispatcher.enqueue([=, this, &kernel]() {
-      // must set cuContext before calling compileToCubin_work
-      CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
-      compileToCubin_work(cuOptLevel, kernel);
-    });
-  }
+  CUDAKernelInfo* kernel = nullptr;
+  ExecutionResult* er = nullptr;
 
-  if (verbose > 0)
-    std::cerr << "JIT Compile PTX to CUBIN...\n";
-  dispatcher.sync(/* progressBar */ verbose > 0);
+  CUmodule cuModule = nullptr;
+  CUfunction cuFunction = nullptr;
 
-  return llvm::Error::success();
-}
+  CUevent startEvent = nullptr;
+  CUevent finishEvent = nullptr;
 
-void CUDAKernelManager::execTh_work_() {
-  CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
-
-  const auto unloadLaunchTask = [this](LaunchTask& task) {
-    {
-      std::lock_guard lk(execMtx_);
-      std::cerr << "Unloading finished kernel " << task.er->kernelName << "\n";
-    }
-    task.er->status.store(ExecutionResult::CleanedUp);
-    assert(task.cuModule != nullptr);
-    CU_CHECK(cuModuleUnload(task.cuModule));
-    task.cuModule = nullptr;
-    assert(task.cuFunction != nullptr);
-    task.cuFunction = nullptr;
+  struct CallbackUserData {
+    decltype(ExecutionResult::status)* statusPtr;
+    std::condition_variable* cvPtr;
   };
 
-  const auto loadLaunchTask = [this](LaunchTask& task, InitialLaunch& il) {
+  CallbackUserData callbackUserData{};
+
+  LaunchTask() = default;
+  LaunchTask(CUDAKernelInfo* kernel, ExecutionResult* er)
+      : kernel(kernel), er(er) {}
+
+  // Does nothing if either event is nullptr or if er is nullptr
+  void tryRecordTime() {
+    if (er == nullptr)
+      return;
+    assert(startEvent == nullptr ^ finishEvent != nullptr);
+    if (startEvent == nullptr || finishEvent == nullptr)
+      return;
+    assert(cuEventQuery(startEvent) == CUDA_SUCCESS);
+    assert(cuEventQuery(finishEvent) == CUDA_SUCCESS);
+    CU_CHECK(cuEventElapsedTime(&er->kernelTime_ms, startEvent, finishEvent));
+  }
+
+  bool isFinished() const {
+    return er != nullptr && er->status.load() == ExecutionResult::Finished;
+  }
+
+  template <typename T> void addParam(T param) {
+    kernelParams_.clear();
+    auto paramPtr = std::make_unique<std::byte[]>(sizeof(T));
+    std::memcpy(paramPtr.get(), &param, sizeof(T));
+    kernelParamsStorage_.push_back(std::move(paramPtr));
+  }
+
+  void resetParams() {
+    kernelParamsStorage_.clear();
+    kernelParams_.clear();
+  }
+
+  // The retained pointer remains valid until the next call to addParam
+  // or resetParams.
+  void** getKernelParams() const {
+    if (!kernelParams_.empty())
+      return kernelParams_.data();
+
+    kernelParams_.reserve(kernelParamsStorage_.size());
+    for (auto& p : kernelParamsStorage_)
+      kernelParams_.push_back(static_cast<void*>(p.get()));
+    return kernelParams_.data();
+  }
+}; // struct LaunchTask
+
+struct LaunchWindow {
+  // window size
+  static constexpr int WS = 4;
+  std::array<LaunchTask, WS> tasks_;
+
+  LaunchTask& operator[](int idx) { return tasks_[idx % WS]; }
+}; // struct LaunchWindow
+} // namespace
+
+void CUDAKernelManager::execTh_work_() {
+  // monotonically increasing indices.
+  unsigned launchIdx = 0, unloadedIdx = 0;
+
+  // When task status changes to Ready, the exec thread moves the task from
+  // initialLaunches_ to launchWindow_.
+  LaunchWindow window;
+
+  CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
+
+  const auto loadLaunchTask = [&](CUDAKernelInfo* kernel, ExecutionResult* er) {
+    auto& task = window[launchIdx++];
+    task.kernel = kernel;
+    task.er = er;
     {
       std::lock_guard lk(execMtx_);
-      std::cerr << "Loading kernel " << il.er->kernelName << "\n";
+      std::cerr << "+ kernel " << task.er->kernelName << ", launchIdx now "
+                << launchIdx << ", " << initialLaunches_.size() << " pending\n";
     }
+    assert(task.kernel != nullptr);
+    assert(task.er != nullptr);
 
-    il.er->status.store(ExecutionResult::Running);
-    task.kernel = il.kernel;
-    task.er = il.er;
+    assert(task.er->status.load() == ExecutionResult::ReadyToLaunch);
 
+    task.er->status.store(ExecutionResult::Running);
     assert(task.cuModule == nullptr);
     assert(task.cuFunction == nullptr);
-    assert(task.kernel->cubinData.size() > 0);
-
-    CU_CHECK(cuModuleLoadData(&task.cuModule, task.kernel->cubinData.data()));
+    {
+      std::lock_guard lk(execMtx_);
+      assert(task.kernel->cubinData.size() > 0);
+      CU_CHECK(cuModuleLoadData(&task.cuModule, task.kernel->cubinData.data()));
+    }
     CU_CHECK(cuModuleGetFunction(
-        &task.cuFunction, task.cuModule, task.kernel->llvmFuncName.c_str()));
+        &task.cuFunction, task.cuModule, task.kernel->getName().data()));
 
     // setup kernel launch parameters
     unsigned nCombos =
-        1U << (launchConfig_.nQubits - task.kernel->gate->nQubits());
+        1U << (launchConfig_.nQubitsSV - task.kernel->gate->nQubits());
     unsigned gridDim =
         (nCombos + launchConfig_.blockSize - 1) / launchConfig_.blockSize;
 
-    task.resetParams();
     task.addParam(launchConfig_.devicePtr);
     task.addParam(nCombos);
     auto param = task.getKernelParams();
+
+    // setup timing if enabled
+    if (this->timingEnabled_) {
+      if (task.startEvent == nullptr)
+        CU_CHECK(cuEventCreate(&task.startEvent, CU_EVENT_DEFAULT));
+      if (task.finishEvent == nullptr)
+        CU_CHECK(cuEventCreate(&task.finishEvent, CU_EVENT_DEFAULT));
+    }
+
+    if (this->timingEnabled_)
+      CU_CHECK(cuEventRecord(task.startEvent, primaryCuStream));
     // clang-format off
     CU_CHECK(cuLaunchKernel(task.cuFunction,
                             gridDim, 1, 1,
@@ -459,6 +454,10 @@ void CUDAKernelManager::execTh_work_() {
                             param,
                             nullptr));
     // clang-format on
+    if (this->timingEnabled_)
+      CU_CHECK(cuEventRecord(task.finishEvent, primaryCuStream));
+
+    // setup callback to mark the task as finished
     task.callbackUserData.statusPtr = &task.er->status;
     task.callbackUserData.cvPtr = &execCV_;
     CU_CHECK(cuLaunchHostFunc(
@@ -466,48 +465,66 @@ void CUDAKernelManager::execTh_work_() {
         +[](void* userData) {
           auto* ud = static_cast<LaunchTask::CallbackUserData*>(userData);
           ud->statusPtr->store(ExecutionResult::Finished);
-          std::cerr << "Kernel finished, notifying exec thread\n";
           ud->cvPtr->notify_one();
         },
         static_cast<void*>(&task.callbackUserData)));
-  };
+  }; // lambda loadLaunchTask
 
   while (true) {
     {
       std::unique_lock lk(execMtx_);
-      std::cerr << "Exec thread waiting...\n";
-      execCV_.wait(lk, [this] {
-        // fast path: all tasks are launched and finished, notify the sync thread
-        // The exec thread itself waits the execStopFlag_ to exit
-        if (launchIdx == unloadedIdx && initialLaunches_.empty()) {
-          syncFlag_ = true;
-          std::cerr
-              << "Exec thread: All kernels finished, notifying sync thread\n";
+      execCV_.wait(lk, [&] {
+        // fast path: syncing requested by the main thread and all tasks are
+        // launched and finished, notify the main thread.
+        // The exec thread itself checks the execStopFlag_ to exit
+        if (syncFlag_ == RequestSyncing && launchIdx == unloadedIdx &&
+            initialLaunches_.empty()) {
+          std::cerr << "= all kernels finished. Notify syncing threads\n";
+          syncFlag_ = Synced;
           // assumes only one thread waiting under syncCV_ (the main thread)
           syncCV_.notify_one();
           return execStopFlag_;
         }
         // can unload a finished task
-        bool caseA = window_[unloadedIdx].isFinished();
+        bool caseA = window[unloadedIdx].isFinished();
 
         // can launch a new task
         bool caseB = (launchIdx - unloadedIdx < LaunchWindow::WS) &&
                      initialLaunches_.hasReadyToLaunch();
         return caseA || caseB || execStopFlag_;
       });
-      std::cerr << "Exec thread woke up\n";
       if (execStopFlag_)
         return;
     }
 
     // unload finished tasks
-    while (window_[unloadedIdx].isFinished()) {
-      unloadLaunchTask(window_[unloadedIdx]);
+    while (true) {
+      auto& task = window[unloadedIdx];
+      if (task.isFinished() == false)
+        break;
       ++unloadedIdx;
+      {
+        std::lock_guard lk(execMtx_);
+        std::cerr << "- kernel " << task.er->kernelName << ", unloadedIdx now "
+                  << unloadedIdx << "\n";
+      }
+      assert(task.er != nullptr);
+      assert(task.er->status.load() == ExecutionResult::Finished);
+
+      task.er->status.store(ExecutionResult::CleanedUp);
+      task.tryRecordTime();
+      task.resetParams();
+      assert(task.cuModule != nullptr);
+      CU_CHECK(cuModuleUnload(task.cuModule));
+      task.cuModule = nullptr;
+      assert(task.cuFunction != nullptr);
+      task.cuFunction = nullptr;
+      task.kernel = nullptr;
+      task.er = nullptr;
     }
 
     // launch new tasks
-    InitialLaunch il;
+
     while (true) {
       // not enough space in the window
       if (launchIdx - unloadedIdx >= LaunchWindow::WS)
@@ -517,59 +534,86 @@ void CUDAKernelManager::execTh_work_() {
         break;
 
       // launch a new task
-      initialLaunches_.pop(il);
-      auto& task = window_[launchIdx];
-      ++launchIdx;
-
-      loadLaunchTask(task, il);
+      CUDAKernelInfo* ilKernel;
+      ExecutionResult* ilEr;
+      initialLaunches_.pop(ilKernel, ilEr);
+      loadLaunchTask(ilKernel, ilEr);
     }
   }
 }
 
 const CUDAKernelManager::ExecutionResult*
-CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_, int verbosity) {
+CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
   assert(launchConfig_.devicePtr != 0);
   assert(launchConfig_.blockSize > 0);
-  assert(launchConfig_.nQubits > 0);
+  assert(launchConfig_.nQubitsSV > 0);
 
   auto* kernel = &kernel_;
 
   execResults_.emplace_back();
   auto* er = &execResults_.back();
-  er->kernelName = kernel->llvmFuncName;
+  er->kernelName = kernel->getName();
 
   // prepare a initial launch task
-  initialLaunches_.push(kernel, er);
+  auto* semaphore = initialLaunches_.push(kernel, er);
 
   // add compilation task to the dispatcher
-  dispatcher.enqueue([kernel = kernel, er = er, this]() {
+  dispatcher.enqueue([kernel, er, semaphore, this]() {
     CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
-    assert(er != nullptr);
+    assert(semaphore != nullptr);
 
     er->t_cubinPrepareStart = ExecutionResult::clock_t::now();
-
-    // TODO: possible racing if the user launches the same kernel multiple
-    // times.
-    // Prepares cubin (if not already available)
-    if (kernel->cubinData.empty()) {
-      // If PTX is not available, we optimize LLVM IR and generate PTX
-      if (kernel->ptxString.empty()) {
-        optimizeLLVMIR_work(1, *kernel);
-        llvm::cantFail(compileLLVMIRToPTX_work(*kernel));
+    {
+      std::unique_lock lk(semaphore->mtx);
+      auto ilStatus = semaphore->status;
+      if (ilStatus == KernelSemaphore::Pending) {
+        // Prepares cubin (if not already available)
+        semaphore->status = KernelSemaphore::Compiling;
+        {
+          std::lock_guard lk(execMtx_);
+          std::cerr << "Loading thread " << dispatcher.getWorkerID()
+                    << " is preparing kernel " << kernel->getName() << "\n";
+        }
+        // unlock while doing the compilation
+        lk.unlock();
+        assert(kernel != nullptr);
+        if (kernel->cubinData.empty()) {
+          // If PTX is not available, we optimize LLVM IR and generate PTX
+          if (kernel->ptxString.empty()) {
+            if (auto e = optimizeLLVMIR_work(1, *kernel)) {
+              std::cerr << "Failed to optimize LLVM IR for kernel "
+                        << kernel->getName() << ": "
+                        << llvm::toString(std::move(e)) << "\n";
+              std::abort();
+            }
+            llvm::cantFail(compileLLVMIRToPTX_work(*kernel));
+          }
+          // PTX is now available. Compile to cubin
+          compileToCubin_work(1, *kernel);
+        }
+        lk.lock();
+        // finished compilation, notify all waiting threads
+        semaphore->status = KernelSemaphore::Prepared;
+        semaphore->cv.notify_all();
+      } else if (ilStatus == KernelSemaphore::Compiling) {
+        // some other thread is compiling the same kernel
+        {
+          std::lock_guard lk(execMtx_);
+          std::cerr << "Loading thread " << dispatcher.getWorkerID()
+                    << " is waiting for kernel " << kernel->getName()
+                    << " to be prepared\n";
+        }
+        semaphore->cv.wait(lk, [semaphore] {
+          return semaphore->status == KernelSemaphore::Prepared;
+        });
       }
-      // PTX is now available. Compile to cubin
-      compileToCubin_work(1, *kernel);
+      assert(semaphore->status == KernelSemaphore::Prepared);
     }
 
     er->t_cubinPrepareFinish = ExecutionResult::clock_t::now();
 
     // notify the exec thread that it may try to launch kernels
     er->status.store(ExecutionResult::ReadyToLaunch);
-    {
-      std::lock_guard lk(execMtx_);
-      std::cerr << "Kernel " << er->kernelName
-                << " is ready to launch, notifying exec thread\n";
-    }
     // only one exec thread
     execCV_.notify_one();
   });
@@ -580,88 +624,28 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_, int verbosity) {
 }
 
 void CUDAKernelManager::syncKernelExecution(bool progressBar) {
-  // wait for all compilation tasks to finish
-  // if (progressBar)
-  std::cerr << "Main thread: Waiting for all compilation tasks to finish...\n";
-  dispatcher.sync(progressBar);
-
-  std::cerr << "Main thread: All compilation tasks finished, notifying exec "
-               "thread\n";
-
+  // blocks until all compilation tasks finish
+  if (progressBar)
+    std::cerr << "Waiting for all compilation tasks to finish...\n";
+  dispatcher.sync(false);
   // notify exec thread so that it can launch all kernels
-  execCV_.notify_one();
 
   {
-    // if (progressBar)
-    std::cerr << "Main thread: Waiting for kernel execution...\n";
     std::unique_lock lk(execMtx_);
-    syncCV_.wait(lk, [this] { return syncFlag_ == true; });
+    if (progressBar)
+      std::cerr << "Waiting for kernel execution...\n";
+    syncFlag_ = RequestSyncing;
+    execCV_.notify_one();
+    syncCV_.wait(lk, [this] { return syncFlag_ == Synced; });
     // reset for reuse
-    syncFlag_ = false;
+    syncFlag_ = NotSyncing;
   }
-  // if (progressBar)
-  std::cerr << "Main thread: returned\n";
-}
-
-// void CUDAKernelManager::clearWindow_() {
-//   assert(cuStreamQuery(primaryCuStream) == CUDA_SUCCESS &&
-//          "CUDA stream is not idle");
-
-//   for (auto& task : window_.tasks_) {
-//     if (task.cuModule != nullptr) {
-//       CU_CHECK(cuModuleUnload(task.cuModule));
-//       task.cuModule = nullptr;
-//     }
-
-//     task.cuFunction = nullptr;
-
-//     // Record kernel time
-//     if (task.startEvent && task.finishEvent) {
-//       assert(cuEventQuery(task.startEvent) == CUDA_SUCCESS);
-//       assert(cuEventQuery(task.finishEvent) == CUDA_SUCCESS);
-//       if (task.history) {
-//         CU_CHECK(cuEventElapsedTime(
-//             &task.history->kernelTime_ms, task.startEvent,
-//             task.finishEvent));
-//       }
-//     }
-
-//     if (task.startEvent != nullptr) {
-//       CU_CHECK(cuEventDestroy(task.startEvent));
-//       task.startEvent = nullptr;
-//     }
-
-//     if (task.finishEvent != nullptr) {
-//       CU_CHECK(cuEventDestroy(task.finishEvent));
-//       task.finishEvent = nullptr;
-//     }
-
-//     task.resetParams();
-
-//     task.status.store(LaunchTask::Idle);
-//   }
-// }
-
-llvm::Error CUDAKernelManager::initJIT(int optLevel, int verbose) {
-  if (auto e = compileLLVMIRToPTX(optLevel, verbose)) {
-    return llvm::joinErrors(
-        llvm::createStringError("Failed to compile LLVM IR to PTX: "),
-        std::move(e));
-  }
-
-  if (auto e = compilePTXToCubin(optLevel, verbose)) {
-    return llvm::joinErrors(
-        llvm::createStringError("Failed to compile PTX to CUBIN: "),
-        std::move(e));
-  }
-
-  return llvm::Error::success();
 }
 
 CUDAKernelInfo*
 CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) {
   for (auto& kernel : *this) {
-    if (kernel.llvmFuncName == llvmFuncName)
+    if (kernel.getName() == llvmFuncName)
       return &kernel;
   }
   return nullptr;
@@ -670,7 +654,7 @@ CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) {
 const CUDAKernelInfo*
 CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) const {
   for (const auto& kernel : *this) {
-    if (kernel.llvmFuncName == llvmFuncName)
+    if (kernel.getName() == llvmFuncName)
       return &kernel;
   }
   return nullptr;
@@ -686,42 +670,5 @@ void CUDAKernelManager::dumpPTX(std::ostream& os,
   }
   os << kernelInfo->ptxString << "\n";
 }
-
-// void CUDAKernelManager::launchCUDAKernelParam(
-//     void* dData, // pointer to device statevector
-//     int nQubits,
-//     const CUDAKernelInfo& kernelInfo,
-//     void* dMatPtr, // pointer to device matrix
-//     int blockSize  // ignored if fixed TILE is used
-// ) {
-//   assert(dData != nullptr);
-//   assert(dMatPtr != nullptr);
-//   assert(kernelInfo.cuTuple.cuContext != nullptr);
-//   assert(kernelInfo.cuTuple.cuModule != nullptr);
-//   assert(kernelInfo.cuTuple.cuFunction != nullptr);
-//   cuCtxSetCurrent(kernelInfo.cuTuple.cuContext);
-
-//   // Define tile size to match kernel expectations
-//   unsigned nGateQubits = kernelInfo.gate->nQubits();
-//   unsigned N = 1u << nGateQubits; // Size of gate matrix (2^nGateQubits)
-//   unsigned TILE = std::min(256u, N);
-//   unsigned combos =
-//       (nQubits > nGateQubits) ? (1u << (nQubits - nGateQubits)) : 1;
-//   unsigned tilesPerGate = (N + TILE - 1) / TILE;
-//   unsigned gridDimX = combos * tilesPerGate;
-
-//   void* kernelParams[] = {&dData, &dMatPtr, &combos};
-
-//   // clang-format off
-//   CU_CALL(cuLaunchKernel(kernelInfo.cuTuple.cuFunction,
-//                          gridDimX, 1, 1,                    // grid dim
-//                          TILE, 1, 1,                        // block dim
-//     0,
-//                          0,                                 // stream
-//                          kernelParams,                      // kernel
-//                          arguments nullptr),
-//           "launchCUDAKernelParam");
-//   // clang-format on
-// }
 
 #undef DEBUG_TYPE
