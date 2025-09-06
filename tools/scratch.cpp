@@ -1,5 +1,6 @@
 #include "cast/CUDA/CUDAKernelManager.h"
 #include "cast/CUDA/CUDAStatevector.h"
+#include "utils/Formats.h"
 #include "utils/PrintSpan.h"
 #include "utils/utils.h"
 #include <fstream>
@@ -15,37 +16,34 @@ int main(int argc, char** argv) {
   CUDAStatevectorF64 sv(nQubitsSV);
   sv.initialize();
   km.setLaunchConfig(sv.getDevicePtr(), nQubitsSV);
+  km.enableTiming();
 
-  int count = 0;
-  for (int i = 0; i < 4; ++i) {
-    QuantumGate::TargetQubitsType qubits;
-    std::string name;
-    QuantumGatePtr gate;
-    utils::sampleNoReplacement(nQubitsSV, 2, qubits);
-    gate = StandardQuantumGate::RandomUnitary(qubits);
-    name = "g" + std::to_string(count++);
-    if (auto k = km.genStandaloneGate(genCfg, gate, name); !k) {
-      std::cerr << "Failed to generate kernel: "
-                << llvm::toString(k.takeError()) << "\n";
-      std::exit(1);
-    }
+  QuantumGate::TargetQubitsType qubits;
+  utils::sampleNoReplacement(nQubitsSV, 3, qubits);
+  llvm::cantFail(km.genStandaloneGate(
+      genCfg, StandardQuantumGate::RandomUnitary(qubits), "gateA"));
 
-    utils::sampleNoReplacement(nQubitsSV, 3, qubits);
-    gate = StandardQuantumGate::RandomUnitary(qubits);
-    name = "g" + std::to_string(count++);
-    if (auto k = km.genStandaloneGate(genCfg, gate, name); !k) {
-      std::cerr << "Failed to generate kernel: "
-                << llvm::toString(k.takeError()) << "\n";
-      std::exit(1);
-    }
+  utils::sampleNoReplacement(nQubitsSV, 4, qubits);
+  llvm::cantFail(km.genStandaloneGate(
+      genCfg, StandardQuantumGate::RandomUnitary(qubits), "gateB"));
+
+  utils::sampleNoReplacement(nQubitsSV, 2, qubits);
+  llvm::cantFail(km.genStandaloneGate(
+      genCfg, StandardQuantumGate::RandomUnitary(qubits), "gateC"));
+
+  std::vector<const CUDAKernelManager::ExecutionResult*> results;
+  for (auto& kernel : km)
+    results.push_back(km.enqueueKernelLaunch(kernel));
+
+  km.syncKernelExecution();
+
+  for (const auto* res : results) {
+    std::cerr << "Kernel: " << res->kernelName << "\n"
+              << "- Kernel Time: " << utils::fmt_time(res->getKernelTime())
+              << "\n";
+    std::cerr << "- Compile Time: "
+              << utils::fmt_time(res->getCompileTime()) << "\n";
   }
-
-  for (auto& kernel : km) {
-    km.enqueueKernelLaunch(kernel);
-    km.enqueueKernelLaunch(kernel);
-  }
-
-  km.syncKernelExecution(true);
 
   return 0;
 }

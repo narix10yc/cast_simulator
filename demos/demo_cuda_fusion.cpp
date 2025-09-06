@@ -172,13 +172,13 @@ int main(int argc, const char** argv) {
 
   // Generate kernels
   CUDAKernelManager km(ArgNWorkerThreads);
+  km.enableTiming();
   if (ArgRunNoFuse) {
     utils::timedExecute(
         [&]() {
-          auto r = km.genGraphGates(genCfg, graphs.noFuse, "graphNoFuse");
-          if (!r) {
-            std::cerr << BOLDRED("[Err] ")
-                      << "Failed to generate graphNoFuse\n";
+          if (auto e = km.genGraphGates(genCfg, graphs.noFuse, "nofuse")) {
+            logerr() << "Failed to generate nofuse graph: "
+                     << llvm::toString(std::move(e)) << "\n";
             std::exit(1);
           }
         },
@@ -187,11 +187,9 @@ int main(int argc, const char** argv) {
   if (ArgRunSizeOnlyFuse) {
     utils::timedExecute(
         [&]() {
-          auto r =
-              km.genGraphGates(genCfg, graphs.sizeOnly, "graphSizeOnlyFuse");
-          if (!r) {
-            std::cerr << BOLDRED("[Err] ")
-                      << "Failed to generate graphSizeOnlyFuse\n";
+          if (auto e = km.genGraphGates(genCfg, graphs.sizeOnly, "sizeonly")) {
+            logerr() << "Failed to generate size-only graph: "
+                     << llvm::toString(std::move(e)) << "\n";
             std::exit(1);
           }
         },
@@ -200,11 +198,9 @@ int main(int argc, const char** argv) {
   if (ArgModelPath != "" && ArgRunAdaptiveFuse) {
     utils::timedExecute(
         [&]() {
-          auto r =
-              km.genGraphGates(genCfg, graphs.adaptive, "graphAdaptiveFuse");
-          if (!r) {
-            std::cerr << BOLDRED("[Err] ")
-                      << "Failed to generate graphAdaptiveFuse\n";
+          if (auto e = km.genGraphGates(genCfg, graphs.adaptive, "adaptive")) {
+            logerr() << "Failed to generate adaptive graph: "
+                     << llvm::toString(std::move(e)) << "\n";
             std::exit(1);
           }
         },
@@ -213,24 +209,21 @@ int main(int argc, const char** argv) {
   if (ArgRunNoFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto r = km.genGraphGates(
-              genDenseCfg, graphs.noFuseDense, "graphNoFuseDense");
-          if (!r) {
-            std::cerr << BOLDRED("[Err] ")
-                      << "Failed to generate graphNoFuseDense\n";
-            std::exit(1);
-          }
+          if (auto e =
+                  km.genGraphGates(genDenseCfg, graphs.noFuseDense, "nofuse_d"))
+            logerr() << "Failed to generate no-fuse dense graph: "
+                     << llvm::toString(std::move(e)) << "\n";
+          std::exit(1);
         },
         "Generate No-fuse Dense Kernels");
   }
   if (ArgRunSizeOnlyFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto r = km.genGraphGates(
-              genDenseCfg, graphs.sizeOnlyDense, "graphSizeOnlyFuseDense");
-          if (!r) {
-            std::cerr << BOLDRED("[Err] ")
-                      << "Failed to generate graphSizeOnlyFuseDense\n";
+          if (auto e = km.genGraphGates(
+                  genDenseCfg, graphs.sizeOnlyDense, "sizeonly_d")) {
+            logerr() << "Failed to generate size-only dense graph: "
+                     << llvm::toString(std::move(e)) << "\n";
             std::exit(1);
           }
         },
@@ -239,11 +232,10 @@ int main(int argc, const char** argv) {
   if (ArgModelPath != "" && ArgRunAdaptiveFuse && ArgRunDenseKernel) {
     utils::timedExecute(
         [&]() {
-          auto r = km.genGraphGates(
-              genDenseCfg, graphs.adaptiveDense, "graphAdaptiveFuseDense");
-          if (!r) {
-            std::cerr << BOLDRED("[Err] ")
-                      << "Failed to generate graphAdaptiveFuseDense\n";
+          if (auto e = km.genGraphGates(
+                  genDenseCfg, graphs.adaptiveDense, "adaptive_d")) {
+            logerr() << "Failed to generate adaptive-fuse dense graph: "
+                     << llvm::toString(std::move(e)) << "\n";
             std::exit(1);
           }
         },
@@ -262,7 +254,7 @@ int main(int argc, const char** argv) {
     for (const auto& kernel : kernels)
       opCountTotal += kernel->gate->opCount(isDense ? 0.0 : 1e-8);
 
-    auto results = km.enqueueKernelLaunchFromGraph(graphName, 2);
+    auto results = km.enqueueKernelLaunchFromGraph(graphName);
     km.syncKernelExecution();
     float t = 0.0f;
     for (const auto* r : results) {
@@ -286,28 +278,28 @@ int main(int argc, const char** argv) {
   std::cerr << BOLDCYAN("Running kernels:\n");
   if (ArgRunNoFuse) {
     std::cerr << "No-fuse Circuit:\n";
-    runAndDisplayResult("graphNoFuse", false);
+    runAndDisplayResult("nofuse", false);
     if (ArgRunDenseKernel) {
       std::cerr << "No-fuse Dense Circuit:\n";
-      runAndDisplayResult("graphNoFuseDense", true);
+      runAndDisplayResult("nofuse_d", true);
     }
   }
 
   if (ArgRunSizeOnlyFuse) {
     std::cerr << "Size-only-fuse Circuit:\n";
-    runAndDisplayResult("graphSizeOnlyFuse", false);
+    runAndDisplayResult("sizeonly", false);
     if (ArgRunDenseKernel) {
       std::cerr << "Size-only-fuse Dense Circuit:\n";
-      runAndDisplayResult("graphSizeOnlyFuseDense", true);
+      runAndDisplayResult("sizeonly_d", true);
     }
   }
 
   if (ArgRunAdaptiveFuse) {
     std::cerr << "Adaptive-fused Circuit:\n";
-    runAndDisplayResult("graphAdaptiveFuse", false);
+    runAndDisplayResult("adaptive", false);
     if (ArgRunDenseKernel) {
       std::cerr << "Adaptive-fused Dense Circuit:\n";
-      runAndDisplayResult("graphAdaptiveFuseDense", true);
+      runAndDisplayResult("adaptive_d", true);
     }
   }
   return 0;

@@ -107,7 +107,9 @@ public:
 
     // Get the compilation time in seconds
     float getCompileTime() const {
-      return (t_cubinPrepareFinish - t_cubinPrepareStart).count() * 1e-3f;
+      std::chrono::duration<float> t(t_cubinPrepareFinish -
+                                     t_cubinPrepareStart);
+      return t.count();
     }
 
     // Get the kernel time in seconds (from CUevent)
@@ -201,11 +203,7 @@ private:
   std::condition_variable execCV_;
   std::condition_variable syncCV_;
 
-  enum SyncStatus {
-    NotSyncing,
-    RequestSyncing,
-    Synced
-  };
+  enum SyncStatus { NotSyncing, RequestSyncing, Synced };
   // To load and store under execMtx_
   SyncStatus syncFlag_ = NotSyncing;
 

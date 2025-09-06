@@ -388,7 +388,8 @@ struct LaunchWindow {
 
   LaunchTask& operator[](int idx) { return tasks_[idx % WS]; }
 }; // struct LaunchWindow
-} // namespace
+
+} // anonymous namespace
 
 void CUDAKernelManager::execTh_work_() {
   // monotonically increasing indices.
@@ -628,11 +629,11 @@ void CUDAKernelManager::syncKernelExecution(bool progressBar) {
   if (progressBar)
     std::cerr << "Waiting for all compilation tasks to finish...\n";
   dispatcher.sync(progressBar);
-  
+
   {
     std::unique_lock lk(execMtx_);
     if (progressBar)
-    std::cerr << "Waiting for kernel execution...\n";
+      std::cerr << "Waiting for kernel execution...\n";
     syncFlag_ = RequestSyncing;
     // notify exec thread so that it can launch all kernels
     execCV_.notify_one();
