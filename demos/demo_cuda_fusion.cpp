@@ -100,16 +100,14 @@ unwrapArguments(Precision& precision, int& nWorkerThreads, int& nQubitsSV) {
     nWorkerThreads = ArgNWorkerThreads;
 
   if (ArgRunAdaptiveFuse && ArgModelPath == "") {
-    std::cerr
-        << BOLDRED("[Err] ")
+    logerr()
         << "--model=<path> must be specified when using adaptive fusion.\n";
     std::exit(1);
   }
 
   if (!(ArgRunNoFuse || ArgRunSizeOnlyFuse || ArgRunAdaptiveFuse)) {
-    std::cerr << BOLDRED("[Err] ")
-              << "At least one of --run-no-fuse, --run-naive-fuse, "
-              << "--run-adaptive-fuse must be specified.\n";
+    logerr() << "At least one of --run-no-fuse, --run-naive-fuse, "
+             << "--run-adaptive-fuse must be specified.\n";
     std::exit(1);
   }
 
