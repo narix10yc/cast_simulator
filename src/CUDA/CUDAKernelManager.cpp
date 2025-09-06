@@ -404,11 +404,11 @@ void CUDAKernelManager::execTh_work_() {
     auto& task = window[launchIdx++];
     task.kernel = kernel;
     task.er = er;
-    {
+    LLVM_DEBUG({
       std::lock_guard lk(execMtx_);
       std::cerr << "+ kernel " << task.er->kernelName << ", launchIdx now "
                 << launchIdx << ", " << initialLaunches_.size() << " pending\n";
-    }
+    });
     assert(task.kernel != nullptr);
     assert(task.er != nullptr);
 
@@ -479,7 +479,7 @@ void CUDAKernelManager::execTh_work_() {
         // The exec thread itself checks the execStopFlag_ to exit
         if (syncFlag_ == RequestSyncing && launchIdx == unloadedIdx &&
             initialLaunches_.empty()) {
-          std::cerr << "= all kernels finished. Notify syncing threads\n";
+          // std::cerr << "= all kernels finished. Notify syncing threads\n";
           syncFlag_ = Synced;
           // assumes only one thread waiting under syncCV_ (the main thread)
           syncCV_.notify_one();
@@ -503,11 +503,11 @@ void CUDAKernelManager::execTh_work_() {
       if (task.isFinished() == false)
         break;
       ++unloadedIdx;
-      {
+      LLVM_DEBUG({
         std::lock_guard lk(execMtx_);
         std::cerr << "- kernel " << task.er->kernelName << ", unloadedIdx now "
                   << unloadedIdx << "\n";
-      }
+      });
       assert(task.er != nullptr);
       assert(task.er->status.load() == ExecutionResult::Finished);
 
@@ -569,11 +569,11 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
       if (ilStatus == KernelSemaphore::Pending) {
         // Prepares cubin (if not already available)
         semaphore->status = KernelSemaphore::Compiling;
-        {
+        LLVM_DEBUG({
           std::lock_guard lk(execMtx_);
           std::cerr << "Loading thread " << dispatcher.getWorkerID()
                     << " is preparing kernel " << kernel->getName() << "\n";
-        }
+        });
         // unlock while doing the compilation
         lk.unlock();
         assert(kernel != nullptr);
@@ -597,12 +597,12 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
         semaphore->cv.notify_all();
       } else if (ilStatus == KernelSemaphore::Compiling) {
         // some other thread is compiling the same kernel
-        {
+        LLVM_DEBUG({
           std::lock_guard lk(execMtx_);
           std::cerr << "Loading thread " << dispatcher.getWorkerID()
                     << " is waiting for kernel " << kernel->getName()
                     << " to be prepared\n";
-        }
+        });
         semaphore->cv.wait(lk, [semaphore] {
           return semaphore->status == KernelSemaphore::Prepared;
         });
@@ -627,14 +627,14 @@ void CUDAKernelManager::syncKernelExecution(bool progressBar) {
   // blocks until all compilation tasks finish
   if (progressBar)
     std::cerr << "Waiting for all compilation tasks to finish...\n";
-  dispatcher.sync(false);
-  // notify exec thread so that it can launch all kernels
-
+  dispatcher.sync(progressBar);
+  
   {
     std::unique_lock lk(execMtx_);
     if (progressBar)
-      std::cerr << "Waiting for kernel execution...\n";
+    std::cerr << "Waiting for kernel execution...\n";
     syncFlag_ = RequestSyncing;
+    // notify exec thread so that it can launch all kernels
     execCV_.notify_one();
     syncCV_.wait(lk, [this] { return syncFlag_ == Synced; });
     // reset for reuse
