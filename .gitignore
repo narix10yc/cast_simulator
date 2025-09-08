@@ -8,8 +8,6 @@ examples/*
 
 # build folders
 build*
-debug-build/*
-release-build/*
 
 # analysis files
 tmp/*

@@ -28,6 +28,7 @@ public:
     }
     cm->setQueryNThreads(queryNThreads);
     cm->setQueryPrecision(queryPrecision);
+    this->setFusionConfig(std::move(fc));
 
     return llvm::Error::success();
   }
