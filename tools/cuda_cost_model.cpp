@@ -30,7 +30,6 @@ static cl::opt<int>
 ArgNQubits("nqubits", cl::cat(ArgCategory),
     cl::desc("Number of qubits"), cl::init(28));
 
-
 static cl::opt<int> 
 ArgNWorkerThreads("worker-threads", cl::cat(ArgCategory),
     cl::desc("CPU threads used for JIT compilation (0 to auto-detect)"),

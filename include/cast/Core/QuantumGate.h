@@ -220,6 +220,8 @@ public:
 
 // Return gateA @ gateB. In the context of quantum gates, gateB is applied
 // first.
+// Remark: This is not an efficient implementation. Matmul is not the bottleneck
+// in most cases.
 QuantumGatePtr matmul(const QuantumGate* gateA, const QuantumGate* gateB);
 
 bool isCommuting(const QuantumGate* gateA,

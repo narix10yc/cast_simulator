@@ -28,12 +28,15 @@ static double computeGiBps(std::size_t memoryInBytes, double timeInSeconds) {
          (timeInSeconds * 1024 * 1024 * 1024);
 }
 
+inline std::ostream& loginfo() { return std::cout << BOLDCYAN("[Info]: "); }
+inline std::ostream& logerr() { return std::cerr << BOLDRED("[Error]: "); }
+
 template <typename ScalarType> static void benchmark() {
   static_assert(std::is_same_v<ScalarType, float> ||
                     std::is_same_v<ScalarType, double>,
                 "ScalarType must be either float or double");
 
-  CPUKernelManager kernelMgr;
+  CPUKernelManager km;
   CPUKernelGenConfig kernelGenConfig(
       SIMD_WIDTH,
       (std::is_same_v<ScalarType, float> ? Precision::F32 : Precision::F64));
@@ -66,36 +69,32 @@ template <typename ScalarType> static void benchmark() {
     // is 1e-8 by default). We force to generate dense kernels here.
     kernelGenConfig.zeroTol = 0.0;
     kernelGenConfig.oneTol = 0.0;
-    kernelMgr
-        .genStandaloneGate(
-            kernelGenConfig, unitaryGate, "u_gate_" + std::to_string(k))
-        ; 
+    if (auto e = km.genStandaloneGate(
+            kernelGenConfig, unitaryGate, "u_gate_" + std::to_string(k))) {
+      logerr() << "In kernel gen: " << llvm::toString(std::move(e)) << "\n";
+      std::exit(EXIT_FAILURE);
+    }
     // And we relax forceDenseKernel for Hadamard and RZ gates
     kernelGenConfig.zeroTol = 1e-8;
     kernelGenConfig.oneTol = 1e-8;
-    kernelMgr
-        .genStandaloneGate(
-            kernelGenConfig, hadamardGate, "h_gate_" + std::to_string(k))
-        ; 
-    kernelMgr
-        .genStandaloneGate(kernelGenConfig,
-                           sGate,
-                           "s_gate_" + std::to_string(k))
-        ; 
+    if (auto e = km.genStandaloneGate(
+            kernelGenConfig, hadamardGate, "h_gate_" + std::to_string(k))) {
+      logerr() << "In kernel gen: " << llvm::toString(std::move(e)) << "\n";
+      std::exit(EXIT_FAILURE);
+    }
+    if (auto e = km.genStandaloneGate(
+            kernelGenConfig, sGate, "s_gate_" + std::to_string(k))) {
+      logerr() << "In kernel gen: " << llvm::toString(std::move(e)) << "\n";
+      std::exit(EXIT_FAILURE);
+    }
   }
 
   // Initialize JIT engine
   utils::timedExecute(
       [&]() {
-        auto r =
-            kernelMgr.initJIT(1, /* number of threads */
-                              llvm::OptimizationLevel::O1, /* LLVM opt level */
-                              false,                       /* use lazy JIT */
-                              1 /* verbose (show progress bar) */
-            );
-        if (!r) {
-          std::cerr << BOLDRED("[Error]: ")
-                    << "In initializing JIT engine: " << r.what() << "\n";
+        if (auto e = km.initJIT(llvm::OptimizationLevel::O1)) {
+          logerr() << "In initializing JIT engine: "
+                   << llvm::toString(std::move(e)) << "\n";
           std::exit(EXIT_FAILURE);
         }
       },
@@ -108,60 +107,65 @@ template <typename ScalarType> static void benchmark() {
 
   // Benchmark the kernels
   timeit::Timer timer(/* replication */ 7, /* verbose */ 0);
-  timeit::TimingResult tr;
+
+  const auto run = [&](std::function<void()> f, const char* title) {
+    auto tr = timer.timeit(f);
+    std::cerr << "  " << title << ": " << computeGiBps(sv.sizeInBytes(), tr.min)
+              << " GiB/s\n";
+  };
+
+  // clang-format off
+  static constexpr auto denseTitle =    "Dense Gate    ";
+  static constexpr auto hadamardTitle = "Hadamard Gate ";
+  static constexpr auto sGateTitle =    "S Gate        ";
+  // clang-format on
+
   for (int k = 1; k < 5; ++k) {
     std::cerr << "- " << k << "-qubit gates:\n";
     // Dense Gate
-    tr = timer.timeit([&]() {
-      kernelMgr
-          .applyCPUKernel(sv.data(),
-                          sv.nQubits(),
-                          "u_gate_" + std::to_string(k),
-                          NUM_THREADS)
-          ;
-    });
-    std::cerr << "  Dense Gate: " << computeGiBps(sv.sizeInBytes(), tr.min)
-              << " GiB/s\n";
+    run(
+        [&]() {
+          llvm::cantFail(km.applyCPUKernel(sv.data(),
+                                           sv.nQubits(),
+                                           "u_gate_" + std::to_string(k),
+                                           NUM_THREADS));
+        },
+        denseTitle);
 
     // Hadamard Gate
-    tr = timer.timeit([&]() {
-      kernelMgr
-          .applyCPUKernel(sv.data(),
-                          sv.nQubits(),
-                          "h_gate_" + std::to_string(k),
-                          NUM_THREADS)
-          ;
-    });
-    std::cerr << "  H Gate:     " << computeGiBps(sv.sizeInBytes(), tr.min)
-              << " GiB/s\n";
+    run(
+        [&]() {
+          llvm::cantFail(km.applyCPUKernel(sv.data(),
+                                           sv.nQubits(),
+                                           "h_gate_" + std::to_string(k),
+                                           NUM_THREADS));
+        },
+        hadamardTitle);
 
     // S Gate
-    tr = timer.timeit([&]() {
-      kernelMgr
-          .applyCPUKernel(sv.data(),
-                          sv.nQubits(),
-                          "s_gate_" + std::to_string(k),
-                          NUM_THREADS)
-          ;
-    });
-    std::cerr << "  S Gate:     " << computeGiBps(sv.sizeInBytes(), tr.min)
-              << " GiB/s\n";
+    run(
+        [&]() {
+          llvm::cantFail(km.applyCPUKernel(sv.data(),
+                                           sv.nQubits(),
+                                           "s_gate_" + std::to_string(k),
+                                           NUM_THREADS));
+        },
+        sGateTitle);
   } // end for k
 }
 
 int main(int argc, char** argv) {
-  std::cerr << BOLDCYAN("[Info]: ")
-            << "Benchmarking CPU simulation speed of multi-qubit dense gates "
+  loginfo() << "Benchmarking CPU simulation speed of multi-qubit dense gates "
             << "and multi-qubit Hadamard gates on CPU.\n";
-  std::cerr << BOLDCYAN("[Info]: ") << "Using " << NUM_QUBITS
-            << "-qubit statevector with " << NUM_THREADS << " threads.\n";
-  std::cerr << BOLDCYAN("[Info]: ") << "SIMD width is set to "
-            << static_cast<int>(SIMD_WIDTH) << " bits.\n";
+  loginfo() << "Number of qubits  : " << NUM_QUBITS << "\n";
+  loginfo() << "Number of threads : " << NUM_THREADS << "\n";
+  loginfo() << "SIMD width        : " << static_cast<int>(SIMD_WIDTH)
+            << " bits\n";
 
-  std::cerr << BOLDCYAN("[Info]: ") << "Starting single-precision test.\n";
+  loginfo() << "Starting single-precision test.\n";
   benchmark<float>();
 
-  std::cerr << BOLDCYAN("[Info]: ") << "Starting double-precision test.\n";
+  loginfo() << "Starting double-precision test.\n";
   benchmark<double>();
   return 0;
 }
