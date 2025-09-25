@@ -48,6 +48,8 @@ CPUSimdWidth cast::get_cpu_simd_width() {
     switch (width) {
     case (0):
       break;
+    case (64):
+      return W64;
     case (128):
       return W128;
     case (256):
@@ -58,7 +60,8 @@ CPUSimdWidth cast::get_cpu_simd_width() {
       std::cerr << BOLDYELLOW("[Warning]: ")
                 << "Environment variable CAST_SIMD_WIDTH is set to an illegal "
                    "value: "
-                << width << ". Accepted values are: 128, 256, 512. Ignored.\n";
+                << width
+                << ". Accepted values are: 64, 128, 256, 512. Ignored.\n";
       break;
     }
   }
@@ -92,6 +95,8 @@ CPUSimdWidth cast::get_cpu_simd_width() {
 int cast::get_simd_s(CPUSimdWidth simdWidth, Precision precision) {
   if (precision == Precision::F32) {
     switch (simdWidth) {
+    case W64:
+      return 1; // 64 bits / 32 bits = 2 elements
     case W128:
       return 2; // 128 bits / 32 bits = 4 elements
     case W256:
@@ -105,6 +110,8 @@ int cast::get_simd_s(CPUSimdWidth simdWidth, Precision precision) {
   }
   if (precision == Precision::F64) {
     switch (simdWidth) {
+    case W64:
+      return 0; // 64 bits / 64 bits = 1 element
     case W128:
       return 1; // 128 bits / 64 bits = 2 elements
     case W256:

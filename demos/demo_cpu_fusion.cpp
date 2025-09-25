@@ -25,7 +25,7 @@ ArgPrecision("precision",
 
 cl::opt<int>
 ArgSimdWidth("simd-width",
-  cl::desc("SIMD width (128, 256, 512, or 0 for auto-detect)"), cl::init(0));
+  cl::desc("SIMD width (64, 128, 256, 512, or 0 for auto-detect)"), cl::init(0));
 
 cl::opt<int>
 ArgNWorkerThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
@@ -100,7 +100,9 @@ static CircuitGraphs unwrapArguments(Precision& precision,
   else
     nThreads = ArgNWorkerThreads;
 
-  if (ArgSimdWidth == 128)
+  if (ArgSimdWidth == 64)
+    simdWidth = CPUSimdWidth::W64;
+  else if (ArgSimdWidth == 128)
     simdWidth = CPUSimdWidth::W128;
   else if (ArgSimdWidth == 256)
     simdWidth = CPUSimdWidth::W256;
@@ -110,7 +112,7 @@ static CircuitGraphs unwrapArguments(Precision& precision,
     simdWidth = get_cpu_simd_width();
   else {
     logerr() << "Invalid SIMD width specified: " << ArgSimdWidth
-             << ". Valid values are 128, 256, 512, or 0 for auto-detection.\n";
+             << ". Valid values are 64, 128, 256, 512, or 0 for auto-detection.\n";
     std::exit(1);
   }
 

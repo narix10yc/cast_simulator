@@ -9,6 +9,7 @@ constexpr int CPU_GLOBAL_MAX_SIZE = 7;
 
 enum CPUSimdWidth : int {
   W0 = 0,        // Special flag that marks no SIMD width
+  W64 = 64,      // 64 bits
   W128 = 128,    // 128 bits, such as SSE and NEON
   W256 = 256,    // 256 bits, such as AVX and AVX2
   W512 = 512,    // 512 bits, such as AVX-512

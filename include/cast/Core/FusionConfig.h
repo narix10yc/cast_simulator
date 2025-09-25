@@ -49,7 +49,7 @@ public:
 
   /// How much benefit do we recognize as significant. For example, if set to
   /// 0.1, then we accept fusion whenever costModel predicts >10% improvement
-  double benefitMargin = 0.1;
+  double benefitMargin = 0.0;
 
   bool enableMultiTraverse = true;
 

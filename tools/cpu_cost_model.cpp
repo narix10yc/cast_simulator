@@ -47,6 +47,8 @@ ArgNTests("N", cl::cat(ArgCategory),
 
 // clang-format on
 
+static std::ostream& logerr() { return std::cerr << BOLDRED("[Error]: "); }
+
 static void
 unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
   nQubits = ArgNQubits;
@@ -55,7 +57,9 @@ unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
   else
     nThreads = ArgNWorkerThreads;
 
-  if (ArgSimdWidth == 128)
+  if (ArgSimdWidth == 64)
+    simdWidth = CPUSimdWidth::W64;
+  else if (ArgSimdWidth == 128)
     simdWidth = CPUSimdWidth::W128;
   else if (ArgSimdWidth == 256)
     simdWidth = CPUSimdWidth::W256;
@@ -64,9 +68,8 @@ unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
   else if (ArgSimdWidth == 0)
     simdWidth = get_cpu_simd_width();
   else {
-    std::cerr << BOLDRED("[Error]: ")
-              << "Invalid SIMD width specified: " << ArgSimdWidth
-              << ". Valid values are 128, 256, 512, or 0 for auto-detection.\n";
+    logerr() << "Invalid SIMD width specified: " << ArgSimdWidth
+             << ". Valid values are 64, 128, 256, 512, or 0 for auto-detection.\n";
     std::exit(1);
   }
 }
