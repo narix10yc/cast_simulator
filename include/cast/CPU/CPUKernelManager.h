@@ -35,6 +35,8 @@ struct CPUKernelInfo {
   // extra information
   CPUSimdWidth simdWidth;
   double opCount;
+
+  std::ostream& displayInfo(std::ostream& os) const;
 };
 
 struct CPUKernelGenConfig {
@@ -87,6 +89,9 @@ public:
   CPUKernelManager(int nWorkerThreads = -1)
       : KernelManager<CPUKernelInfo>(
             nWorkerThreads > 0 ? nWorkerThreads : cast::get_cpu_num_threads()) {
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmParser();
+    llvm::InitializeNativeTargetAsmPrinter();
   }
 
   std::ostream& displayInfo(std::ostream& os) const;
@@ -171,7 +176,6 @@ public:
   void dumpAsm(const std::string& funcName, llvm::raw_ostream& os);
 
 }; // class CPUKernelManager
-
 }; // namespace cast
 
 #endif // CAST_CPU_KERNEL_MANAGER_CPU_H

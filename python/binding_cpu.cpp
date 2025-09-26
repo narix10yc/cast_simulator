@@ -1,121 +1,27 @@
-#include "pybind11/complex.h"
 #include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
+#include "pybind11/complex.h"
 
-#include "cast/CPU/CPUDensityMatrix.h"
 #include "cast/CPU/CPUKernelManager.h"
-#include "cast/Transform/Transform.h"
-#include "openqasm/Parser.h"
+#include "cast/CPU/CPUStatevector.h"
 
 namespace py = pybind11;
 
 namespace {
 
-void bind_QuantumGate(py::module_& m) {
-  // Base class: QuantumGate
-  py::class_<cast::QuantumGate, cast::QuantumGatePtr>(m, "QuantumGate")
-      .def_property_readonly("num_qubits", &cast::QuantumGate::nQubits)
-      .def_property_readonly(
-          "qubits", [](const cast::QuantumGate& self) { return self.qubits(); })
-      .def("op_count", &cast::QuantumGate::opCount, py::arg("zero_tol"))
-      .def("get_superop_gate", &cast::QuantumGate::getSuperopGate)
-      .def(
-          "get_info",
-          [](const cast::QuantumGate& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo(oss, verbose);
-            return oss.str();
-          },
-          py::arg("verbose") = 1);
-
-  // Derived class: StandardQuantumGate
-  py::class_<cast::StandardQuantumGate,
-             cast::QuantumGate,
-             cast::StandardQuantumGatePtr>(m, "StandardQuantumGate")
-      .def_static(
-          "random_unitary",
-          [](const std::vector<int>& qubits) {
-            return cast::StandardQuantumGate::RandomUnitary(qubits);
-          },
-          py::arg("qubits"))
-      .def_static("I1", &cast::StandardQuantumGate::I1, py::arg("q"))
-      .def_static("H", &cast::StandardQuantumGate::H, py::arg("q"))
-      .def("set_noise_spc",
-           &cast::StandardQuantumGate::setNoiseSPC,
-           py::arg("p"))
-      .def("get_superop_gate", &cast::StandardQuantumGate::getSuperopGate)
-      .def(
-          "get_info",
-          [](const cast::StandardQuantumGate& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo(oss, verbose);
-            return oss.str();
-          },
-          py::arg("verbose") = 1);
-
-  // Derived class: SuperopQuantumGate
-  py::class_<cast::SuperopQuantumGate,
-             cast::QuantumGate,
-             cast::SuperopQuantumGatePtr>(m, "SuperopQuantumGate")
-      .def(
-          "get_info",
-          [](const cast::SuperopQuantumGate& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo(oss, verbose);
-            return oss.str();
-          },
-          py::arg("verbose") = 1);
-}
-
-// Bind cast::ir::CircuitGraphNode to CircuitGraph in Python
-void bind_CircuitGraph(py::module_& m) {
-  using CircuitGraphNode = cast::ir::CircuitGraphNode;
-  py::class_<CircuitGraphNode>(m, "CircuitGraph")
-      .def("__str__",
-           [](const CircuitGraphNode& self) {
-             std::ostringstream oss;
-             self.print(oss, 0);
-             return oss.str();
-           })
-      .def("get_all_gates", &CircuitGraphNode::getAllGates)
-      .def(
-          "get_visualization",
-          [](const CircuitGraphNode& self, int verbose = 1) {
-            std::ostringstream oss;
-            self.visualize(oss, verbose);
-            return oss.str();
-          },
-          py::arg("verbose") = 1);
-}
-
-// Bind cast::ir::CircuitNode to Circuit in Python
-void bind_Circuit(py::module_& m) {
-  py::class_<cast::ir::CircuitNode>(m, "Circuit")
-      .def("__str__",
-           [](const cast::ir::CircuitNode& self) {
-             std::ostringstream oss;
-             self.print(oss, 0);
-             return oss.str();
-           })
-      .def("get_all_circuit_graphs",
-           &cast::ir::CircuitNode::getAllCircuitGraphs,
-           py::return_value_policy::reference_internal);
-}
-
-void bind_parse_circuit_from_qasm_file(py::module_& m) {
-  using namespace cast::transform;
-  m.def("parse_circuit_from_qasm_file", [](const std::string& fileName) {
-    openqasm::Parser qasmParser(fileName);
-    auto qasmRoot = qasmParser.parse();
-    cast::ast::ASTContext astCtx;
-    auto astCircuit = cvtQasmCircuitToAstCircuit(*qasmRoot, astCtx);
-    return cvtAstCircuitToIrCircuit(*astCircuit, astCtx);
-  });
+void bind_simdWidth(py::module_& m) {
+  py::enum_<cast::CPUSimdWidth>(m, "CPUSimdWidth")
+      .value("W0", cast::CPUSimdWidth::W0)
+      .value("W64", cast::CPUSimdWidth::W64)
+      .value("W128", cast::CPUSimdWidth::W128)
+      .value("W256", cast::CPUSimdWidth::W256)
+      .value("W512", cast::CPUSimdWidth::W512);
 }
 
 void bind_CPUStatevector(py::module_& m) {
   py::class_<cast::CPUStatevectorF32>(m, "CPUStatevectorF32")
-      .def(py::init<int, int>(), py::arg("num_qubits"), py::arg("simd_s"))
+      .def(py::init<int, cast::CPUSimdWidth>(),
+           py::arg("num_qubits"),
+           py::arg("simd_width"))
       .def(
           "__getitem__",
           [](const cast::CPUStatevectorF32& self, size_t idx) {
@@ -143,7 +49,9 @@ void bind_CPUStatevector(py::module_& m) {
            py::arg("num_threads") = 1);
 
   py::class_<cast::CPUStatevectorF64>(m, "CPUStatevectorF64")
-      .def(py::init<int, int>(), py::arg("num_qubits"), py::arg("simd_s"))
+      .def(py::init<int, cast::CPUSimdWidth>(),
+           py::arg("num_qubits"),
+           py::arg("simd_width"))
       .def(
           "__getitem__",
           [](const cast::CPUStatevectorF64& self, size_t idx) {
@@ -172,9 +80,9 @@ void bind_CPUStatevector(py::module_& m) {
 }
 
 void bind_CPUKernelManager(py::module_& m) {
-  py::enum_<cast::MatrixLoadMode>(m, "MatrixLoadMode")
-      .value("UseMatImmValues", cast::MatrixLoadMode::UseMatImmValues)
-      .value("StackLoadMatElems", cast::MatrixLoadMode::StackLoadMatElems)
+  py::enum_<cast::CPUMatrixLoadMode>(m, "CPUMatrixLoadMode")
+      .value("UseMatImmValues", cast::CPUMatrixLoadMode::UseMatImmValues)
+      .value("StackLoadMatElems", cast::CPUMatrixLoadMode::StackLoadMatElems)
       .export_values();
 
   py::class_<cast::CPUKernelGenConfig>(m, "CPUKernelGenConfig")
@@ -205,11 +113,7 @@ void bind_CPUKernelManager(py::module_& m) {
                              })
       .def("get_info", [](const cast::CPUKernelInfo& self) {
         std::ostringstream oss;
-        oss << "=== Info of CPUKernel @ " << (void*)&self << " ===\n";
-        oss << "- Precision: " << self.precision << "\n";
-        oss << "- LLVM Function Name: " << self.llvmFuncName << "\n";
-        oss << "- Gate: " << (void*)(self.gate.get()) << "\n";
-        oss << "- Executable: " << (self.executable ? "Yes" : "No") << "\n";
+        self.displayInfo(oss);
         return oss.str();
       });
 
@@ -227,26 +131,24 @@ void bind_CPUKernelManager(py::module_& m) {
              const cast::CPUKernelGenConfig& config,
              const cast::QuantumGatePtr& gate,
              const std::string& func_name) {
-            auto result = self.genStandaloneGate(config, gate, func_name);
-            if (!result) {
-              throw std::runtime_error("Failed to generate CPU gate. Reason: " +
-                                       result.takeError());
+            if (auto e = self.genStandaloneGate(config, gate, func_name)) {
+              throw std::runtime_error("Failed to generate CPU gate: " +
+                                       llvm::toString(std::move(e)));
             }
           },
           py::arg("config"),
           py::arg("gate"),
           py::arg("func_name"))
       .def(
-          "gen_cpu_gates_from_graph",
+          "gen_graph_gates",
           [](cast::CPUKernelManager& self,
              const cast::CPUKernelGenConfig& config,
              const cast::ir::CircuitGraphNode& graph,
              const std::string& graph_name) {
-            auto rst = self.genCPUGatesFromGraph(config, graph, graph_name);
-            if (!rst) {
+            if (auto e = self.genGraphGates(config, graph, graph_name)) {
               throw std::runtime_error(
-                  "Failed to generate CPU gates from graph. Reason: " +
-                  rst.takeError());
+                  "Failed to generate CPU gates from graph: " +
+                  llvm::toString(std::move(e)));
             }
           },
           py::arg("config"),
@@ -279,16 +181,14 @@ void bind_CPUKernelManager(py::module_& m) {
             case 3:
               llvmOptLevel = llvm::OptimizationLevel::O3;
               break;
-            // we default it to O3 anyways
+            // we default it to O1
             default:
-              llvmOptLevel = llvm::OptimizationLevel::O3;
+              llvmOptLevel = llvm::OptimizationLevel::O1;
               break;
             }
-            auto rst =
-                self.initJIT(nThreads, llvmOptLevel, useLazyJit, verbose);
-            if (!rst) {
+            if (auto e = self.initJIT(llvmOptLevel, useLazyJit, verbose)) {
               throw std::runtime_error("Failed to initialize JIT: " +
-                                       rst.takeError());
+                                       llvm::toString(std::move(e)));
             }
           },
           py::arg("num_threads") = 1,
@@ -301,16 +201,15 @@ void bind_CPUKernelManager(py::module_& m) {
              cast::CPUStatevectorF32& sv,
              const cast::CPUKernelInfo& kernel,
              int nThreads) {
-            if (kernel.precision != 32) {
+            if (kernel.precision != cast::Precision::F32) {
               throw std::runtime_error(
                   "Kernel precision mismatch: expected 32, got " +
-                  std::to_string(kernel.precision));
+                  std::to_string(static_cast<int>(kernel.precision)));
             }
-            auto rst =
-                self.applyCPUKernel(sv.data(), sv.nQubits(), kernel, nThreads);
-            if (!rst) {
-              throw std::runtime_error("Failed to apply gate. Reason" +
-                                       rst.takeError());
+            if (auto e = self.applyCPUKernel(
+                    sv.data(), sv.nQubits(), kernel, nThreads)) {
+              throw std::runtime_error("Failed to apply gate: " +
+                                       llvm::toString(std::move(e)));
             }
           },
           py::arg("sv"),
@@ -322,16 +221,15 @@ void bind_CPUKernelManager(py::module_& m) {
              cast::CPUStatevectorF64& sv,
              const cast::CPUKernelInfo& kernel,
              int nThreads) {
-            if (kernel.precision != 64) {
+            if (kernel.precision != cast::Precision::F64) {
               throw std::runtime_error(
-                  "Kernel precision mismatch: expected 32, got " +
-                  std::to_string(kernel.precision));
+                  "Kernel precision mismatch: expected 64, got " +
+                  std::to_string(static_cast<int>(kernel.precision)));
             }
-            auto rst =
-                self.applyCPUKernel(sv.data(), sv.nQubits(), kernel, nThreads);
-            if (!rst) {
+            if (auto e = self.applyCPUKernel(
+                    sv.data(), sv.nQubits(), kernel, nThreads)) {
               throw std::runtime_error("Failed to apply gate: " +
-                                       rst.takeError());
+                                       llvm::toString(std::move(e)));
             }
           },
           py::arg("sv"),
@@ -341,13 +239,8 @@ void bind_CPUKernelManager(py::module_& m) {
 
 } // end of anonymous namespace
 
-PYBIND11_MODULE(cast_python, m) {
-  m.doc() = "Python bindings for the cast library";
-  bind_QuantumGate(m);
-  bind_CircuitGraph(m);
-  bind_Circuit(m);
-  bind_parse_circuit_from_qasm_file(m);
-
+void bind_cpu(py::module_& m) {
+  bind_simdWidth(m);
   bind_CPUStatevector(m);
   bind_CPUKernelManager(m);
 }

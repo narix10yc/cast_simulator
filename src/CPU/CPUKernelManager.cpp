@@ -13,6 +13,32 @@
 using namespace cast;
 using namespace llvm;
 
+std::ostream& CPUKernelInfo::displayInfo(std::ostream& os) const {
+  os << std::scientific;
+  os << CYAN("=== CPU Kernel Info ===\n")
+     << "- Precision:       " << static_cast<int>(precision) << "\n"
+     << "- LLVM Func Name:  " << llvmFuncName << "\n"
+     << "- Matrix Load Mode: ";
+  switch (this->matrixLoadMode) {
+  case CPUMatrixLoadMode::UseMatImmValues:
+    os << "UseMatImmValues\n";
+    break;
+  case CPUMatrixLoadMode::StackLoadMatElems:
+    os << "StackLoadMatElems\n";
+    break;
+  case CPUMatrixLoadMode::StackLoadMatVecs:
+    os << "StackLoadMatVecs\n";
+    break;
+  }
+  os << "- Gate:           " << (void*)(gate.get()) << "\n"
+     << "- SIMD Width:     " << static_cast<int>(simdWidth) << "\n"
+     << "- Op Count:       " << opCount << "\n"
+     << "- Executable:     " << (executable ? "Yes" : "No") << "\n";
+
+  os << CYAN("=========================\n");
+  return os;
+}
+
 std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
   os << std::scientific;
   os << CYAN("=== CPU Kernel Gen Config ===\n")
@@ -108,12 +134,7 @@ llvm::Error CPUKernelManager::initJIT(OptimizationLevel optLevel,
   if (isJITed()) {
     return llvm::createStringError("JIT has already been initialized.");
   }
-
-  InitializeAllTargets();
-  InitializeAllTargetMCs();
-  InitializeAllAsmPrinters();
-  InitializeAllAsmParsers();
-
+  
   applyLLVMOptimization(optLevel, /* progressBar */ verbose > 0);
 
   if (useLazyJIT) {

@@ -111,6 +111,11 @@ CUDAKernelManager::ExecutionResult::displayInfo(std::ostream& os) const {
 CUDAKernelManager::CUDAKernelManager(int nWorkerThreads, int deviceOrdinal)
     : KernelManager<CUDAKernelInfo>(
           nWorkerThreads > 0 ? nWorkerThreads : cast::get_cpu_num_threads()) {
+  llvm::LLVMInitializeNVPTXTarget();
+  llvm::LLVMInitializeNVPTXTargetInfo();
+  llvm::LLVMInitializeNVPTXTargetMC();
+  llvm::LLVMInitializeNVPTXAsmPrinter();
+
   CU_CHECK(cuInit(0));
   CU_CHECK(cuDeviceGet(&cuDevice, deviceOrdinal));
   CU_CHECK(cuDevicePrimaryCtxRetain(&primaryCuCtx, cuDevice));

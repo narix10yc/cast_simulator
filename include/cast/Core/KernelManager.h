@@ -42,12 +42,7 @@ protected:
   void applyLLVMOptimization(llvm::OptimizationLevel optLevel,
                              bool progressBar);
 
-  explicit KernelManagerBase(int nWorkerThreads) : dispatcher(nWorkerThreads) {
-    llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs();
-    llvm::InitializeAllAsmParsers();
-    llvm::InitializeAllAsmPrinters();
-  }
+  explicit KernelManagerBase(int nWorkerThreads) : dispatcher(nWorkerThreads) {}
 };
 
 // KernelManager offers CRTP style interface to manage kernel storage and
@@ -62,7 +57,7 @@ protected:
 public:
   explicit KernelManager(int nWorkerThreads)
       : KernelManagerBase(nWorkerThreads) {}
-      
+
   class iterator {
     using VecOfKernels = std::vector<KernelInfoPtr>;
     using MapOfKernels = std::map<std::string, VecOfKernels>;
