@@ -1,165 +1,55 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(cast_simulator LANGUAGES C CXX)
+##### Handle LLVM Dependency ######
+include(scripts/Utils.cmake)
+handle_llvm_dep()
+message(STATUS "CAST_LLVM_DEBUG_ROOT: ${CAST_LLVM_DEBUG_ROOT}")
+message(STATUS "CAST_LLVM_RELEASE_ROOT: ${CAST_LLVM_RELEASE_ROOT}")
+
+##### User Options ######
+message("### User Options ###")
+option(CAST_USE_LLVM_COMPILER "Use LLVM Clang/Clang++ as compilers" OFF)
+message(STATUS "CAST_USE_LLVM_COMPILER: ${CAST_USE_LLVM_COMPILER}")
+option(CAST_USE_LLVM_LIBCXX "Use LLVM libc++ as the standard C++ library" OFF)
+message(STATUS "CAST_USE_LLVM_LIBCXX: ${CAST_USE_LLVM_LIBCXX}")
 option(CAST_USE_CUDA "Use LLVM NVPTX Backend for CUDA Support" OFF)
-if(CAST_USE_CUDA)
-  add_compile_definitions(CAST_USE_CUDA)
-endif()
+message(STATUS "CAST_USE_CUDA: ${CAST_USE_CUDA}")
 option(CAST_PYTHON_BIND "Bind Python" OFF)
-option(CAST_NUM_THREADS "Default number of threads to use" OFF)
-# forward definition to 'CMAKE_CAST_NUM_THREADS'. Setting to OFF means fallback
+message(STATUS "CAST_PYTHON_BIND: ${CAST_PYTHON_BIND}")
+message("#######################")
 
-if(NOT CAST_NUM_THREADS)
-  add_compile_definitions(CMAKE_CAST_NUM_THREADS=0)
+##### Compiler Setup ######
+if(CAST_USE_LLVM_COMPILER)
+  use_llvm_compilers()
 else()
-  add_compile_definitions(CMAKE_CAST_NUM_THREADS=${CAST_NUM_THREADS})
-endif()
-
-message("############ Custom Setups ############")
-# There are two modes: 
-# 1. Enviroment variable CAST_LLVM_ROOT is set: We expect there are two
-#    subdirectories under CAST_LLVM_ROOT: 'release-install' and 'debug-install'.
-# 2. CAST_LLVM_RELEASE_ROOT: The root directory of the LLVM release-install.
-#    In this case, we won't have debug infos in debug builds.
-# If both CAST_LLVM_ROOT and CAST_LLVM_RELEASE_ROOT are defined, we issue a
-# warning and use the second case.
-set(CAST_LLVM_ROOT "" CACHE PATH "Path to the llvm root directory")
-set(CAST_LLVM_RELEASE_ROOT "" CACHE PATH "Path to the llvm release-install directory")
-
-if(NOT CAST_LLVM_ROOT)
-  if(DEFINED ENV{CAST_LLVM_ROOT})
-    set(CAST_LLVM_ROOT "$ENV{CAST_LLVM_ROOT}")
-  elseif(DEFINED ENV{cast_llvm_root})
-    set(CAST_LLVM_ROOT "$ENV{cast_llvm_root}")
-  endif()
-endif()
-
-if(NOT CAST_LLVM_RELEASE_ROOT)
-  if(DEFINED ENV{CAST_LLVM_RELEASE_ROOT})
-    set(CAST_LLVM_RELEASE_ROOT "$ENV{CAST_LLVM_RELEASE_ROOT}")
-  elseif(DEFINED ENV{cast_llvm_release_root})
-    set(CAST_LLVM_RELEASE_ROOT "$ENV{cast_llvm_release_root}")
-  endif()
-endif()
-
-if(CAST_LLVM_ROOT AND CAST_LLVM_RELEASE_ROOT)
-  message(WARNING
-    "Both CAST_LLVM_ROOT and CAST_LLVM_RELEASE_ROOT are defined. "
-    "CAST_LLVM_RELEASE_ROOT will be used, ignoring CAST_LLVM_ROOT. "
-    "So in debug builds, LLVM-related debug infos will not be available. ")
-  set(CAST_LLVM_ROOT "")
-endif()
-
-if(NOT CAST_LLVM_ROOT AND NOT CAST_LLVM_RELEASE_ROOT)
-  message(FATAL_ERROR
-    "Neither CAST_LLVM_ROOT nor CAST_LLVM_RELEASE_ROOT is defined. "
-    "Please set one of them to the root directory of your LLVM installation.")
-endif()
-
-if(CAST_LLVM_ROOT)
-  message(STATUS "Using CAST_LLVM_ROOT: ${CAST_LLVM_ROOT}")
-  set(CAST_LLVM_RELEASE_ROOT "${CAST_LLVM_ROOT}/release-install")
-  set(CAST_LLVM_DEBUG_ROOT "${CAST_LLVM_ROOT}/debug-install")
-  message(STATUS "CAST_LLVM_RELEASE_ROOT is set to: ${CAST_LLVM_RELEASE_ROOT}")
-  message(STATUS "CAST_LLVM_DEBUG_ROOT is set to: ${CAST_LLVM_DEBUG_ROOT}")
-  if(NOT EXISTS "${CAST_LLVM_RELEASE_ROOT}")
-    message(FATAL_ERROR "CAST_LLVM_RELEASE_ROOT does not exist!")
-  endif()
-  if(NOT IS_DIRECTORY "${CAST_LLVM_RELEASE_ROOT}")
-    message(FATAL_ERROR "CAST_LLVM_RELEASE_ROOT is not a directory!")
-  endif()
-  if(NOT EXISTS "${CAST_LLVM_DEBUG_ROOT}")
-    message(FATAL_ERROR "CAST_LLVM_DEBUG_ROOT does not exist!")
-  endif()
-  if(NOT IS_DIRECTORY "${CAST_LLVM_DEBUG_ROOT}")
-    message(FATAL_ERROR "CAST_LLVM_DEBUG_ROOT is not a directory!")
-  endif()
-else()
-  # the second case (CAST_LLVM_RELEASE_ROOT is defined)
-  message(STATUS "Using CAST_LLVM_RELEASE_ROOT: ${CAST_LLVM_RELEASE_ROOT}")
-  message(STATUS "Notice that In debug builds, "
-    "LLVM-related debug infos will NOT be available.")
-endif()
-
-# check if clang is installed along with LLVM
-if(EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang" AND
-  EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
-  message(STATUS "Using compilers under LLVM release-install at: "
-    "${CAST_LLVM_RELEASE_ROOT}")
-  set(CMAKE_C_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang")
-  set(CMAKE_CXX_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
-  add_link_options("-fuse-ld=${CAST_LLVM_RELEASE_ROOT}/bin/ld.lld")
-else()
-  message(STATUS "No clang install found along with LLVM release-install. "
-    "Using system compilers.")
+  message(STATUS "Using system compilers.")
 endif()
 message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 
-# check if libc++ is installed along with LLVM
-# include path is almost always
-# ${CAST_LLVM_RELEASE_ROOT}/include/c++/v1
-set(LIBCXX_INCLUDE_DIR "${CAST_LLVM_RELEASE_ROOT}/include/c++/v1")
-
-# but the library path may vary. For example,
-# ${CAST_LLVM_RELEASE_ROOT}/lib
-# ${CAST_LLVM_RELEASE_ROOT}/lib/x86_64-unknown-linux-gnu
-file(GLOB_RECURSE LIBCXX_LIB_PATHS "${CAST_LLVM_RELEASE_ROOT}/lib/*libc++.*")
-if(LIBCXX_LIB_PATHS)
-  list(GET LIBCXX_LIB_PATHS 0 LIBCXX_LIB_PATH)
-  get_filename_component(LIBCXX_LIB_DIR "${LIBCXX_LIB_PATH}" DIRECTORY)
-endif()
-
-if(EXISTS "${LIBCXX_INCLUDE_DIR}/vector" AND
-  DEFINED LIBCXX_LIB_DIR)
-  message(STATUS "Found libc++ at ${LIBCXX_LIB_DIR}")
-  add_compile_options(-stdlib=libc++ -I"${LIBCXX_INCLUDE_DIR}")
-  if(NOT APPLE)
-    # On macOS, -stdlib=libc++ automatically links libc++, libc++abi, and
-    # unwind. Specifying them will cause annoying warnings.
-    link_libraries(c++ c++abi unwind)
-  endif()
-  link_directories("${LIBCXX_LIB_DIR}")
-else()
-  message(STATUS "No libc++ found along with LLVM release-install, "
-    "using system defaults.")
-endif()
-
-# Number of threads
-if(DEFINED CAST_NUM_THREADS AND CAST_NUM_THREADS GREATER 0)
-  message(STATUS "CAST_NUM_THREADS is set to ${CAST_NUM_THREADS}.")
-else()
-  message(STATUS "-DCAST_NUM_THREADS=<N> is not explicitly set.")
-endif()
+##### Project Setup ######
+project(cast_simulator LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
 
-string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
+if(CAST_USE_LLVM_LIBCXX)
+  use_llvm_libcxx()
+endif()
 
-# disable C++ RTTI
-add_compile_options("-fno-rtti")
-
-# show colored diagnostics in the terminal
-add_compile_options("-fdiagnostics-color=always")
-
-if(CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
-  add_compile_options("-Wall")
+if(CAST_USE_CUDA)
+  add_compile_definitions(CAST_USE_CUDA)
 endif()
 
 # Find LLVM
+string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
 if(CAST_LLVM_DEBUG_ROOT AND CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
   set(LLVM_DIR "${CAST_LLVM_DEBUG_ROOT}/lib/cmake/llvm")
 else()
   set(LLVM_DIR "${CAST_LLVM_RELEASE_ROOT}/lib/cmake/llvm")
 endif()
 
-message("############ End Custom Setups ############")
-
 message(STATUS "LLVM_DIR is set to: ${LLVM_DIR}")
-find_package(LLVM CONFIG)
-if(NOT LLVM_FOUND)
-  message(FATAL_ERROR "LLVM not found!")
-endif()
+find_package(LLVM CONFIG REQUIRED)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 message(STATUS "LLVM is built for targets: ${LLVM_TARGETS_TO_BUILD}")
@@ -169,6 +59,8 @@ if(CAST_USE_CUDA AND NOT "NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
     "CUDA is enabled in the project, "
     "but LLVM build does not support NVPTX backend.")
 endif()
+
+###### CUDA Setup ######
 
 # Find CUDAToolkit (if CAST_USE_CUDA is defined)
 if(CAST_USE_CUDA)
@@ -204,6 +96,12 @@ if(CAST_USE_CUDA)
   enable_language(CUDA)
 endif() # if(CAST_USE_CUDA)
 
+# show colored diagnostics in the terminal
+add_compile_options("-fdiagnostics-color=always")
+
+if(CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
+  add_compile_options("-Wall")
+endif()
 include_directories(${LLVM_INCLUDE_DIRS} include)
 message(STATUS "LLVM_LIBRARY_DIRS: ${LLVM_LIBRARY_DIRS}")
 link_directories(${LLVM_LIBRARY_DIRS})

@@ -2,14 +2,19 @@
 
 # This will put the dependencies in a top-level _deps directory
 # so if we delete the build directory, we don't need to re-download.
+set(PYBIND11_FINDPYTHON ON)
 set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/_deps")
-
 include(FetchContent)
 FetchContent_Declare(
   pybind11
   GIT_REPOSITORY https://github.com/pybind/pybind11.git
-  GIT_TAG v2.12.0
+  GIT_TAG v3.0.1
 )
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+message(STATUS "Using Python: ${Python3_EXECUTABLE}")
+message(STATUS "Python includes: ${Python3_INCLUDE_DIRS}")
+message(STATUS "Python libraries: ${Python3_LIBRARIES}")
 
 FetchContent_MakeAvailable(pybind11)
 
@@ -31,3 +36,6 @@ add_custom_command(
 add_custom_target(cast_python_copy_pyi ALL DEPENDS ${PYI_TARGET})
 add_dependencies(cast_python cast_python_copy_pyi)
 target_link_libraries(cast_python PRIVATE cast)
+target_compile_options(cast_python PRIVATE "-fexceptions" "-frtti")
+
+message(STATUS "Python bindings enabled")

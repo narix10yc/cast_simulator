@@ -5,28 +5,28 @@
 
 #include <cassert>
 #include <condition_variable>
+#include <deque>
 #include <functional>
-#include <queue>
 #include <thread>
 
 namespace utils {
 
 /// Thread-safe task dispatcher
 class TaskDispatcher {
-  std::queue<std::function<void()>> tasks;
+  std::deque<std::function<void()>> tasks;
   std::vector<std::thread> workers;
   mutable std::mutex mtx;
   std::condition_variable cv;
   std::condition_variable syncCV;
 
-  std::atomic<int> nTotalTasks;
-  std::atomic<int> nActiveWorkers;
-  std::atomic<bool> stopFlag;
+  std::atomic<int> nTotalTasks = 0;
+  std::atomic<int> nActiveWorkers = 0;
+  std::atomic<bool> stopFlag = false;
 
   void worker_work();
 
 public:
-  explicit TaskDispatcher(unsigned nWorkers);
+  TaskDispatcher(int nWorkers);
 
   TaskDispatcher(const TaskDispatcher&) = delete;
   TaskDispatcher(TaskDispatcher&&) = delete;
@@ -35,10 +35,12 @@ public:
   TaskDispatcher& operator=(TaskDispatcher&&) = delete;
 
   ~TaskDispatcher() {
-    if (stopFlag == false) {
-      sync();
-      join();
-    }
+    assert(stopFlag == false);
+    sync();
+    stopFlag.store(true);
+    cv.notify_all();
+    for (auto& thread : workers)
+      thread.join();
   }
 
   // Add a new task to the queue
@@ -50,10 +52,6 @@ public:
 
   /// @brief A blocking method that waits until all tasks are finished.
   void sync(bool progressBar = false);
-
-  /// @brief Join all threads. This method is automatically called upon
-  /// destruction, so is normally not needed.a
-  void join();
 
   /* TLS Management */
 private:

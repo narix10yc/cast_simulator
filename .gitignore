@@ -1,5 +1,6 @@
 .vscode/*
 .idea/*
+.python.envs/*
 *.o
 *.exe
 examples/*

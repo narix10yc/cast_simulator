@@ -12,25 +12,20 @@ thread_local int TaskDispatcher::tls_local_version_ = 0;
 thread_local TaskDispatcher::tls_instance_t
     TaskDispatcher::tls_local_instance_(nullptr, +[](void*) {});
 
-TaskDispatcher::TaskDispatcher(unsigned nWorkers)
-    : tasks(), workers(), mtx(), cv(), syncCV(), nTotalTasks(0),
-      nActiveWorkers(0), stopFlag(false) {
+TaskDispatcher::TaskDispatcher(int nWorkers) {
   assert(nWorkers > 0);
   workers.reserve(nWorkers);
-  for (unsigned i = 0; i < nWorkers; ++i)
+  for (int i = 0; i < nWorkers; ++i)
     workers.emplace_back(&TaskDispatcher::worker_work, this);
 }
 
 void TaskDispatcher::enqueue(const std::function<void()>& task) {
-  ++nTotalTasks;
+  nTotalTasks.store(nTotalTasks.load() + 1);
   {
     std::lock_guard lock(mtx);
-    if (stopFlag) {
-      std::cerr << BOLDRED("[Err: ]")
-                << "TaskDispatcher is stopped, cannot enqueue new tasks.\n";
-      return;
-    }
-    tasks.push(std::move(task));
+    assert(stopFlag == false &&
+           "Cannot enqueue tasks after join() or during destruction");
+    tasks.push_back(std::move(task));
   }
   cv.notify_one();
 }
@@ -55,27 +50,30 @@ void TaskDispatcher::ensure_tls_ready_() {
 }
 
 void TaskDispatcher::worker_work() {
+  std::function<void()> task;
+  bool tlExit = false;
   while (true) {
-    std::function<void()> task;
-    {
-      std::unique_lock lock(mtx);
-      cv.wait(lock, [this]() { return stopFlag || !tasks.empty(); });
+    std::unique_lock lk(mtx);
+    cv.wait(lk, [this, &tlExit]() {
+      tlExit = stopFlag.load();
+      return tlExit || !tasks.empty();
+    });
 
-      if (stopFlag && tasks.empty()) {
-        return;
-      }
+    if (tlExit)
+      break;
 
-      if (tasks.empty()) {
-        // No task to do. Keep waiting
-        continue;
-      }
-      task = std::move(tasks.front());
-      tasks.pop();
-      ++nActiveWorkers;
-    }
+    assert(!tasks.empty());
+    task = std::move(tasks.front());
+    tasks.pop_front();
+
+    lk.unlock();
+    ++nActiveWorkers;
     ensure_tls_ready_();
     task();
     --nActiveWorkers;
+    lk.lock();
+
+    // we always notify the syncing threads for it to update progress bar
     syncCV.notify_all();
   }
 }
@@ -93,8 +91,8 @@ int TaskDispatcher::getWorkerID() const {
 void TaskDispatcher::sync(bool progressBar) {
   assert(getWorkerID() == -1 && "Cannot sync() inside a worker thread");
   {
-    std::unique_lock lock(mtx);
-    syncCV.wait(lock, [this, progressBar]() {
+    std::unique_lock lk(mtx);
+    syncCV.wait(lk, [this, progressBar]() {
       if (progressBar) {
         int nTasksFinished = nTotalTasks - tasks.size() - nActiveWorkers;
         utils::displayProgressBar(nTasksFinished, nTotalTasks, 20);
@@ -103,22 +101,8 @@ void TaskDispatcher::sync(bool progressBar) {
     });
   }
   if (progressBar)
-    std::cerr << std::endl;
-  cv.notify_all();
+    std::cerr << "\n" << std::flush;
 
   // reset for reuse
   nTotalTasks = 0;
-}
-
-void TaskDispatcher::join() {
-  stopFlag = true;
-  cv.notify_all();
-  for (auto& thread : workers) {
-    if (thread.joinable())
-      thread.join();
-  }
-  // reset for reuse
-  stopFlag = false;
-  nTotalTasks = 0;
-  nActiveWorkers = 0;
 }
