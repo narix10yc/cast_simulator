@@ -48,8 +48,8 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
     ss << "Apply U1q at " << gates[i]->qubits()[0];
     auto immFuncName = "gateImm_" + std::to_string(i);
     auto loadFuncName = "gateLoad_" + std::to_string(i);
-    const auto* immKernel = km.getKernelByName(immFuncName);
-    const auto* loadKernel = km.getKernelByName(loadFuncName);
+    auto* immKernel = km.getKernelByName(immFuncName);
+    auto* loadKernel = km.getKernelByName(loadFuncName);
     assert(immKernel);
     assert(loadKernel);
     llvm::cantFail(km.applyCPUKernel(sv0.data(), sv0.nQubits(), *immKernel));
@@ -117,8 +117,8 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U2q() {
     ss << "Apply U2q at " << a << " and " << b;
     auto immFuncName = "gateImm_" + std::to_string(i);
     auto loadFuncName = "gateLoad_" + std::to_string(i);
-    const auto* immKernel = km.getKernelByName(immFuncName);
-    const auto* loadKernel = km.getKernelByName(loadFuncName);
+    auto* immKernel = km.getKernelByName(immFuncName);
+    auto* loadKernel = km.getKernelByName(loadFuncName);
     assert(immKernel);
     assert(loadKernel);
     llvm::cantFail(km.applyCPUKernel(sv0.data(), sv0.nQubits(), *immKernel));

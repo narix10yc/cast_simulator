@@ -4,6 +4,7 @@ using namespace cast;
 
 // Allocates memory for the gate matrix to be used in invoking CPU kernels
 // @return a raw pointer to the allocated memory. Remember to free it after use.
+// TODO: refactor this function
 static void* mallocGatePointer(const cast::QuantumGate* gate,
                                Precision precision) {
   void* p = nullptr;
@@ -47,19 +48,25 @@ static void* mallocGatePointer(const cast::QuantumGate* gate,
 
 llvm::Error CPUKernelManager::applyCPUKernel(void* sv,
                                              int nQubits,
-                                             const CPUKernelInfo& kernel,
-                                             int nThreads) const {
+                                             CPUKernelInfo& kernel,
+                                             int nThreads) {
   if (kernel.executable == nullptr) {
     return llvm::createStringError(
         "Kernel executable not available. Did you call initJIT()?");
   }
-  int simd_s = cast::get_simd_s(kernel.simdWidth, kernel.precision);
-  int tmp = nQubits - kernel.gate->nQubits() - simd_s;
+  if (nThreads <= 0) {
+    return llvm::createStringError("Invalid number of threads: " +
+                                   llvm::Twine(nThreads));
+  }
+
+  const int simd_s = cast::get_simd_s(kernel.simdWidth, kernel.precision);
+  const int tmp = nQubits - kernel.gate->nQubits() - simd_s;
   if (tmp < 0) {
     return llvm::createStringError(
-        "Invalid number of qubits for the kernel '" + kernel.llvmFuncName +
+        "Invalid number of qubits for the kernel '" +
+        llvm::Twine(kernel.llvmFuncName) +
         "'. This kernel must act on statevectors with at least " +
-        std::to_string(kernel.gate->nQubits() + simd_s) + " qubits.");
+        llvm::Twine(kernel.gate->nQubits() + simd_s) + " qubits.");
   }
   uint64_t nTasks = 1ULL << tmp;
   void* pMat = nullptr;
@@ -89,10 +96,14 @@ llvm::Error CPUKernelManager::applyCPUKernel(void* sv,
     argvs[tIdx * 4 + 3] = pMat;                 // matrix pointer
   }
 
+  kernel.tpExecStart = std::chrono::steady_clock::now();
+
   for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)
     threads.emplace_back(kernel.executable, &argvs[tIdx * 4]);
   for (auto& t : threads)
     t.join();
+
+  kernel.tpExecFinish = std::chrono::steady_clock::now();
 
   // clean up
   std::free(pMat);
@@ -102,18 +113,18 @@ llvm::Error CPUKernelManager::applyCPUKernel(void* sv,
 llvm::Error CPUKernelManager::applyCPUKernel(void* sv,
                                              int nQubits,
                                              const std::string& llvmFuncName,
-                                             int nThreads) const {
-  const auto* kernel = getKernelByName(llvmFuncName);
-  if (kernel == nullptr) {
+                                             int nThreads) {
+  auto* kernel = getKernelByName(llvmFuncName);
+  if (kernel == nullptr)
     return llvm::createStringError("Kernel not found: " + llvmFuncName);
-  }
+
   if (auto e = applyCPUKernel(sv, nQubits, *kernel, nThreads))
     return e;
   return llvm::Error::success();
 }
 
 llvm::Error CPUKernelManager::applyCPUKernelsFromGraph(
-    void* sv, int nQubits, const std::string& graphName, int nThreads) const {
+    void* sv, int nQubits, const std::string& graphName, int nThreads) {
   if (!graphKernels_.contains(graphName)) {
     return llvm::createStringError("Graph not found: " + graphName);
   }

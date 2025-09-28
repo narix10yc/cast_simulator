@@ -47,14 +47,12 @@ CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
                                    funcName);
   }
 
-  return std::make_unique<CPUKernelInfo>(
-      std::function<CPU_KERNEL_TYPE>(), // empty executable
-      config.precision,
-      func->getName().str(),
-      config.matrixLoadMode,
-      gate,
-      config.simdWidth,
-      gate->opCount(config.zeroTol));
+  return std::make_unique<CPUKernelInfo>(config.precision,
+                                         func->getName().str(),
+                                         config.matrixLoadMode,
+                                         gate,
+                                         config.simdWidth,
+                                         gate->opCount(config.zeroTol));
 }
 
 llvm::Error
@@ -481,13 +479,11 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
       }
     }
     LLVM_DEBUG(std::cerr << "- reSplitMasks: [";
-               for (const auto& e
-                    : reSplitMasks) std::cerr
+               for (const auto& e : reSplitMasks) std::cerr
                << utils::fmt_0b(e, sepBit + 1) << ",";
                std::cerr << "]\n";
                std::cerr << "- imSplitMasks: [";
-               for (const auto& e
-                    : imSplitMasks) std::cerr
+               for (const auto& e : imSplitMasks) std::cerr
                << utils::fmt_0b(e, sepBit + 1) << ",";
                std::cerr << "]\n";);
   } // end init [re/im]SplitMasks

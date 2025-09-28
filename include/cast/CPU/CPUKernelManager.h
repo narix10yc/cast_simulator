@@ -27,14 +27,48 @@ enum class CPUMatrixLoadMode {
 };
 
 struct CPUKernelInfo {
-  std::function<CPU_KERNEL_TYPE> executable;
-  Precision precision;
-  std::string llvmFuncName;
-  CPUMatrixLoadMode matrixLoadMode;
-  ConstQuantumGatePtr gate;
-  // extra information
-  CPUSimdWidth simdWidth;
+  std::function<CPU_KERNEL_TYPE> executable{};
+  Precision precision = Precision::Unknown;
+  std::string llvmFuncName{};
+  CPUMatrixLoadMode matrixLoadMode{};
+  ConstQuantumGatePtr gate = nullptr;
+  CPUSimdWidth simdWidth = CPUSimdWidth::W_Unknown;
+  // we need opCount here due to the zeroTol value
   double opCount;
+  // execution time in seconds
+  using time_point_t = std::chrono::time_point<std::chrono::steady_clock>;
+  time_point_t tpJitStart{};
+  time_point_t tpJitFinish{};
+  time_point_t tpExecStart{};
+  time_point_t tpExecFinish{};
+
+  CPUKernelInfo() = default;
+
+  CPUKernelInfo(Precision precision,
+                const std::string& llvmFuncName,
+                CPUMatrixLoadMode matrixLoadMode,
+                ConstQuantumGatePtr gate,
+                CPUSimdWidth simdWidth,
+                double opCount)
+      : precision(precision), llvmFuncName(llvmFuncName),
+        matrixLoadMode(matrixLoadMode), gate(gate), simdWidth(simdWidth),
+        opCount(opCount) {}
+
+  // Get JIT time in seconds
+  float getJitTime() const {
+    if (tpJitStart.time_since_epoch().count() == 0 ||
+        tpJitFinish.time_since_epoch().count() == 0)
+      return 0.0f;
+    return std::chrono::duration<float>(tpJitFinish - tpJitStart).count();
+  }
+
+  // Get execution time in seconds
+  float getExecTime() const {
+    if (tpExecStart.time_since_epoch().count() == 0 ||
+        tpExecFinish.time_since_epoch().count() == 0)
+      return 0.0f;
+    return std::chrono::duration<float>(tpExecFinish - tpExecStart).count();
+  }
 
   std::ostream& displayInfo(std::ostream& os) const;
 };
@@ -142,7 +176,7 @@ public:
   }
 
   // Get kernel by name. Return nullptr if not found.
-  const CPUKernelInfo* getKernelByName(const std::string& llvmFuncName) const;
+  CPUKernelInfo* getKernelByName(const std::string& llvmFuncName);
 
   std::span<const KernelInfoPtr>
   getKernelsFromGraphName(const std::string& graphName) const {
@@ -155,19 +189,19 @@ public:
   /* Apply Kernels */
 
   llvm::Error applyCPUKernel(void* sv,
-                             int nQubits,
-                             const CPUKernelInfo& kernelInfo,
-                             int nThreads = 1) const;
+                             int nQubitsSV,
+                             CPUKernelInfo& kernelInfo,
+                             int nThreads = 1);
 
   llvm::Error applyCPUKernel(void* sv,
-                             int nQubits,
+                             int nQubitsSV,
                              const std::string& llvmFuncName,
-                             int nThreads = 1) const;
+                             int nThreads = 1);
 
   llvm::Error applyCPUKernelsFromGraph(void* sv,
-                                       int nQubits,
+                                       int nQubitsSV,
                                        const std::string& graphName,
-                                       int nThreads = 1) const;
+                                       int nThreads = 1);
 
   void dumpIR(const std::string& funcName,
               llvm::raw_ostream& os = llvm::errs());

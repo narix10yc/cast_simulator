@@ -1,5 +1,5 @@
-#include "pybind11/pybind11.h"
 #include "pybind11/complex.h"
+#include "pybind11/pybind11.h"
 
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUStatevector.h"
@@ -111,6 +111,8 @@ void bind_CPUKernelManager(py::module_& m) {
                              [](const cast::CPUKernelInfo& self) {
                                return self.executable ? true : false;
                              })
+      .def("get_jit_time", &cast::CPUKernelInfo::getJitTime)
+      .def("get_exec_time", &cast::CPUKernelInfo::getExecTime)
       .def("get_info", [](const cast::CPUKernelInfo& self) {
         std::ostringstream oss;
         self.displayInfo(oss);
@@ -156,7 +158,7 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("graph_name"))
       .def(
           "get_kernel_by_name",
-          [](const cast::CPUKernelManager& self, const std::string& funcName) {
+          [](cast::CPUKernelManager& self, const std::string& funcName) {
             return self.getKernelByName(funcName);
           },
           py::arg("func_name"))
@@ -199,7 +201,7 @@ void bind_CPUKernelManager(py::module_& m) {
           "apply_kernel_f32",
           [](cast::CPUKernelManager& self,
              cast::CPUStatevectorF32& sv,
-             const cast::CPUKernelInfo& kernel,
+             cast::CPUKernelInfo& kernel,
              int nThreads) {
             if (kernel.precision != cast::Precision::F32) {
               throw std::runtime_error(
@@ -219,7 +221,7 @@ void bind_CPUKernelManager(py::module_& m) {
           "apply_kernel_f64",
           [](cast::CPUKernelManager& self,
              cast::CPUStatevectorF64& sv,
-             const cast::CPUKernelInfo& kernel,
+             cast::CPUKernelInfo& kernel,
              int nThreads) {
             if (kernel.precision != cast::Precision::F64) {
               throw std::runtime_error(

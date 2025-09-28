@@ -1,6 +1,7 @@
 #include "llvm/Support/TargetSelect.h"
 
 #include "cast/CPU/CPUKernelManager.h"
+#include "utils/Formats.h"
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 
@@ -33,7 +34,9 @@ std::ostream& CPUKernelInfo::displayInfo(std::ostream& os) const {
   os << "- Gate:           " << (void*)(gate.get()) << "\n"
      << "- SIMD Width:     " << static_cast<int>(simdWidth) << "\n"
      << "- Op Count:       " << opCount << "\n"
-     << "- Executable:     " << (executable ? "Yes" : "No") << "\n";
+     << "- Executable:     " << (executable ? "Yes" : "No") << "\n"
+     << "- JIT Time:       " << utils::fmt_time(getJitTime()) << "\n"
+     << "- Exec Time:      " << utils::fmt_time(getExecTime()) << "\n";
 
   os << CYAN("=========================\n");
   return os;
@@ -78,8 +81,8 @@ std::ostream& CPUKernelManager::displayInfo(std::ostream& os) const {
   return os;
 }
 
-const CPUKernelInfo*
-CPUKernelManager::getKernelByName(const std::string& llvmFuncName) const {
+CPUKernelInfo*
+CPUKernelManager::getKernelByName(const std::string& llvmFuncName) {
   for (const auto& kernel : standaloneKernels_) {
     if (kernel->llvmFuncName == llvmFuncName)
       return kernel.get();
@@ -103,12 +106,12 @@ void CPUKernelManager::ensureExecutable(CPUKernelInfo& kernel) {
     std::lock_guard<std::mutex> lock(mtx);
     if (kernel.executable)
       return;
+    kernel.tpJitStart = std::chrono::steady_clock::now();
   }
   auto addr =
       cantFail(llvmJIT->lookup(kernel.llvmFuncName)).toPtr<CPU_KERNEL_TYPE>();
-  // std::cerr << "Kernel " << kernel.llvmFuncName << " addr " << (void*)addr
-  // << "\n";
   {
+    kernel.tpJitFinish = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(mtx);
     kernel.executable = addr;
   }
@@ -134,7 +137,7 @@ llvm::Error CPUKernelManager::initJIT(OptimizationLevel optLevel,
   if (isJITed()) {
     return llvm::createStringError("JIT has already been initialized.");
   }
-  
+
   applyLLVMOptimization(optLevel, /* progressBar */ verbose > 0);
 
   if (useLazyJIT) {
