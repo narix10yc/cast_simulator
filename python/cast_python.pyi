@@ -72,16 +72,21 @@ class CircuitGraph:
     ...
 
 from enum import Enum
-class MatrixLoadMode(Enum):
+class CPUMatrixLoadMode(Enum):
   """
   Enum for matrix load types.
   """
-  UseMatImmValues   : MatrixLoadMode
-  StackLoadMatElems : MatrixLoadMode
+  UseMatImmValues   : CPUMatrixLoadMode
+  StackLoadMatElems : CPUMatrixLoadMode
 
-# Also expose the enum values directly
-UseMatImmValues   : MatrixLoadMode
-StackLoadMatElems : MatrixLoadMode
+class CPUSimdWidth(Enum):
+  """
+  Enum for SIMD widths.
+  """
+  W64  : CPUSimdWidth
+  W128 : CPUSimdWidth
+  W256 : CPUSimdWidth
+  W512 : CPUSimdWidth
 
 class CPUKernelGenConfig:
   """
@@ -94,7 +99,7 @@ class CPUKernelGenConfig:
   usePDEP : bool
   zeroTol : float
   oneTol : float
-  matrixLoadMode : MatrixLoadMode
+  matrixLoadMode : CPUMatrixLoadMode
 
   def __init__(self) -> None:
     ...
@@ -121,10 +126,27 @@ class CPUKernelInfo:
 
   @property
   def gate(self) -> QuantumGate:
+    """
+    Returns the quantum gate associated with this kernel.
+    """
     ...
   
-  @property
-  def executable(self) -> bool:
+  def has_executable(self) -> bool:
+    """
+    Returns True if the kernel has been JIT compiled and is executable.
+    """
+    ...
+    
+  def get_jit_time(self) -> float:
+    """
+    Get JIT time in seconds.
+    """
+    ...
+    
+  def get_exec_time(self) -> float:
+    """
+    Get execution time in seconds.
+    """
     ...
 
   def get_info(self) -> str:
@@ -161,10 +183,10 @@ class CPUKernelManager:
     """
     ...
   
-  def gen_cpu_gates_from_graph(self, 
-                               config: CPUKernelGenConfig, 
-                               graph: CircuitGraph,
-                               graph_name: str) -> None:
+  def gen_graph_gates(self, 
+                      config: CPUKernelGenConfig, 
+                      graph: CircuitGraph,
+                      graph_name: str) -> None:
     """
     Generates CPU kernels for all gates in the given circuit graph.
     graph_name should be unique for every circuit graph given to this method.

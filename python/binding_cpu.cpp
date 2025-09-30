@@ -71,13 +71,13 @@ void bind_CPUStatevector(py::module_& m) {
       .def("probability", &cast::CPUStatevectorF64::prob, py::arg("qubit"))
       .def("initialize",
            &cast::CPUStatevectorF64::initialize,
-           py::arg("nThreads") = 1)
+           py::arg("num_threads") = 1)
       .def("normalize",
            &cast::CPUStatevectorF64::normalize,
-           py::arg("nThreads") = 1)
+           py::arg("num_threads") = 1)
       .def("randomize",
            &cast::CPUStatevectorF64::randomize,
-           py::arg("nThreads") = 1);
+           py::arg("num_threads") = 1);
 }
 
 void bind_CPUKernelManager(py::module_& m) {
@@ -111,7 +111,7 @@ void bind_CPUKernelManager(py::module_& m) {
       .def_readonly("precision", &cast::CPUKernelInfo::precision)
       .def_readonly("llvm_func_name", &cast::CPUKernelInfo::llvmFuncName)
       .def_readonly("gate", &cast::CPUKernelInfo::gate)
-      .def_property_readonly("executable",
+      .def_property_readonly("has_executable",
                              [](const cast::CPUKernelInfo& self) {
                                return self.executable ? true : false;
                              })
