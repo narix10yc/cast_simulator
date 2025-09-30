@@ -21,18 +21,18 @@
 #define BOLDCYAN(MSG) "\033[1m\033[36m" << MSG << "\033[0m"
 
 namespace IOColor {
-static const char* RESET = "\033[0m";
+static constexpr const char* RESET = "\033[0m";
 
-static const char* BOLD = "\033[1m";
-static const char* ITALIC = "\033[3m";
+static constexpr const char* BOLD = "\033[1m";
+static constexpr const char* ITALIC = "\033[3m";
 
-static const char* DEFAULT_FG = "\033[30m";
-static const char* RED_FG = "\033[31m";
-static const char* GREEN_FG = "\033[32m";
-static const char* YELLOW_FG = "\033[33m";
-static const char* BLUE_FG = "\033[34m";
-static const char* MAGENTA_FG = "\033[35m";
-static const char* CYAN_FG = "\033[36m";
+static constexpr const char* DEFAULT_FG = "\033[30m";
+static constexpr const char* RED_FG = "\033[31m";
+static constexpr const char* GREEN_FG = "\033[32m";
+static constexpr const char* YELLOW_FG = "\033[33m";
+static constexpr const char* BLUE_FG = "\033[34m";
+static constexpr const char* MAGENTA_FG = "\033[35m";
+static constexpr const char* CYAN_FG = "\033[36m";
 } // namespace IOColor
 
-#endif // UTILS_IOCOLOR_H
+#endif // UTILS_IOCOLOR_Hz

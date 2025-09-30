@@ -13,14 +13,20 @@
 #include <vector>
 
 namespace utils {
+
+template<class>
+inline constexpr bool dependent_false_v = false;
+
 // -------------------- CSVField Protocol --------------------
 template <typename T> struct CSVField {
   static void parse(std::string_view token, T& field) {
-    static_assert(false, "CSVField<T>::parse must be specialized for type T");
+    static_assert(dependent_false_v<T>,
+                  "CSVField<T>::parse must be specialized for type T");
   }
 
   static void write(std::ostream& os, const T& value) {
-    static_assert(false, "CSVField<T>::parse must be specialized for type T");
+    static_assert(dependent_false_v<T>,
+                  "CSVField<T>::write must be specialized for type T");
   }
 };
 

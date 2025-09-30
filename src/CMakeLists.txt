@@ -13,21 +13,26 @@ file(GLOB_RECURSE SRC_FILES "OpenQASM/*.cpp")
 add_library(openqasm STATIC ${SRC_FILES})
 target_compile_options(openqasm PRIVATE ${COMPILE_FLAGS})
 
+file(GLOB_RECURSE SRC_FILES "Utils/*.cpp")
+add_library(cast_utils STATIC ${SRC_FILES})
+target_compile_options(cast_utils PRIVATE ${COMPILE_FLAGS})
+target_link_libraries(cast_utils PRIVATE timeit)
+
 file(GLOB_RECURSE SRC_FILES "Core/*.cpp")
 add_library(cast_core STATIC ${SRC_FILES})
 target_compile_options(cast_core PRIVATE ${COMPILE_FLAGS})
+target_link_libraries(cast_core PRIVATE cast_utils openqasm timeit)
 
 file(GLOB_RECURSE SRC_FILES "CPU/*.cpp")
 add_library(cast_cpu STATIC ${SRC_FILES})
 target_compile_options(cast_cpu PRIVATE ${COMPILE_FLAGS})
+target_link_libraries(cast_cpu PRIVATE cast_core)
 
 file(GLOB_RECURSE SRC_FILES "FPGA/*.cpp")
 add_library(cast_fpga STATIC ${SRC_FILES})
 target_compile_options(cast_fpga PRIVATE ${COMPILE_FLAGS})
+target_link_libraries(cast_fpga PRIVATE cast_core)
 
-file(GLOB_RECURSE SRC_FILES "Utils/*.cpp")
-add_library(cast_utils STATIC ${SRC_FILES})
-target_compile_options(cast_utils PRIVATE ${COMPILE_FLAGS})
 
 add_library(cast INTERFACE)
 
@@ -39,24 +44,19 @@ set(LLVM_COMPONENTS
   OrcJIT
   native
 )
+if (CAST_USE_CUDA)
+  list(APPEND LLVM_COMPONENTS NVPTX)
+endif()
+llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
+target_link_libraries(cast_core PRIVATE ${LLVM_LIBS})
 
 if (CAST_USE_CUDA)
   file(GLOB_RECURSE SRC_FILES "CUDA/*.cpp" "CUDA/*.cu")
   add_library(cast_cuda STATIC ${SRC_FILES})
-  target_link_libraries(cast_cuda cuda CUDA::cudart)
+  target_link_libraries(cast_cuda cuda CUDA::cudart cast_core)
   target_compile_options(cast_cuda PRIVATE ${COMPILE_FLAGS})
   target_link_libraries(cast INTERFACE cast_cuda)
-  list(APPEND LLVM_COMPONENTS NVPTX)
 endif()
 
-llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
 
-target_link_libraries(cast INTERFACE
-  timeit
-  openqasm
-  cast_core
-  cast_cpu
-  cast_fpga
-  cast_utils
-  ${LLVM_LIBS}
-)
+target_link_libraries(cast INTERFACE cast_cpu cast_fpga)

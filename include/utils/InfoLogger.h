@@ -22,6 +22,16 @@ public:
     return *this;
   }
 
+  // Specialization for bool to print True/False
+  InfoLogger&
+  put(const char* label, bool value, int requireVerbose) {
+    if (verbose < requireVerbose)
+      return *this;
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : "
+        << (value ? "True" : "False") << "\n";
+    return *this;
+  }
+
   // Custom printing function
   template <typename Func>
     requires std::invocable<Func, std::ostream&>
@@ -41,17 +51,6 @@ public:
       return *this;
     os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : "
         << value << "\n";
-    return *this;
-  }
-
-  // Specialization for bool to print True/False
-  template <>
-  InfoLogger&
-  put<bool>(const char* label, const bool& value, int requireVerbose) {
-    if (verbose < requireVerbose)
-      return *this;
-    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : "
-        << (value ? "True" : "False") << "\n";
     return *this;
   }
 
