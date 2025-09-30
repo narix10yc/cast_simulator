@@ -19,7 +19,7 @@ template <CPUSimdWidth SimdWidth> static void f() {
   cast::CPUKernelGenConfig genCfg(SimdWidth, cast::Precision::F64);
 
   cast::CPUOptimizer opt;
-  opt.disableCFO().setSizeOnlyFusionConfig(3);
+  opt.enableCFO(false).setSizeOnlyFusionConfig(3);
 
   std::cerr << "Test Dir: " << TEST_DIR << "\n";
   fs::path circuitDir = fs::path(TEST_DIR) / "circuits";

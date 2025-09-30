@@ -14,71 +14,52 @@
 using namespace cast;
 using namespace llvm;
 
-std::ostream& CPUKernelInfo::displayInfo(std::ostream& os) const {
-  os << std::scientific;
-  os << CYAN("=== CPU Kernel Info ===\n")
-     << "- Precision:       " << static_cast<int>(precision) << "\n"
-     << "- LLVM Func Name:  " << llvmFuncName << "\n"
-     << "- Matrix Load Mode: ";
-  switch (this->matrixLoadMode) {
+static const char* matrixLoadModeToStr(CPUMatrixLoadMode mode) {
+  switch (mode) {
   case CPUMatrixLoadMode::UseMatImmValues:
-    os << "UseMatImmValues\n";
-    break;
+    return "UseMatImmValues";
   case CPUMatrixLoadMode::StackLoadMatElems:
-    os << "StackLoadMatElems\n";
-    break;
+    return "StackLoadMatElems";
   case CPUMatrixLoadMode::StackLoadMatVecs:
-    os << "StackLoadMatVecs\n";
-    break;
+    return "StackLoadMatVecs";
+  default:
+    return "Unknown";
   }
-  os << "- Gate:           " << (void*)(gate.get()) << "\n"
-     << "- SIMD Width:     " << static_cast<int>(simdWidth) << "\n"
-     << "- Op Count:       " << opCount << "\n"
-     << "- Executable:     " << (executable ? "Yes" : "No") << "\n"
-     << "- JIT Time:       " << utils::fmt_time(getJitTime()) << "\n"
-     << "- Exec Time:      " << utils::fmt_time(getExecTime()) << "\n";
-
-  os << CYAN("=========================\n");
-  return os;
 }
 
-std::ostream& CPUKernelGenConfig::displayInfo(std::ostream& os) const {
-  os << std::scientific;
-  os << CYAN("=== CPU Kernel Gen Config ===\n")
-     << "SIMD Width:      " << static_cast<int>(simdWidth) << "\n"
-     << "Precision:       " << static_cast<int>(precision) << "\n"
-     << "Use FMA:         " << useFMA << "\n"
-     << "Use FMS:         " << useFMS << "\n"
-     << "Use PDEP:        " << usePDEP << "\n"
-     << "Zero Tolerance:  " << zeroTol << "\n"
-     << "One Tolerance:   " << oneTol << "\n"
-     << "matrixLoadMode: ";
-  switch (this->matrixLoadMode) {
-  case CPUMatrixLoadMode::UseMatImmValues:
-    os << "UseMatImmValues\n";
-    break;
-  case CPUMatrixLoadMode::StackLoadMatElems:
-    os << "StackLoadMatElems\n";
-    break;
-  case CPUMatrixLoadMode::StackLoadMatVecs:
-    os << "StackLoadMatVecs\n";
-    break;
-  }
-
-  os << CYAN("================================\n");
-  return os;
+void CPUKernelInfo::displayInfo(utils::InfoLogger logger) const {
+  logger.put("CPUKernelInfo")
+      .put("Precision       ", static_cast<int>(precision))
+      .put("LLVM Func Name  ", llvmFuncName)
+      .put("Matrix Load Mode", matrixLoadModeToStr(matrixLoadMode))
+      .put("Gate Ptr        ", (void*)(gate.get()))
+      .put("SIMD Width      ", static_cast<int>(simdWidth))
+      .put("Op Count        ", opCount)
+      .put("Executable      ", (executable ? "Yes" : "No"))
+      .put("JIT Time        ", utils::fmt_time(getJitTime()))
+      .put("Exec Time       ", utils::fmt_time(getExecTime()));
 }
 
-std::ostream& CPUKernelManager::displayInfo(std::ostream& os) const {
+void CPUKernelGenConfig::displayInfo(utils::InfoLogger logger) const {
+  logger.put("CPUKernelGenConfig")
+      .put("SIMD Width      ", static_cast<int>(simdWidth))
+      .put("Precision       ", static_cast<int>(precision))
+      .put("Use FMA         ", useFMA)
+      .put("Use FMS         ", useFMS)
+      .put("Use PDEP        ", usePDEP)
+      .put("Zero Tolerance  ", zeroTol)
+      .put("One Tolerance   ", oneTol)
+      .put("Matrix Load Mode", matrixLoadModeToStr(matrixLoadMode));
+}
+
+void CPUKernelManager::displayInfo(utils::InfoLogger logger) const {
   int nKernels = standaloneKernels_.size();
   for (const auto& [graphName, kernels] : graphKernels_)
     nKernels += kernels.size();
-  os << CYAN("=== CPU Kernel Manager Info ===\n");
-  os << "- Is JITed:          " << (isJITed() ? "Yes" : "No") << "\n"
-     << "- Number of Kernels: " << nKernels << "\n";
-
-  os << CYAN("=============================\n");
-  return os;
+  logger.put("CPU Kernel Manager")
+      .put("Is JITed         ", isJITed())
+      .put("Number of Threads", dispatcher.getNumWorkers())
+      .put("Number of Kernels", nKernels);
 }
 
 CPUKernelInfo*

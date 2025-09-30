@@ -12,11 +12,11 @@ double SizeOnlyCostModel::computeGiBTime(const QuantumGate* gate) const {
   return 1e-10;
 }
 
-std::ostream& SizeOnlyCostModel::displayInfo(std::ostream& os,
-                                             int verbose) const {
-  os << "SizeOnlyCostModel: maxSize=" << maxSize << ", maxOp=" << maxOp
-     << ", zeroTol=" << zeroTol;
-  return os;
+void SizeOnlyCostModel::displayInfo(utils::InfoLogger logger) const {
+  logger.put("SizeOnlyCostModel")
+      .put("maxSize", maxSize)
+      .put("maxOp", maxOp)
+      .put("zeroTol", zeroTol);
 }
 
 void cast::impl::computeGateWeights(const std::array<float, 5>& tarr,

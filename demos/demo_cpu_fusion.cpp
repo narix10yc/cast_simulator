@@ -188,7 +188,7 @@ int main(int argc, const char** argv) {
   utils::Logger logger(std::cerr, ArgVerbose);
   if (ArgRunSizeOnlyFuse) {
     CPUOptimizer opt;
-    opt.setSizeOnlyFusionConfig(ArgSizeonlySize).disableCFO();
+    opt.setSizeOnlyFusionConfig(ArgSizeonlySize).enableCFO(false);
 
     opt.run(graphs.sizeOnly, logger);
     if (ArgRunDenseKernel)
@@ -197,7 +197,7 @@ int main(int argc, const char** argv) {
 
   if (ArgRunAdaptiveFuse) {
     CPUOptimizer opt;
-    opt.disableCFO();
+    opt.enableCFO(false);
     if (auto e = opt.loadCPUCostModel(ArgModelPath, nThreads, precision)) {
       logerr() << "Optimizer initialization failed: "
                << llvm::toString(std::move(e)) << "\n";

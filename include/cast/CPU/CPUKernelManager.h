@@ -5,6 +5,7 @@
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
+#include "utils/InfoLogger.h"
 
 #include <span>
 
@@ -70,7 +71,7 @@ struct CPUKernelInfo {
     return std::chrono::duration<float>(tpExecFinish - tpExecStart).count();
   }
 
-  std::ostream& displayInfo(std::ostream& os) const;
+  void displayInfo(utils::InfoLogger logger) const;
 };
 
 struct CPUKernelGenConfig {
@@ -96,7 +97,7 @@ struct CPUKernelGenConfig {
 
   int get_simd_s() const { return cast::get_simd_s(simdWidth, precision); }
 
-  std::ostream& displayInfo(std::ostream& os) const;
+  void displayInfo(utils::InfoLogger logger) const;
 };
 
 class CPUKernelManager : public KernelManager<CPUKernelInfo> {
@@ -128,7 +129,7 @@ public:
     llvm::InitializeNativeTargetAsmPrinter();
   }
 
-  std::ostream& displayInfo(std::ostream& os) const;
+  void displayInfo(utils::InfoLogger logger) const;
 
   /// Initialize JIT session. When succeeds, \c llvmContextModulePairs
   /// will be cleared and \c llvmJIT will be non-null. This function can only be

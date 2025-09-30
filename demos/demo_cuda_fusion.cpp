@@ -137,7 +137,7 @@ int main(int argc, const char** argv) {
   utils::Logger logger(std::cerr, ArgVerbose);
   if (ArgRunSizeOnlyFuse) {
     CUDAOptimizer opt;
-    opt.setSizeOnlyFusionConfig(ArgSizeonlySize).disableCFO();
+    opt.setSizeOnlyFusionConfig(ArgSizeonlySize).enableCFO(false);
 
     opt.run(graphs.sizeOnly, logger);
     if (ArgRunDenseKernel)
@@ -147,7 +147,7 @@ int main(int argc, const char** argv) {
   // Fusion: adaptive
   if (ArgRunAdaptiveFuse) {
     CUDAOptimizer opt;
-    opt.disableCFO();
+    opt.enableCFO(false);
     if (auto e = opt.loadCUDACostModelFromFile(ArgModelPath, precision)) {
       logerr() << "Failed to load CUDA cost model from " << ArgModelPath << ": "
                << llvm::toString(std::move(e)) << "\n";

@@ -1,6 +1,7 @@
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
+#include "cast/Core/Optimizer.h"
 #include "cast/Transform/Transform.h"
 #include "openqasm/Parser.h"
 
@@ -82,7 +83,6 @@ void bind_CircuitGraph(py::module_& m) {
       });
 }
 
-// Bind cast::ir::CircuitNode to Circuit in Python
 void bind_Circuit(py::module_& m) {
   py::class_<cast::ir::CircuitNode>(m, "Circuit")
       .def("__str__",
@@ -107,6 +107,30 @@ void bind_parse_circuit_from_qasm_file(py::module_& m) {
   });
 }
 
+void bind_OptimizerBase(py::module_& m) {
+  py::class_<cast::OptimizerBase>(m, "OptimizerBase")
+      .def(
+          "run_circuit",
+          [](const cast::OptimizerBase& self,
+             cast::ir::CircuitNode& circuit,
+             int verbose) {
+            utils::Logger logger(std::cerr, verbose);
+            self.run(circuit, logger);
+          },
+          py::arg("circuit"),
+          py::arg("verbose") = 1)
+      .def(
+          "run_circuit_graph",
+          [](const cast::OptimizerBase& self,
+             cast::ir::CircuitGraphNode& graph,
+             int verbose) {
+            utils::Logger logger(std::cerr, verbose);
+            self.run(graph, logger);
+          },
+          py::arg("graph"),
+          py::arg("verbose") = 1);
+}
+
 } // end of anonymous namespace
 
 void bind_core(py::module_& m) {
@@ -114,4 +138,5 @@ void bind_core(py::module_& m) {
   bind_CircuitGraph(m);
   bind_Circuit(m);
   bind_parse_circuit_from_qasm_file(m);
+  bind_OptimizerBase(m);
 }

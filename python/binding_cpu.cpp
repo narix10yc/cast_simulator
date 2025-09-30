@@ -2,6 +2,7 @@
 #include "pybind11/pybind11.h"
 
 #include "cast/CPU/CPUKernelManager.h"
+#include "cast/CPU/CPUOptimizer.h"
 #include "cast/CPU/CPUStatevector.h"
 
 namespace py = pybind11;
@@ -96,11 +97,14 @@ void bind_CPUKernelManager(py::module_& m) {
       .def_readwrite("oneTol", &cast::CPUKernelGenConfig::oneTol)
       .def_readwrite("matrixLoadMode",
                      &cast::CPUKernelGenConfig::matrixLoadMode)
-      .def("get_info", [](const cast::CPUKernelGenConfig& self) {
-        std::ostringstream oss;
-        self.displayInfo(oss);
-        return oss.str();
-      });
+      .def(
+          "get_info",
+          [](const cast::CPUKernelGenConfig& self, int verbose) {
+            std::ostringstream oss;
+            self.displayInfo({oss, verbose});
+            return oss.str();
+          },
+          py::arg("verbose") = 1);
 
   py::class_<cast::CPUKernelInfo>(m, "CPUKernelInfo")
       .def(py::init<>())
@@ -113,20 +117,25 @@ void bind_CPUKernelManager(py::module_& m) {
                              })
       .def("get_jit_time", &cast::CPUKernelInfo::getJitTime)
       .def("get_exec_time", &cast::CPUKernelInfo::getExecTime)
-      .def("get_info", [](const cast::CPUKernelInfo& self) {
-        std::ostringstream oss;
-        self.displayInfo(oss);
-        return oss.str();
-      });
+      .def(
+          "get_info",
+          [](const cast::CPUKernelInfo& self, int verbose) {
+            std::ostringstream oss;
+            self.displayInfo({oss, verbose});
+            return oss.str();
+          },
+          py::arg("verbose") = 1);
 
   py::class_<cast::CPUKernelManager>(m, "CPUKernelManager")
       .def(py::init<>())
-      .def("get_info",
-           [](const cast::CPUKernelManager& self) {
-             std::ostringstream oss;
-             self.displayInfo(oss);
-             return oss.str();
-           })
+      .def(
+          "get_info",
+          [](const cast::CPUKernelManager& self, int verbose) {
+            std::ostringstream oss;
+            self.displayInfo({oss, verbose});
+            return oss.str();
+          },
+          py::arg("verbose") = 1)
       .def(
           "gen_cpu_gate",
           [](cast::CPUKernelManager& self,
@@ -239,10 +248,28 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("num_threads") = 1);
 }
 
+void bind_CPUOptimizer(py::module_& m) {
+  py::class_<cast::CPUOptimizer, cast::OptimizerBase>(m, "CPUOptimizer")
+      .def(py::init<>())
+      .def("enable_fusion", &cast::CPUOptimizer::enableFusion)
+      .def("enable_canonicalization",
+           &cast::CPUOptimizer::enableCanonicalization)
+      .def("enable_cfo", &cast::CPUOptimizer::enableCFO)
+      .def(
+          "get_info",
+          [](const cast::CPUOptimizer& self, int verbose) {
+            std::ostringstream oss;
+            self.displayInfo({oss, verbose});
+            return oss.str();
+          },
+          py::arg("verbose") = 1);
+}
+
 } // end of anonymous namespace
 
 void bind_cpu(py::module_& m) {
   bind_simdWidth(m);
   bind_CPUStatevector(m);
   bind_CPUKernelManager(m);
+  bind_CPUOptimizer(m);
 }

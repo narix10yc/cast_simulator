@@ -33,6 +33,21 @@ public:
     return llvm::Error::success();
   }
 
+  void displayInfo(utils::InfoLogger logger) const {
+    logger.put("CPUOptimizer");
+    if (fusionConfig_) {
+      logger.put("Fusion Config");
+      auto l = logger.indent();
+      fusionConfig_->displayInfo(l);
+    } else {
+      logger.put("Fusion Config", "None");
+    }
+    logger.put("Canonicalization",
+               enableCanonicalization_ ? "Enabled" : "Disabled");
+    logger.put("Fusion", enableFusion_ ? "Enabled" : "Disabled");
+    logger.put("CFO", enableCFO_ ? "Enabled" : "Disabled");
+  }
+
 }; // class CPUOptimizer
 
 } // end namespace cast

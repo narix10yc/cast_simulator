@@ -24,7 +24,7 @@ public:
     return std::make_unique<CPUFusionConfig>(std::move(cm));
   }
 
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const FusionConfig* config) {
     return config->getKind() == FC_CPU;

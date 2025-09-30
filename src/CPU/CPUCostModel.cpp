@@ -121,8 +121,8 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
   return estTime;
 }
 
-std::ostream& CPUCostModel::displayInfo(std::ostream& os, int verbose) const {
-  const int nLinesToDisplay = std::min<int>(5 * verbose, items.size());
+void CPUCostModel::showEntries(std::ostream& os, int nLines) const {
+  const int nLinesToDisplay = std::min<int>(nLines, items.size());
 
   os << "Memory Bandwidth: " << utils::fmt_1_to_1e3(1.0 / this->minGibTimeCap)
      << " GiBps\n";
@@ -135,7 +135,6 @@ std::ostream& CPUCostModel::displayInfo(std::ostream& os, int verbose) const {
        << items[i].nThreads << "    |    "
        << utils::fmt_1_to_1e3(1.0 / timePerGiB) << "\n";
   }
-  return os;
 }
 
 void CPUPerformanceCache::runPreliminaryExperiments(

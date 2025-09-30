@@ -41,33 +41,18 @@ public:
     return static_cast<Derived&>(*this);
   }
 
-  Derived& disableCanonicalization() {
-    enableCanonicalization_ = false;
+  Derived& enableCanonicalization(bool enable = true) {
+    enableCanonicalization_ = enable;
     return static_cast<Derived&>(*this);
   }
 
-  Derived& disableFusion() {
-    enableFusion_ = false;
+  Derived& enableFusion(bool enable = true) {
+    enableFusion_ = enable;
     return static_cast<Derived&>(*this);
   }
 
-  Derived& disableCFO() {
-    enableCFO_ = false;
-    return static_cast<Derived&>(*this);
-  }
-
-  Derived& enableCanonicalization() {
-    enableCanonicalization_ = true;
-    return static_cast<Derived&>(*this);
-  }
-
-  Derived& enableFusion() {
-    enableFusion_ = true;
-    return static_cast<Derived&>(*this);
-  }
-
-  Derived& enableCFO() {
-    enableCFO_ = true;
+  Derived& enableCFO(bool enable = true) {
+    enableCFO_ = enable;
     return static_cast<Derived&>(*this);
   }
 

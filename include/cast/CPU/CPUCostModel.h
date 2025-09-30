@@ -133,7 +133,9 @@ public:
 
   double computeGiBTime(const QuantumGate* gate) const override;
 
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
+  void showEntries(std::ostream& os, int nLines) const;
+
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const CostModel* model) {
     return model->getKind() == CM_CPU;

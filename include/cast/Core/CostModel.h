@@ -4,6 +4,7 @@
 #include "cast/Core/Config.h"
 #include "cast/Core/Precision.h"
 #include "cast/Core/QuantumGate.h"
+#include "utils/InfoLogger.h"
 #include <string>
 
 namespace cast {
@@ -42,8 +43,8 @@ public:
   // The time it takes to update 1 GiB of memory, in seconds.
   virtual double computeGiBTime(const QuantumGate* gate) const = 0;
 
-  virtual std::ostream& displayInfo(std::ostream& os, int verbose) const {
-    return os << "CostModel::displayInfo() not implemented";
+  virtual void displayInfo(utils::InfoLogger logger) const {
+    logger.put("CostModel::displayInfo() not implemented");
   }
 };
 
@@ -61,7 +62,7 @@ public:
 
   double computeGiBTime(const QuantumGate* gate) const override;
 
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const CostModel* model) {
     return model->getKind() == CM_SizeOnly;
@@ -74,7 +75,7 @@ public:
 
   double computeGiBTime(const QuantumGate* gate) const override { return 1.0; }
 
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const CostModel* model) {
     return model->getKind() == CM_Constant;

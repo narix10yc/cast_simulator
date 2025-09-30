@@ -3,6 +3,7 @@
 
 #include "cast/Core/Config.h"
 #include "cast/Core/CostModel.h"
+#include "utils/InfoLogger.h"
 
 namespace cast {
 
@@ -53,7 +54,22 @@ public:
 
   bool enableMultiTraverse = true;
 
-  virtual std::ostream& displayInfo(std::ostream& os, int verbose) const = 0;
+  virtual void displayInfo(utils::InfoLogger logger) const {
+    if (costModel_) {
+      logger.put("CostModel");
+      costModel_->displayInfo(logger.indent());
+    } else {
+      logger.put("CostModel", "None");
+    }
+    logger.put("Zero Tolerance ", zeroTol)
+        .put("Swap Tolerance ", swapTol)
+        .put("Size Range     ",
+             [=, this](std::ostream& os) {
+               os << "[" << sizeMin << ", " << sizeMax << "]";
+             })
+        .put("Benefit Margin ", benefitMargin)
+        .put("Multi-Traverse ", enableMultiTraverse);
+  }
 };
 
 class SizeOnlyFusionConfig : public FusionConfig {
@@ -63,8 +79,9 @@ public:
     sizeMax = size;
   }
 
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override {
-    return os << "SizeOnlyFusionConfig with size " << sizeMin << "\n";
+  void displayInfo(utils::InfoLogger logger) const override {
+    logger.put("SizeOnlyFusionConfig").put("size", sizeMin);
+    FusionConfig::displayInfo(logger.indent(logger.verbose - 1));
   }
 
   static bool classof(const FusionConfig* config) {
