@@ -141,7 +141,7 @@ public:
   // This is the width to display in each qubit wire.
   static int getWidthForVisualize();
 
-  static constexpr int DefaultRowCapacity = 32;
+  static constexpr int DefaultRowCapacity = 48;
 
   using row_iterator = std::list<row_t>::iterator;
   using const_row_iterator = std::list<row_t>::const_iterator;

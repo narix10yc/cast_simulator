@@ -212,7 +212,8 @@ int main(int argc, const char** argv) {
   CPUKernelGenConfig kernelGenConfig;
   kernelGenConfig.precision = precision;
   kernelGenConfig.simdWidth = simdWidth;
-  kernelGenConfig.displayInfo(std::cerr) << "\n";
+  kernelGenConfig.displayInfo(std::cerr);
+  std::cerr << "\n";
 
   auto denseKernelGenConfig = kernelGenConfig;
   denseKernelGenConfig.zeroTol = 0.0;

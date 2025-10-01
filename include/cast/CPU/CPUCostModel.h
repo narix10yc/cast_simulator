@@ -135,7 +135,7 @@ public:
 
   void showEntries(std::ostream& os, int nLines) const;
 
-  void displayInfo(utils::InfoLogger logger) const override;
+  void displayInfo(utils::InfoLogger logger) const override {}
 
   static bool classof(const CostModel* model) {
     return model->getKind() == CM_CPU;
