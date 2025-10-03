@@ -5,16 +5,20 @@
 #include <ostream>
 #include <string>
 #include <span>
+#include <functional>
 
 namespace utils {
 
 class InfoLogger {
   std::ostream& os_;
 
-  template <typename T> void put_format_(std::ostream& os) {}
-
-  template <> void put_format_<double>(std::ostream& os) {
-    os << std::scientific;
+  template<typename T>
+  void put_format_(std::ostream& os) {
+    if constexpr (std::is_floating_point_v<T>) {
+      os << std::defaultfloat;
+    } else if constexpr (std::is_integral_v<T>) {
+      os << std::dec;
+    }
   }
 
 public:
