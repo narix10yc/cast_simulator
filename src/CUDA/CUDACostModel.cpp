@@ -226,9 +226,8 @@ CUDACostModel::CUDACostModel(const CUDAPerformanceCache& cache)
   }
 }
 
-std::ostream& CUDACostModel::displayInfo(std::ostream& os,
-                                         int verbosity) const {
-  int nToDisplay = std::min<int>(bucket_.size(), 5 * (verbosity + 1));
+void CUDACostModel::showEntries(std::ostream& os, int nLines) const {
+  int nToDisplay = std::min<int>(bucket_.size(), nLines);
   os << "Two-way Bandwidth Cap: " << utils::fmt_mem(1.0f / minGiBTimeCap * 1e9)
      << "\n";
   os << "k | Precision | Dense (GiB/s) | Per Op Per Sec\n";
@@ -240,7 +239,6 @@ std::ostream& CUDACostModel::displayInfo(std::ostream& os,
     if (--nToDisplay <= 0)
       break;
   }
-  return os;
 }
 
 double CUDACostModel::computeGiBTime(const QuantumGate* gate) const {

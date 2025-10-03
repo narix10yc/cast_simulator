@@ -253,12 +253,15 @@ int main(int argc, const char** argv) {
     for (const auto& kernel : kernels)
       opCountTotal += kernel->gate->opCount(isDense ? 0.0 : 1e-8);
 
+    auto rawT0 = std::chrono::steady_clock::now();
     auto results = km.enqueueKernelLaunchFromGraph(graphName);
     km.syncKernelExecution();
+    auto rawT1 = std::chrono::steady_clock::now();
     float t = 0.0f;
     for (const auto* r : results) {
       t += r->getKernelTime();
     }
+    float rawT = std::chrono::duration<float>(rawT1 - rawT0).count();
 
     double gflops =
         static_cast<double>(1ULL << sv.nQubits()) * 1e-9 * opCountTotal;
@@ -267,9 +270,11 @@ int main(int argc, const char** argv) {
                        (precision == Precision::F32 ? 8.0 : 16.0) / t;
     std::cerr << "- Num Kernels:    " << kernels.size() << "\n"
               << "- Total Op Count: " << opCountTotal << "\n"
-              << "- Fastest Run:    "
+              << "- Run Time:       " 
               << timeit::TimingResult::timeToString(t, 4) << " @ " << gflops
               << " GFLOPs per second\n"
+              << "- Wall Time:      "
+              << timeit::TimingResult::timeToString(rawT, 4) << "\n"
               << "- Effective Bandwidth: " << utils::fmt_mem(bandwidth)
               << " per sec\n";
   };
