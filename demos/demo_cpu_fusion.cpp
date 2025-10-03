@@ -199,6 +199,7 @@ int main(int argc, const char** argv) {
   if (ArgRunSizeOnlyFuse) {
     CPUOptimizer opt;
     opt.setSizeOnlyFusionConfig(ArgSizeonlySize).enableCFO(false);
+    opt.displayInfo({std::cerr, ArgVerbose});
 
     opt.run(graphs.sizeOnly, logger);
     if (ArgRunDenseKernel)
@@ -213,6 +214,7 @@ int main(int argc, const char** argv) {
                << llvm::toString(std::move(e)) << "\n";
       std::exit(1);
     }
+    opt.displayInfo({std::cerr, ArgVerbose});
 
     opt.run(graphs.adaptive, logger);
     if (ArgRunDenseKernel)
