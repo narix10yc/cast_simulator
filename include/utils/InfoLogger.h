@@ -3,11 +3,20 @@
 
 #include <ostream>
 #include <string>
+#include <iomanip>
 
 namespace utils {
 
 class InfoLogger {
   std::ostream& os_;
+
+  template<typename T>
+  void put_format_(std::ostream& os) {}
+
+  template<>
+  void put_format_<double>(std::ostream& os) {
+    os << std::scientific;
+  }
 
 public:
   int verbose = 1;
@@ -49,6 +58,7 @@ public:
   InfoLogger& put(const char* label, const T& value, int requireVerbose = 1) {
     if (verbose < requireVerbose)
       return *this;
+    put_format_<T>(os_);
     os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : "
         << value << "\n";
     return *this;

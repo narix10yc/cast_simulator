@@ -3,6 +3,7 @@
 #include "cast/CPU/CPUStatevector.h"
 
 #include "timeit/timeit.h"
+#include "utils/PrintSpan.h"
 #include "utils/iocolor.h"
 
 #include "llvm/Support/CommandLine.h"
@@ -111,8 +112,9 @@ static CircuitGraphs unwrapArguments(Precision& precision,
   else if (ArgSimdWidth == 0)
     simdWidth = get_cpu_simd_width();
   else {
-    logerr() << "Invalid SIMD width specified: " << ArgSimdWidth
-             << ". Valid values are 64, 128, 256, 512, or 0 for auto-detection.\n";
+    logerr()
+        << "Invalid SIMD width specified: " << ArgSimdWidth
+        << ". Valid values are 64, 128, 256, 512, or 0 for auto-detection.\n";
     std::exit(1);
   }
 
@@ -173,6 +175,14 @@ static void runAndDisplayResult(std::ostream& os,
      << "- Fastest Run:    " << timeit::TimingResult::timeToString(tr.min, 4)
      << " @ " << gflops << " GFLOPs per second\n"
      << "- Effective Bandwidth: " << bandwidth << " GiBps\n";
+  if (ArgVerbose > 1) {
+    for (const auto& kernel : kernels) {
+      os << kernel->llvmFuncName << ",\"";
+      utils::printSpanNoBraket(os, std::span(kernel->gate->qubits()));
+      os << "\"," << kernel->opCount << ","
+         << utils::fmt_time(kernel->getExecTime()) << "\n";
+    }
+  }
 }
 
 int main(int argc, const char** argv) {
