@@ -1,20 +1,19 @@
 #ifndef CAST_UTILS_INFOLOGGER_H
 #define CAST_UTILS_INFOLOGGER_H
 
+#include <iomanip>
 #include <ostream>
 #include <string>
-#include <iomanip>
+#include <span>
 
 namespace utils {
 
 class InfoLogger {
   std::ostream& os_;
 
-  template<typename T>
-  void put_format_(std::ostream& os) {}
+  template <typename T> void put_format_(std::ostream& os) {}
 
-  template<>
-  void put_format_<double>(std::ostream& os) {
+  template <> void put_format_<double>(std::ostream& os) {
     os << std::scientific;
   }
 
@@ -32,12 +31,31 @@ public:
   }
 
   // Specialization for bool to print True/False
-  InfoLogger&
-  put(const char* label, bool value, int requireVerbose) {
+  InfoLogger& put(const char* label, bool value, int requireVerbose) {
     if (verbose < requireVerbose)
       return *this;
     os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : "
         << (value ? "True" : "False") << "\n";
+    return *this;
+  }
+
+  // For pointer types
+  template <typename T>
+  InfoLogger& put(const char* label,
+                  const T* ptr,
+                  int requireVerbose = 1,
+                  int subVerbose = 1)
+    requires requires(const T* p) { p->displayInfo(*this); }
+  {
+    if (verbose < requireVerbose)
+      return *this;
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : ";
+    if (ptr == nullptr) {
+      os_ << "None\n";
+      return *this;
+    }
+
+    ptr->displayInfo(this->indent(subVerbose));
     return *this;
   }
 
@@ -50,6 +68,21 @@ public:
     os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : ";
     std::invoke(std::forward<Func>(func), os_);
     os_ << "\n";
+    return *this;
+  }
+
+  // For span of elements
+  template <typename T>
+  InfoLogger&
+  put(const char* label, std::span<const T> span, int requireVerbose = 1) {
+    if (verbose < requireVerbose)
+      return *this;
+    put_format_<T>(os_);
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : ";
+    os_ << "[";
+    for (const auto& v : span)
+      os_ << v << ", ";
+    os_ << "]\n";
     return *this;
   }
 

@@ -3,6 +3,7 @@
 
 #include "cast/Internal/ChoiRep.h"
 #include "cast/Internal/KrausRep.h"
+#include "utils/InfoLogger.h"
 
 namespace cast {
 
@@ -26,7 +27,7 @@ public:
   NoiseChannel(std::shared_ptr<ChoiRep> choiRep)
       : reps(nullptr, std::move(choiRep)) {}
 
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const;
+  void displayInfo(utils::InfoLogger logger) const;
 
   int nQubits() const;
 

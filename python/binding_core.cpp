@@ -21,7 +21,7 @@ void bind_QuantumGate(py::module_& m) {
           "get_info",
           [](const cast::QuantumGate& self, int verbose) {
             std::ostringstream oss;
-            self.displayInfo(oss, verbose);
+            self.displayInfo({oss, verbose});
             return oss.str();
           },
           py::arg("verbose") = 1);
@@ -46,7 +46,7 @@ void bind_QuantumGate(py::module_& m) {
           "get_info",
           [](const cast::StandardQuantumGate& self, int verbose) {
             std::ostringstream oss;
-            self.displayInfo(oss, verbose);
+            self.displayInfo({oss, verbose});
             return oss.str();
           },
           py::arg("verbose") = 1);
@@ -59,7 +59,7 @@ void bind_QuantumGate(py::module_& m) {
           "get_info",
           [](const cast::SuperopQuantumGate& self, int verbose) {
             std::ostringstream oss;
-            self.displayInfo(oss, verbose);
+            self.displayInfo({oss, verbose});
             return oss.str();
           },
           py::arg("verbose") = 1);

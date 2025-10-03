@@ -3,6 +3,7 @@
 
 #include "cast/ADT/GateMatrix.h"
 #include "cast/ADT/NoiseChannel.h"
+#include "utils/InfoLogger.h"
 #include <algorithm>
 #include <cassert>
 #include <vector>
@@ -66,11 +67,7 @@ public:
     return nullptr;
   }
 
-  virtual std::ostream& displayInfo(std::ostream& os, int verbose) const {
-    return os << "QuantumGate::displayInfo() not implemented";
-  }
-
-  virtual void dumpInfo() const { displayInfo(std::cerr, 3); }
+  virtual void displayInfo(utils::InfoLogger logger) const = 0;
 
 }; // class QuantumGate
 
@@ -115,7 +112,7 @@ public:
 
   SuperopQuantumGatePtr getSuperopGate() const override;
 
-  std::ostream& displayInfo(std::ostream& os, int verbose) const override;
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static StandardQuantumGatePtr Create(GateMatrixPtr gateMatrix,
                                        NoiseChannelPtr noiseChannel,
@@ -211,7 +208,7 @@ public:
     return SuperopQuantumGate::Create(_superopMatrix, _qubits);
   }
 
-  std::ostream& displayInfo(std::ostream& os, int verbose) const override;
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const QuantumGate* qg) {
     return qg->kind() == QG_Superop;

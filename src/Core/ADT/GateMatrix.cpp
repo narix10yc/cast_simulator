@@ -7,12 +7,9 @@
 
 using namespace cast;
 
-std::ostream& ScalarGateMatrix::displayInfo(std::ostream& os,
-                                            int verbose) const {
-  os << "ScalarGateMatrix @ " << this << "\n";
-  os << "- nQubits: " << _nQubits << "\n";
-  return os;
-} // namespace cast
+void ScalarGateMatrix::displayInfo(utils::InfoLogger logger) const {
+  logger.put("Scalar Gate Matrix").put("Num Qubits", _nQubits);
+}
 
 ScalarGateMatrixPtr
 ScalarGateMatrix::U1q(double theta, double phi, double lambda) {

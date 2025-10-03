@@ -62,18 +62,10 @@ int NoiseChannel::getRank() const {
   return -1;
 }
 
-std::ostream& NoiseChannel::displayInfo(std::ostream& os, int verbose) const {
-  os << CYAN("Info of NoiseChannel @ " << this << "\n");
-  os << "- Kraus Rep: " << (reps.krausRep ? "Available" : "No") << "\n";
-  os << "- Choi Rep:  " << (reps.choiRep ? "Available" : "No") << "\n";
-  if (verbose > 1) {
-    if (reps.krausRep)
-      reps.krausRep->display(os);
-    if (reps.choiRep)
-      reps.choiRep->display(os);
-  }
-
-  return os;
+void NoiseChannel::displayInfo(utils::InfoLogger logger) const {
+  logger.put("Noise Channel");
+  logger.put("Kraus Rep", reps.krausRep ? "Available" : "No");
+  logger.put("Choi Rep", reps.choiRep ? "Available" : "No");
 }
 
 int NoiseChannel::nQubits() const {

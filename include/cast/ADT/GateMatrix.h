@@ -2,6 +2,7 @@
 #define CAST_ADT_GATE_MATRIX_H
 
 #include "cast/ADT/ComplexSquareMatrix.h"
+#include "utils/InfoLogger.h"
 #include <memory>
 #include <vector>
 
@@ -61,9 +62,8 @@ public:
     return nullptr;
   }
 
-  virtual std::ostream& displayInfo(std::ostream& os, int verbose = 1) const {
-    assert(false && "Not implemented yet (called from base class)");
-    return os;
+  virtual void displayInfo(utils::InfoLogger logger) const {
+    assert(false && "Calling from base class");
   }
 
   static bool classof(const GateMatrix* gm) {
@@ -126,7 +126,7 @@ public:
 
   GateMatrixPtr subsystem(uint32_t mask) const override;
 
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const override;
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const GateMatrix* gm) { return gm->kind() == GM_Scalar; }
 
@@ -243,6 +243,10 @@ public:
   IndexPhasePair* data() { return _data; }
   const IndexPhasePair* data() const { return _data; }
 
+  void displayInfo(utils::InfoLogger logger) const override {
+    logger.put("Unitary Permutation Gate Matrix").put("Num Qubits", _nQubits);
+  }
+
   static UnitaryPermGateMatrixPtr FromGateMatrix(const GateMatrix* gm,
                                                  double zeroTol);
 
@@ -254,6 +258,8 @@ public:
 class ParametrizedGateMatrix : public GateMatrix {
 public:
   ParametrizedGateMatrix(int nQubits) : GateMatrix(GM_Parametrized, nQubits) {}
+
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const GateMatrix* gm) {
     return gm->kind() == GM_Parametrized;

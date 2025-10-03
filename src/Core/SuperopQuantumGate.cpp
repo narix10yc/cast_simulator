@@ -23,19 +23,9 @@ SuperopQuantumGate::SuperopQuantumGate(ScalarGateMatrixPtr matrix,
   _qubits = qubits;
 }
 
-std::ostream& SuperopQuantumGate::displayInfo(std::ostream& os,
-                                              int verbose) const {
-  os << BOLDCYAN("=== Info of SuperopQuantumGate @ " << this << " === ")
-     << "(Verbose " << verbose << ")\n";
-
-  os << CYAN("- Target Qubits: ");
-  utils::printSpan(os, std::span<const int>(_qubits)) << "\n";
-  os << CYAN("- opCount:       ") << opCount(1e-8) << "\n";
-
-  os << CYAN("- superopMatrix: ") << _superopMatrix.get() << "\n";
-  if (verbose > 1) {
-    _superopMatrix->matrix().print(os);
-  }
-
-  return os;
+void SuperopQuantumGate::displayInfo(utils::InfoLogger logger) const {
+  logger.put("Superop Quantum Gate")
+      .put("Target Qubits", std::span(_qubits))
+      .put("Superop Matrix", _superopMatrix.get())
+      .put("opCount", opCount(1e-8));
 }

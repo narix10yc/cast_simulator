@@ -41,46 +41,15 @@ ConstScalarGateMatrixPtr StandardQuantumGate::getScalarGM() const {
   return nullptr;
 }
 
-std::ostream& StandardQuantumGate::displayInfo(std::ostream& os,
-                                               int verbose) const {
-  os << BOLDCYAN("=== Info of StandardQuantumGate @ " << this << " === ")
-     << "(Verbose " << verbose << ")\n";
-
-  os << CYAN("- Target Qubits: ");
-  utils::printSpan(os, std::span<const int>(_qubits)) << "\n";
-
-  // gate matrix
-  os << CYAN("- gateMatrix: ");
-  if (_gateMatrix == nullptr)
-    os << "nullptr";
-  else if (auto* sMat = llvm::dyn_cast<ScalarGateMatrix>(_gateMatrix.get()))
-    os << "ScalarGateMatrix @ " << sMat;
-  else if (auto* uMat =
-               llvm::dyn_cast<UnitaryPermGateMatrix>(_gateMatrix.get()))
-    os << "UnitaryPermGateMatrix @ " << uMat;
-  else if (auto* pMat =
-               llvm::dyn_cast<ParametrizedGateMatrix>(_gateMatrix.get()))
-    os << "ParametrizedGateMatrix @ " << pMat;
-  else
-    assert(false && "Unknown GateMatrix type");
-  os << "\n";
-
-  if (verbose > 1 && _gateMatrix != nullptr) {
-    if (auto* sMat = llvm::dyn_cast<ScalarGateMatrix>(_gateMatrix.get()))
-      sMat->matrix().print(os);
+void StandardQuantumGate::displayInfo(utils::InfoLogger logger) const {
+  logger.put("Standard Quantum Gate").put("Target Qubits", std::span(_qubits));
+  if (_gateMatrix == nullptr) {
+    logger.put("Gate Matrix", "None");
+  } else {
+    logger.put("Gate Matrix");
+    _gateMatrix->displayInfo(logger.indent());
   }
 
   // noise channel
-  os << CYAN("- noiseChannel: ");
-  if (_noiseChannel == nullptr)
-    os << "nullptr";
-  else
-    os << "NoiseChannel @ " << _noiseChannel.get();
-  os << "\n";
-  if (verbose > 1 && _noiseChannel != nullptr) {
-    _noiseChannel->displayInfo(os, verbose - 1);
-  }
-
-  os << BOLDCYAN("========== End ==========\n");
-  return os;
+  logger.put("Noise Channel", _noiseChannel.get());
 }
