@@ -349,7 +349,7 @@ struct LaunchTask {
   void tryRecordTime() {
     if (er == nullptr)
       return;
-    assert(startEvent == nullptr ^ finishEvent != nullptr);
+    assert((startEvent == nullptr) ^ (finishEvent != nullptr));
     if (startEvent == nullptr || finishEvent == nullptr)
       return;
     assert(cuEventQuery(startEvent) == CUDA_SUCCESS);

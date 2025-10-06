@@ -39,11 +39,13 @@ struct CUDAKernelInfo {
 }; // struct CUDAKernelInfo
 
 struct CUDAKernelGenConfig {
-  Precision precision = Precision::F64; // default to double precision
+  Precision precision;
   double zeroTol = 1e-8;
   double oneTol = 1e-8;
 
   CUDAMatrixLoadMode matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
+
+  explicit CUDAKernelGenConfig(Precision p = Precision::F64) : precision(p) {}
 
   std::ostream& displayInfo(std::ostream& os) const;
 };
@@ -193,8 +195,6 @@ private:
 
   InitialLaunchQueue initialLaunches_;
 
-  std::deque<ExecutionResult> execResults;
-
   // execution thread
   std::thread execTh_;
   bool execStopFlag_ = false;
@@ -311,6 +311,13 @@ public:
   /// users are allowed to launch the same kernel multiple times (for example,
   /// in benchmarking).
   const ExecutionResult* enqueueKernelLaunch(CUDAKernelInfo& kernel);
+
+  float getTotalExecTime() const {
+    float total = 0.0f;
+    for (const auto& er : execResults_)
+      total += er.getKernelTime();
+    return total;
+  }
 
   std::vector<const ExecutionResult*>
   enqueueKernelLaunchFromGraph(const std::string& graphName) {
