@@ -28,6 +28,9 @@ public:
 // We use CRTP to allow method chaining.
 template <typename Derived> class Optimizer : public OptimizerBase {
 public:
+  // Default fusion config is SizeOnlyFusionConfig with size 3.
+  Optimizer() { fusionConfig_ = std::make_unique<SizeOnlyFusionConfig>(3); }
+
   Derived& setFusionConfig(std::unique_ptr<FusionConfig> cfg) {
     fusionConfig_ = std::move(cfg);
     return static_cast<Derived&>(*this);

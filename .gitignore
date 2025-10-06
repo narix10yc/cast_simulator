@@ -6,9 +6,11 @@
 examples/*
 *.rec
 .DS_Store
+_deps/*
 
 # build folders
 build*
+debug-build/*
 
 # analysis files
 tmp/*
@@ -18,4 +20,3 @@ analysis/*
 # python-related
 python_envs/*
 *.ipynb
-_deps/*

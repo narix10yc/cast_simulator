@@ -8,6 +8,7 @@ using namespace cast;
 
 void OptimizerBase::run(ir::CircuitNode& circuit, utils::Logger logger) const {
   assert(fusionConfig_ != nullptr);
+
   // Step 1: Run canonicalization pass if enabled
   if (enableCanonicalization_) {
     // Canoicalization Block-wise Fusion Pass

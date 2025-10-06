@@ -7,20 +7,20 @@ endif()
 
 file(GLOB_RECURSE SRC_FILES "Timeit/*.cpp")
 add_library(timeit STATIC ${SRC_FILES})
-target_compile_options(timeit PRIVATE -O3 -march=native)
+target_compile_options(timeit PUBLIC -O3 -march=native)
 
 file(GLOB_RECURSE SRC_FILES "OpenQASM/*.cpp")
 add_library(openqasm STATIC ${SRC_FILES})
-target_compile_options(openqasm PRIVATE ${COMPILE_FLAGS})
+target_compile_options(openqasm PUBLIC ${COMPILE_FLAGS})
 
 file(GLOB_RECURSE SRC_FILES "Utils/*.cpp")
 add_library(cast_utils STATIC ${SRC_FILES})
-target_compile_options(cast_utils PRIVATE ${COMPILE_FLAGS})
+target_compile_options(cast_utils PUBLIC ${COMPILE_FLAGS})
 target_link_libraries(cast_utils PUBLIC timeit)
 
 file(GLOB_RECURSE SRC_FILES "Core/*.cpp")
 add_library(cast_core STATIC ${SRC_FILES})
-target_compile_options(cast_core PRIVATE ${COMPILE_FLAGS})
+target_compile_options(cast_core PUBLIC ${COMPILE_FLAGS})
 target_link_libraries(cast_core PUBLIC cast_utils openqasm timeit)
 
 # Grab LLVM libraries
