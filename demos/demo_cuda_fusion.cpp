@@ -15,45 +15,52 @@ using namespace cast;
 
 #pragma region Command line arguments
 // clang-format off
-cl::opt<std::string>
-ArgInputFilename("i",
+
+static cl::OptionCategory Category("Demo CUDA Fusion Options");
+
+static cl::opt<std::string>
+ArgInputFilename("i", cl::cat(Category),
   cl::desc("Input file name"), cl::Positional, cl::Required);
 
-cl::opt<std::string>
-ArgModelPath("model", cl::desc("Path to performance model"), cl::init(""));
+static cl::opt<std::string>
+ArgModelPath("model", cl::cat(Category),
+  cl::desc("Path to performance model"), cl::init(""));
 
-cl::opt<int>
-ArgPrecision("precision",
+static cl::opt<int>
+ArgPrecision("precision", cl::cat(Category),
   cl::desc("Precision for the simulation (32 or 64)"), cl::init(64));
 
-cl::opt<int>
-ArgNWorkerThreads("worker-threads",
+static cl::opt<int>
+ArgNWorkerThreads("worker-threads", cl::cat(Category),
   cl::desc("Number of worker threads (0 to auto-detect)"), cl::init(0));
 
-cl::opt<bool>
-ArgRunNoFuse("run-no-fuse", cl::desc("Run no-fuse circuit"), cl::init(false));
+static cl::opt<bool>
+ArgRunNoFuse("run-no-fuse", cl::cat(Category),
+  cl::desc("Run no-fuse circuit"), cl::init(false));
 
-cl::opt<bool>
-ArgRunSizeOnlyFuse("run-sizeonly-fuse",
+static cl::opt<bool>
+ArgRunSizeOnlyFuse("run-sizeonly-fuse", cl::cat(Category),
   cl::desc("Run size-only-fuse circuit"), cl::init(true));
 
-cl::opt<bool>
-ArgRunAdaptiveFuse("run-adaptive-fuse",
+static cl::opt<bool>
+ArgRunAdaptiveFuse("run-adaptive-fuse", cl::cat(Category),
   cl::desc("Run adaptive-fuse circuit"), cl::init(false));
 
-cl::opt<int>
-ArgSizeonlySize("sizeonly-size",
+static cl::opt<int>
+ArgSizeonlySize("sizeonly-size", cl::cat(Category),
   cl::desc("The max size of gates in size-only fusion"), cl::init(3));
 
-cl::opt<bool>
-ArgRunDenseKernel("run-dense-kernel",
+static cl::opt<bool>
+ArgRunDenseKernel("run-dense-kernel", cl::cat(Category),
   cl::desc("Run dense kernel"), cl::init(false));
 
-cl::opt<int>
-ArgReplication("replication", cl::desc("Number of replications"), cl::init(1));
+static cl::opt<int>
+ArgReplication("replication", cl::cat(Category),
+  cl::desc("Number of replications"), cl::init(1));
 
-cl::opt<int>
-ArgVerbose("verbose", cl::desc("Verbosity level"), cl::init(1));
+static cl::opt<int>
+ArgVerbose("verbose", cl::cat(Category),
+  cl::desc("Verbosity level"), cl::init(1));
 
 // clang-format on
 #pragma endregion
@@ -125,6 +132,7 @@ unwrapArguments(Precision& precision, int& nWorkerThreads, int& nQubitsSV) {
 }
 
 int main(int argc, const char** argv) {
+  cl::HideUnrelatedOptions(Category);
   cl::ParseCommandLineOptions(argc, argv);
 
   Precision precision;

@@ -9,8 +9,8 @@ class CUDAFusionConfig : public FusionConfig {
 public:
   CUDAFusionConfig() : FusionConfig(FC_CUDA) {}
 
-  std::ostream& displayInfo(std::ostream& os, int verbose) const override {
-    return os << "CUDA Fusion Config\n";
+  void displayInfo(utils::InfoLogger logger) const override {
+    assert(false && "Not implemented yet");
   }
 
   static bool classof(const FusionConfig* base) {
