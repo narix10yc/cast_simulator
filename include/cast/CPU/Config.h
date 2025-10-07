@@ -4,8 +4,6 @@
 #include "cast/Core/Precision.h"
 
 namespace cast {
-// Maximum number of qubits for which we can generate kernels.
-constexpr int CPU_GLOBAL_MAX_SIZE = 7;
 
 enum CPUSimdWidth : int {
   W0 = 0,        // Special flag that marks no SIMD width

@@ -37,7 +37,7 @@ class CPUPerformanceCache {
 
   std::vector<Item> items_;
   // private:
-  using WeightType = std::array<int, CPU_GLOBAL_MAX_SIZE>;
+  using WeightType = std::array<int, GLOBAL_MAX_GATE_SIZE>;
   void runPreliminaryExperiments(const CPUKernelGenConfig& cpuConfig,
                                  int nQubits,
                                  int nThreads,

@@ -4,8 +4,6 @@
 #include "cast/Core/CostModel.h"
 #include "utils/InfoLogger.h"
 
-static constexpr int GLOBAL_FUSION_MAX_SIZE = 7;
-
 namespace cast {
 
 class FusionConfig {
@@ -70,7 +68,7 @@ public:
     else if (level == 2)
       sizeMax = 6;
     else { // level >= 3
-      sizeMax = GLOBAL_FUSION_MAX_SIZE;
+      sizeMax = GLOBAL_MAX_GATE_SIZE;
       swapTol = 1e-8;
     }
   }
