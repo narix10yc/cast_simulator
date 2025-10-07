@@ -154,7 +154,20 @@ public:
   /// Notice: even though we provide nThreads parameter, this function
   /// uses a single-thread std::fill_n to initialize the statevector.
   void initialize(int nThreads = 1) {
-    std::fill_n(_data, 2 * getN(), 0.0);
+    std::vector<std::thread> threads;
+    threads.reserve(nThreads);
+    auto N = 2 * getN();
+    size_t nTasksPerThread = N / nThreads;
+    for (int t = 0; t < nThreads; ++t) {
+      size_t t0 = nTasksPerThread * t;
+      size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
+      threads.emplace_back(
+          [this, t0, t1]() { std::fill(_data + t0, _data + t1, 0.0); });
+    }
+    for (auto& t : threads) {
+      if (t.joinable())
+        t.join();
+    }
     _data[0] = 1.0;
   }
 

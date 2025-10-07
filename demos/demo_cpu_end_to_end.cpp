@@ -106,7 +106,7 @@ int main(int argc, char** arv) {
     return 1;
   }
   CPUStatevectorF64 sv(cg->nQubits(), gConfig.simdWidth);
-  sv.initialize();
+  sv.initialize(nThreads);
 
   // Right after kernel gen and state init
   auto t2 = my_clock::now();
