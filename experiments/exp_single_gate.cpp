@@ -180,8 +180,7 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
   for (int i = 0; i < gates.size(); ++i) {
     const auto& gate = gates[i];
     std::string funcName = "gate_" + std::to_string(i);
-    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName)
-        ; 
+    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName);
   }
 
   // Initialize JIT engine
@@ -217,9 +216,8 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
 
     tr = timer.timeit([&]() {
       for (auto* kernelInfo : kernels) {
-        kernelMgr
-            .applyCPUKernel(sv.data(), sv.nQubits(), *kernelInfo, NUM_THREADS)
-            ;
+        kernelMgr.applyCPUKernel(
+            sv.data(), sv.nQubits(), *kernelInfo, NUM_THREADS);
       }
     });
     // device,method,gate_type,nqubits,precision,time_per_gate

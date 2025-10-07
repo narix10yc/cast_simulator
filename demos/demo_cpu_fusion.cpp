@@ -221,8 +221,7 @@ int main(int argc, const char** argv) {
       opt.run(graphs.adaptiveDense, logger);
   }
 
-  CPUKernelGenConfig kernelGenConfig;
-  kernelGenConfig.precision = precision;
+  CPUKernelGenConfig kernelGenConfig(precision);
   kernelGenConfig.simdWidth = simdWidth;
   kernelGenConfig.displayInfo(std::cerr);
   std::cerr << "\n";
