@@ -23,6 +23,11 @@ static cl::opt<int>
 ArgPrecision("precision", cl::cat(Category),
   cl::desc("Precision for the simulation (32 or 64)"), cl::init(64));
 
+static cl::opt<std::string>
+ArgOptMode("fusion", cl::cat(Category),
+  cl::desc("Fusion optimization mode (mild, balanced, aggresive)"),
+  cl::init("balanced"));
+
 static cl::opt<int>
 ArgVerbose("verbose", cl::cat(Category),
   cl::desc("Verbosity level"), cl::init(1));
@@ -36,6 +41,20 @@ static Precision getPrecision() {
     return Precision::F64;
   else {
     std::cerr << "Unsupported precision: " << ArgPrecision << "\n";
+    exit(1);
+  }
+}
+
+static FusionOptLevel getFusionOptLevel() {
+  if (ArgOptMode == "mild")
+    return FusionOptLevel::Mild;
+  else if (ArgOptMode == "balanced")
+    return FusionOptLevel::Balanced;
+  else if (ArgOptMode == "aggressive")
+    return FusionOptLevel::Aggressive;
+  else {
+    std::cerr << "Unsupported fusion optimization mode: " << ArgOptMode
+              << ". Supported modes are: mild, balanced, aggressive\n";
     exit(1);
   }
 }
@@ -70,6 +89,8 @@ int main(int argc, char** arv) {
     return 1;
   }
 
+  auto optLevel = getFusionOptLevel();
+  opt.getFusionConfig()->setOptLevel(optLevel);
   opt.enableCFO(false);
   opt.run(**circuit);
   auto cg = (*circuit)->getAllCircuitGraphs()[0];
@@ -114,6 +135,7 @@ int main(int argc, char** arv) {
   logger.put("Input file", ArgInputFilename)
       .put("Num Threads", nThreads)
       .put("Precision", (precision == Precision::F32 ? "32" : "64"))
+      .put("Num Gates After Opt", cg->nGates())
       .put("Total Time", getTime(t0, t4));
   loggerB.put("Parse & Optimize", getTime(t0, t1))
       .put("Kernel Gen & State Init", getTime(t1, t2))

@@ -6,6 +6,12 @@
 
 namespace cast {
 
+enum class FusionOptLevel {
+  Mild = 0,      // sizeMax = 5
+  Balanced = 1,  // sizeMax = 6
+  Aggressive = 2 // sizeMax = 7
+};
+
 class FusionConfig {
 protected:
   enum FusionConfigKind {
@@ -53,23 +59,25 @@ public:
 
   bool enableMultiTraverse = true;
 
-  // Set the aggresiveness level of fusion.
-  // level <= 0: sizeMax = 4. Disables swapping analysis.
-  // level == 1: sizeMax = 5. Disables swapping analysis.
-  // level == 2: sizeMax = 6 (default). Disables swapping analysis.
-  // level >= 3: sizeMax = 7. Enables swapping analysis.
-  void setAggresiveness(int level) {
-    // Swapping analysis is enabled only when level >= 3
-    swapTol = 0.0;
-    if (level <= 0)
-      sizeMax = 4;
-    else if (level == 1)
+  // Set fusion optimization level.
+  // Mild: sizeMax = 5
+  // Balanced: sizeMax = 6 (default)
+  // Aggresive: sizeMax = 7
+  void setOptLevel(FusionOptLevel level) {
+    switch (level) {
+    case FusionOptLevel::Mild:
       sizeMax = 5;
-    else if (level == 2)
+      break;
+    case FusionOptLevel::Balanced:
       sizeMax = 6;
-    else { // level >= 3
-      sizeMax = GLOBAL_MAX_GATE_SIZE;
-      swapTol = 1e-8;
+      break;
+    case FusionOptLevel::Aggressive:
+      sizeMax = 7;
+      break;
+    default:
+      assert(false && "Unknown FusionOptLevel");
+      sizeMax = 6;
+      break;
     }
   }
 

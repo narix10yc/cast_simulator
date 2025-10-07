@@ -12,49 +12,61 @@ namespace cl = llvm::cl;
 
 using namespace cast;
 
+static cl::OptionCategory Category("Demo CPU Fusion Options");
+
 // clang-format off
 cl::opt<std::string>
-ArgInputFilename("i",
+ArgInputFilename("i", cl::cat(Category),
   cl::desc("Input file name"), cl::Positional, cl::Required);
 
 cl::opt<std::string>
-ArgModelPath("model", cl::desc("Path to performance model"), cl::init(""));
+ArgModelPath("model", cl::cat(Category),
+  cl::desc("Path to performance model"), cl::init(""));
 
 cl::opt<int>
-ArgPrecision("precision",
+ArgPrecision("precision", cl::cat(Category),
   cl::desc("Precision for the simulation (32 or 64)"), cl::init(64));
 
 cl::opt<int>
-ArgSimdWidth("simd-width",
+ArgSimdWidth("simd-width", cl::cat(Category),
   cl::desc("SIMD width (64, 128, 256, 512, or 0 for auto-detect)"), cl::init(0));
 
+static cl::opt<std::string>
+ArgOptMode("fusion", cl::cat(Category),
+  cl::desc("Fusion optimization mode (mild, balanced, aggressive)"),
+  cl::init("balanced"));
+
 cl::opt<int>
-ArgNWorkerThreads("T", cl::desc("Number of threads"), cl::Prefix, cl::init(0));
+ArgNWorkerThreads("T", cl::cat(Category),
+  cl::desc("Number of threads"), cl::Prefix, cl::init(0));
 
 cl::opt<bool>
-ArgRunNoFuse("run-no-fuse", cl::desc("Run no-fuse circuit"), cl::init(false));
+ArgRunNoFuse("run-no-fuse", cl::cat(Category),
+  cl::desc("Run no-fuse circuit"), cl::init(false));
 
 cl::opt<bool>
-ArgRunSizeOnlyFuse("run-sizeonly-fuse",
+ArgRunSizeOnlyFuse("run-sizeonly-fuse", cl::cat(Category),
   cl::desc("Run size-only-fuse circuit"), cl::init(true));
 
 cl::opt<bool>
-ArgRunAdaptiveFuse("run-adaptive-fuse",
+ArgRunAdaptiveFuse("run-adaptive-fuse", cl::cat(Category),
   cl::desc("Run adaptive-fuse circuit"), cl::init(false));
 
 cl::opt<int>
-ArgSizeonlySize("sizeonly-size",
+ArgSizeonlySize("sizeonly-size", cl::cat(Category),
   cl::desc("The max size of gates in size-only fusion"), cl::init(3));
 
 cl::opt<bool>
-ArgRunDenseKernel("run-dense-kernel",
+ArgRunDenseKernel("run-dense-kernel", cl::cat(Category),
   cl::desc("Run dense kernel"), cl::init(false));
 
 cl::opt<int>
-ArgReplication("replication", cl::desc("Number of replications"), cl::init(1));
+ArgReplication("replication", cl::cat(Category),
+  cl::desc("Number of replications"), cl::init(1));
 
 cl::opt<int>
-ArgVerbose("verbose", cl::desc("Verbosity level"), cl::init(1));
+ArgVerbose("verbose", cl::cat(Category),
+  cl::desc("Verbosity level"), cl::init(1));
 
 // clang-format on
 
@@ -85,7 +97,8 @@ struct CircuitGraphs {
 static CircuitGraphs unwrapArguments(Precision& precision,
                                      int& nThreads,
                                      CPUSimdWidth& simdWidth,
-                                     int& nQubitsSV) {
+                                     int& nQubitsSV,
+                                     FusionOptLevel& optLevel) {
   if (ArgPrecision == 32)
     precision = Precision::F32;
   else if (ArgPrecision == 64)
@@ -127,6 +140,17 @@ static CircuitGraphs unwrapArguments(Precision& precision,
   if (!(ArgRunNoFuse || ArgRunSizeOnlyFuse || ArgRunAdaptiveFuse)) {
     logerr() << "At least one of --run-no-fuse, --run-naive-fuse, "
              << "--run-adaptive-fuse must be specified.\n";
+    std::exit(1);
+  }
+  if (ArgOptMode == "mild")
+    optLevel = FusionOptLevel::Mild;
+  else if (ArgOptMode == "balanced")
+    optLevel = FusionOptLevel::Balanced;
+  else if (ArgOptMode == "aggressive")
+    optLevel = FusionOptLevel::Aggressive;
+  else {
+    logerr() << "Unsupported fusion optimization mode: " << ArgOptMode
+             << ". Supported modes are: mild, balanced, aggressive\n";
     std::exit(1);
   }
 
@@ -186,21 +210,25 @@ static void runAndDisplayResult(std::ostream& os,
 }
 
 int main(int argc, const char** argv) {
+  cl::HideUnrelatedOptions(Category);
   cl::ParseCommandLineOptions(argc, argv);
 
   Precision precision;
   int nThreads;
   CPUSimdWidth simdWidth;
   int nQubitsSV;
-  auto graphs = unwrapArguments(precision, nThreads, simdWidth, nQubitsSV);
+  FusionOptLevel optLevel;
+  auto graphs =
+      unwrapArguments(precision, nThreads, simdWidth, nQubitsSV, optLevel);
 
   // Fusion
   utils::Logger logger(std::cerr, ArgVerbose);
   if (ArgRunSizeOnlyFuse) {
     CPUOptimizer opt;
     opt.setSizeOnlyFusionConfig(ArgSizeonlySize).enableCFO(false);
-    opt.displayInfo({std::cerr, ArgVerbose});
+    opt.getFusionConfig()->setOptLevel(optLevel);
 
+    opt.displayInfo({std::cerr, ArgVerbose});
     opt.run(graphs.sizeOnly, logger);
     if (ArgRunDenseKernel)
       opt.run(graphs.sizeOnlyDense, logger);
@@ -214,8 +242,9 @@ int main(int argc, const char** argv) {
                << llvm::toString(std::move(e)) << "\n";
       std::exit(1);
     }
+    opt.getFusionConfig()->setOptLevel(optLevel);
+    
     opt.displayInfo({std::cerr, ArgVerbose});
-
     opt.run(graphs.adaptive, logger);
     if (ArgRunDenseKernel)
       opt.run(graphs.adaptiveDense, logger);

@@ -36,7 +36,8 @@ public:
     return static_cast<Derived&>(*this);
   }
 
-  std::unique_ptr<FusionConfig>& getFusionConfig() { return fusionConfig_; }
+  const FusionConfig* getFusionConfig() const { return fusionConfig_.get(); }
+  FusionConfig* getFusionConfig() { return fusionConfig_.get(); }
 
   // Size-only fusion does not take any queries.
   Derived& setSizeOnlyFusionConfig(int size) {
