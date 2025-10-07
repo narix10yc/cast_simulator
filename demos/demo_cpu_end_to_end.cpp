@@ -105,11 +105,14 @@ int main(int argc, char** arv) {
               << "\n";
     return 1;
   }
+  // Right after kernel generation
+  auto t2 = my_clock::now();
+
   CPUStatevectorF64 sv(cg->nQubits(), gConfig.simdWidth);
   sv.initialize(nThreads);
 
-  // Right after kernel gen and state init
-  auto t2 = my_clock::now();
+  // Right after state init
+  auto t3 = my_clock::now();
   if (auto e = km.initJIT()) {
     std::cerr << "Error initializing JIT: " << llvm::toString(std::move(e))
               << "\n";
@@ -117,7 +120,7 @@ int main(int argc, char** arv) {
   }
 
   // Right after JIT
-  auto t3 = my_clock::now();
+  auto t4 = my_clock::now();
 
   if (auto e = km.applyCPUKernelsFromGraph(
           sv.data(), sv.nQubits(), "graph", nThreads)) {
@@ -127,7 +130,7 @@ int main(int argc, char** arv) {
   }
 
   // Right after execution
-  auto t4 = my_clock::now();
+  auto t5 = my_clock::now();
 
   // Statistics
   utils::InfoLogger logger(std::cerr, ArgVerbose);
@@ -136,10 +139,11 @@ int main(int argc, char** arv) {
       .put("Num Threads", nThreads)
       .put("Precision", precision)
       .put("Num Gates After Opt", cg->nGates())
-      .put("Total Time", getTime(t0, t4));
+      .put("Total Time", getTime(t0, t5));
   loggerB.put("Parse & Optimize", getTime(t0, t1))
-      .put("Kernel Gen & State Init", getTime(t1, t2))
-      .put("JIT", getTime(t2, t3))
-      .put("Execution", getTime(t3, t4));
+      .put("Kernel Gen", getTime(t1, t2))
+      .put("State Init", getTime(t2, t3))
+      .put("JIT", getTime(t3, t4))
+      .put("Execution", getTime(t4, t5));
   return 0;
 }
