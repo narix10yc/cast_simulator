@@ -1,3 +1,6 @@
+add_executable(demo_cpu_end_to_end "demo_cpu_end_to_end.cpp")
+target_link_libraries(demo_cpu_end_to_end PRIVATE cast)
+
 add_executable(demo_cpu_fusion "demo_cpu_fusion.cpp")
 target_link_libraries(demo_cpu_fusion PRIVATE cast)
 

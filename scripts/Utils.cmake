@@ -9,13 +9,14 @@ function(handle_llvm_dep)
   # If both CAST_LLVM_ROOT and CAST_LLVM_RELEASE_ROOT are defined, we issue a
   # warning and use the second case.
 
-  if(DEFINED ENV{CAST_LLVM_ROOT})
+  if(DEFINED CAST_LLVM_RELEASE_ROOT)
+    # already cached
+  elseif(DEFINED ENV{CAST_LLVM_ROOT})
+    # debug + release llvm versions
     set(CAST_LLVM_DEBUG_ROOT "${CAST_LLVM_ROOT}/debug-install" CACHE PATH
       "Path to the llvm debug-install directory")
     set(CAST_LLVM_RELEASE_ROOT "${CAST_LLVM_ROOT}/release-install" CACHE PATH
       "Path to the llvm release-install directory")
-    message(STATUS "CAST_LLVM_RELEASE_ROOT is set to: ${CAST_LLVM_RELEASE_ROOT}")
-    message(STATUS "CAST_LLVM_DEBUG_ROOT is set to: ${CAST_LLVM_DEBUG_ROOT}")
     if(NOT EXISTS "${CAST_LLVM_RELEASE_ROOT}")
       message(FATAL_ERROR "CAST_LLVM_RELEASE_ROOT does not exist!")
     endif()
@@ -29,9 +30,13 @@ function(handle_llvm_dep)
       message(FATAL_ERROR "CAST_LLVM_DEBUG_ROOT is not a directory!")
     endif()
   elseif(DEFINED ENV{CAST_LLVM_RELEASE_ROOT})
+    # release only llvm version
     set(CAST_LLVM_RELEASE_ROOT "$ENV{CAST_LLVM_RELEASE_ROOT}" CACHE PATH
       "Path to the llvm release-install directory")
   endif()
+
+  message(STATUS "CAST_LLVM_RELEASE_ROOT is set to: ${CAST_LLVM_RELEASE_ROOT}")
+  message(STATUS "CAST_LLVM_DEBUG_ROOT is set to: ${CAST_LLVM_DEBUG_ROOT}")
 
   if(DEFINED ENV{CAST_LLVM_ROOT} AND DEFINED ENV{CAST_LLVM_RELEASE_ROOT})
     message(WARNING
@@ -50,7 +55,7 @@ endfunction() # handle_llvm_dep
 
 function(use_llvm_compilers)
   if(EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang" AND
-      EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
+    EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
     message(STATUS "Using compilers under LLVM release-install at "
       "${CAST_LLVM_RELEASE_ROOT}")
     set(CMAKE_C_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang" PARENT_SCOPE)

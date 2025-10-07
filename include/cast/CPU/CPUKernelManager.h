@@ -77,23 +77,19 @@ struct CPUKernelInfo {
 struct CPUKernelGenConfig {
   CPUSimdWidth simdWidth;
   Precision precision;
-  bool useFMA;
-  bool useFMS;
+  bool useFMA = true;
+  bool useFMS = true;
   // parallel bits deposit from BMI2
-  bool usePDEP;
-  double zeroTol;
-  double oneTol;
-  CPUMatrixLoadMode matrixLoadMode;
+  bool usePDEP = false;
+  double zeroTol = 1e-8;
+  double oneTol = 1e-8;
+  CPUMatrixLoadMode matrixLoadMode = CPUMatrixLoadMode::UseMatImmValues;
 
-  CPUKernelGenConfig()
-      : simdWidth(get_cpu_simd_width()), precision(Precision::F64),
-        useFMA(true), useFMS(true), usePDEP(false), zeroTol(1e-8), oneTol(1e-8),
-        matrixLoadMode(CPUMatrixLoadMode::UseMatImmValues) {}
+  CPUKernelGenConfig(Precision precision)
+      : simdWidth(get_cpu_simd_width()), precision(precision) {}
 
   CPUKernelGenConfig(CPUSimdWidth simdWidth, Precision precision)
-      : simdWidth(simdWidth), precision(precision), useFMA(true), useFMS(true),
-        usePDEP(false), zeroTol(1e-8), oneTol(1e-8),
-        matrixLoadMode(CPUMatrixLoadMode::UseMatImmValues) {}
+      : simdWidth(simdWidth), precision(precision) {}
 
   int get_simd_s() const { return cast::get_simd_s(simdWidth, precision); }
 

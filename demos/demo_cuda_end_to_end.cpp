@@ -36,7 +36,7 @@ static Precision getPrecision() {
   else if (ArgPrecision == 64)
     return Precision::F64;
   else {
-    llvm::errs() << "Unsupported precision: " << ArgPrecision << "\n";
+    std::cerr << "Unsupported precision: " << ArgPrecision << "\n";
     exit(1);
   }
 }
