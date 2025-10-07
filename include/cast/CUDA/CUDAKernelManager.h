@@ -45,7 +45,7 @@ struct CUDAKernelGenConfig {
 
   CUDAMatrixLoadMode matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
 
-  explicit CUDAKernelGenConfig(Precision p = Precision::F64) : precision(p) {}
+  explicit CUDAKernelGenConfig(Precision p = Precision::FP64) : precision(p) {}
 
   std::ostream& displayInfo(std::ostream& os) const;
 };

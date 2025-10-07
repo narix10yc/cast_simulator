@@ -33,7 +33,7 @@ template <unsigned nQubits> static void f() {
 
   CUDAKernelGenConfig cfg;
   cfg.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
-  cfg.precision = Precision::F64;
+  cfg.precision = Precision::FP64;
 
   for (int q = 0; q < nQubits; q++) {
     llvm::cantFail(

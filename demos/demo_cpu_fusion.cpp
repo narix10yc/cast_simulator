@@ -100,9 +100,9 @@ static CircuitGraphs unwrapArguments(Precision& precision,
                                      int& nQubitsSV,
                                      FusionOptLevel& optLevel) {
   if (ArgPrecision == 32)
-    precision = Precision::F32;
+    precision = Precision::FP32;
   else if (ArgPrecision == 64)
-    precision = Precision::F64;
+    precision = Precision::FP64;
   else {
     std::cerr << BOLDRED("[Error]: ")
               << "Invalid precision specified: " << ArgPrecision
@@ -243,7 +243,7 @@ int main(int argc, const char** argv) {
       std::exit(1);
     }
     opt.getFusionConfig()->setOptLevel(optLevel);
-    
+
     opt.displayInfo({std::cerr, ArgVerbose});
     opt.run(graphs.adaptive, logger);
     if (ArgRunDenseKernel)

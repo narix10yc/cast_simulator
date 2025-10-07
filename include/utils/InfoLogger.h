@@ -1,19 +1,21 @@
 #ifndef CAST_UTILS_INFOLOGGER_H
 #define CAST_UTILS_INFOLOGGER_H
 
+#include <functional>
 #include <iomanip>
 #include <ostream>
-#include <string>
 #include <span>
-#include <functional>
+#include <string>
+
+// To provide an specialization for cast::Precision
+#include "cast/Core/Precision.h"
 
 namespace utils {
 
 class InfoLogger {
   std::ostream& os_;
 
-  template<typename T>
-  void put_format_(std::ostream& os) {
+  template <typename T> void put_format_(std::ostream& os) {
     if constexpr (std::is_floating_point_v<T>) {
       os << std::defaultfloat;
     } else if constexpr (std::is_integral_v<T>) {
@@ -35,11 +37,32 @@ public:
   }
 
   // Specialization for bool to print True/False
-  InfoLogger& put(const char* label, bool value, int requireVerbose) {
+  InfoLogger& put(const char* label, bool value, int requireVerbose = 1) {
     if (verbose < requireVerbose)
       return *this;
     os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : "
         << (value ? "True" : "False") << "\n";
+    return *this;
+  }
+
+  // Specialization for cast::Precision
+  InfoLogger&
+  put(const char* label, cast::Precision p, int requireVerbose = 1) {
+    if (verbose < requireVerbose)
+      return *this;
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : ";
+    switch (p) {
+    case cast::Precision::FP32:
+      os_ << "FP32";
+      break;
+    case cast::Precision::FP64:
+      os_ << "FP64";
+      break;
+    default:
+      os_ << "Unknown";
+      break;
+    }
+    os_ << "\n";
     return *this;
   }
 

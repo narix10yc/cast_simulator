@@ -134,13 +134,13 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
   // reVal and imVal
   auto zeroVal = ConstantFP::get(
       B.getContext(),
-      (config.precision == Precision::F32) ? APFloat(0.0f) : APFloat(0.0));
+      (config.precision == Precision::FP32) ? APFloat(0.0f) : APFloat(0.0));
   auto oneVal = ConstantFP::get(
       B.getContext(),
-      (config.precision == Precision::F32) ? APFloat(1.0f) : APFloat(1.0));
+      (config.precision == Precision::FP32) ? APFloat(1.0f) : APFloat(1.0));
   auto minusOneVal = ConstantFP::get(
       B.getContext(),
-      (config.precision == Precision::F32) ? APFloat(-1.0f) : APFloat(-1.0));
+      (config.precision == Precision::FP32) ? APFloat(-1.0f) : APFloat(-1.0));
 
   for (unsigned i = 0; i < KK; ++i) {
     switch (data[i].reKind) {
@@ -158,7 +158,7 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
     case SK_ImmValue: {
       auto re = matrix.reData()[i];
       data[i].reVal = ConstantFP::get(B.getContext(),
-                                      (config.precision == Precision::F32)
+                                      (config.precision == Precision::FP32)
                                           ? APFloat(static_cast<float>(re))
                                           : APFloat(static_cast<double>(re)));
       break;
@@ -182,7 +182,7 @@ std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<>& B,
     case SK_ImmValue: {
       auto im = matrix.imData()[i];
       data[i].imVal = ConstantFP::get(B.getContext(),
-                                      (config.precision == Precision::F32)
+                                      (config.precision == Precision::FP32)
                                           ? APFloat(static_cast<float>(im))
                                           : APFloat(static_cast<double>(im)));
       break;
@@ -1198,7 +1198,7 @@ CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
         "KernelGenConfig specifies precision to be 'Unknown'");
   }
   Type* scalarTy =
-      (config.precision == Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
+      (config.precision == Precision::FP32) ? B.getFloatTy() : B.getDoubleTy();
 
   IRArgsCUDA args;
   auto* func = getFunctionDeclarationCUDA(

@@ -16,7 +16,7 @@ static void* mallocGatePointer(const cast::QuantumGate* gate,
     assert(scalarGM != nullptr && "Only ScalarGateMatrix is supported for now");
     const auto& mat = scalarGM->matrix();
     auto edgeSize = mat.edgeSize();
-    if (precision == Precision::F32) {
+    if (precision == Precision::FP32) {
       p = std::malloc(2 * edgeSize * edgeSize * sizeof(float));
       float* pp = reinterpret_cast<float*>(p);
       for (unsigned r = 0; r < edgeSize; ++r) {
@@ -27,7 +27,7 @@ static void* mallocGatePointer(const cast::QuantumGate* gate,
         }
       }
     } else {
-      assert(precision == Precision::F64 && "Unsupported precision");
+      assert(precision == Precision::FP64 && "Unsupported precision");
       p = std::malloc(2 * edgeSize * edgeSize * sizeof(double));
       double* pp = reinterpret_cast<double*>(p);
       for (unsigned r = 0; r < edgeSize; ++r) {

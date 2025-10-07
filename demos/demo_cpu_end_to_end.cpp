@@ -36,9 +36,9 @@ ArgVerbose("verbose", cl::cat(Category),
 
 static Precision getPrecision() {
   if (ArgPrecision == 32)
-    return Precision::F32;
+    return Precision::FP32;
   else if (ArgPrecision == 64)
-    return Precision::F64;
+    return Precision::FP64;
   else {
     std::cerr << "Unsupported precision: " << ArgPrecision << "\n";
     exit(1);
@@ -134,7 +134,7 @@ int main(int argc, char** arv) {
   auto loggerB = logger.indent();
   logger.put("Input file", ArgInputFilename)
       .put("Num Threads", nThreads)
-      .put("Precision", (precision == Precision::F32 ? "32" : "64"))
+      .put("Precision", precision)
       .put("Num Gates After Opt", cg->nGates())
       .put("Total Time", getTime(t0, t4));
   loggerB.put("Parse & Optimize", getTime(t0, t1))

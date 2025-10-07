@@ -14,7 +14,7 @@ template <CPUSimdWidth SimdWidth> static void f() {
 
   CPUKernelManager km;
 
-  CPUKernelGenConfig genCfg(SimdWidth, Precision::F64);
+  CPUKernelGenConfig genCfg(SimdWidth, Precision::FP64);
 
   llvm::cantFail(km.genStandaloneGate(genCfg, getH(0), "gate_h_0"));
   llvm::cantFail(km.genStandaloneGate(genCfg, getH(1), "gate_h_1"));

@@ -93,7 +93,7 @@ CPUSimdWidth cast::get_cpu_simd_width() {
 }
 
 int cast::get_simd_s(CPUSimdWidth simdWidth, Precision precision) {
-  if (precision == Precision::F32) {
+  if (precision == Precision::FP32) {
     switch (simdWidth) {
     case W64:
       return 1; // 64 bits / 32 bits = 2 elements
@@ -108,7 +108,7 @@ int cast::get_simd_s(CPUSimdWidth simdWidth, Precision precision) {
       return 0;
     }
   }
-  if (precision == Precision::F64) {
+  if (precision == Precision::FP64) {
     switch (simdWidth) {
     case W64:
       return 0; // 64 bits / 64 bits = 1 element

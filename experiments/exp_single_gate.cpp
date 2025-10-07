@@ -171,7 +171,7 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
   CPUKernelManager kernelMgr;
   CPUKernelGenConfig kernelGenConfig(
       SIMD_WIDTH,
-      (std::is_same_v<ScalarType, float> ? Precision::F32 : Precision::F64));
+      (std::is_same_v<ScalarType, float> ? Precision::FP32 : Precision::FP64));
 
   std::vector<QuantumGatePtr> gates;
   for (const auto& gateType : gateTypes)

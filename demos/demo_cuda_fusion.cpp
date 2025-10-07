@@ -92,9 +92,9 @@ struct CircuitGraphs {
 static CircuitGraphs
 unwrapArguments(Precision& precision, int& nWorkerThreads, int& nQubitsSV) {
   if (ArgPrecision == 32)
-    precision = Precision::F32;
+    precision = Precision::FP32;
   else if (ArgPrecision == 64)
-    precision = Precision::F64;
+    precision = Precision::FP64;
   else {
     std::cerr << BOLDRED("[Error]: ")
               << "Invalid precision specified: " << ArgPrecision
@@ -275,7 +275,7 @@ int main(int argc, const char** argv) {
         static_cast<double>(1ULL << sv.nQubits()) * 1e-9 * opCountTotal;
     double bandwidth = kernels.size() *
                        static_cast<double>(1ULL << sv.nQubits()) *
-                       (precision == Precision::F32 ? 8.0 : 16.0) / t;
+                       (precision == Precision::FP32 ? 8.0 : 16.0) / t;
     std::cerr << "- Num Kernels:    " << kernels.size() << "\n"
               << "- Total Op Count: " << opCountTotal << "\n"
               << "- Run Time:       " 

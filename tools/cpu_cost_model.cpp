@@ -113,13 +113,13 @@ int main(int argc, char** argv) {
   if (ArgF32) {
     std::cerr << BOLDCYAN("[Info]: ")
               << "Running single-precision experiments.\n";
-    CPUKernelGenConfig cpuConfig(simdWidth, Precision::F32);
+    CPUKernelGenConfig cpuConfig(simdWidth, Precision::FP32);
     cache.runExperiments(cpuConfig, ArgNQubits, nThreads, ArgNTests);
   }
   if (ArgF64) {
     std::cerr << BOLDCYAN("[Info]: ")
               << "Running double-precision experiments.\n";
-    CPUKernelGenConfig cpuConfig(simdWidth, Precision::F64);
+    CPUKernelGenConfig cpuConfig(simdWidth, Precision::FP64);
     cache.runExperiments(cpuConfig, ArgNQubits, nThreads, ArgNTests);
   }
   cache.writeResults(outFile);

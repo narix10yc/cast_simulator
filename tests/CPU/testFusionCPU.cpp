@@ -16,7 +16,7 @@ template <CPUSimdWidth SimdWidth> static void f() {
                               ")");
 
   cast::CPUKernelManager km;
-  cast::CPUKernelGenConfig genCfg(SimdWidth, cast::Precision::F64);
+  cast::CPUKernelGenConfig genCfg(SimdWidth, cast::Precision::FP64);
 
   cast::CPUOptimizer opt;
   opt.enableCFO(false).setSizeOnlyFusionConfig(3);

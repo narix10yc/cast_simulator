@@ -233,7 +233,7 @@ void CUDACostModel::showEntries(std::ostream& os, int nLines) const {
   os << "k | Precision | Dense (GiB/s) | Per Op Per Sec\n";
   for (const auto& [key, value] : bucket_) {
     auto denseGateGiBTime = 1.0f / (value * (1U << (key.k + 2)));
-    os << key.k << " | " << (key.precision == Precision::F32 ? "F32" : "F64")
+    os << key.k << " | " << (key.precision == Precision::FP32 ? "F32" : "F64")
        << " | " << utils::fmt_1_to_1e3(denseGateGiBTime) << " | "
        << utils::fmt_mem(value * 1e6) << "\n";
     if (--nToDisplay <= 0)

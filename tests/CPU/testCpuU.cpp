@@ -26,7 +26,7 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
     gates.emplace_back(StandardQuantumGate::RandomUnitary({q}));
   }
 
-  CPUKernelGenConfig cpuConfig(SimdWidth, Precision::F64);
+  CPUKernelGenConfig cpuConfig(SimdWidth, Precision::FP64);
   cpuConfig.matrixLoadMode = CPUMatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
     llvm::cantFail(km.genStandaloneGate(
@@ -94,7 +94,7 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U2q() {
     gates.emplace_back(StandardQuantumGate::RandomUnitary({a, b}));
   }
 
-  CPUKernelGenConfig cpuConfig(SimdWidth, Precision::F64);
+  CPUKernelGenConfig cpuConfig(SimdWidth, Precision::FP64);
   cpuConfig.matrixLoadMode = CPUMatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
     llvm::cantFail(km.genStandaloneGate(

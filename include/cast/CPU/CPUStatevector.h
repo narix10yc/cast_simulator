@@ -319,9 +319,9 @@ public:
   CPUStatevectorWrapper(Precision precision,
                         int nQubits,
                         CPUSimdWidth simdWidth) {
-    if (precision == Precision::F32)
+    if (precision == Precision::FP32)
       sv = CPUStatevectorF32(nQubits, simdWidth);
-    else if (precision == Precision::F64)
+    else if (precision == Precision::FP64)
       sv = CPUStatevectorF64(nQubits, simdWidth);
     else
       assert(false && "Unsupported precision for CPUStatevectorWrapper");

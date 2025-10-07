@@ -39,7 +39,7 @@ template <typename ScalarType> static void benchmark() {
   CPUKernelManager km;
   CPUKernelGenConfig kernelGenConfig(
       SIMD_WIDTH,
-      (std::is_same_v<ScalarType, float> ? Precision::F32 : Precision::F64));
+      (std::is_same_v<ScalarType, float> ? Precision::FP32 : Precision::FP64));
 
   // Generate 1 to 4-qubit random unitary and Hadamard gates
   for (int k = 1; k < 5; ++k) {
