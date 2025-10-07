@@ -159,13 +159,6 @@ bool swapIfPossible(ir::CircuitGraphNode& graph,
   return true;
 }
 
-struct TentativeFusedItem {
-  // We must use shared pointers here because intermediate fusion steps may
-  // remove gates from the graph, yet these gates may need to be restored.
-  QuantumGatePtr gate;
-  row_iterator iter;
-};
-
 } // end of anonymous namespace
 
 /// @return Number of fused gates
@@ -182,6 +175,12 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
   auto prodIt = curIt;
   int nFused = 0;
 
+  struct TentativeFusedItem {
+    // We must use shared pointers here because intermediate fusion steps may
+    // remove gates from the graph, yet these gates may need to be restored.
+    QuantumGatePtr gate;
+    row_iterator iter;
+  };
   // keep track of all gates that are being fused, and restore them upon
   // rejecting the fusion
   std::vector<TentativeFusedItem> fusedGates;

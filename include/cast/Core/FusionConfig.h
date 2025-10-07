@@ -1,7 +1,6 @@
 #ifndef CAST_CORE_FUSIONCONFIG_H
 #define CAST_CORE_FUSIONCONFIG_H
 
-#include "cast/Core/Config.h"
 #include "cast/Core/CostModel.h"
 #include "utils/InfoLogger.h"
 
@@ -46,13 +45,33 @@ public:
   // We pose an upper limit this because sometimes even though the cost model
   // predicts a benefit, kernel generation may be too expensive.
   int sizeMin = 2;
-  int sizeMax = GLOBAL_MAX_GATE_SIZE;
+  int sizeMax = 6;
 
   /// How much benefit do we recognize as significant. For example, if set to
   /// 0.1, then we accept fusion whenever costModel predicts >10% improvement
   double benefitMargin = 0.0;
 
   bool enableMultiTraverse = true;
+
+  // Set the aggresiveness level of fusion.
+  // level <= 0: sizeMax = 4. Disables swapping analysis.
+  // level == 1: sizeMax = 5. Disables swapping analysis.
+  // level == 2: sizeMax = 6 (default). Disables swapping analysis.
+  // level >= 3: sizeMax = 7. Enables swapping analysis.
+  void setAggresiveness(int level) {
+    // Swapping analysis is enabled only when level >= 3
+    swapTol = 0.0;
+    if (level <= 0)
+      sizeMax = 4;
+    else if (level == 1)
+      sizeMax = 5;
+    else if (level == 2)
+      sizeMax = 6;
+    else { // level >= 3
+      sizeMax = 7;
+      swapTol = 1e-8;
+    }
+  }
 
   virtual void displayInfo(utils::InfoLogger logger) const {
     if (costModel_) {
