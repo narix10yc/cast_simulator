@@ -5,6 +5,11 @@
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 
+#include "llvm/IR/OptBisect.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/StandardInstrumentations.h"
+
 #include <cassert>
 
 #define DEBUG_TYPE "cpu-kernel-mgr"
@@ -53,23 +58,18 @@ void CPUKernelGenConfig::displayInfo(utils::InfoLogger logger) const {
 }
 
 void CPUKernelManager::displayInfo(utils::InfoLogger logger) const {
-  int nKernels = standaloneKernels_.size();
-  for (const auto& [graphName, kernels] : graphKernels_)
-    nKernels += kernels.size();
+  int nKernels = 0;
+  for (const auto& [_, poolValue] : kernelPools_)
+    nKernels += poolValue.items.size();
   logger.put("CPU Kernel Manager")
-      .put("Is JITed         ", isJITed())
-      .put("Number of Threads", dispatcher.getNumWorkers())
-      .put("Number of Kernels", nKernels);
+      .put("Num of Threads", dispatcher.getNumWorkers())
+      .put("Num of Kernels", nKernels);
 }
 
 CPUKernelInfo*
 CPUKernelManager::getKernelByName(const std::string& llvmFuncName) {
-  for (const auto& kernel : standaloneKernels_) {
-    if (kernel->llvmFuncName == llvmFuncName)
-      return kernel.get();
-  }
-  for (const auto& [graphName, kernels] : graphKernels_) {
-    for (const auto& kernel : kernels) {
+  for (const auto& [_, poolValue] : kernelPools_) {
+    for (const auto& kernel : poolValue.iter_kernels()) {
       if (kernel->llvmFuncName == llvmFuncName)
         return kernel.get();
     }
@@ -77,96 +77,129 @@ CPUKernelManager::getKernelByName(const std::string& llvmFuncName) {
   return nullptr;
 }
 
-void CPUKernelManager::ensureExecutable(CPUKernelInfo& kernel) {
-  // Note: We do not actually need the lock here
-  // as it is expected (at least now) each KernelInfo is accesses by a unique
-  // thread
-  // TODO: we could inline this function into \c initJIT. Maybe introduce a
-  // lock inside \c initJIT
-  {
-    std::lock_guard<std::mutex> lock(mtx);
-    if (kernel.executable)
-      return;
-    kernel.tpJitStart = std::chrono::steady_clock::now();
+llvm::Error CPUKernelManager::compileItem(Item& item,
+                                          llvm::OptimizationLevel optLevel) {
+  orc::ThreadSafeModule TSM(std::move(item.llvmModule),
+                            std::move(item.llvmContext));
+
+  TSM.withModuleDo([optLevel](llvm::Module& M) {
+    // --- Analysis managers (must be constructed in this order) ---
+    LoopAnalysisManager LAM;
+    FunctionAnalysisManager FAM;
+    CGSCCAnalysisManager CGAM;
+    ModuleAnalysisManager MAM;
+
+    // --- Pass instrumentation (debug hooks, timers, etc.) ---
+    PassInstrumentationCallbacks PIC;
+    StandardInstrumentations SI(M.getContext(), /*DebugLogging=*/false);
+    SI.registerCallbacks(PIC, &MAM);
+
+    // Use the PassBuilder ctor that takes PIC (portable for LLVM 20.x).
+    PipelineTuningOptions PTO;
+    PassBuilder PB(/*TM=*/nullptr, PTO, /*PGO=*/std::nullopt, &PIC);
+
+    // Register analyses and cross-proxies.
+    PB.registerLoopAnalyses(LAM);
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.registerModuleAnalyses(MAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+    // Wrap default pipeline with verifiers (pre & post).
+    ModulePassManager MPM;
+    MPM.addPass(VerifierPass()); // verify pre
+    MPM.addPass(PB.buildPerModuleDefaultPipeline(optLevel));
+    MPM.addPass(VerifierPass()); // verify post
+
+    // Run the pipeline for this module.
+    MPM.run(M, MAM);
+  });
+
+  if (auto e = llvmJIT->addIRModule(std::move(TSM))) {
+    return llvm::joinErrors(llvm::createStringError("Failed to add IR module"),
+                            std::move(e));
   }
-  auto addr =
-      cantFail(llvmJIT->lookup(kernel.llvmFuncName)).toPtr<CPU_KERNEL_TYPE>();
-  {
-    kernel.tpJitFinish = std::chrono::steady_clock::now();
-    std::lock_guard<std::mutex> lock(mtx);
-    kernel.executable = addr;
+  item.kernel->tpJitStart = std::chrono::steady_clock::now();
+  auto addr = llvmJIT->lookup(item.kernel->llvmFuncName);
+  if (!addr) {
+    return llvm::joinErrors(
+        llvm::createStringError("Failed to lookup function " +
+                                item.kernel->llvmFuncName),
+        addr.takeError());
   }
+  item.kernel->tpJitFinish = std::chrono::steady_clock::now();
+
+  item.kernel->executable = addr->toPtr<CPU_KERNEL_TYPE>();
+
+  return llvm::Error::success();
 }
 
-void CPUKernelManager::ensureAllExecutable(bool progressBar) {
-  for (auto& kernel : standaloneKernels_) {
-    dispatcher.enqueue([this, &kernel]() { ensureExecutable(*kernel); });
+llvm::Error CPUKernelManager::initLLVMJIT_() {
+  if (llvmJIT != nullptr)
+    return llvm::Error::success();
+  // eager JIT engine
+  orc::LLJITBuilder eagerJitBuilder;
+  eagerJitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
+  auto t = eagerJitBuilder.create();
+  if (!t) {
+    return llvm::joinErrors(llvm::createStringError("Failed to create LLJIT"),
+                            t.takeError());
   }
-  for (auto& [graphName, kernels] : graphKernels_) {
-    for (auto& kernel : kernels) {
-      dispatcher.enqueue([this, &kernel]() { ensureExecutable(*kernel); });
-    }
+  llvmJIT = std::move(*t);
+  return llvm::Error::success();
+}
+
+llvm::Error CPUKernelManager::compilePool(const std::string& poolName,
+                                          llvm::OptimizationLevel optLevel,
+                                          bool progressBar) {
+  assert(llvmJIT != nullptr && "llvmJIT is null");
+
+  auto it = kernelPools_.find(poolName);
+  if (it == kernelPools_.end()) {
+    return llvm::createStringError("Pool " + poolName + " not found");
   }
-  if (progressBar)
-    std::cerr << "Ensure All Executables...\n";
+  auto& items = it->second.items;
+
+  for (auto& item : items) {
+    dispatcher.enqueue([this, &item, optLevel]() {
+      if (item.kernel->executable)
+        return;
+      if (auto e = compileItem(item, optLevel)) {
+        llvm::errs() << "Error compiling kernel " << item.kernel->llvmFuncName
+                     << ": " << toString(std::move(e)) << "\n";
+        std::abort();
+      }
+    });
+  }
+
   dispatcher.sync(progressBar);
+  return llvm::Error::success();
 }
 
-llvm::Error CPUKernelManager::initJIT(OptimizationLevel optLevel,
-                                      bool useLazyJIT,
-                                      int verbose) {
-  if (isJITed()) {
-    return llvm::createStringError("JIT has already been initialized.");
-  }
-
-  applyLLVMOptimization(optLevel, /* progressBar */ verbose > 0);
-
-  if (useLazyJIT) {
-    // lazy JIT engine
-    orc::LLLazyJITBuilder jitBuilder;
-    jitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
-    auto lazyJIT = cantFail(jitBuilder.create());
-    for (auto& [ctx, mod] : llvmContextModulePairs) {
-      if (auto e = lazyJIT->addLazyIRModule(
-              orc::ThreadSafeModule(std::move(mod), std::move(ctx)))) {
-        return llvm::joinErrors(
-            llvm::createStringError("Failed to add lazy IR module"),
-            std::move(e));
-      }
+llvm::Error CPUKernelManager::compileAll(OptimizationLevel optLevel,
+                                         bool progressBar) {
+  assert(llvmJIT != nullptr && "llvmJIT is null");
+  for (auto& [_, poolValue] : kernelPools_) {
+    auto& items = poolValue.items;
+    for (auto& item : items) {
+      dispatcher.enqueue([this, &item, optLevel]() {
+        if (item.kernel->executable)
+          return;
+        if (auto e = compileItem(item, optLevel)) {
+          llvm::errs() << "Error compiling kernel " << item.kernel->llvmFuncName
+                       << ": " << toString(std::move(e)) << "\n";
+          std::abort();
+        }
+      });
     }
-    this->llvmJIT = std::move(lazyJIT);
-    ensureAllExecutable(/* progressBar */ verbose > 0);
-  } else {
-    // eager JIT engine
-    orc::LLJITBuilder eagerJitBuilder;
-    eagerJitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
-    auto eagerJIT = cantFail(eagerJitBuilder.create());
-    for (auto& [ctx, mod] : llvmContextModulePairs) {
-      if (auto e = eagerJIT->addIRModule(
-              orc::ThreadSafeModule(std::move(mod), std::move(ctx)))) {
-        return llvm::joinErrors(
-            llvm::createStringError("Failed to add IR module"), std::move(e));
-      }
-    }
-    this->llvmJIT = std::move(eagerJIT);
-    ensureAllExecutable(/* progressBar */ verbose > 0);
   }
-  this->llvmContextModulePairs.clear();
+  dispatcher.sync(progressBar);
   return llvm::Error::success();
 }
 
 void CPUKernelManager::dumpIR(const std::string& funcName,
                               llvm::raw_ostream& os) {
-  assert(isJITed() == false && "Only supports un-JITed kernels");
-
-  for (const auto& ctxModPair : llvmContextModulePairs) {
-    if (auto* func = ctxModPair.llvmModule->getFunction(funcName)) {
-      func->print(os, nullptr);
-      return;
-    }
-  }
-  std::cerr << RED("[Err] ") << "In CPUKernelManager::dumpIR: " << "Function "
-            << funcName << " not found.\n";
+  assert(false && "Not implemented yet");
 }
 
 #undef DEBUG_TYPE

@@ -125,18 +125,18 @@ llvm::Error CPUKernelManager::applyCPUKernel(void* sv,
 
 llvm::Error CPUKernelManager::applyCPUKernelsFromGraph(
     void* sv, int nQubits, const std::string& graphName, int nThreads) {
-  if (!graphKernels_.contains(graphName)) {
+  if (!kernelPools_.contains(graphName)) {
     return llvm::createStringError("Graph not found: " + graphName);
   }
-  const auto& kernels = graphKernels_.at(graphName);
-  for (const auto& kernel : kernels) {
+  const auto& kernels = kernelPools_.at(graphName);
+  for (const auto& kernel : kernels.iter_kernels()) {
     if (kernel->executable == nullptr) {
       return llvm::createStringError("Kernel '" + kernel->llvmFuncName +
                                      "' has no executable.");
     }
   }
 
-  for (const auto& kernel : kernels) {
+  for (const auto& kernel : kernels.iter_kernels()) {
     if (auto e = applyCPUKernel(sv, nQubits, *kernel, nThreads))
       return e;
   }

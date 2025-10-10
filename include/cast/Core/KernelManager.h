@@ -10,6 +10,8 @@
 
 #include "utils/TaskDispatcher.h"
 
+#include <ranges>
+
 namespace cast {
 
 namespace internal {
@@ -21,23 +23,20 @@ std::string demangleGraphName(const std::string& mangledName);
 } // namespace internal
 
 class KernelManagerBase {
+private:
+  // This mutex controls the access to llvmContextModulePairs
+  std::mutex mtx_;
+
 protected:
-  struct ContextModulePair {
-    std::unique_ptr<llvm::LLVMContext> llvmContext;
-    std::unique_ptr<llvm::Module> llvmModule;
-  };
   // A vector of pairs of LLVM context and module. Expected to be cleared after
   // calling \c initJIT
-  std::vector<ContextModulePair> llvmContextModulePairs;
-  // This mutex controls the access to llvmContextModulePairs
-  std::mutex mtx;
   utils::TaskDispatcher dispatcher;
 
   /// A thread-safe version that creates a new llvm Module
-  ContextModulePair& createNewLLVMContextModulePair(const std::string& name);
+  llvm::Module* createNewLLVMContextModulePair(const std::string& name);
 
   /// Apply LLVM optimization to all modules inside \c llvmContextModulePairs
-  /// As a private member function, this function will be called by \c initJIT
+  /// As a protected member function, this function will be called by \c initJIT
   /// and \c initJITForPTXEmission
   void applyLLVMOptimization(llvm::OptimizationLevel optLevel,
                              bool progressBar);
@@ -51,156 +50,54 @@ template <typename KernelInfoType>
 class KernelManager : public KernelManagerBase {
 protected:
   using KernelInfoPtr = std::unique_ptr<KernelInfoType>;
-  std::vector<KernelInfoPtr> standaloneKernels_;
-  std::map<std::string, std::vector<KernelInfoPtr>> graphKernels_;
+
+  struct Item {
+    KernelInfoPtr kernel;
+    std::unique_ptr<llvm::LLVMContext> llvmContext;
+    std::unique_ptr<llvm::Module> llvmModule;
+
+    Item(const std::string& llvmModuleName) {
+      kernel = std::make_unique<KernelInfoType>();
+      llvmContext = std::make_unique<llvm::LLVMContext>();
+      llvmModule = std::make_unique<llvm::Module>(llvmModuleName, *llvmContext);
+    }
+  };
+
+  // VecItem is a vector<Item> with some helper functions, such as
+  // iter_kernels()
+  struct VecItem {
+    std::vector<Item> items;
+    auto iter_kernels() { return items | std::views::transform(&Item::kernel); }
+
+    auto iter_kernels() const {
+      return items | std::views::transform(&Item::kernel);
+    }
+  };
+
+  // The storage of kernels. kernelPools_ has a default pool named "_default_".
+  using KernelPool = std::map<std::string, VecItem>;
+  KernelPool kernelPools_;
+  constexpr static const char* DEFAULT_POOL_NAME = "_default_";
+
   /* --- iterator ---*/
 public:
   explicit KernelManager(int nWorkerThreads)
-      : KernelManagerBase(nWorkerThreads) {}
-
-  class iterator {
-    using VecOfKernels = std::vector<KernelInfoPtr>;
-    using MapOfKernels = std::map<std::string, VecOfKernels>;
-    VecOfKernels::iterator vecIt, vecEnd;
-    MapOfKernels::iterator mapIt, mapEnd;
-
-    void proceedToNextMap() {
-      while (mapIt != mapEnd) {
-        vecIt = mapIt->second.begin();
-        vecEnd = mapIt->second.end();
-        if (vecIt != vecEnd) // found a non-empty one
-          return;
-        ++mapIt;
-      }
-      // reached the end
-      vecIt = typename VecOfKernels::iterator();
-      vecEnd = typename VecOfKernels::iterator();
-    }
-
-  public:
-    using value_type = KernelInfoType;
-    iterator() = default;
-
-    iterator(VecOfKernels::iterator vecIt,
-             VecOfKernels::iterator vecEnd,
-             MapOfKernels::iterator mapIt,
-             MapOfKernels::iterator mapEnd)
-        : vecIt(vecIt), vecEnd(vecEnd), mapIt(mapIt), mapEnd(mapEnd) {
-      if (vecIt == vecEnd)
-        proceedToNextMap();
-    }
-
-    value_type& operator*() const { return *(vecIt->get()); }
-    value_type* operator->() const { return &**this; }
-
-    iterator& operator++() {
-      ++vecIt;
-      if (vecIt == vecEnd)
-        proceedToNextMap();
-
-      return *this;
-    }
-
-    iterator operator++(int) {
-      auto tmp = *this;
-      ++*this;
-      return tmp;
-    }
-
-    bool operator==(const iterator& other) const {
-      return vecIt == other.vecIt && mapIt == other.mapIt;
-    }
-
-    bool operator!=(const iterator& other) const { return !(*this == other); }
-  }; // iterator
-
-  iterator begin() {
-    return iterator(standaloneKernels_.begin(),
-                    standaloneKernels_.end(),
-                    graphKernels_.begin(),
-                    graphKernels_.end());
+      : KernelManagerBase(nWorkerThreads) {
+    kernelPools_.insert({DEFAULT_POOL_NAME, VecItem()});
   }
 
-  iterator end() {
-    return iterator(standaloneKernels_.end(),
-                    standaloneKernels_.end(),
-                    graphKernels_.end(),
-                    graphKernels_.end());
+  auto all_kernels() {
+    return kernelPools_ | std::views::values |
+           std::views::transform(&VecItem::items) | std::views::join |
+           std::views::transform(&Item::kernel);
   }
 
-  /* --- const iterator ---*/
-public:
-  class const_iterator {
-    using VecOfKernels = std::vector<KernelInfoPtr>;
-    using MapOfKernels = std::map<std::string, VecOfKernels>;
-    VecOfKernels::const_iterator vecIt, vecEnd;
-    MapOfKernels::const_iterator mapIt, mapEnd;
-
-    void proceedToNextMap() {
-      while (mapIt != mapEnd) {
-        vecIt = mapIt->second.begin();
-        vecEnd = mapIt->second.end();
-        if (vecIt != vecEnd) // found a non-empty one
-          return;
-        ++mapIt;
-      }
-      // reached the end
-      vecIt = typename VecOfKernels::const_iterator();
-      vecEnd = typename VecOfKernels::const_iterator();
-    }
-
-  public:
-    using value_type = const KernelInfoType;
-    const_iterator() = default;
-
-    const_iterator(VecOfKernels::const_iterator vecIt,
-                   VecOfKernels::const_iterator vecEnd,
-                   MapOfKernels::const_iterator mapIt,
-                   MapOfKernels::const_iterator mapEnd)
-        : vecIt(vecIt), vecEnd(vecEnd), mapIt(mapIt), mapEnd(mapEnd) {
-      if (vecIt == vecEnd)
-        proceedToNextMap();
-    }
-
-    value_type& operator*() const { return *(vecIt->get()); }
-    value_type* operator->() const { return &**this; }
-
-    const_iterator& operator++() {
-      ++vecIt;
-      if (vecIt == vecEnd)
-        proceedToNextMap();
-
-      return *this;
-    }
-
-    const_iterator operator++(int) {
-      auto tmp = *this;
-      ++*this;
-      return tmp;
-    }
-
-    bool operator==(const const_iterator& other) const {
-      return vecIt == other.vecIt && mapIt == other.mapIt;
-    }
-
-    bool operator!=(const const_iterator& other) const {
-      return !(*this == other);
-    }
-  }; // const _iterator
-
-  const_iterator begin() const {
-    return const_iterator(standaloneKernels_.begin(),
-                          standaloneKernels_.end(),
-                          graphKernels_.begin(),
-                          graphKernels_.end());
+  auto all_kernels() const {
+    return kernelPools_ | std::views::values |
+           std::views::transform(&VecItem::items) | std::views::join |
+           std::views::transform(&Item::kernel);
   }
 
-  const_iterator end() const {
-    return const_iterator(standaloneKernels_.end(),
-                          standaloneKernels_.end(),
-                          graphKernels_.end(),
-                          graphKernels_.end());
-  }
 }; // KernelManager
 
 } // namespace cast

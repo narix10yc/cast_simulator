@@ -13,9 +13,9 @@ function(handle_llvm_dep)
     # already cached
   elseif(DEFINED ENV{CAST_LLVM_ROOT})
     # debug + release llvm versions
-    set(CAST_LLVM_DEBUG_ROOT "${CAST_LLVM_ROOT}/debug-install" CACHE PATH
+    set(CAST_LLVM_DEBUG_ROOT "$ENV{CAST_LLVM_ROOT}/debug-install" CACHE PATH
       "Path to the llvm debug-install directory")
-    set(CAST_LLVM_RELEASE_ROOT "${CAST_LLVM_ROOT}/release-install" CACHE PATH
+    set(CAST_LLVM_RELEASE_ROOT "$ENV{CAST_LLVM_ROOT}/release-install" CACHE PATH
       "Path to the llvm release-install directory")
     if(NOT EXISTS "${CAST_LLVM_RELEASE_ROOT}")
       message(FATAL_ERROR "${CAST_LLVM_RELEASE_ROOT} does not exist!")

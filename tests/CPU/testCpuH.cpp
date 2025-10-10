@@ -16,12 +16,12 @@ template <CPUSimdWidth SimdWidth> static void f() {
 
   CPUKernelGenConfig genCfg(SimdWidth, Precision::FP64);
 
-  llvm::cantFail(km.genStandaloneGate(genCfg, getH(0), "gate_h_0"));
-  llvm::cantFail(km.genStandaloneGate(genCfg, getH(1), "gate_h_1"));
-  llvm::cantFail(km.genStandaloneGate(genCfg, getH(2), "gate_h_2"));
-  llvm::cantFail(km.genStandaloneGate(genCfg, getH(3), "gate_h_3"));
+  llvm::cantFail(km.genGate(genCfg, getH(0), "gate_h_0"));
+  llvm::cantFail(km.genGate(genCfg, getH(1), "gate_h_1"));
+  llvm::cantFail(km.genGate(genCfg, getH(2), "gate_h_2"));
+  llvm::cantFail(km.genGate(genCfg, getH(3), "gate_h_3"));
 
-  llvm::cantFail(km.initJIT());
+  llvm::cantFail(km.compileAll());
 
   CPUStatevector<double> sv(6, SimdWidth);
   sv.initialize();

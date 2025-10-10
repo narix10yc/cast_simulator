@@ -264,7 +264,7 @@ public:
 
   unsigned numKernels() {
     unsigned count = standaloneKernels_.size();
-    for (const auto& [name, kernels] : graphKernels_)
+    for (const auto& [name, kernels] : kernelPools_)
       count += kernels.size();
     return count;
   }
@@ -281,8 +281,8 @@ public:
 
   std::span<const KernelInfoPtr>
   getKernelsFromGraphName(const std::string& graphName) const {
-    auto it = graphKernels_.find(graphName);
-    if (it == graphKernels_.end())
+    auto it = kernelPools_.find(graphName);
+    if (it == kernelPools_.end())
       return {}; // empty span
     return std::span<const KernelInfoPtr>(it->second);
   }
@@ -321,8 +321,8 @@ public:
 
   std::vector<const ExecutionResult*>
   enqueueKernelLaunchFromGraph(const std::string& graphName) {
-    auto it = graphKernels_.find(graphName);
-    if (it == graphKernels_.end())
+    auto it = kernelPools_.find(graphName);
+    if (it == kernelPools_.end())
       return {}; // empty vector
 
     std::vector<const ExecutionResult*> results;

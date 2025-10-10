@@ -29,7 +29,7 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
   CPUKernelGenConfig cpuConfig(SimdWidth, Precision::FP64);
   cpuConfig.matrixLoadMode = CPUMatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
-    llvm::cantFail(km.genStandaloneGate(
+    llvm::cantFail(km.genGate(
         cpuConfig, gates[q], "gateImm_" + std::to_string(q)));
   }
 
@@ -37,11 +37,11 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
   cpuConfig.oneTol = 0.0;
   cpuConfig.matrixLoadMode = CPUMatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++) {
-    llvm::cantFail(km.genStandaloneGate(
+    llvm::cantFail(km.genGate(
         cpuConfig, gates[q], "gateLoad_" + std::to_string(q)));
   }
 
-  llvm::cantFail(km.initJIT());
+  llvm::cantFail(km.compileAll());
   for (unsigned i = 0; i < nQubits; i++) {
     randomizeSV();
     std::stringstream ss;
@@ -97,18 +97,18 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U2q() {
   CPUKernelGenConfig cpuConfig(SimdWidth, Precision::FP64);
   cpuConfig.matrixLoadMode = CPUMatrixLoadMode::UseMatImmValues;
   for (int q = 0; q < nQubits; q++) {
-    llvm::cantFail(km.genStandaloneGate(
+    llvm::cantFail(km.genGate(
         cpuConfig, gates[q], "gateImm_" + std::to_string(q)));
   }
   cpuConfig.zeroTol = 0.0;
   cpuConfig.oneTol = 0.0;
   cpuConfig.matrixLoadMode = CPUMatrixLoadMode::StackLoadMatElems;
   for (int q = 0; q < nQubits; q++) {
-    llvm::cantFail(km.genStandaloneGate(
+    llvm::cantFail(km.genGate(
         cpuConfig, gates[q], "gateLoad_" + std::to_string(q)));
   }
 
-  llvm::cantFail(km.initJIT());
+  llvm::cantFail(km.compileAll());
   for (unsigned i = 0; i < nQubits; i++) {
     randomizeSV();
     int a = gates[i]->qubits()[0];

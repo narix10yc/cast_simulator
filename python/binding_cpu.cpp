@@ -142,7 +142,7 @@ void bind_CPUKernelManager(py::module_& m) {
              const cast::CPUKernelGenConfig& config,
              const cast::QuantumGatePtr& gate,
              const std::string& func_name) {
-            if (auto e = self.genStandaloneGate(config, gate, func_name)) {
+            if (auto e = self.genGate(config, gate, func_name)) {
               throw std::runtime_error("Failed to generate CPU gate: " +
                                        llvm::toString(std::move(e)));
             }
@@ -197,7 +197,7 @@ void bind_CPUKernelManager(py::module_& m) {
               llvmOptLevel = llvm::OptimizationLevel::O1;
               break;
             }
-            if (auto e = self.initJIT(llvmOptLevel, useLazyJit, verbose)) {
+            if (auto e = self.compileAll(llvmOptLevel, useLazyJit, verbose)) {
               throw std::runtime_error("Failed to initialize JIT: " +
                                        llvm::toString(std::move(e)));
             }

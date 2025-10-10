@@ -1,21 +1,6 @@
-#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
-#include "llvm/Passes/PassBuilder.h"
-
 #include "cast/Core/KernelManager.h"
 
-#include "utils/TaskDispatcher.h"
-#include "utils/iocolor.h"
-
-#include "llvm/IR/OptBisect.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/StandardInstrumentations.h"
-#include <cstdlib>
-
-#include <ranges>
-
 using namespace cast;
-using namespace llvm;
 
 std::string cast::internal::mangleGraphName(const std::string& graphName) {
   return "G" + std::to_string(graphName.length()) + graphName;
@@ -36,62 +21,4 @@ std::string cast::internal::demangleGraphName(const std::string& mangledName) {
   auto l = std::stoi(std::string(p0, p));
   assert(p + l <= e);
   return std::string(p, p + l);
-}
-
-KernelManagerBase::ContextModulePair&
-KernelManagerBase::createNewLLVMContextModulePair(const std::string& name) {
-  std::lock_guard<std::mutex> lock(mtx);
-  auto ctx = std::make_unique<llvm::LLVMContext>();
-  llvmContextModulePairs.emplace_back(
-      std::move(ctx), std::make_unique<llvm::Module>(name, *ctx));
-  return llvmContextModulePairs.back();
-}
-
-void KernelManagerBase::applyLLVMOptimization(llvm::OptimizationLevel optLevel,
-                                              bool progressBar) {
-  if (optLevel == llvm::OptimizationLevel::O0)
-    return;
-
-  for (auto& [ctxUPtr, modUPtr] : llvmContextModulePairs) {
-    llvm::Module* M = modUPtr.get();
-
-    dispatcher.enqueue([M, optLevel]() {
-      using namespace llvm;
-
-      // --- Analysis managers (must be constructed in this order) ---
-      LoopAnalysisManager LAM;
-      FunctionAnalysisManager FAM;
-      CGSCCAnalysisManager CGAM;
-      ModuleAnalysisManager MAM;
-
-      // --- Pass instrumentation (debug hooks, timers, etc.) ---
-      PassInstrumentationCallbacks PIC;
-      StandardInstrumentations SI(M->getContext(), /*DebugLogging=*/false);
-      SI.registerCallbacks(PIC, &MAM);
-
-      // Use the PassBuilder ctor that takes PIC (portable for LLVM 20.x).
-      PipelineTuningOptions PTO;
-      PassBuilder PB(/*TM=*/nullptr, PTO, /*PGO=*/std::nullopt, &PIC);
-
-      // Register analyses and cross-proxies.
-      PB.registerLoopAnalyses(LAM);
-      PB.registerFunctionAnalyses(FAM);
-      PB.registerCGSCCAnalyses(CGAM);
-      PB.registerModuleAnalyses(MAM);
-      PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-
-      // Wrap default pipeline with verifiers (pre & post).
-      ModulePassManager MPM;
-      MPM.addPass(VerifierPass()); // verify pre
-      MPM.addPass(PB.buildPerModuleDefaultPipeline(optLevel));
-      MPM.addPass(VerifierPass()); // verify post
-
-      // Run the pipeline for this module.
-      MPM.run(*M, MAM);
-    });
-  }
-
-  if (progressBar)
-    std::cerr << "Applying LLVM Optimization....\n";
-  dispatcher.sync(progressBar);
 }

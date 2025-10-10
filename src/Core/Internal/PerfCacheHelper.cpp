@@ -8,7 +8,7 @@ double cast::internal::calculateMemUpdateSpeed(int nQubits,
                                                Precision precision,
                                                double t) {
   assert(nQubits > 0);
-  assert(precision == Precision::F32 || precision == Precision::F64);
+  assert(precision == Precision::FP32 || precision == Precision::FP64);
   assert(t > 0.0);
 
   // F32 takes 8 bytes because of complex number

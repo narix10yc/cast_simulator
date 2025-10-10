@@ -180,13 +180,13 @@ static void cpu_benchmark(const std::vector<GateType>& gateTypes,
   for (int i = 0; i < gates.size(); ++i) {
     const auto& gate = gates[i];
     std::string funcName = "gate_" + std::to_string(i);
-    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName);
+    kernelMgr.genGate(kernelGenConfig, gate, funcName);
   }
 
   // Initialize JIT engine
   utils::timedExecute(
       [&]() {
-        auto r = kernelMgr.initJIT(1, llvm::OptimizationLevel::O1, false, 1);
+        auto r = kernelMgr.compileAll(1, llvm::OptimizationLevel::O1, false, 1);
         if (!r) {
           std::cerr << BOLDRED("[Error]: ")
                     << "In initializing JIT engine: " << r.what() << "\n";

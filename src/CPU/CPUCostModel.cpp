@@ -151,9 +151,9 @@ void CPUPerformanceCache::runPreliminaryExperiments(
       utils::sampleNoReplacement(nQubits, k, qubits);
       auto gate = StandardQuantumGate::RandomUnitary(qubits);
       llvm::cantFail(
-          km.genStandaloneGate(cpuConfig, gate, "gate_k" + std::to_string(k)));
+          km.genGate(cpuConfig, gate, "gate_k" + std::to_string(k)));
     }
-    llvm::cantFail(km.initJIT(llvm::OptimizationLevel::O1, false, 0));
+    llvm::cantFail(km.compileAll(llvm::OptimizationLevel::O1, false));
   };
 
   if (verbose > 0) {
@@ -289,7 +289,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
       [&]() {
         int i = 0;
         for (const auto& gate : gates) {
-          if (auto e = km.genStandaloneGate(
+          if (auto e = km.genGate(
                   cpuConfig, gate, "gate_" + std::to_string(i++))) {
             std::cerr << RED("Error: ") << "Failed to generate kernel for gate "
                       << i - 1 << ": " << llvm::toString(std::move(e)) << "\n";
@@ -301,7 +301,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
 
   utils::timedExecute(
       [&]() {
-        if (auto e = km.initJIT(llvm::OptimizationLevel::O1, false, 1)) {
+        if (auto e = km.compileAll(llvm::OptimizationLevel::O1, false)) {
           std::cerr << RED("Error: ") << "Failed to initialize JIT engine: "
                     << llvm::toString(std::move(e)) << "\n";
           std::exit(1);
@@ -316,7 +316,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
   utils::timedExecute([&]() { sv.randomize(nThreads); },
                       "Initialize statevector");
 
-  for (const auto& kernel : km.getAllStandaloneKernels()) {
+  for (auto& kernel : km.all_kernels()) {
     tr = timer.timeit([&]() {
       llvm::cantFail(
           km.applyCPUKernel(sv.data(), sv.nQubits(), *kernel, nThreads));

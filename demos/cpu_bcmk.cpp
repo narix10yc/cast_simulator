@@ -69,7 +69,7 @@ template <typename ScalarType> static void benchmark() {
     // is 1e-8 by default). We force to generate dense kernels here.
     kernelGenConfig.zeroTol = 0.0;
     kernelGenConfig.oneTol = 0.0;
-    if (auto e = km.genStandaloneGate(
+    if (auto e = km.genGate(
             kernelGenConfig, unitaryGate, "u_gate_" + std::to_string(k))) {
       logerr() << "In kernel gen: " << llvm::toString(std::move(e)) << "\n";
       std::exit(EXIT_FAILURE);
@@ -77,12 +77,12 @@ template <typename ScalarType> static void benchmark() {
     // And we relax forceDenseKernel for Hadamard and RZ gates
     kernelGenConfig.zeroTol = 1e-8;
     kernelGenConfig.oneTol = 1e-8;
-    if (auto e = km.genStandaloneGate(
+    if (auto e = km.genGate(
             kernelGenConfig, hadamardGate, "h_gate_" + std::to_string(k))) {
       logerr() << "In kernel gen: " << llvm::toString(std::move(e)) << "\n";
       std::exit(EXIT_FAILURE);
     }
-    if (auto e = km.genStandaloneGate(
+    if (auto e = km.genGate(
             kernelGenConfig, sGate, "s_gate_" + std::to_string(k))) {
       logerr() << "In kernel gen: " << llvm::toString(std::move(e)) << "\n";
       std::exit(EXIT_FAILURE);
@@ -92,7 +92,7 @@ template <typename ScalarType> static void benchmark() {
   // Initialize JIT engine
   utils::timedExecute(
       [&]() {
-        if (auto e = km.initJIT(llvm::OptimizationLevel::O1)) {
+        if (auto e = km.compileAll(llvm::OptimizationLevel::O1)) {
           logerr() << "In initializing JIT engine: "
                    << llvm::toString(std::move(e)) << "\n";
           std::exit(EXIT_FAILURE);

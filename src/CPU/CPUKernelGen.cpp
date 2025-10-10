@@ -17,17 +17,19 @@
 using namespace cast;
 
 // Top-level entry
-llvm::Expected<CPUKernelManager::KernelInfoPtr>
-CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
-                              ConstQuantumGatePtr gate,
-                              const std::string& funcName) {
+llvm::Error CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
+                                          ConstQuantumGatePtr gate,
+                                          const std::string& funcName,
+                                          CPUKernelInfo& kernel,
+                                          llvm::Module& llvmModule) {
   auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
   llvm::Function* func = nullptr;
   if (stdQuGate != nullptr && stdQuGate->noiseChannel() == nullptr) {
     // a normal gate, no noise channel
     const auto scalarGM = stdQuGate->getScalarGM();
     assert(scalarGM != nullptr && "Only supporting scalar GM for now");
-    func = gen_(config, scalarGM->matrix(), stdQuGate->qubits(), funcName);
+    func = gen_(
+        config, scalarGM->matrix(), stdQuGate->qubits(), funcName, llvmModule);
   } else {
     // super op gates are treated as normal gates with twice the number of
     // qubits
@@ -39,7 +41,7 @@ CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
     auto nQubits = superopGate->nQubits();
     for (const auto& q : qubits)
       qubits.push_back(q + nQubits);
-    func = gen_(config, scalarGM->matrix(), qubits, funcName);
+    func = gen_(config, scalarGM->matrix(), qubits, funcName, llvmModule);
   }
 
   if (func == nullptr) {
@@ -47,38 +49,42 @@ CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
                                    funcName);
   }
 
-  return std::make_unique<CPUKernelInfo>(config.precision,
-                                         func->getName().str(),
-                                         config.matrixLoadMode,
-                                         gate,
-                                         config.simdWidth,
-                                         gate->opCount(config.zeroTol));
+  kernel.update(config.precision,
+                func->getName().str(),
+                config.matrixLoadMode,
+                gate,
+                config.simdWidth,
+                gate->opCount(config.zeroTol));
+
+  return llvm::Error::success();
 }
 
-llvm::Error
-CPUKernelManager::genStandaloneGate(const CPUKernelGenConfig& config,
-                                    ConstQuantumGatePtr gate,
-                                    const std::string& _funcName) {
-  std::string funcName(_funcName);
+llvm::Error CPUKernelManager::genGate(const CPUKernelGenConfig& config,
+                                      ConstQuantumGatePtr gate,
+                                      const std::string& funcName_) {
+  std::string funcName(funcName_);
   if (funcName.empty())
-    funcName = "kernel_" + std::to_string(standaloneKernels_.size());
-  // check for name conflicts
-  for (const auto& kernel : standaloneKernels_) {
-    if (kernel->llvmFuncName == funcName) {
-      return llvm::createStringError("Kernel with name '" + funcName +
-                                     "' already exists.");
+    funcName =
+        "k_" + std::to_string(kernelPools_[DEFAULT_POOL_NAME].items.size());
+  else {
+    // check for name conflicts
+    for (const auto& kernel : kernelPools_[DEFAULT_POOL_NAME].iter_kernels()) {
+      if (kernel->llvmFuncName == funcName) {
+        return llvm::createStringError("Kernel with name '" + funcName +
+                                       "' already exists.");
+      }
     }
   }
-
-  auto kernel = genCPUGate_(config, gate, funcName);
-  if (!kernel) {
+  kernelPools_[DEFAULT_POOL_NAME].items.emplace_back(funcName + "_module");
+  auto& kernelRef = *kernelPools_[DEFAULT_POOL_NAME].items.back().kernel;
+  auto& llvmModuleRef =
+      *kernelPools_[DEFAULT_POOL_NAME].items.back().llvmModule;
+  if (auto e = genCPUGate_(config, gate, funcName, kernelRef, llvmModuleRef)) {
     return llvm::joinErrors(
-        llvm::createStringError("Failed to generate kernel for "
-                                "gate " +
+        llvm::createStringError("Failed to generate kernel for gate " +
                                 funcName),
-        kernel.takeError());
+        std::move(e));
   }
-  standaloneKernels_.emplace_back(std::move(*kernel));
   return llvm::Error::success();
 }
 
@@ -87,29 +93,34 @@ llvm::Error CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
                                             const std::string& graphName) {
   assert(graph.checkConsistency());
 
-  if (graphKernels_.contains(graphName)) {
-    return llvm::createStringError("Kernels for graph '" + graphName +
-                                   "' already exist.");
+  if (kernelPools_.contains(graphName)) {
+    return llvm::createStringError(
+        "Cannot append kernels to an existing pool with name '" + graphName);
   }
 
-  auto mangledGraphName = internal::mangleGraphName(graphName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
-  std::vector<KernelInfoPtr> kernels;
-  kernels.reserve(allGates.size());
+
+  VecItem items;
+  items.items.reserve(allGates.size());
 
   for (const auto& gate : allGates) {
-    auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
+    // initialize llvm context and module. Leave the update to kernel info to
+    // genCPUGate_ call
+    auto name = graphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    auto kernel = genCPUGate_(config, gate, name);
-    if (!kernel) {
-      return kernel.takeError();
-    }
-    kernels.emplace_back(std::move(*kernel));
-  }
-  // Store the generated kernels in the map
-  graphKernels_[graphName] = std::move(kernels);
+    items.items.emplace_back(name + "_module");
+    auto& kernelRef = *items.items.back().kernel;
+    auto& llvmModuleRef = *items.items.back().llvmModule;
 
+    // genCPUGate_ will update kernelRef
+    if (auto e = genCPUGate_(config, gate, name, kernelRef, llvmModuleRef)) {
+      return llvm::joinErrors(
+          llvm::createStringError("Failed to generate kernel for gate " + name),
+          std::move(e));
+    }
+  }
+  kernelPools_.insert({graphName, std::move(items)});
   return llvm::Error::success();
 }
 
@@ -136,8 +147,8 @@ struct IRMatData {
         imVecVal(nullptr), reFlag(SK_Unknown), imFlag(SK_Unknown) {}
 }; // IRMatData
 
-/// @brief This function must be called after function declaration and that the
-/// IRBuilder is set to the entry block.
+/// @brief This function must be called after function declaration and that
+/// the IRBuilder is set to the entry block.
 std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
                                       const CPUKernelGenConfig& config,
                                       const ComplexSquareMatrix& mat,
@@ -192,8 +203,8 @@ std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
   case CPUMatrixLoadMode::UseMatImmValues: {
     for (unsigned i = 0; i < KK; ++i) {
       // We only initialize the values for general entries. Values in other
-      // cases (SK_Zero, SK_One, SK_MinusOne) are left as null. This is okay as
-      // in the main loop we will only use these imm values if the flag is
+      // cases (SK_Zero, SK_One, SK_MinusOne) are left as null. This is okay
+      // as in the main loop we will only use these imm values if the flag is
       // SK_General.
       auto& d = matData[i];
       if (d.reFlag == SK_Runtime) {
@@ -211,8 +222,8 @@ std::vector<IRMatData> initMatrixData(llvm::IRBuilder<>& B,
   }
   case CPUMatrixLoadMode::StackLoadMatElems: {
     // In StackLoadMatElems mode, the matrix elements are assumed to alternate
-    // between one real and one imag value. That is, real[0], imag[0], real[1],
-    // imag[1], ..., real[K*K-1], imag[K*K-1].
+    // between one real and one imag value. That is, real[0], imag[0],
+    // real[1], imag[1], ..., real[K*K-1], imag[K*K-1].
     for (unsigned i = 0; i < KK; ++i) {
       auto& d = matData[i];
       if (d.reFlag == SK_Runtime) {
@@ -281,7 +292,8 @@ llvm::Function*
 CPUKernelManager::gen_(const CPUKernelGenConfig& config,
                        const ComplexSquareMatrix& mat,
                        const QuantumGate::TargetQubitsType& qubits,
-                       const std::string& funcName) {
+                       const std::string& funcName,
+                       llvm::Module& llvmModule) {
   const unsigned s = config.get_simd_s();
   const unsigned S = 1ULL << s;
   const unsigned k = qubits.size();
@@ -289,10 +301,7 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
 
   assert(K == mat.edgeSize() && "matrix size mismatch");
 
-  auto& llvmContextModulePair =
-      createNewLLVMContextModulePair(funcName + "Module");
-  auto& llvmContext = *llvmContextModulePair.llvmContext;
-  auto& llvmModule = *llvmContextModulePair.llvmModule;
+  auto& llvmContext = llvmModule.getContext();
 
   llvm::IRBuilder<> B(llvmContext);
   assert(config.precision != Precision::Unknown);

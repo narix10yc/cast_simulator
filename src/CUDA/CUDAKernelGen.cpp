@@ -1375,7 +1375,7 @@ llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
                                              const std::string& graphName) {
   assert(graph.checkConsistency());
 
-  if (graphKernels_.contains(graphName)) {
+  if (kernelPools_.contains(graphName)) {
     return llvm::createStringError("Graph with name '" + graphName +
                                    "' already exists.");
   }
@@ -1397,7 +1397,7 @@ llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
     }
   }
   // Store the generated kernels in the map
-  graphKernels_[graphName] = std::move(kernels);
+  kernelPools_[graphName] = std::move(kernels);
   return llvm::Error::success();
 }
 

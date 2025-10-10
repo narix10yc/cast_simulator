@@ -173,7 +173,7 @@ static void runAndDisplayResult(std::ostream& os,
                                 cast::CPUStatevectorWrapper& sv,
                                 int nThreads,
                                 bool isDense) {
-  auto kernels = kernelMgr.getKernelsFromGraphName(graphName);
+  auto kernels = kernelMgr.getPool(graphName);
   double opCountTotal = 0.0;
   for (const auto& kernel : kernels)
     opCountTotal += kernel->gate->opCount(isDense ? 0.0 : 1e-8);
@@ -346,7 +346,7 @@ int main(int argc, const char** argv) {
 
   utils::timedExecute(
       [&]() {
-        if (auto e = km.initJIT(llvm::OptimizationLevel::O1, false, 1)) {
+        if (auto e = km.compileAll(llvm::OptimizationLevel::O1, false, 1)) {
           logerr() << "Failed to initialize JIT: "
                    << llvm::toString(std::move(e)) << "\n";
           std::exit(1);

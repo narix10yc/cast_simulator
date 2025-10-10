@@ -1,2 +1,2 @@
-# add_executable(exp_single_gate "exp_single_gate.cpp")
-# target_link_libraries(exp_single_gate PRIVATE cast)
+add_executable(experi_cpu_profile "experi_cpu_profile.cpp")
+target_link_libraries(experi_cpu_profile PRIVATE cast)
