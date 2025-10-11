@@ -9,6 +9,7 @@ struct ProfileStats : utils::CSVParsable<ProfileStats> {
   int num_threads;
   std::string benchmark_name;
   int num_qubits;
+  cast::FusionOptLevel fusion_opt_level;
   cast::Precision precision;
   float parse_opt_time;
   float jit_launch_time;
@@ -16,7 +17,8 @@ struct ProfileStats : utils::CSVParsable<ProfileStats> {
 
   // clang-format off
   CSV_DATA_FIELD(device_name, num_threads, benchmark_name, num_qubits,
-                 precision, parse_opt_time, jit_launch_time, exec_time)
+                 fusion_opt_level, precision, parse_opt_time, jit_launch_time,
+                 exec_time)
   // clang-format on
 };
 

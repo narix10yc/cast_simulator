@@ -12,6 +12,46 @@ enum class FusionOptLevel {
   Aggressive = 2 // sizeMax = 7
 };
 
+} // namespace cast
+
+#include "utils/CSVParsable.h"
+
+namespace utils {
+
+template <> struct CSVField<cast::FusionOptLevel> {
+  static void parse(std::string_view token, cast::FusionOptLevel& field) {
+    if (token == "mild")
+      field = cast::FusionOptLevel::Mild;
+    else if (token == "balanced")
+      field = cast::FusionOptLevel::Balanced;
+    else if (token == "aggressive")
+      field = cast::FusionOptLevel::Aggressive;
+    else {
+      assert(false && "Unknown FusionOptLevel");
+    }
+  }
+
+  static void write(std::ostream& os, const cast::FusionOptLevel& value) {
+    switch (value) {
+    case cast::FusionOptLevel::Mild:
+      os << "mild";
+      break;
+    case cast::FusionOptLevel::Balanced:
+      os << "balanced";
+      break;
+    case cast::FusionOptLevel::Aggressive:
+      os << "aggressive";
+      break;
+    default:
+      assert(false && "Unknown FusionOptLevel");
+      break;
+    }
+  }
+};
+
+} // namespace utils
+
+namespace cast {
 class FusionConfig {
 protected:
   enum FusionConfigKind {
