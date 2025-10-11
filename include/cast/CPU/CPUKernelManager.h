@@ -198,7 +198,7 @@ public:
     auto it = kernelPools_.find(poolName);
     if (it == kernelPools_.end())
       return {}; // empty span
-    return std::span<const Item>(it->second.items);
+    return std::span<const Item>(it->second);
   }
 
   /* Apply Kernels */

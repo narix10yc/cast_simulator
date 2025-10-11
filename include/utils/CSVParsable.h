@@ -13,8 +13,7 @@
 
 namespace utils {
 
-template<class>
-inline constexpr bool dependent_false_v = false;
+template <class> inline constexpr bool dependent_false_v = false;
 
 // CSVField: Every parsable type should provide a specialization of this struct
 template <typename T> struct CSVField {
@@ -36,6 +35,14 @@ template <> struct CSVField<int> {
   }
 
   static void write(std::ostream& os, const int& value) { os << value; }
+};
+
+template <> struct CSVField<float> {
+  static void parse(std::string_view token, float& field) {
+    field = std::stof(std::string(token));
+  }
+
+  static void write(std::ostream& os, const float& value) { os << value; }
 };
 
 template <> struct CSVField<double> {

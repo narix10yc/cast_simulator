@@ -64,21 +64,19 @@ llvm::Error CPUKernelManager::genGate(const CPUKernelGenConfig& config,
                                       const std::string& funcName_) {
   std::string funcName(funcName_);
   if (funcName.empty())
-    funcName =
-        "k_" + std::to_string(kernelPools_[DEFAULT_POOL_NAME].items.size());
+    funcName = "k_" + std::to_string(kernelPools_[DEFAULT_POOL_NAME].size());
   else {
     // check for name conflicts
-    for (const auto& kernel : kernelPools_[DEFAULT_POOL_NAME].iter_kernels()) {
+    for (const auto& [kernel, ctx, mod] : kernelPools_[DEFAULT_POOL_NAME]) {
       if (kernel->llvmFuncName == funcName) {
         return llvm::createStringError("Kernel with name '" + funcName +
                                        "' already exists.");
       }
     }
   }
-  kernelPools_[DEFAULT_POOL_NAME].items.emplace_back(funcName + "_module");
-  auto& kernelRef = *kernelPools_[DEFAULT_POOL_NAME].items.back().kernel;
-  auto& llvmModuleRef =
-      *kernelPools_[DEFAULT_POOL_NAME].items.back().llvmModule;
+  kernelPools_[DEFAULT_POOL_NAME].emplace_back(funcName + "_module");
+  auto& kernelRef = *kernelPools_[DEFAULT_POOL_NAME].back().kernel;
+  auto& llvmModuleRef = *kernelPools_[DEFAULT_POOL_NAME].back().llvmModule;
   if (auto e = genCPUGate_(config, gate, funcName, kernelRef, llvmModuleRef)) {
     return llvm::joinErrors(
         llvm::createStringError("Failed to generate kernel for gate " +
@@ -101,17 +99,17 @@ llvm::Error CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
   auto allGates = graph.getAllGatesShared();
   int order = 0;
 
-  VecItem items;
-  items.items.reserve(allGates.size());
+  std::vector<Item> items;
+  items.reserve(allGates.size());
 
   for (const auto& gate : allGates) {
     // initialize llvm context and module. Leave the update to kernel info to
     // genCPUGate_ call
     auto name = graphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    items.items.emplace_back(name + "_module");
-    auto& kernelRef = *items.items.back().kernel;
-    auto& llvmModuleRef = *items.items.back().llvmModule;
+    items.emplace_back(name + "_module");
+    auto& kernelRef = *items.back().kernel;
+    auto& llvmModuleRef = *items.back().llvmModule;
 
     // genCPUGate_ will update kernelRef
     if (auto e = genCPUGate_(config, gate, name, kernelRef, llvmModuleRef)) {

@@ -173,14 +173,14 @@ static void runAndDisplayResult(std::ostream& os,
                                 cast::CPUStatevectorWrapper& sv,
                                 int nThreads,
                                 bool isDense) {
-  auto kernels = kernelMgr.getPool(graphName);
+  auto items = kernelMgr.getPool(graphName);
   double opCountTotal = 0.0;
-  for (const auto& kernel : kernels)
-    opCountTotal += kernel->gate->opCount(isDense ? 0.0 : 1e-8);
+  for (const auto& item : items)
+    opCountTotal += item.kernel->gate->opCount(isDense ? 0.0 : 1e-8);
 
   timeit::Timer timer(ArgReplication);
   auto tr = timer.timeit([&]() {
-    for (const auto& kernel : kernels) {
+    for (const auto& kernel : items.iter_kernels()) {
       if (auto e = kernelMgr.applyCPUKernel(
               sv.data(), sv.nQubits(), *kernel, nThreads)) {
         logerr() << "Failed to apply kernel " << kernel->llvmFuncName << ": "
@@ -193,14 +193,14 @@ static void runAndDisplayResult(std::ostream& os,
   double gflops =
       static_cast<double>(1ULL << sv.nQubits()) * 1e-9 * opCountTotal / tr.min;
   double bandwidth =
-      static_cast<double>(sv.sizeInBytes()) * 1e-9 * kernels.size() / tr.min;
-  os << "- Num Kernels:    " << kernels.size() << "\n"
+      static_cast<double>(sv.sizeInBytes()) * 1e-9 * items.size() / tr.min;
+  os << "- Num Kernels:    " << items.size() << "\n"
      << "- Total Op Count: " << opCountTotal << "\n"
      << "- Fastest Run:    " << timeit::TimingResult::timeToString(tr.min, 4)
      << " @ " << gflops << " GFLOPs per second\n"
      << "- Effective Bandwidth: " << bandwidth << " GiBps\n";
   if (ArgVerbose > 1) {
-    for (const auto& kernel : kernels) {
+    for (const auto& kernel : items) {
       os << kernel->llvmFuncName << ",\"";
       utils::printSpanNoBraket(os, std::span(kernel->gate->qubits()));
       os << "\"," << kernel->opCount << ","

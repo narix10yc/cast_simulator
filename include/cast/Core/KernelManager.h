@@ -63,19 +63,8 @@ protected:
     }
   };
 
-  // VecItem is a vector<Item> with some helper functions, such as
-  // iter_kernels()
-  struct VecItem {
-    std::vector<Item> items;
-    auto iter_kernels() { return items | std::views::transform(&Item::kernel); }
-
-    auto iter_kernels() const {
-      return items | std::views::transform(&Item::kernel);
-    }
-  };
-
   // The storage of kernels. kernelPools_ has a default pool named "_default_".
-  using KernelPool = std::map<std::string, VecItem>;
+  using KernelPool = std::map<std::string, std::vector<Item>>;
   KernelPool kernelPools_;
   constexpr static const char* DEFAULT_POOL_NAME = "_default_";
 
@@ -83,18 +72,16 @@ protected:
 public:
   explicit KernelManager(int nWorkerThreads)
       : KernelManagerBase(nWorkerThreads) {
-    kernelPools_.insert({DEFAULT_POOL_NAME, VecItem()});
+    kernelPools_.insert({DEFAULT_POOL_NAME, std::vector<Item>()});
   }
 
   auto all_kernels() {
-    return kernelPools_ | std::views::values |
-           std::views::transform(&VecItem::items) | std::views::join |
+    return kernelPools_ | std::views::values | std::views::join |
            std::views::transform(&Item::kernel);
   }
 
   auto all_kernels() const {
-    return kernelPools_ | std::views::values |
-           std::views::transform(&VecItem::items) | std::views::join |
+    return kernelPools_ | std::views::values | std::views::join |
            std::views::transform(&Item::kernel);
   }
 

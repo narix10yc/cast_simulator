@@ -128,15 +128,15 @@ llvm::Error CPUKernelManager::applyCPUKernelsFromGraph(
   if (!kernelPools_.contains(graphName)) {
     return llvm::createStringError("Graph not found: " + graphName);
   }
-  const auto& kernels = kernelPools_.at(graphName);
-  for (const auto& kernel : kernels.iter_kernels()) {
+  const auto& items = kernelPools_.at(graphName);
+  for (const auto& [kernel, ctx, mod] : items) {
     if (kernel->executable == nullptr) {
       return llvm::createStringError("Kernel '" + kernel->llvmFuncName +
                                      "' has no executable.");
     }
   }
 
-  for (const auto& kernel : kernels.iter_kernels()) {
+  for (const auto& [kernel, ctx, mod] : items) {
     if (auto e = applyCPUKernel(sv, nQubits, *kernel, nThreads))
       return e;
   }

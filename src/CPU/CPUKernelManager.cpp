@@ -60,7 +60,7 @@ void CPUKernelGenConfig::displayInfo(utils::InfoLogger logger) const {
 void CPUKernelManager::displayInfo(utils::InfoLogger logger) const {
   int nKernels = 0;
   for (const auto& [_, poolValue] : kernelPools_)
-    nKernels += poolValue.items.size();
+    nKernels += poolValue.size();
   logger.put("CPU Kernel Manager")
       .put("Num of Threads", dispatcher.getNumWorkers())
       .put("Num of Kernels", nKernels);
@@ -68,11 +68,10 @@ void CPUKernelManager::displayInfo(utils::InfoLogger logger) const {
 
 CPUKernelInfo*
 CPUKernelManager::getKernelByName(const std::string& llvmFuncName) {
-  for (const auto& [_, poolValue] : kernelPools_) {
-    for (const auto& kernel : poolValue.iter_kernels()) {
-      if (kernel->llvmFuncName == llvmFuncName)
-        return kernel.get();
-    }
+  for (const auto& kernel : all_kernels()) {
+    assert(kernel != nullptr);
+    if (kernel->llvmFuncName == llvmFuncName)
+      return kernel.get();
   }
   return nullptr;
 }
@@ -158,9 +157,8 @@ llvm::Error CPUKernelManager::compilePool(const std::string& poolName,
   if (it == kernelPools_.end()) {
     return llvm::createStringError("Pool " + poolName + " not found");
   }
-  auto& items = it->second.items;
 
-  for (auto& item : items) {
+  for (auto& item : it->second) {
     dispatcher.enqueue([this, &item, optLevel]() {
       if (item.kernel->executable)
         return;
@@ -179,9 +177,8 @@ llvm::Error CPUKernelManager::compilePool(const std::string& poolName,
 llvm::Error CPUKernelManager::compileAll(OptimizationLevel optLevel,
                                          bool progressBar) {
   assert(llvmJIT != nullptr && "llvmJIT is null");
-  for (auto& [_, poolValue] : kernelPools_) {
-    auto& items = poolValue.items;
-    for (auto& item : items) {
+  for (auto& [_, pool] : kernelPools_) {
+    for (auto& item : pool) {
       dispatcher.enqueue([this, &item, optLevel]() {
         if (item.kernel->executable)
           return;
