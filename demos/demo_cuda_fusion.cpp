@@ -74,7 +74,7 @@ struct CircuitGraphs {
 
   ir::CircuitGraphNode noFuseDense;
   ir::CircuitGraphNode sizeOnlyDense;
-  ir::CircuitGraphNode adaptiveDense;
+  ir::CircuitGraphNode adaptiveDense; 
 
   CircuitGraphs(const ir::CircuitGraphNode& cg) {
     auto allGates = cg.getAllGatesShared();
@@ -262,7 +262,7 @@ int main(int argc, const char** argv) {
       opCountTotal += kernel->gate->opCount(isDense ? 0.0 : 1e-8);
 
     auto rawT0 = std::chrono::steady_clock::now();
-    auto results = km.enqueueKernelLaunchFromGraph(graphName);
+    auto results = km.enqueueKernelLaunchesFromGraph(graphName);
     km.syncKernelExecution();
     auto rawT1 = std::chrono::steady_clock::now();
     float t = 0.0f;

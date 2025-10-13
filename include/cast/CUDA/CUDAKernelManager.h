@@ -4,6 +4,7 @@
 #ifndef CAST_CUDA_CUDAKERNELMANAGER_H
 #define CAST_CUDA_CUDAKERNELMANAGER_H
 
+#include "cast/CUDA/CUDAStatevector.h"
 #include "cast/CUDA/Config.h"
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
@@ -15,7 +16,6 @@
 
 #include <cuda.h>
 #include <map>
-#include <span>
 
 namespace cast {
 
@@ -300,6 +300,14 @@ public:
     launchConfig_.blockSize = blockSize;
   }
 
+  void setLaunchConfig(CUDAStatevectorF32& sv, unsigned blockSize = 64) {
+    setLaunchConfig(sv.getDevicePtr(), sv.nQubits(), blockSize);
+  }
+
+  void setLaunchConfig(CUDAStatevectorF64& sv, unsigned blockSize = 64) {
+    setLaunchConfig(sv.getDevicePtr(), sv.nQubits(), blockSize);
+  }
+
   void enableTiming(bool enable = true) { timingEnabled_ = enable; }
 
   void clearExecutionResults() { execResults_.clear(); }
@@ -324,7 +332,7 @@ public:
   }
 
   std::vector<const ExecutionResult*>
-  enqueueKernelLaunchFromGraph(const std::string& graphName) {
+  enqueueKernelLaunchesFromGraph(const std::string& graphName) {
     auto it = kernelPools_.find(graphName);
     if (it == kernelPools_.end())
       return {}; // empty vector
@@ -349,7 +357,9 @@ public:
                              int nQubits,
                              const CUDAKernelInfo& kernelInfo,
                              void* dMatPtr,
-                             int blockDim = 64);
+                             int blockDim = 64) {
+    assert(false && "Not implemented yet");
+  }
 }; // class CUDAKernelManager
 
 } // namespace cast

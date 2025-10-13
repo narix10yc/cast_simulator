@@ -81,7 +81,7 @@ createRandomSizedGate(int nQubitsSV,
   std::uniform_real_distribution<float> dist(0.0f, 1.0f);
   float r = dist(rng) * std::accumulate(weights.begin(), weights.end(), 0.0f);
   float acc = 0;
-  for (int i = 0; i < weights.size(); ++i) {
+  for (unsigned i = 0; i < weights.size(); ++i) {
     acc += weights[i];
     if (r <= acc) {
       QuantumGate::TargetQubitsType qubits;

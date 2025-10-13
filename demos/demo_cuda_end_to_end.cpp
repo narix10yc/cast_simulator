@@ -88,7 +88,7 @@ int main(int argc, const char** argv) {
   // Right after generated all kernels
   auto t2 = clock::now();
 
-  km.enqueueKernelLaunchFromGraph("graph");
+  km.enqueueKernelLaunchesFromGraph("graph");
   km.syncKernelExecution();
 
   // Right after all kernels finish execution

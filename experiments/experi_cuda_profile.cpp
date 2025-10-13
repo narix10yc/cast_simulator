@@ -1,4 +1,4 @@
-#include "cast/CPU/CPU.h"
+#include "cast/CUDA/CUDA.h"
 #include "cast/Core/Precision.h"
 #include "utils/CSVParsable.h"
 
@@ -27,7 +27,7 @@ struct ProfileStats : utils::CSVParsable<ProfileStats> {
 using namespace cast;
 namespace cl = llvm::cl;
 
-static cl::OptionCategory Category("CPU Instrumental Profiling Options");
+static cl::OptionCategory Category("CUDA Profile Experiment Options");
 
 // clang-format off
 
@@ -61,7 +61,7 @@ ArgOptModes("fusion", cl::cat(Category),
 
 static cl::opt<std::string>
 ArgCostModel("model", cl::cat(Category),
-  cl::desc("Path to the CPU cost model file."),
+  cl::desc("Path to the cuda cost model file."),
   cl::Required);
 
 static cl::opt<int>
@@ -91,8 +91,10 @@ int main(int argc, char** argv) {
 
   std::string deviceName = ArgDeviceName;
   int nThreads = cast::get_cpu_num_threads();
-  cast::CPUKernelManager km;
-  CPUStatevectorF64 sv(getNumQubitsSV(), cast::get_cpu_simd_width());
+  cast::CUDAKernelManager km;
+  CUDAStatevectorF64 sv(getNumQubitsSV());
+  sv.initialize();
+  km.setLaunchConfig(sv.getDevicePtr(), sv.nQubits());
 
   int count = 0;
   const auto run = [&](const std::string& inputFilename,
@@ -100,27 +102,38 @@ int main(int argc, char** argv) {
                        Precision precision) {
     auto t0 = clock::now();
     auto circuit = llvm::cantFail(parseCircuitFromQASMFile(inputFilename));
-    CPUOptimizer opt;
+    CUDAOptimizer opt;
     opt.enableCFO(false);
-    llvm::cantFail(opt.loadCPUCostModel(ArgCostModel, nThreads, precision));
+    if (auto e = opt.loadCUDACostModelFromFile(ArgCostModel, precision)) {
+      logerr() << "Failed to load CUDA cost model from file '" << ArgCostModel
+               << "': " << llvm::toString(std::move(e)) << "\n";
+      std::exit(1);
+    }
     opt.getFusionConfig()->setOptLevel(fusionOpt);
     auto* cg = circuit->getAllCircuitGraphs()[0];
     opt.run(*cg);
 
-    CPUKernelGenConfig gConfig(precision);
+    CUDAKernelGenConfig gConfig(precision);
     auto graphName = "graph_" + std::to_string(count++);
-    llvm::cantFail(km.genGraphGates(gConfig, *cg, graphName));
+    if (auto e = km.genGraphGates(gConfig, *cg, graphName)) {
+      logerr() << "Failed to generate CUDA kernels for graph '" << graphName
+               << "': " << llvm::toString(std::move(e)) << "\n";
+      std::exit(1);
+    }
     auto t1 = clock::now();
 
-    llvm::cantFail(km.compilePool(graphName));
+    auto ers = km.enqueueKernelLaunchesFromGraph(graphName);
+    km.syncKernelExecution();
+
     auto t2 = clock::now();
 
-    llvm::cantFail(km.applyCPUKernelsFromGraph(
-        sv.data(), sv.nQubits(), graphName, nThreads));
-    auto t3 = clock::now();
+    float gpuT = 0.0f;
+    for (const auto* er : ers)
+      gpuT += er->getKernelTime();
+
+    float wallT = std::chrono::duration<float>(t2 - t1).count();
 
     std::filesystem::path path(inputFilename);
-
     stats.push_back(
         {.device_name = deviceName,
          .num_threads = nThreads,
@@ -128,8 +141,8 @@ int main(int argc, char** argv) {
          .num_qubits = cg->nQubits(),
          .precision = precision,
          .parse_opt_time = std::chrono::duration<float>(t1 - t0).count(),
-         .jit_launch_time = std::chrono::duration<float>(t2 - t1).count(),
-         .exec_time = std::chrono::duration<float>(t3 - t2).count()});
+         .jit_launch_time = wallT - gpuT,
+         .exec_time = gpuT});
     stats.back().write(std::cout);
     std::cout << "\n";
   };

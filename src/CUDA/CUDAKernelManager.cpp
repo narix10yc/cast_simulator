@@ -122,6 +122,9 @@ CUDAKernelManager::CUDAKernelManager(int nWorkerThreads, int deviceOrdinal)
   CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
   CU_CHECK(cuStreamCreate(&primaryCuStream, CU_STREAM_DEFAULT));
 
+  // Enable timing by default
+  enableTiming(true);
+
   // initialize exec thread
   execTh_ = std::thread(&CUDAKernelManager::execTh_work_, this);
 }

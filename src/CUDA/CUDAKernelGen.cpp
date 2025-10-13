@@ -1380,6 +1380,7 @@ llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
                                    "'");
   }
 
+  kernelPools_.emplace(graphName, Pool());
   auto& pool = kernelPools_.at(graphName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
