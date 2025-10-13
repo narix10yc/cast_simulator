@@ -26,10 +26,10 @@
 // Runtime API error checking
 #define CUDA_CHECK(CALL)                                                       \
   do {                                                                         \
-    cudaError_t logerr = CALL;                                                    \
-    if (logerr != cudaSuccess) {                                                  \
+    cudaError_t logerr = CALL;                                                 \
+    if (logerr != cudaSuccess) {                                               \
       std::cerr << "\033[31m[CUDA Runtime Error]\033[0m "                      \
-                << cudaGetErrorString(logerr) << " (at " << __FILE__ << ":"       \
+                << cudaGetErrorString(logerr) << " (at " << __FILE__ << ":"    \
                 << __LINE__ << ")" << " in CALL: " << #CALL << "\n";           \
     }                                                                          \
   } while (0)
@@ -37,12 +37,12 @@
 // Driver API error checking
 #define CU_CHECK(CALL)                                                         \
   do {                                                                         \
-    CUresult logerr = CALL;                                                       \
-    if (logerr != CUDA_SUCCESS) {                                                 \
+    CUresult logerr = CALL;                                                    \
+    if (logerr != CUDA_SUCCESS) {                                              \
       const char* errStr;                                                      \
-      cuGetErrorString(logerr, &errStr);                                          \
+      cuGetErrorString(logerr, &errStr);                                       \
       std::cerr << "\033[31m[CUDA Driver Error]\033[0m " << errStr             \
-                << " (code " << logerr << ")" << " at " << __FILE__ << ":"        \
+                << " (code " << logerr << ")" << " at " << __FILE__ << ":"     \
                 << __LINE__ << " in CALL: " << #CALL << "\n";                  \
       std::terminate();                                                        \
     }                                                                          \
