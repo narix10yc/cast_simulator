@@ -27,18 +27,15 @@ template <unsigned nQubits> static void f() {
   // generate random unitary gates
   std::vector<QuantumGatePtr> gates;
   gates.reserve(nQubits);
-  for (int q = 0; q < nQubits; q++) {
+  for (unsigned q = 0; q < nQubits; q++)
     gates.emplace_back(StandardQuantumGate::RandomUnitary(q));
-  }
 
   CUDAKernelGenConfig cfg;
   cfg.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
   cfg.precision = Precision::FP64;
 
-  for (int q = 0; q < nQubits; q++) {
-    llvm::cantFail(
-        km.genGate(cfg, gates[q], "gateImm_" + std::to_string(q)));
-  }
+  for (unsigned q = 0; q < nQubits; q++)
+    CHECK(suite, km.genGate(cfg, gates[q], "gateImm_" + std::to_string(q)));
 
   for (unsigned q = 0; q < nQubits; q++) {
     std::stringstream ss;

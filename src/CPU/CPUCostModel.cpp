@@ -150,8 +150,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
     for (int k = 1; k <= 5; ++k) {
       utils::sampleNoReplacement(nQubits, k, qubits);
       auto gate = StandardQuantumGate::RandomUnitary(qubits);
-      llvm::cantFail(
-          km.genGate(cpuConfig, gate, "gate_k" + std::to_string(k)));
+      llvm::cantFail(km.genGate(cpuConfig, gate, "gate_k" + std::to_string(k)));
     }
     llvm::cantFail(km.compileAll(llvm::OptimizationLevel::O1, false));
   };
@@ -196,33 +195,33 @@ void CPUPerformanceCache::runPreliminaryExperiments(
         static_cast<double>(weights[k - 2]) *
         ((ratio - 1.0) * (memSpds[k - 2] / memSpds[k - 1]) + 2 - ratio));
   }
-  for (int k = 6; k < weights.size() + 1; ++k) {
+  for (unsigned k = 6; k < weights.size() + 1; ++k) {
     weights[k - 1] =
         static_cast<int>(static_cast<double>(weights[k - 2]) * decay);
   }
 
-  int maxIdx = 0;
+  unsigned maxIdx = 0;
   double maxWeight = 0.0;
-  for (int k = 0; k < weights.size(); ++k) {
+  for (unsigned k = 0; k < weights.size(); ++k) {
     if (weights[k] > maxWeight) {
       maxWeight = static_cast<double>(weights[k]);
       maxIdx = k;
     }
   }
   // An extra round of weight decay. More decay for distant weights
-  for (int k = 0; k < weights.size(); ++k) {
+  for (unsigned k = 0; k < weights.size(); ++k) {
     if (k == maxIdx)
       continue;
     constexpr double ratio = 1.5;
-    double newWeight =
-        static_cast<double>(weights[k]) / std::pow(ratio, std::abs(maxIdx - k));
+    double newWeight = static_cast<double>(weights[k]) /
+                       std::pow(ratio, std::abs<int>(maxIdx - k));
     weights[k] = static_cast<int>(newWeight);
   }
 
   if (verbose > 1) {
     double sum = std::reduce(weights.begin(), weights.end(), 0.0);
     std::cerr << "Relative weights:\n";
-    for (int k = 1; k <= weights.size(); ++k) {
+    for (unsigned k = 1; k <= weights.size(); ++k) {
       std::cerr << "  " << k << "-qubit: " << "weight = " << weights[k - 1]
                 << "; percentage = "
                 << (100.0 * static_cast<double>(weights[k - 1]) / sum) << "\n";
@@ -254,7 +253,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
     std::uniform_int_distribution<int> dist(0, sum - 1);
     int r = dist(gen);
     int acc = 0;
-    for (int i = 0; i < nQubitsWeights.size(); ++i) {
+    for (unsigned i = 0; i < nQubitsWeights.size(); ++i) {
       acc += nQubitsWeights[i];
       if (r <= acc) {
         std::vector<int> targetQubits;
@@ -289,8 +288,8 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
       [&]() {
         int i = 0;
         for (const auto& gate : gates) {
-          if (auto e = km.genGate(
-                  cpuConfig, gate, "gate_" + std::to_string(i++))) {
+          if (auto e =
+                  km.genGate(cpuConfig, gate, "gate_" + std::to_string(i++))) {
             std::cerr << RED("Error: ") << "Failed to generate kernel for gate "
                       << i - 1 << ": " << llvm::toString(std::move(e)) << "\n";
             std::exit(1);

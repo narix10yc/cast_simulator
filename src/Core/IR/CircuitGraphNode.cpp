@@ -505,7 +505,7 @@ void CircuitGraphNode::dump_visualize() const {
 
   for (const auto& row : _tile) {
     std::cerr << "Row @ " << (void*)(&row) << ": ";
-    for (unsigned q = 0; q < _nQubits; ++q) {
+    for (int q = 0; q < _nQubits; ++q) {
       if (const auto* gate = row[q]; gate != nullptr)
         std::cerr << std::setw(width) << std::setfill('0') << gateId(gate)
                   << " ";

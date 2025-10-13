@@ -125,7 +125,7 @@ public:
   static StandardQuantumGatePtr RandomUnitary(Ints... qubits) {
     static_assert((std::is_integral_v<Ints> && ...));
     constexpr auto nQubits = sizeof...(Ints);
-    TargetQubitsType qubitsCopy{qubits...};
+    TargetQubitsType qubitsCopy{static_cast<int>(qubits)...};
     std::ranges::sort(qubitsCopy);
     return StandardQuantumGate::Create(ScalarGateMatrix::RandomUnitary(nQubits),
                                        nullptr, // No noise channel

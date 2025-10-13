@@ -32,8 +32,8 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
     if (auto e = km.genGate(kernelConfig,
                             StandardQuantumGate::RandomUnitary(qubits),
                             "gate_k" + std::to_string(k))) {
-      llvm::joinErrors(llvm::createStringError("Preliminary gate gen failed"),
-                       std::move(e));
+      return llvm::joinErrors(
+          llvm::createStringError("Preliminary gate gen failed"), std::move(e));
     }
   }
 
