@@ -29,9 +29,20 @@ struct CUDAKernelInfo {
 
   std::string ptxString;
   std::vector<uint8_t> cubinData;
-  ConstQuantumGatePtr gate;
-  Precision precision;
-  llvm::Function* llvmFunc;
+  ConstQuantumGatePtr gate = nullptr;
+  Precision precision = Precision::Unknown;
+  llvm::Function* llvmFunc = nullptr;
+
+  void update(ConstQuantumGatePtr gate,
+              Precision precision,
+              llvm::Function* llvmFunc) {
+    this->gate = gate;
+    this->precision = precision;
+    this->llvmFunc = llvmFunc;
+  }
+
+  void clearPTX() { ptxString.clear(); }
+  void clearCubin() { cubinData.clear(); }
 
   std::string_view getName() const { return llvmFunc->getName(); }
 
@@ -62,14 +73,17 @@ class CUDAKernelManager : public KernelManager<CUDAKernelInfo> {
   gen_(const CUDAKernelGenConfig& config,
        const ComplexSquareMatrix& matrix,
        const QuantumGate::TargetQubitsType& qubits,
-       const std::string& funcName);
+       const std::string& funcName,
+       llvm::Module& llvmModule);
 
   // Generate a CUDA kernel for the given gate. This function will wraps around
   // when gate is a StandardQuantumGate (with or without noise) or
   // SuperopQuantumGate, and call gen_ with a corresponding ComplexSquareMatrix.
-  llvm::Expected<KernelInfoPtr> genCUDAGate_(const CUDAKernelGenConfig& config,
-                                             ConstQuantumGatePtr gate,
-                                             const std::string& funcName);
+  // The generated kernel will be put into the given pool.
+  llvm::Error genCUDAGate_(const CUDAKernelGenConfig& config,
+                           ConstQuantumGatePtr gate,
+                           const std::string& funcName,
+                           Pool& pool);
 
   /* Kernel Execution Result */
 public:
@@ -232,10 +246,12 @@ public:
 
   std::ostream& displayInfo(std::ostream& os) const;
 
-  llvm::Expected<CUDAKernelInfo*>
-  genStandaloneGate(const CUDAKernelGenConfig& config,
-                    ConstQuantumGatePtr gate,
-                    const std::string& funcName);
+  // Generate a kernel for a single gate into the default kernel pool.
+  // \c funcName: if empty, a default name "k_<index>" will be assigned. If
+  // provided, it must be unique among all kernels in the default pool.
+  llvm::Error genGate(const CUDAKernelGenConfig& config,
+                      ConstQuantumGatePtr gate,
+                      const std::string& funcName);
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is
@@ -248,13 +264,13 @@ public:
   void dumpPTX(std::ostream& os, const std::string& kernelName) const;
 
   void clearPTX() {
-    for (auto& kernel : *this)
-      kernel.ptxString.clear();
+    for (auto& kernel : all_kernels())
+      kernel->clearPTX();
   }
 
   void clearCubin() {
-    for (auto& kernel : *this)
-      kernel.cubinData.clear();
+    for (auto& kernel : all_kernels())
+      kernel->clearCubin();
   }
 
   CUcontext getPrimaryCUContext() const { return primaryCuCtx; }
@@ -263,14 +279,10 @@ public:
   /* Get Kernels */
 
   unsigned numKernels() {
-    unsigned count = standaloneKernels_.size();
-    for (const auto& [name, kernels] : kernelPools_)
-      count += kernels.size();
+    unsigned count = 0;
+    for (const auto& [name, items] : kernelPools_)
+      count += items.size();
     return count;
-  }
-
-  std::span<const KernelInfoPtr> getAllStandaloneKernels() const {
-    return std::span<const KernelInfoPtr>(standaloneKernels_);
   }
 
   // Get kernel by name. Return nullptr if not found.
@@ -278,14 +290,6 @@ public:
 
   // Get kernel by name. Return nullptr if not found.
   const CUDAKernelInfo* getKernelByName(const std::string& llvmFuncName) const;
-
-  std::span<const KernelInfoPtr>
-  getKernelsFromGraphName(const std::string& graphName) const {
-    auto it = kernelPools_.find(graphName);
-    if (it == kernelPools_.end())
-      return {}; // empty span
-    return std::span<const KernelInfoPtr>(it->second);
-  }
 
   /* --- Kernel Launch --- */
 
@@ -328,8 +332,8 @@ public:
     std::vector<const ExecutionResult*> results;
     results.reserve(it->second.size());
 
-    for (auto& kernel : it->second) {
-      const auto* res = enqueueKernelLaunch(*kernel);
+    for (auto& item : it->second) {
+      const auto* res = enqueueKernelLaunch(*item.kernel);
       if (res != nullptr)
         results.push_back(res);
     }

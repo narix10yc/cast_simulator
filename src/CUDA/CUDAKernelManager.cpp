@@ -79,14 +79,14 @@ std::ostream& CUDAKernelManager::displayInfo(std::ostream& os) const {
   int nKernels = 0;
   size_t totalPTXSize = 0, totalCUBINSize = 0;
   unsigned nActivePTX = 0, nActiveCUBIN = 0;
-  for (const auto& kernel : *this) {
+  for (const auto& kernel : all_kernels()) {
     ++nKernels;
-    if (!kernel.ptxString.empty())
+    if (!kernel->ptxString.empty())
       ++nActivePTX;
-    if (!kernel.cubinData.empty())
+    if (!kernel->cubinData.empty())
       ++nActiveCUBIN;
-    totalPTXSize += kernel.ptxString.size();
-    totalCUBINSize += kernel.cubinData.size();
+    totalPTXSize += kernel->ptxString.size();
+    totalCUBINSize += kernel->cubinData.size();
   }
   os << "Num Kernels        : " << nKernels << "\n"
      << "PTX     : " << nActivePTX << " availables\n"
@@ -650,18 +650,18 @@ void CUDAKernelManager::syncKernelExecution(bool progressBar) {
 
 CUDAKernelInfo*
 CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) {
-  for (auto& kernel : *this) {
-    if (kernel.getName() == llvmFuncName)
-      return &kernel;
+  for (auto& kernel : all_kernels()) {
+    if (kernel->getName() == llvmFuncName)
+      return kernel.get();
   }
   return nullptr;
 }
 
 const CUDAKernelInfo*
 CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) const {
-  for (const auto& kernel : *this) {
-    if (kernel.getName() == llvmFuncName)
-      return &kernel;
+  for (auto& kernel : all_kernels()) {
+    if (kernel->getName() == llvmFuncName)
+      return kernel.get();
   }
   return nullptr;
 }

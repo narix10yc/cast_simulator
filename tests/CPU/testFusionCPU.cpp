@@ -39,7 +39,7 @@ template <CPUSimdWidth SimdWidth> static void f() {
            "Expected exactly one circuit graph in the test circuit");
 
     // generate gates before fusion
-    llvm::cantFail(km.genGraphGates(genCfg, *graphs[0], "graphBeforeFusion"));
+    CHECK(suite, km.genGraphGates(genCfg, *graphs[0], "graphBeforeFusion"));
 
     opt.run(*circuit, nullptr);
     graphs = circuit->getAllCircuitGraphs();
@@ -54,10 +54,12 @@ template <CPUSimdWidth SimdWidth> static void f() {
     sv0.initialize();
     sv1 = sv0;
 
-    llvm::cantFail(km.applyCPUKernelsFromGraph(
-        sv0.data(), sv0.nQubits(), "graphBeforeFusion"));
-    llvm::cantFail(km.applyCPUKernelsFromGraph(
-        sv1.data(), sv1.nQubits(), "graphAfterFusion"));
+    CHECK(suite,
+          km.applyCPUKernelsFromGraph(
+              sv0.data(), sv0.nQubits(), "graphBeforeFusion"));
+    CHECK(suite,
+          km.applyCPUKernelsFromGraph(
+              sv1.data(), sv1.nQubits(), "graphAfterFusion"));
 
     suite.assertCloseF64(sv0.norm(),
                          1.0,

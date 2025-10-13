@@ -37,7 +37,7 @@ template <unsigned nQubits> static void f() {
 
   for (int q = 0; q < nQubits; q++) {
     llvm::cantFail(
-        km.genStandaloneGate(cfg, gates[q], "gateImm_" + std::to_string(q)));
+        km.genGate(cfg, gates[q], "gateImm_" + std::to_string(q)));
   }
 
   for (unsigned q = 0; q < nQubits; q++) {

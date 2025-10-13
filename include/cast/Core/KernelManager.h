@@ -23,23 +23,10 @@ std::string demangleGraphName(const std::string& mangledName);
 } // namespace internal
 
 class KernelManagerBase {
-private:
-  // This mutex controls the access to llvmContextModulePairs
-  std::mutex mtx_;
-
 protected:
   // A vector of pairs of LLVM context and module. Expected to be cleared after
   // calling \c initJIT
   utils::TaskDispatcher dispatcher;
-
-  /// A thread-safe version that creates a new llvm Module
-  llvm::Module* createNewLLVMContextModulePair(const std::string& name);
-
-  /// Apply LLVM optimization to all modules inside \c llvmContextModulePairs
-  /// As a protected member function, this function will be called by \c initJIT
-  /// and \c initJITForPTXEmission
-  void applyLLVMOptimization(llvm::OptimizationLevel optLevel,
-                             bool progressBar);
 
   explicit KernelManagerBase(int nWorkerThreads) : dispatcher(nWorkerThreads) {}
 };
@@ -51,38 +38,63 @@ class KernelManager : public KernelManagerBase {
 protected:
   using KernelInfoPtr = std::unique_ptr<KernelInfoType>;
 
-  struct Item {
+  // A PoolItem is bounded to a KernelInfo, LLVM Context and LLVM Module
+  struct PoolItem {
     KernelInfoPtr kernel;
     std::unique_ptr<llvm::LLVMContext> llvmContext;
     std::unique_ptr<llvm::Module> llvmModule;
 
-    Item(const std::string& llvmModuleName) {
+    PoolItem(const std::string& llvmModuleName) {
       kernel = std::make_unique<KernelInfoType>();
       llvmContext = std::make_unique<llvm::LLVMContext>();
       llvmModule = std::make_unique<llvm::Module>(llvmModuleName, *llvmContext);
     }
   };
 
+  class Pool {
+    std::vector<PoolItem> items_;
+
+  public:
+    using iterator = typename std::vector<PoolItem>::iterator;
+    using const_iterator = typename std::vector<PoolItem>::const_iterator;
+
+    iterator begin() { return items_.begin(); }
+    iterator end() { return items_.end(); }
+    const_iterator begin() const { return items_.begin(); }
+    const_iterator end() const { return items_.end(); }
+
+    size_t size() const { return items_.size(); }
+    bool empty() const { return items_.empty(); }
+
+    void addItem(PoolItem&& item) { items_.emplace_back(std::move(item)); }
+  };
+
   // The storage of kernels. kernelPools_ has a default pool named "_default_".
-  using KernelPool = std::map<std::string, std::vector<Item>>;
-  KernelPool kernelPools_;
+  using KernelPools = std::map<std::string, Pool>;
+  KernelPools kernelPools_;
   constexpr static const char* DEFAULT_POOL_NAME = "_default_";
 
   /* --- iterator ---*/
 public:
   explicit KernelManager(int nWorkerThreads)
       : KernelManagerBase(nWorkerThreads) {
-    kernelPools_.insert({DEFAULT_POOL_NAME, std::vector<Item>()});
+    kernelPools_.insert({DEFAULT_POOL_NAME, Pool()});
+  }
+
+  Pool& getDefaultPool() { return kernelPools_.at(DEFAULT_POOL_NAME); }
+
+  const Pool& getDefaultPool() const {
+    return kernelPools_.at(DEFAULT_POOL_NAME);
   }
 
   auto all_kernels() {
     return kernelPools_ | std::views::values | std::views::join |
-           std::views::transform(&Item::kernel);
+           std::views::transform(&PoolItem::kernel);
   }
 
   auto all_kernels() const {
     return kernelPools_ | std::views::values | std::views::join |
-           std::views::transform(&Item::kernel);
+           std::views::transform(&PoolItem::kernel);
   }
 
 }; // KernelManager

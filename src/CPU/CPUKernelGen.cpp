@@ -20,16 +20,19 @@ using namespace cast;
 llvm::Error CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
                                           ConstQuantumGatePtr gate,
                                           const std::string& funcName,
-                                          CPUKernelInfo& kernel,
-                                          llvm::Module& llvmModule) {
+                                          Pool& pool) {
+  PoolItem item(funcName + "_module");
   auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
   llvm::Function* func = nullptr;
   if (stdQuGate != nullptr && stdQuGate->noiseChannel() == nullptr) {
     // a normal gate, no noise channel
     const auto scalarGM = stdQuGate->getScalarGM();
     assert(scalarGM != nullptr && "Only supporting scalar GM for now");
-    func = gen_(
-        config, scalarGM->matrix(), stdQuGate->qubits(), funcName, llvmModule);
+    func = gen_(config,
+                scalarGM->matrix(),
+                stdQuGate->qubits(),
+                funcName,
+                *item.llvmModule);
   } else {
     // super op gates are treated as normal gates with twice the number of
     // qubits
@@ -41,7 +44,7 @@ llvm::Error CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
     auto nQubits = superopGate->nQubits();
     for (const auto& q : qubits)
       qubits.push_back(q + nQubits);
-    func = gen_(config, scalarGM->matrix(), qubits, funcName, llvmModule);
+    func = gen_(config, scalarGM->matrix(), qubits, funcName, *item.llvmModule);
   }
 
   if (func == nullptr) {
@@ -49,12 +52,13 @@ llvm::Error CPUKernelManager::genCPUGate_(const CPUKernelGenConfig& config,
                                    funcName);
   }
 
-  kernel.update(config.precision,
-                func->getName().str(),
-                config.matrixLoadMode,
-                gate,
-                config.simdWidth,
-                gate->opCount(config.zeroTol));
+  item.kernel->update(config.precision,
+                      func->getName().str(),
+                      config.matrixLoadMode,
+                      gate,
+                      config.simdWidth,
+                      gate->opCount(config.zeroTol));
+  pool.addItem(std::move(item));
 
   return llvm::Error::success();
 }
@@ -63,8 +67,9 @@ llvm::Error CPUKernelManager::genGate(const CPUKernelGenConfig& config,
                                       ConstQuantumGatePtr gate,
                                       const std::string& funcName_) {
   std::string funcName(funcName_);
+  auto& pool = getDefaultPool();
   if (funcName.empty())
-    funcName = "k_" + std::to_string(kernelPools_[DEFAULT_POOL_NAME].size());
+    funcName = "k_" + std::to_string(pool.size());
   else {
     // check for name conflicts
     for (const auto& [kernel, ctx, mod] : kernelPools_[DEFAULT_POOL_NAME]) {
@@ -74,10 +79,9 @@ llvm::Error CPUKernelManager::genGate(const CPUKernelGenConfig& config,
       }
     }
   }
-  kernelPools_[DEFAULT_POOL_NAME].emplace_back(funcName + "_module");
-  auto& kernelRef = *kernelPools_[DEFAULT_POOL_NAME].back().kernel;
-  auto& llvmModuleRef = *kernelPools_[DEFAULT_POOL_NAME].back().llvmModule;
-  if (auto e = genCPUGate_(config, gate, funcName, kernelRef, llvmModuleRef)) {
+
+  // Generate the kernel into the default pool
+  if (auto e = genCPUGate_(config, gate, funcName, pool)) {
     return llvm::joinErrors(
         llvm::createStringError("Failed to generate kernel for gate " +
                                 funcName),
@@ -92,33 +96,26 @@ llvm::Error CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
   assert(graph.checkConsistency());
 
   if (kernelPools_.contains(graphName)) {
-    return llvm::createStringError(
-        "Cannot append kernels to an existing pool with name '" + graphName);
+    return llvm::createStringError("Already exists a pool named '" + graphName +
+                                   "'");
   }
 
+  kernelPools_.insert({graphName, Pool()});
+  auto& pool = kernelPools_.at(graphName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
 
-  std::vector<Item> items;
-  items.reserve(allGates.size());
-
   for (const auto& gate : allGates) {
-    // initialize llvm context and module. Leave the update to kernel info to
-    // genCPUGate_ call
     auto name = graphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    items.emplace_back(name + "_module");
-    auto& kernelRef = *items.back().kernel;
-    auto& llvmModuleRef = *items.back().llvmModule;
 
-    // genCPUGate_ will update kernelRef
-    if (auto e = genCPUGate_(config, gate, name, kernelRef, llvmModuleRef)) {
+    // genCPUGate_ will put the new kernel into pool
+    if (auto e = genCPUGate_(config, gate, name, pool)) {
       return llvm::joinErrors(
           llvm::createStringError("Failed to generate kernel for gate " + name),
           std::move(e));
     }
   }
-  kernelPools_.insert({graphName, std::move(items)});
   return llvm::Error::success();
 }
 
@@ -486,11 +483,13 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
       }
     }
     LLVM_DEBUG(std::cerr << "- reSplitMasks: [";
-               for (const auto& e : reSplitMasks) std::cerr
+               for (const auto& e
+                    : reSplitMasks) std::cerr
                << utils::fmt_0b(e, sepBit + 1) << ",";
                std::cerr << "]\n";
                std::cerr << "- imSplitMasks: [";
-               for (const auto& e : imSplitMasks) std::cerr
+               for (const auto& e
+                    : imSplitMasks) std::cerr
                << utils::fmt_0b(e, sepBit + 1) << ",";
                std::cerr << "]\n";);
   } // end init [re/im]SplitMasks

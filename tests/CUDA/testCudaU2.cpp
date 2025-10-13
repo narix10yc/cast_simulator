@@ -37,30 +37,30 @@ template <int nQubits> void runU2qTest() {
   CUDAKernelGenConfig cgCfg;
   cgCfg.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
   for (std::size_t i = 0; i < gates.size(); ++i) {
-    llvm::cantFail(km.genStandaloneGate(
-        cgCfg, gates[i], "gateImm_2q_" + std::to_string(i)));
+    llvm::cantFail(
+        km.genGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i)));
   }
 
   // Main test loop: check per-qubit prob match after each gate
-  auto kernels = km.getAllStandaloneKernels();
+  auto& pool = km.getDefaultPool();
 
-  for (unsigned i = 0; i < kernels.size(); ++i) {
+  for (const auto& item : pool) {
     randomizeSV();
-    auto& qubits = gates[i]->qubits(); // {q, q+1}
+    ConstQuantumGatePtr gate = item.kernel->gate;
 
     /* apply gate on GPU */
     km.setLaunchConfig(svCUDA.getDevicePtr(), svCUDA.nQubits());
-    km.enqueueKernelLaunch(*kernels[i]);
+    km.enqueueKernelLaunch(*item.kernel);
     km.syncKernelExecution();
 
     // check norm
     suite.assertCloseF64(
         svCUDA.norm(), 1.0, "CUDA SV norm equals 1", GET_INFO());
 
-    svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gates[i].get()));
+    svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gate.get()));
 
     // compare per-qubit probabilities
-    for (int q : qubits) {
+    for (int q : gate->qubits()) {
       suite.assertCloseF64(svCUDA.prob(q),
                            svCPU.prob(q),
                            "CUDA vs CPU probability match for qubit " +

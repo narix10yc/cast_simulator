@@ -21,18 +21,18 @@
 using namespace cast;
 using namespace llvm;
 
-static FixedVectorType* getVec2Ty(Type* scalarTy) {
+namespace {
+
+FixedVectorType* getVec2Ty(Type* scalarTy) {
   return FixedVectorType::get(scalarTy, 2); // length = 2, non-scalable
 }
 
 /// Bit-cast a scalar* to a vec2* **without** changing the address-space.
-static Value* bitCastPtrToVec2(IRBuilder<>& B, Value* ptr, Type* scalarTy) {
+Value* bitCastPtrToVec2(IRBuilder<>& B, Value* ptr, Type* scalarTy) {
   auto* vec2Ty = getVec2Ty(scalarTy);
   unsigned AS = llvm::cast<PointerType>(ptr->getType())->getAddressSpace();
   return B.CreateBitCast(ptr, PointerType::get(vec2Ty, AS), "as_vec2");
 }
-
-namespace {
 
 Value* genOptFMul(Value* a, Value* b, ScalarKind aKind, IRBuilder<>& B) {
   switch (aKind) {
@@ -1184,14 +1184,14 @@ llvm::Expected<llvm::Function*>
 CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
                         const ComplexSquareMatrix& matrix,
                         const QuantumGate::TargetQubitsType& qubits,
-                        const std::string& funcName) {
+                        const std::string& funcName,
+                        llvm::Module& llvmModule) {
   const unsigned k = qubits.size();
   const unsigned K = 1u << k;
   const unsigned KK = K * K;
 
-  auto& llvmContextModulePair =
-      createNewLLVMContextModulePair(funcName + "Module");
-  IRBuilder<> B(*llvmContextModulePair.llvmContext);
+  auto& llvmContext = llvmModule.getContext();
+  IRBuilder<> B(llvmContext);
 
   if (config.precision == Precision::Unknown) {
     return llvm::createStringError(
@@ -1201,11 +1201,10 @@ CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
       (config.precision == Precision::FP32) ? B.getFloatTy() : B.getDoubleTy();
 
   IRArgsCUDA args;
-  auto* func = getFunctionDeclarationCUDA(
-      B, *llvmContextModulePair.llvmModule, funcName, config, args);
+  auto* func =
+      getFunctionDeclarationCUDA(B, llvmModule, funcName, config, args);
 
-  auto* entryBB =
-      BasicBlock::Create(*llvmContextModulePair.llvmContext, "entry", func);
+  auto* entryBB = BasicBlock::Create(llvmContext, "entry", func);
   B.SetInsertPoint(entryBB);
 
   // Helper: compute the base pointer (into the full statevector) for this CTA's
@@ -1251,8 +1250,8 @@ CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
     // Build/lookup constant-memory global (AS=4) and initialize with matrix
     // values
     auto* arrTy = ArrayType::get(scalarTy, 2u * KK);
-    auto* gConstMat = getOrCreateConstMatGlobal(
-        *llvmContextModulePair.llvmModule, arrTy, "gConstMatShared");
+    auto* gConstMat =
+        getOrCreateConstMatGlobal(llvmModule, arrTy, "gConstMatShared");
 
     std::vector<Constant*> constElems;
     constElems.reserve(2u * KK);
@@ -1291,10 +1290,12 @@ CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
   return func;
 }
 
-llvm::Expected<CUDAKernelManager::KernelInfoPtr>
-CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
-                                ConstQuantumGatePtr gate,
-                                const std::string& funcName) {
+llvm::Error CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
+                                            ConstQuantumGatePtr gate,
+                                            const std::string& funcName,
+                                            Pool& pool) {
+  PoolItem item(funcName + "_module");
+
   auto* stdQuGate = llvm::dyn_cast<const StandardQuantumGate>(gate.get());
   llvm::Function* func = nullptr;
 
@@ -1305,12 +1306,16 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
       return llvm::createStringError("Only supporting scalar GM for now");
     }
 
-    if (auto expectedF =
-            gen_(config, scalarGM->matrix(), stdQuGate->qubits(), funcName)) {
+    if (auto expectedF = gen_(config,
+                              scalarGM->matrix(),
+                              stdQuGate->qubits(),
+                              funcName,
+                              *item.llvmModule)) {
       func = *expectedF;
     } else {
       return expectedF.takeError();
     }
+
   } else {
     // super op gates are treated as normal gates with twice the number of
     // qubits
@@ -1324,7 +1329,8 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
     for (const auto& q : qubits)
       qubits.push_back(q + nQubits);
 
-    if (auto expectedF = gen_(config, scalarGM->matrix(), qubits, funcName))
+    if (auto expectedF = gen_(
+            config, scalarGM->matrix(), qubits, funcName, *item.llvmModule))
       func = *expectedF;
     else
       return expectedF.takeError();
@@ -1334,40 +1340,34 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
     return llvm::createStringError(funcName + " generates a null function");
   }
 
-  // std::string ptxString;
-  // std::vector<uint8_t> cubinData;
-  // ConstQuantumGatePtr gate;
-  // Precision precision;
-  // llvm::Function* llvmFunction;
-  auto ki = std::make_unique<CUDAKernelInfo>(
-      std::string(), std::vector<uint8_t>(), gate, config.precision, func);
+  item.kernel->update(gate, config.precision, func);
+  pool.addItem(std::move(item));
 
-  return ki;
+  return llvm::Error::success();
 }
 
-llvm::Expected<CUDAKernelInfo*>
-CUDAKernelManager::genStandaloneGate(const CUDAKernelGenConfig& config,
-                                     ConstQuantumGatePtr gate,
-                                     const std::string& _funcName) {
-  std::string funcName(_funcName);
+llvm::Error CUDAKernelManager::genGate(const CUDAKernelGenConfig& config,
+                                       ConstQuantumGatePtr gate,
+                                       const std::string& funcName_) {
+  std::string funcName(funcName_);
+  auto& pool = getDefaultPool();
   if (funcName.empty())
-    funcName = "kernel_" + std::to_string(standaloneKernels_.size());
+    funcName = "k" + std::to_string(pool.size());
 
   // check for name conflicts
-  for (const auto& kernel : standaloneKernels_) {
-    if (kernel->llvmFunc->getName() == funcName) {
+  for (const auto& item : pool) {
+    if (item.kernel->llvmFunc->getName() == funcName) {
       return llvm::createStringError("Kernel with name '" + funcName +
                                      "' already exists.");
     }
   }
 
-  if (auto kernel = genCUDAGate_(config, gate, funcName)) {
-    auto* kernelRet = (*kernel).get();
-    standaloneKernels_.emplace_back(std::move(*kernel));
-    return kernelRet;
-  } else {
-    return kernel.takeError();
+  if (auto e = genCUDAGate_(config, gate, funcName, pool)) {
+    return llvm::joinErrors(
+        llvm::createStringError("Failed to generate gate '" + funcName + "'"),
+        std::move(e));
   }
+  return llvm::Error::success();
 }
 
 llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
@@ -1376,28 +1376,25 @@ llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
   assert(graph.checkConsistency());
 
   if (kernelPools_.contains(graphName)) {
-    return llvm::createStringError("Graph with name '" + graphName +
-                                   "' already exists.");
+    return llvm::createStringError("Already exists a pool named '" + graphName +
+                                   "'");
   }
 
-  auto mangledGraphName = internal::mangleGraphName(graphName);
+  auto& pool = kernelPools_.at(graphName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
 
-  std::vector<KernelInfoPtr> kernels;
-  kernels.reserve(allGates.size());
-
   for (const auto& gate : allGates) {
-    auto name = mangledGraphName + "_" + std::to_string(order++) + "_" +
+    auto name = graphName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
-    if (auto kernel = genCUDAGate_(config, gate, name)) {
-      kernels.emplace_back(std::move(*kernel));
-    } else {
-      return kernel.takeError();
+
+    // genCUDAGate_ will put the new kernel into pool
+    if (auto e = genCUDAGate_(config, gate, name, pool)) {
+      return llvm::joinErrors(
+          llvm::createStringError("Failed to generate kernel for gate " + name),
+          std::move(e));
     }
   }
-  // Store the generated kernels in the map
-  kernelPools_[graphName] = std::move(kernels);
   return llvm::Error::success();
 }
 

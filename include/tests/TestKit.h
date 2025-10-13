@@ -2,11 +2,14 @@
 #define CAST_TESTS_TESTKIT_H
 
 #include "utils/utils.h"
+#include "llvm/Support/Error.h"
 #include <vector>
 
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 #define GET_INFO() __FILE__ ":" TOSTRING(__LINE__)
+
+#define CHECK(suite, expr) suite.check((expr), #expr, GET_INFO())
 
 namespace cast::test {
 
@@ -45,16 +48,16 @@ public:
   void assertFalse(const std::string& title, const std::string& info);
 
   void assertCloseF32(float a,
-                   float b,
-                   const std::string& title,
-                   const std::string& info,
-                   float tol = 1e-4);
+                      float b,
+                      const std::string& title,
+                      const std::string& info,
+                      float tol = 1e-4);
 
   void assertCloseF64(double a,
-                   double b,
-                   const std::string& title,
-                   const std::string& info,
-                   double tol = 1e-8);
+                      double b,
+                      const std::string& title,
+                      const std::string& info,
+                      double tol = 1e-8);
 
   void assertAllClose(const std::vector<double>& aVec,
                       const std::vector<double>& bVec,
@@ -81,6 +84,13 @@ public:
                       const std::string& title,
                       const std::string& info,
                       float tol = 1e-4);
+
+  void check(llvm::Error err, llvm::Twine title, const char* info) {
+    ++nTests;
+    if (!err)
+      return;
+    failures.emplace_back(title.str(), info, llvm::toString(std::move(err)));
+  }
 };
 
 void test_complexSquareMatrix();

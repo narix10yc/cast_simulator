@@ -76,7 +76,7 @@ CPUKernelManager::getKernelByName(const std::string& llvmFuncName) {
   return nullptr;
 }
 
-llvm::Error CPUKernelManager::compileItem(Item& item,
+llvm::Error CPUKernelManager::compileItem(PoolItem& item,
                                           llvm::OptimizationLevel optLevel) {
   orc::ThreadSafeModule TSM(std::move(item.llvmModule),
                             std::move(item.llvmContext));

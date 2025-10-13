@@ -250,7 +250,7 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   for (int i = 0; i < gates.size(); ++i) {
     const auto& gate = gates[i];
     std::string funcName = "gate_" + std::to_string(i);
-    kernelMgr.genStandaloneGate(kernelGenConfig, gate, funcName);
+    kernelMgr.genGate(kernelGenConfig, gate, funcName);
   }
 
   // Initialize JIT engine

@@ -1,13 +1,12 @@
 #ifndef CAST_CPU_KERNEL_MANAGER_CPU_H
 #define CAST_CPU_KERNEL_MANAGER_CPU_H
 
+#include "cast/CPU/CPUStatevector.h"
 #include "cast/CPU/Config.h"
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 #include "utils/InfoLogger.h"
-
-#include <span>
 
 #define CPU_KERNEL_TYPE void(void*)
 
@@ -114,10 +113,12 @@ class CPUKernelManager : public KernelManager<CPUKernelInfo> {
   // Add a task to compile the given llvmModule. The llvmModule will be
   // transferred to a ThreadSafeModule and stored in the JIT session.
   // This function modifies the given item until item.executable is set.
-  llvm::Error compileItem(Item& item, llvm::OptimizationLevel optLevel);
+  llvm::Error compileItem(PoolItem& item, llvm::OptimizationLevel optLevel);
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
+  // The generated function will be put into the given llvmModule.
+  // /c funcName: a unique name for the generated function.
   llvm::Function* gen_(const CPUKernelGenConfig& config,
                        const ComplexSquareMatrix& matrix,
                        const QuantumGate::TargetQubitsType& qubits,
@@ -127,11 +128,11 @@ class CPUKernelManager : public KernelManager<CPUKernelInfo> {
   // Generate a CPU kernel for the given gate. This function will wraps around
   // when gate is a StandardQuantumGate (with or without noise) or
   // SuperopQuantumGate, and call gen_ with a corresponding ComplexSquareMatrix.
+  // The generated kernel will be put into the given pool.
   llvm::Error genCPUGate_(const CPUKernelGenConfig& config,
                           ConstQuantumGatePtr gate,
                           const std::string& funcName,
-                          CPUKernelInfo& kernel,
-                          llvm::Module& llvmModule);
+                          Pool& pool);
 
 public:
   CPUKernelManager(int nWorkerThreads = -1)
@@ -194,11 +195,11 @@ public:
   // Get kernel by name. Return nullptr if not found.
   CPUKernelInfo* getKernelByName(const std::string& llvmFuncName);
 
-  std::span<const Item> getPool(const std::string& poolName) const {
+  std::span<const PoolItem> getPool(const std::string& poolName) const {
     auto it = kernelPools_.find(poolName);
     if (it == kernelPools_.end())
       return {}; // empty span
-    return std::span<const Item>(it->second);
+    return std::span<const PoolItem>(it->second);
   }
 
   /* Apply Kernels */
@@ -212,6 +213,30 @@ public:
                              int nQubitsSV,
                              const std::string& llvmFuncName,
                              int nThreads = 1);
+
+  llvm::Error applyCPUKernel(CPUStatevectorF32& sv,
+                             CPUKernelInfo& kernelInfo,
+                             int nThreads = 1) {
+    return applyCPUKernel(sv.data(), sv.nQubits(), kernelInfo, nThreads);
+  }
+
+  llvm::Error applyCPUKernel(CPUStatevectorF64& sv,
+                             CPUKernelInfo& kernelInfo,
+                             int nThreads = 1) {
+    return applyCPUKernel(sv.data(), sv.nQubits(), kernelInfo, nThreads);
+  }
+
+  llvm::Error applyCPUKernel(CPUStatevectorF32& sv,
+                             const std::string& llvmFuncName,
+                             int nThreads = 1) {
+    return applyCPUKernel(sv.data(), sv.nQubits(), llvmFuncName, nThreads);
+  }
+
+  llvm::Error applyCPUKernel(CPUStatevectorF64& sv,
+                             const std::string& llvmFuncName,
+                             int nThreads = 1) {
+    return applyCPUKernel(sv.data(), sv.nQubits(), llvmFuncName, nThreads);
+  }
 
   llvm::Error applyCPUKernelsFromGraph(void* sv,
                                        int nQubitsSV,

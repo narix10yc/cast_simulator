@@ -102,7 +102,7 @@ void TestSuite::assertAllClose(const std::vector<float>& aVec,
   }
 
   std::vector<int> unmatchPos;
-  for (int i = 0; i < size; i++) {
+  for (unsigned i = 0; i < size; i++) {
     if (std::abs(aVec[i] - bVec[i]) > tol)
       unmatchPos.push_back(i);
   }
@@ -110,7 +110,7 @@ void TestSuite::assertAllClose(const std::vector<float>& aVec,
     return;
 
   ss << "Unmatch positions: ";
-  for (int i = 0, s = unmatchPos.size(); i < s - 1; i++)
+  for (unsigned i = 0, s = unmatchPos.size(); i < s - 1; i++)
     ss << unmatchPos[i] << ",";
   ss << unmatchPos.back();
   failures.emplace_back(title, info, ss.str());
