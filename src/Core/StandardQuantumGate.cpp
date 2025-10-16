@@ -17,39 +17,39 @@ StandardQuantumGate::StandardQuantumGate(GateMatrixPtr gateMatrix,
   std::ranges::sort(indices,
                     [&qubits](int i, int j) { return qubits[i] < qubits[j]; });
 
-  _qubits.resize(nQubits);
+  qubits_.resize(nQubits);
   for (unsigned i = 0; i < nQubits; i++)
-    _qubits[i] = qubits[indices[i]];
+    qubits_[i] = qubits[indices[i]];
 
-  _gateMatrix = cast::permute(gateMatrix, indices);
-  _noiseChannel = cast::permute(noiseChannel, indices);
+  gateMatrix_ = cast::permute(gateMatrix, indices);
+  noiseChannel_ = cast::permute(noiseChannel, indices);
 }
 
 ScalarGateMatrixPtr StandardQuantumGate::getScalarGM() {
-  if (_gateMatrix == nullptr)
+  if (gateMatrix_ == nullptr)
     return nullptr;
-  if (llvm::isa<ScalarGateMatrix>(_gateMatrix.get()))
-    return std::static_pointer_cast<ScalarGateMatrix>(_gateMatrix);
+  if (llvm::isa<ScalarGateMatrix>(gateMatrix_.get()))
+    return std::static_pointer_cast<ScalarGateMatrix>(gateMatrix_);
   return nullptr;
 }
 
 ConstScalarGateMatrixPtr StandardQuantumGate::getScalarGM() const {
-  if (_gateMatrix == nullptr)
+  if (gateMatrix_ == nullptr)
     return nullptr;
-  if (llvm::isa<ScalarGateMatrix>(_gateMatrix.get()))
-    return std::static_pointer_cast<const ScalarGateMatrix>(_gateMatrix);
+  if (llvm::isa<ScalarGateMatrix>(gateMatrix_.get()))
+    return std::static_pointer_cast<const ScalarGateMatrix>(gateMatrix_);
   return nullptr;
 }
 
 void StandardQuantumGate::displayInfo(utils::InfoLogger logger) const {
-  logger.put("Standard Quantum Gate").put("Target Qubits", std::span(_qubits));
-  if (_gateMatrix == nullptr) {
+  logger.put("Standard Quantum Gate").put("Target Qubits", std::span(qubits_));
+  if (gateMatrix_ == nullptr) {
     logger.put("Gate Matrix", "None");
   } else {
     logger.put("Gate Matrix");
-    _gateMatrix->displayInfo(logger.indent());
+    gateMatrix_->displayInfo(logger.indent());
   }
 
   // noise channel
-  logger.put("Noise Channel", _noiseChannel.get());
+  logger.put("Noise Channel", noiseChannel_.get());
 }

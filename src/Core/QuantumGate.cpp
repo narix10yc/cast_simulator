@@ -168,19 +168,19 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
 }
 
 SuperopQuantumGatePtr StandardQuantumGate::getSuperopGate() const {
-  assert(_gateMatrix != nullptr);
+  assert(gateMatrix_ != nullptr);
   auto scalarGM = getScalarGM();
   assert(scalarGM != nullptr && "Only supporting ScalarGateMatrix for now");
-  if (_noiseChannel == nullptr) {
+  if (noiseChannel_ == nullptr) {
     // If there is no noise channel, the superoperator matrix is just the gate
     // matrix itself.
     auto superopGM = std::make_shared<ScalarGateMatrix>(scalarGM->matrix());
     return SuperopQuantumGate::Create(superopGM, qubits());
   }
 
-  assert(_noiseChannel->reps.krausRep != nullptr &&
+  assert(noiseChannel_->reps.krausRep != nullptr &&
          "We must have KrausRep to compute superoperator matrix");
-  const auto& krausOps = _noiseChannel->reps.krausRep->getOps();
+  const auto& krausOps = noiseChannel_->reps.krausRep->getOps();
   // If the gate matrix and every Kraus operator are N * N, then the
   // superoperator matrix is (N ** 2) * (N ** 2).
   const size_t N = 1ULL << nQubits();
@@ -238,7 +238,7 @@ double StandardQuantumGate::opCount(double zeroTol) const {
   auto scalarGM = getScalarGM();
   assert(scalarGM != nullptr && "Only supporting scalar gate matrix for now");
 
-  if (_noiseChannel == nullptr) {
+  if (noiseChannel_ == nullptr) {
     double count = static_cast<double>(countNonZeroElems(*scalarGM, zeroTol));
     return count * std::pow<double>(2.0, 1 - nQubits());
   }
@@ -262,7 +262,7 @@ double SuperopQuantumGate::opCount(double zeroTol) const {
 /**** Inverse ****/
 
 QuantumGatePtr StandardQuantumGate::inverse() const {
-  if (_noiseChannel != nullptr)
+  if (noiseChannel_ != nullptr)
     return nullptr;
   auto scalarGM = getScalarGM();
   if (scalarGM == nullptr)

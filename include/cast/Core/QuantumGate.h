@@ -24,7 +24,7 @@ using ConstSuperopQuantumGatePtr = std::shared_ptr<const SuperopQuantumGate>;
 
 /// Recommended to always use QuantumGatePtr than QuantumGate directly.
 class QuantumGate {
-public:
+protected:
   enum QuantumGateKind {
     QG_Base,
     QG_Standard, // Standard quantum gate
@@ -32,25 +32,24 @@ public:
     QG_End,
   };
 
-private:
-  QuantumGateKind _kind;
+  QuantumGateKind kind_;
 
 public:
-  QuantumGateKind kind() const { return _kind; }
+  QuantumGateKind getKind() const { return kind_; }
   using TargetQubitsType = std::vector<int>;
 
 protected:
   // qubits are sorted in ascending order
-  TargetQubitsType _qubits;
+  TargetQubitsType qubits_;
 
 public:
-  explicit QuantumGate(QuantumGateKind kind) : _kind(kind) {}
+  explicit QuantumGate(QuantumGateKind kind) : kind_(kind) {}
   virtual ~QuantumGate() = default;
 
-  int nQubits() const { return _qubits.size(); }
+  int nQubits() const { return qubits_.size(); }
 
-  TargetQubitsType& qubits() { return _qubits; }
-  const TargetQubitsType& qubits() const { return _qubits; }
+  TargetQubitsType& qubits() { return qubits_; }
+  const TargetQubitsType& qubits() const { return qubits_; }
 
   /// @brief The operation count.
   virtual double opCount(double zeroTol) const {
@@ -79,23 +78,23 @@ public:
 /// TODO: do we want to support parametrized noise channel fusion?
 class StandardQuantumGate : public QuantumGate {
 private:
-  GateMatrixPtr _gateMatrix;
-  NoiseChannelPtr _noiseChannel;
+  GateMatrixPtr gateMatrix_;
+  NoiseChannelPtr noiseChannel_;
 
 public:
   StandardQuantumGate(GateMatrixPtr gateMatrix,
                       NoiseChannelPtr noiseChannel,
                       const TargetQubitsType& qubits);
 
-  GateMatrixPtr gateMatrix() { return _gateMatrix; }
-  ConstGateMatrixPtr gateMatrix() const { return _gateMatrix; }
+  GateMatrixPtr gateMatrix() { return gateMatrix_; }
+  ConstGateMatrixPtr gateMatrix() const { return gateMatrix_; }
 
-  NoiseChannelPtr noiseChannel() { return _noiseChannel; }
-  ConstNoiseChannelPtr noiseChannel() const { return _noiseChannel; }
+  NoiseChannelPtr noiseChannel() { return noiseChannel_; }
+  ConstNoiseChannelPtr noiseChannel() const { return noiseChannel_; }
 
   // Set the noise channel to a symmetric Pauli channel with probability p.
   void setNoiseSPC(double p) {
-    _noiseChannel = NoiseChannel::SymmetricPauliChannel(p);
+    noiseChannel_ = NoiseChannel::SymmetricPauliChannel(p);
   }
 
   double opCount(double zeroTol) const override;
@@ -180,7 +179,7 @@ public:
   }
 
   static bool classof(const QuantumGate* qg) {
-    return qg->kind() == QG_Standard;
+    return qg->getKind() == QG_Standard;
   }
 }; // class StandardQuantumGate
 
@@ -205,13 +204,13 @@ public:
 
   // This method returns a copy of this superop gate
   SuperopQuantumGatePtr getSuperopGate() const override {
-    return SuperopQuantumGate::Create(_superopMatrix, _qubits);
+    return SuperopQuantumGate::Create(_superopMatrix, qubits_);
   }
 
   void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const QuantumGate* qg) {
-    return qg->kind() == QG_Superop;
+    return qg->getKind() == QG_Superop;
   }
 }; // class SuperopQuantumGate
 
