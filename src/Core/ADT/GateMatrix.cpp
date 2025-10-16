@@ -8,7 +8,7 @@
 using namespace cast;
 
 void ScalarGateMatrix::displayInfo(utils::InfoLogger logger) const {
-  logger.put("Scalar Gate Matrix").put("Num Qubits", _nQubits);
+  logger.put("Scalar Gate Matrix").put("Num Qubits", nQubits_);
 }
 
 ScalarGateMatrixPtr

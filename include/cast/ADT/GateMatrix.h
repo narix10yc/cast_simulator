@@ -40,18 +40,18 @@ public:
   };
 
 protected:
-  GateMatrixKind _kind;
-  int _nQubits;
+  GateMatrixKind kind_;
+  int nQubits_;
 
 public:
   GateMatrix(GateMatrixKind kind, int nQubits)
-      : _kind(kind), _nQubits(nQubits) {}
+      : kind_(kind), nQubits_(nQubits) {}
 
   virtual ~GateMatrix() = default;
 
-  GateMatrixKind kind() const { return _kind; }
+  GateMatrixKind kind() const { return kind_; }
 
-  int nQubits() const { return _nQubits; }
+  int nQubits() const { return nQubits_; }
 
   /// Compute the gate matrix of a subsystem.
   /// @param mask A bitmask indicating which qubits to keep. For example, a
@@ -83,30 +83,30 @@ public:
 
   ScalarGateMatrix(const ComplexSquareMatrix& matrix)
       : GateMatrix(GM_Scalar, std::log2(matrix.edgeSize())), _matrix(matrix) {
-    assert(_nQubits > 0 && 1ULL << _nQubits == matrix.edgeSize() &&
+    assert(nQubits_ > 0 && 1ULL << nQubits_ == matrix.edgeSize() &&
            "Matrix size must be a power of 2");
   }
 
   ScalarGateMatrix(ComplexSquareMatrix&& matrix)
       : GateMatrix(GM_Scalar, std::log2(matrix.edgeSize())),
         _matrix(std::move(matrix)) {
-    assert(_nQubits > 0 && 1ULL << _nQubits == matrix.edgeSize() &&
+    assert(nQubits_ > 0 && 1ULL << nQubits_ == matrix.edgeSize() &&
            "Matrix size must be a power of 2");
   }
 
   ScalarGateMatrix(const ScalarGateMatrix& other)
-      : GateMatrix(GM_Scalar, other._nQubits), _matrix(other._matrix) {}
+      : GateMatrix(GM_Scalar, other.nQubits_), _matrix(other._matrix) {}
 
   ScalarGateMatrix(ScalarGateMatrix&& other) noexcept
-      : GateMatrix(GM_Scalar, other._nQubits),
+      : GateMatrix(GM_Scalar, other.nQubits_),
         _matrix(std::move(other._matrix)) {
-    other._nQubits = 0;
+    other.nQubits_ = 0;
   }
 
   ScalarGateMatrix& operator=(const ScalarGateMatrix& other) {
     if (this == &other)
       return *this;
-    _nQubits = other._nQubits;
+    nQubits_ = other.nQubits_;
     _matrix = other._matrix;
     return *this;
   }
@@ -114,7 +114,7 @@ public:
   ScalarGateMatrix& operator=(ScalarGateMatrix&& other) noexcept {
     if (this == &other)
       return *this;
-    _nQubits = other._nQubits;
+    nQubits_ = other.nQubits_;
     _matrix = std::move(other._matrix);
     return *this;
   }
@@ -211,14 +211,14 @@ public:
         _data(new IndexPhasePair[1ULL << nQubits]) {}
 
   UnitaryPermGateMatrix(const UnitaryPermGateMatrix& other)
-      : GateMatrix(GM_UnitaryPerm, other._nQubits) {
-    _data = new IndexPhasePair[1ULL << _nQubits];
+      : GateMatrix(GM_UnitaryPerm, other.nQubits_) {
+    _data = new IndexPhasePair[1ULL << nQubits_];
     std::memcpy(
-        _data, other._data, sizeof(IndexPhasePair) * (1ULL << _nQubits));
+        _data, other._data, sizeof(IndexPhasePair) * (1ULL << nQubits_));
   }
 
   UnitaryPermGateMatrix(UnitaryPermGateMatrix&& other) noexcept
-      : GateMatrix(GM_UnitaryPerm, other._nQubits), _data(other._data) {
+      : GateMatrix(GM_UnitaryPerm, other.nQubits_), _data(other._data) {
     other._data = nullptr;
   }
 
@@ -244,7 +244,7 @@ public:
   const IndexPhasePair* data() const { return _data; }
 
   void displayInfo(utils::InfoLogger logger) const override {
-    logger.put("Unitary Permutation Gate Matrix").put("Num Qubits", _nQubits);
+    logger.put("Unitary Permutation Gate Matrix").put("Num Qubits", nQubits_);
   }
 
   static UnitaryPermGateMatrixPtr FromGateMatrix(const GateMatrix* gm,

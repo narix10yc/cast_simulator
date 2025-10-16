@@ -100,15 +100,15 @@ ComplexSquareMatrix ComplexSquareMatrix::CP(double phi) {
 
 ComplexSquareMatrix
 ComplexSquareMatrix::operator+(const ComplexSquareMatrix& other) const {
-  assert(_edgeSize == other._edgeSize);
-  ComplexSquareMatrix result(_edgeSize);
+  assert(edgeSize_ == other.edgeSize_);
+  ComplexSquareMatrix result(edgeSize_);
   for (size_t i = 0; i < size(); ++i)
-    result._data[i] = _data[i] + other._data[i];
+    result.data_[i] = data_[i] + other.data_[i];
   return result;
 }
 
 ComplexSquareMatrix ComplexSquareMatrix::operator+(double c) const {
-  ComplexSquareMatrix result(_edgeSize);
+  ComplexSquareMatrix result(edgeSize_);
   std::memcpy(result.imData(), imData(), halfSize() * sizeof(double));
   for (size_t i = 0; i < halfSize(); ++i)
     result.reBegin()[i] = reBegin()[i] + c;
@@ -117,7 +117,7 @@ ComplexSquareMatrix ComplexSquareMatrix::operator+(double c) const {
 
 ComplexSquareMatrix
 ComplexSquareMatrix::operator+(std::complex<double> c) const {
-  ComplexSquareMatrix result(_edgeSize);
+  ComplexSquareMatrix result(edgeSize_);
   for (size_t i = 0; i < halfSize(); ++i)
     result.reBegin()[i] = reBegin()[i] + c.real();
   for (size_t i = 0; i < halfSize(); ++i)
@@ -127,9 +127,9 @@ ComplexSquareMatrix::operator+(std::complex<double> c) const {
 
 ComplexSquareMatrix&
 ComplexSquareMatrix::operator+=(const ComplexSquareMatrix& other) {
-  assert(_edgeSize == other._edgeSize);
+  assert(edgeSize_ == other.edgeSize_);
   for (size_t i = 0; i < size(); ++i)
-    _data[i] += other._data[i];
+    data_[i] += other.data_[i];
   return *this;
 }
 
@@ -148,21 +148,21 @@ ComplexSquareMatrix& ComplexSquareMatrix::operator+=(std::complex<double> c) {
 }
 
 ComplexSquareMatrix ComplexSquareMatrix::operator*(double c) const {
-  ComplexSquareMatrix result(_edgeSize);
+  ComplexSquareMatrix result(edgeSize_);
   for (size_t i = 0; i < size(); ++i)
-    result._data[i] = c * _data[i];
+    result.data_[i] = c * data_[i];
   return result;
 }
 
 ComplexSquareMatrix& ComplexSquareMatrix::operator*=(double c) {
   for (size_t i = 0; i < size(); ++i)
-    _data[i] *= c;
+    data_[i] *= c;
   return *this;
 }
 
 ComplexSquareMatrix
 ComplexSquareMatrix::operator*(std::complex<double> c) const {
-  ComplexSquareMatrix result(_edgeSize);
+  ComplexSquareMatrix result(edgeSize_);
   for (size_t i = 0; i < halfSize(); ++i)
     result.reBegin()[i] = reBegin()[i] * c.real() - imBegin()[i] * c.imag();
   for (size_t i = 0; i < halfSize(); ++i)
@@ -183,23 +183,23 @@ ComplexSquareMatrix& ComplexSquareMatrix::operator*=(std::complex<double> c) {
 }
 
 std::ostream& ComplexSquareMatrix::print(std::ostream& os) const {
-  if (_edgeSize == 0)
+  if (edgeSize_ == 0)
     return os << "[]\n";
-  if (_edgeSize == 1)
+  if (edgeSize_ == 1)
     return utils::print_complex(os << "[", rc(0, 0)) << "]\n";
 
   // first (edgeSize - 1) rows
   os << "[";
-  for (unsigned r = 0; r < _edgeSize - 1; ++r) {
-    for (unsigned c = 0; c < _edgeSize; ++c)
+  for (unsigned r = 0; r < edgeSize_ - 1; ++r) {
+    for (unsigned c = 0; c < edgeSize_; ++c)
       utils::print_complex(os, rc(r, c)) << ", ";
     os << "\n ";
   }
 
   // last row
-  for (unsigned c = 0; c < _edgeSize - 1; c++)
-    utils::print_complex(os, rc(_edgeSize - 1, c)) << ", ";
-  utils::print_complex(os, rc(_edgeSize - 1, _edgeSize - 1));
+  for (unsigned c = 0; c < edgeSize_ - 1; c++)
+    utils::print_complex(os, rc(edgeSize_ - 1, c)) << ", ";
+  utils::print_complex(os, rc(edgeSize_ - 1, edgeSize_ - 1));
   return os << " ]\n";
 }
 

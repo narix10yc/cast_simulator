@@ -13,25 +13,25 @@ namespace cast {
 class ComplexSquareMatrix {
   // constexpr static size_t AlignSize = 64;
 private:
-  size_t _edgeSize;
-  double* _data;
+  size_t edgeSize_;
+  double* data_;
 
   void allocData() {
-    assert(_edgeSize > 0);
-    _data = new double[_edgeSize * _edgeSize * 2];
-    assert(_data != nullptr && "Allocation failed");
+    assert(edgeSize_ > 0);
+    data_ = new double[edgeSize_ * edgeSize_ * 2];
+    assert(data_ != nullptr && "Allocation failed");
   }
 
   void freeData() {
-    delete[] _data;
-    _data = nullptr;
+    delete[] data_;
+    data_ = nullptr;
   }
 
 public:
-  ComplexSquareMatrix() : _edgeSize(0), _data(nullptr) {}
+  ComplexSquareMatrix() : edgeSize_(0), data_(nullptr) {}
 
   ComplexSquareMatrix(size_t edgeSize) {
-    _edgeSize = edgeSize;
+    edgeSize_ = edgeSize;
     allocData();
   }
 
@@ -40,21 +40,21 @@ public:
     assert(re.size() == im.size());
     size_t s = static_cast<size_t>(std::sqrt(re.size()));
     assert(s * s == re.size() && "Size is not a perfect square");
-    this->_edgeSize = s;
+    this->edgeSize_ = s;
     allocData();
     std::memcpy(reData(), re.begin(), re.size() * sizeof(double));
     std::memcpy(imData(), im.begin(), im.size() * sizeof(double));
   }
 
   ComplexSquareMatrix(const ComplexSquareMatrix& other) {
-    _edgeSize = other._edgeSize;
+    edgeSize_ = other.edgeSize_;
     allocData();
-    std::memcpy(_data, other._data, sizeInBytes());
+    std::memcpy(data_, other.data_, sizeInBytes());
   }
 
   ComplexSquareMatrix(ComplexSquareMatrix&& other) noexcept
-      : _edgeSize(other._edgeSize), _data(other._data) {
-    other._data = nullptr;
+      : edgeSize_(other.edgeSize_), data_(other.data_) {
+    other.data_ = nullptr;
   }
 
   ComplexSquareMatrix& operator=(const ComplexSquareMatrix& other) {
@@ -75,73 +75,73 @@ public:
 
   ~ComplexSquareMatrix() { freeData(); }
 
-  size_t edgeSize() const { return _edgeSize; }
+  size_t edgeSize() const { return edgeSize_; }
 
   // Get the size of the real (or imag) part alone.
   // Equals to edgeSize() * edgeSize()
-  size_t halfSize() const { return _edgeSize * _edgeSize; }
+  size_t halfSize() const { return edgeSize_ * edgeSize_; }
 
   // Size of both real and imag parts. Equals to 2 * edgeSize() * edgeSize().
   // For the size of real or imag parts each, use halfSize().
-  size_t size() const { return 2ULL * _edgeSize * _edgeSize; }
+  size_t size() const { return 2ULL * edgeSize_ * edgeSize_; }
 
   size_t sizeInBytes() const {
-    return sizeof(double) * 2ULL * _edgeSize * _edgeSize;
+    return sizeof(double) * 2ULL * edgeSize_ * edgeSize_;
   }
 
-  void fillZeros() { std::fill(_data, _data + size(), 0.0); }
+  void fillZeros() { std::fill(data_, data_ + size(), 0.0); }
 
-  double* data() { return _data; }
-  const double* data() const { return _data; }
+  double* data() { return data_; }
+  const double* data() const { return data_; }
 
-  double* reData() { return _data; }
-  double* reBegin() { return _data; }
-  double* reEnd() { return _data + _edgeSize * _edgeSize; }
+  double* reData() { return data_; }
+  double* reBegin() { return data_; }
+  double* reEnd() { return data_ + edgeSize_ * edgeSize_; }
 
-  double* imData() { return _data + _edgeSize * _edgeSize; }
-  double* imBegin() { return _data + _edgeSize * _edgeSize; }
-  double* imEnd() { return _data + 2 * _edgeSize * _edgeSize; }
+  double* imData() { return data_ + edgeSize_ * edgeSize_; }
+  double* imBegin() { return data_ + edgeSize_ * edgeSize_; }
+  double* imEnd() { return data_ + 2 * edgeSize_ * edgeSize_; }
 
-  const double* reData() const { return _data; }
-  const double* reBegin() const { return _data; }
-  const double* reEnd() const { return _data + _edgeSize * _edgeSize; }
+  const double* reData() const { return data_; }
+  const double* reBegin() const { return data_; }
+  const double* reEnd() const { return data_ + edgeSize_ * edgeSize_; }
 
-  const double* imData() const { return _data + _edgeSize * _edgeSize; }
-  const double* imBegin() const { return _data + _edgeSize * _edgeSize; }
-  const double* imEnd() const { return _data + 2 * _edgeSize * _edgeSize; }
+  const double* imData() const { return data_ + edgeSize_ * edgeSize_; }
+  const double* imBegin() const { return data_ + edgeSize_ * edgeSize_; }
+  const double* imEnd() const { return data_ + 2 * edgeSize_ * edgeSize_; }
 
   double& real(unsigned row, unsigned col) {
-    assert(row < _edgeSize && col < _edgeSize &&
+    assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
-    return _data[row * _edgeSize + col];
+    return data_[row * edgeSize_ + col];
   }
 
   double real(unsigned row, unsigned col) const {
-    assert(row < _edgeSize && col < _edgeSize &&
+    assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
-    return _data[row * _edgeSize + col];
+    return data_[row * edgeSize_ + col];
   }
 
   double& imag(unsigned row, unsigned col) {
-    assert(row < _edgeSize && col < _edgeSize &&
+    assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
-    return _data[(row + _edgeSize) * _edgeSize + col];
+    return data_[(row + edgeSize_) * edgeSize_ + col];
   }
 
   double imag(unsigned row, unsigned col) const {
-    assert(row < _edgeSize && col < _edgeSize &&
+    assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
-    return _data[(row + _edgeSize) * _edgeSize + col];
+    return data_[(row + edgeSize_) * edgeSize_ + col];
   }
 
   std::complex<double> rc(unsigned row, unsigned col) const {
-    assert(row < _edgeSize && col < _edgeSize &&
+    assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
     return {real(row, col), imag(row, col)};
   }
 
   void setRC(unsigned row, unsigned col, double re, double im) {
-    assert(row < _edgeSize && col < _edgeSize &&
+    assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
     real(row, col) = re;
     imag(row, col) = im;
