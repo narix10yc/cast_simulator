@@ -45,7 +45,7 @@ function(handle_llvm_dep)
       "So in debug builds, LLVM-related debug infos will not be available. ")
   endif()
 
-  if(NOT DEFINED ENV{CAST_LLVM_ROOT} AND NOT DEFINED ENV{CAST_LLVM_RELEASE_ROOT})
+  if(NOT DEFINED CAST_LLVM_ROOT AND NOT DEFINED CAST_LLVM_RELEASE_ROOT)
     message(FATAL_ERROR
       "Neither CAST_LLVM_ROOT nor CAST_LLVM_RELEASE_ROOT is defined. "
       "Please set one of them to the root directory of your LLVM installation.")

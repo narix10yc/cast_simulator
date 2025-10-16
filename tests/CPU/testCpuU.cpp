@@ -23,7 +23,7 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
   std::vector<StandardQuantumGatePtr> gates;
   gates.reserve(nQubits);
   for (unsigned q = 0; q < nQubits; q++) {
-    gates.emplace_back(StandardQuantumGate::RandomUnitary({q}));
+    gates.emplace_back(StandardQuantumGate::RandomUnitary(q));
   }
 
   CPUKernelGenConfig cpuConfig(SimdWidth, Precision::FP64);
