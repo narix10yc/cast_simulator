@@ -18,7 +18,6 @@ double normalizePhase(double phase) {
 
 fpga::FPGAGateCategory
 cast::fpga::getFPGAGateCategory(const cast::QuantumGate* gate, double tol) {
-
   assert(gate != nullptr);
   const auto* stdQuGate = llvm::dyn_cast<StandardQuantumGate>(gate);
   assert(stdQuGate && "FPGA only supports StandardQuantumGate");

@@ -15,8 +15,8 @@ struct FPGAFusionConfig {
   static const FPGAFusionConfig Default;
 };
 
-void applyFPGAGateFusion(cast::ir::CircuitGraphNode& graph,
-                         const FPGAFusionConfig& config);
+int applyFPGAGateFusion(cast::ir::CircuitGraphNode& graph,
+                        const FPGAFusionConfig& config);
 
 } // namespace cast::fpga
 

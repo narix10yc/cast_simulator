@@ -121,14 +121,14 @@ private:
   GInstKind gKind;
 
 public:
-  ConstQuantumGatePtr gate;
+  QuantumGatePtr gate;
   FPGAGateCategory blockKind;
 
   GateInst(GInstKind gKind)
       : gKind(gKind), gate(nullptr), blockKind(FPGAGateCategory::General) {}
 
   GateInst(GInstKind gKind,
-           ConstQuantumGatePtr gate,
+           QuantumGatePtr gate,
            FPGAGateCategory blockKind)
       : gKind(gKind), gate(gate), blockKind(blockKind) {}
 
@@ -153,7 +153,7 @@ public:
 // Single Qubit Gate (SQ)
 class GInstSQ : public GateInst {
 public:
-  GInstSQ(ConstQuantumGatePtr gate, FPGAGateCategory blockKind)
+  GInstSQ(QuantumGatePtr gate, FPGAGateCategory blockKind)
       : GateInst(GOp_SQ, gate, blockKind) {}
 
   std::ostream& print(std::ostream& os) const override;
@@ -162,7 +162,7 @@ public:
 // Unitary Permutation Gate (UP)
 class GInstUP : public GateInst {
 public:
-  GInstUP(ConstQuantumGatePtr gate, FPGAGateCategory blockKind)
+  GInstUP(QuantumGatePtr gate, FPGAGateCategory blockKind)
       : GateInst(GOp_UP, gate, blockKind) {}
 
   std::ostream& print(std::ostream& os) const override;
@@ -185,38 +185,40 @@ public:
     CK_TwiceExtMemTime // twice EXT mem inst
   };
 
-private:
-  std::unique_ptr<MemoryInst> _mInst;
-  std::unique_ptr<GateInst> _gInst;
+  // Memory instruction
+  std::unique_ptr<MemoryInst> mInst_;
+  // Gate instruction
+  std::unique_ptr<GateInst> gInst_;
+  // private:
 
 public:
-  Instruction(std::unique_ptr<MemoryInst> _mInst,
-              std::unique_ptr<GateInst> _gInst) {
-    setMInst(std::move(_mInst));
-    setGInst(std::move(_gInst));
+  Instruction(std::unique_ptr<MemoryInst> mInst,
+              std::unique_ptr<GateInst> gInst) {
+    setMInst(std::move(mInst));
+    setGInst(std::move(gInst));
   }
 
   std::ostream& print(std::ostream& os) const {
-    _mInst->print(os) << " : ";
-    _gInst->print(os) << "\n";
+    mInst_->print(os) << " : ";
+    gInst_->print(os) << "\n";
     return os;
   }
 
   /// Get the memory instruction.
-  const MemoryInst* getMInst() const { return _mInst.get(); }
+  const MemoryInst* getMInst() const { return mInst_.get(); }
 
   /// Get the gate instruction.
-  const GateInst* getGInst() const { return _gInst.get(); }
+  const GateInst* getGInst() const { return gInst_.get(); }
 
   /// Set the memory instruction.
   /// @param inst Mem instruction. Could be nullptr, in which case it will be
   /// set to an MInstNul
   void setMInst(std::unique_ptr<MemoryInst> inst) {
     if (inst) {
-      _mInst = std::move(inst);
+      mInst_ = std::move(inst);
       return;
     }
-    _mInst = std::make_unique<MInstNUL>();
+    mInst_ = std::make_unique<MInstNUL>();
   }
 
   /// @brief Set the gate instruction.
@@ -224,10 +226,10 @@ public:
   /// set to a GInstNUL.
   void setGInst(std::unique_ptr<GateInst> inst) {
     if (inst) {
-      _gInst = std::move(inst);
+      gInst_ = std::move(inst);
       return;
     }
-    _gInst = std::make_unique<GInstNUL>();
+    gInst_ = std::make_unique<GInstNUL>();
   }
 
   CostKind getCostKind(const FPGACostConfig&) const;

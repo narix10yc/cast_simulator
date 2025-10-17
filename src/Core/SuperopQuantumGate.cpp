@@ -19,13 +19,13 @@ SuperopQuantumGate::SuperopQuantumGate(ScalarGateMatrixPtr matrix,
   assert(matrix->nQubits() == 2 * qubits.size() &&
          "SuperopQuantumGate requires a 2n-qubit matrix");
   assert(isAscending(qubits) && "Qubits must be sorted in ascending order");
-  _superopMatrix = std::move(matrix);
+  superopMatrix_ = std::move(matrix);
   qubits_ = qubits;
 }
 
 void SuperopQuantumGate::displayInfo(utils::InfoLogger logger) const {
   logger.put("Superop Quantum Gate")
       .put("Target Qubits", std::span(qubits_))
-      .put("Superop Matrix", _superopMatrix.get())
+      .put("Superop Matrix", superopMatrix_.get())
       .put("opCount", opCount(1e-8));
 }

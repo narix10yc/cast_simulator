@@ -31,6 +31,9 @@ public:
   InfoLogger(std::ostream& os, int verbose = 1, int depth = 0)
       : os_(os), verbose(verbose), depth(depth) {}
 
+  // Get the raw ostream attached to this InfoLogger.
+  std::ostream& raw() { return os_; }
+
   InfoLogger& put(const char* label) {
     os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << "\n";
     return *this;

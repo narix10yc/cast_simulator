@@ -7,6 +7,7 @@ examples/*
 *.rec
 .DS_Store
 _deps/*
+drafts/*
 
 # build folders
 build*

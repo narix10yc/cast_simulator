@@ -99,6 +99,8 @@ public:
 
   double opCount(double zeroTol) const override;
 
+  // Returns nullptr if the inverse is not possible. For example, if the gate
+  // has a noise channel or the gate matrix is not invertible.
   QuantumGatePtr inverse() const override;
 
   // Try to cast the gate matrix to ScalarGateMatrix. Returns nullptr if
@@ -109,6 +111,9 @@ public:
   // the casting is not possible.
   ConstScalarGateMatrixPtr getScalarGM() const;
 
+  // Get the superoperator form of this quantum gate. Notice that this is a
+  // const member function, so if the gate has no noise channel, it returns a
+  // shared pointer to a copied gate matrix.
   SuperopQuantumGatePtr getSuperopGate() const override;
 
   void displayInfo(utils::InfoLogger logger) const override;
@@ -186,14 +191,14 @@ public:
 /// @brief SuperopQuantumGate represents a quantum gate in Superoperator form.
 class SuperopQuantumGate : public QuantumGate {
 private:
-  ScalarGateMatrixPtr _superopMatrix;
+  ScalarGateMatrixPtr superopMatrix_;
 
 public:
   SuperopQuantumGate(ScalarGateMatrixPtr superopMatrix,
                      const TargetQubitsType& qubits);
 
-  ScalarGateMatrixPtr getMatrix() { return _superopMatrix; }
-  ConstScalarGateMatrixPtr getMatrix() const { return _superopMatrix; }
+  ScalarGateMatrixPtr getMatrix() { return superopMatrix_; }
+  ConstScalarGateMatrixPtr getMatrix() const { return superopMatrix_; }
 
   double opCount(double zeroTol) const override;
 
@@ -204,7 +209,7 @@ public:
 
   // This method returns a copy of this superop gate
   SuperopQuantumGatePtr getSuperopGate() const override {
-    return SuperopQuantumGate::Create(_superopMatrix, qubits_);
+    return SuperopQuantumGate::Create(superopMatrix_, qubits_);
   }
 
   void displayInfo(utils::InfoLogger logger) const override;

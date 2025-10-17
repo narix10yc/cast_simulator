@@ -127,13 +127,14 @@ QuantumGatePtr trySameWireFuse(ir::CircuitGraphNode& graph,
 }
 } // anonymous namespace
 
-void cast::fpga::applyFPGAGateFusion(ir::CircuitGraphNode& graph,
-                                     const FPGAFusionConfig& config) {
+int cast::fpga::applyFPGAGateFusion(ir::CircuitGraphNode& graph,
+                                    const FPGAFusionConfig& config) {
   // if (graph.tile().size() < 2)
   // return;
 
   const auto nQubits = graph.nQubits();
   bool hasChange = true;
+  int nFused = 0;
   row_iterator rowIt;
   unsigned q = 0;
   // multi-traversal
@@ -151,8 +152,11 @@ void cast::fpga::applyFPGAGateFusion(ir::CircuitGraphNode& graph,
         auto fusedBlock = trySameWireFuse(graph, rowIt, q, config);
         if (fusedBlock == nullptr)
           q++;
-        else
+        else {
+          graph.squeeze();
+          nFused++;
           hasChange = true;
+        }
       }
       // cross wire (same row) fuse
       q = 0;
@@ -160,8 +164,11 @@ void cast::fpga::applyFPGAGateFusion(ir::CircuitGraphNode& graph,
         auto fusedBlock = tryCrossWireFuse(graph, rowIt, q, config);
         if (fusedBlock == nullptr)
           q++;
-        else
+        else {
+          graph.squeeze();
+          nFused++;
           hasChange = true;
+        }
       }
       rowIt++;
     }
@@ -169,4 +176,5 @@ void cast::fpga::applyFPGAGateFusion(ir::CircuitGraphNode& graph,
     if (!config.multiTraverse)
       break;
   }
+  return nFused;
 }

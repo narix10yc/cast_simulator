@@ -251,9 +251,9 @@ double StandardQuantumGate::opCount(double zeroTol) const {
 }
 
 double SuperopQuantumGate::opCount(double zeroTol) const {
-  assert(_superopMatrix != nullptr && "Superop matrix is null");
+  assert(superopMatrix_ != nullptr && "Superop matrix is null");
   double count =
-      static_cast<double>(countNonZeroElems(*_superopMatrix, zeroTol));
+      static_cast<double>(countNonZeroElems(*superopMatrix_, zeroTol));
 
   // superop matrices are treated as 2n-qubit gates
   return count * std::pow<double>(2.0, 1 - 2 * nQubits());

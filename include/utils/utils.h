@@ -139,15 +139,6 @@ void push_back_if_not_present(std::vector<T>& vec, const T& elem) {
   vec.push_back(elem);
 }
 
-template <typename T, unsigned N>
-void pushBackIfNotInVector(llvm::SmallVector<T, N>& vec, T elem) {
-  for (const auto& e : vec) {
-    if (e == elem)
-      return;
-  }
-  vec.push_back(elem);
-}
-
 template <typename T = uint64_t> T insertZeroToBit(T x, int bit) {
   T maskLo = (static_cast<T>(1) << bit) - 1;
   T maskHi = ~maskLo;

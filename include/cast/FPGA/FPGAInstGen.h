@@ -8,15 +8,15 @@ namespace cast::fpga {
 
 struct FPGAInstGenConfig {
 public:
-  int nLocalQubits;
-  int gridSize;
+  int nLocalQubits = 14;
+  int gridSize = 4;
 
   // If off, apply sequential instruction generation on the default order of
-  // blocks present in legacy::CircuitGraph
-  bool selectiveGenerationMode;
-  int maxUpSize;
+  // blocks present in the CircuitGraph
+  bool selectiveGenerationMode = true;
+  int maxUpSize = 5;
 
-  FPGAGateCategoryTolerance tolerances;
+  double tolerance = 1e-8;
 
   int getNOnChipQubits() const { return nLocalQubits + 2 * gridSize; }
 };
