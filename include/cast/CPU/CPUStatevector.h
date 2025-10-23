@@ -28,8 +28,8 @@ namespace cast {
 /// amplitudes:   r00 r01 i00 i01 r10 r11 i10 i11
 template <typename ScalarType> class CPUStatevector {
 private:
-  ScalarType* _data;
-  int _nQubits;
+  ScalarType* data_;
+  int nQubits_;
   int simd_s;
 
   // Make sure _nQubits is set.
@@ -41,14 +41,14 @@ private:
   }
 
 public:
-  CPUStatevector() : _data(nullptr), _nQubits(0), simd_s(0) {}
+  CPUStatevector() : data_(nullptr), nQubits_(0), simd_s(0) {}
 
   CPUStatevector(int nQubits, CPUSimdWidth simdWidth) {
     assert(nQubits > 0);
-    _nQubits = nQubits;
+    nQubits_ = nQubits;
 
     // initialize _data
-    _data = allocate();
+    data_ = allocate();
 
     // initialize simd_s
     if constexpr (std::is_same_v<ScalarType, float>) {
@@ -93,56 +93,56 @@ public:
   }
 
   CPUStatevector(const CPUStatevector& other) {
-    _nQubits = other._nQubits;
+    nQubits_ = other.nQubits_;
     simd_s = other.simd_s;
-    _data = allocate();
-    std::memcpy(_data, other._data, sizeInBytes());
+    data_ = allocate();
+    std::memcpy(data_, other.data_, sizeInBytes());
   }
 
   CPUStatevector(CPUStatevector&& other) noexcept {
     if (this == &other)
       return;
-    _nQubits = other._nQubits;
+    nQubits_ = other.nQubits_;
     simd_s = other.simd_s;
-    _data = other._data;
-    other._data = nullptr; // Prevent double deletion
+    data_ = other.data_;
+    other.data_ = nullptr; // Prevent double deletion
   }
 
-  ~CPUStatevector() { ::operator delete(_data); }
+  ~CPUStatevector() { ::operator delete(data_); }
 
   CPUStatevector& operator=(const CPUStatevector& that) {
     if (this == &that)
       return *this;
-    std::memcpy(_data, that._data, sizeInBytes());
+    std::memcpy(data_, that.data_, sizeInBytes());
     return *this;
   }
 
   CPUStatevector& operator=(CPUStatevector&& other) noexcept {
     if (this == &other)
       return *this;
-    ::operator delete(_data);
-    _nQubits = other._nQubits;
+    ::operator delete(data_);
+    nQubits_ = other.nQubits_;
     simd_s = other.simd_s;
-    _data = other._data;
-    other._data = nullptr; // Prevent double deletion
+    data_ = other.data_;
+    other.data_ = nullptr; // Prevent double deletion
     return *this;
   }
 
-  ScalarType* data() { return _data; }
-  const ScalarType* data() const { return _data; }
+  ScalarType* data() { return data_; }
+  const ScalarType* data() const { return data_; }
 
-  int nQubits() const { return _nQubits; }
+  int nQubits() const { return nQubits_; }
 
-  size_t getN() const { return 1ULL << _nQubits; }
+  size_t getN() const { return 1ULL << nQubits_; }
 
-  size_t size() const { return 2ULL << _nQubits; }
+  size_t size() const { return 2ULL << nQubits_; }
 
-  size_t sizeInBytes() const { return (2ULL << _nQubits) * sizeof(ScalarType); }
+  size_t sizeInBytes() const { return (2ULL << nQubits_) * sizeof(ScalarType); }
 
   double normSquared() const {
     double s = 0.0;
     for (size_t i = 0; i < 2 * getN(); i++) {
-      double a = static_cast<double>(_data[i]);
+      double a = static_cast<double>(data_[i]);
       s += a * a;
     }
     return s;
@@ -162,20 +162,20 @@ public:
       size_t t0 = nTasksPerThread * t;
       size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
       threads.emplace_back(
-          [this, t0, t1]() { std::fill(_data + t0, _data + t1, 0.0); });
+          [this, t0, t1]() { std::fill(data_ + t0, data_ + t1, 0.0); });
     }
     for (auto& t : threads) {
       if (t.joinable())
         t.join();
     }
-    _data[0] = 1.0;
+    data_[0] = 1.0;
   }
 
   /// Notice: nThreads parameter is ignored in this function.
   void normalize(int nThreads = 1) {
     auto factor = 1.0 / norm();
     for (size_t i = 0; i < 2 * getN(); ++i)
-      _data[i] *= factor;
+      data_[i] *= factor;
   }
 
   /// @brief Uniform randomize statevector (by the Haar-measure on sphere).
@@ -193,7 +193,7 @@ public:
         std::mt19937 gen{rd()};
         std::normal_distribution<ScalarType> d(0.0, 1.0);
         for (size_t i = t0; i < t1; ++i)
-          this->_data[i] = d(gen);
+          this->data_[i] = d(gen);
       });
     }
     for (auto& t : threads) {
@@ -205,21 +205,21 @@ public:
   }
 
   ScalarType& real(size_t idx) {
-    return _data[utils::insertZeroToBit(idx, simd_s)];
+    return data_[utils::insertZeroToBit(idx, simd_s)];
   }
   ScalarType& imag(size_t idx) {
-    return _data[utils::insertOneToBit(idx, simd_s)];
+    return data_[utils::insertOneToBit(idx, simd_s)];
   }
   ScalarType real(size_t idx) const {
-    return _data[utils::insertZeroToBit(idx, simd_s)];
+    return data_[utils::insertZeroToBit(idx, simd_s)];
   }
   ScalarType imag(size_t idx) const {
-    return _data[utils::insertOneToBit(idx, simd_s)];
+    return data_[utils::insertOneToBit(idx, simd_s)];
   }
 
   std::complex<ScalarType> amp(size_t idx) const {
     size_t tmp = utils::insertZeroToBit(idx, simd_s);
-    return {_data[tmp], _data[tmp | (1 << simd_s)]};
+    return {data_[tmp], data_[tmp | (1 << simd_s)]};
   }
 
   std::ostream& display(std::ostream& os = std::cerr) const {
@@ -249,7 +249,7 @@ public:
   }
 
   std::ostream& printProbabilities(std::ostream& os = std::cerr) const {
-    for (int q = 0; q < _nQubits; q++) {
+    for (int q = 0; q < nQubits_; q++) {
       os << "qubit " << q << ": " << prob(q) << "\n";
     }
     return os;
