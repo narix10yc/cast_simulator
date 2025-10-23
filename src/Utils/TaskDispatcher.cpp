@@ -31,13 +31,12 @@ void TaskDispatcher::enqueue(const std::function<void()>& task) {
 }
 
 void TaskDispatcher::ensure_tls_ready_() {
-  std::lock_guard lock(tls_mutex_);
   if (tls_manager_.version == tls_local_version_) {
     // Already up to date
     return;
   }
 
-  if (!tls_manager_.creator) {
+  if (tls_manager_.creator == nullptr) {
     // No TLS installed
     tls_local_instance_.reset(nullptr);
     tls_local_version_ = 0;
