@@ -150,11 +150,11 @@ private:
     int row = 0;
     for (auto it = graph.tile().begin(), end = graph.tile().end(); it != end;
          it++, row++) {
-      for (unsigned q = 0; q < nQubits; q++)
+      for (int q = 0; q < nQubits; q++)
         tileBlocks[nQubits * row + q] = graph.lookup((*it)[q]);
     }
     // initialize unlockedRowIndices
-    for (unsigned q = 0; q < nQubits; q++) {
+    for (int q = 0; q < nQubits; q++) {
       for (row = 0; row < nRows; row++) {
         if (tileBlocks[nQubits * row + q] != nullptr)
           break;
@@ -162,7 +162,7 @@ private:
       unlockedRowIndices[q] = row;
     }
     // initialize availables
-    for (unsigned q = 0; q < nQubits; q++) {
+    for (int q = 0; q < nQubits; q++) {
       row = unlockedRowIndices[q];
       if (row >= nRows)
         continue;
@@ -307,12 +307,13 @@ public:
   std::vector<Instruction> generate() {
     std::vector<Instruction> instructions;
     // The minimum indices at which we can insert mem / gate instructions
-    int vacantMemIdx = 0;
-    int vacantGateIdx = 0;
-    int sqGateBarrierIdx = 0; // single-qubit gate
+    unsigned vacantMemIdx = 0;
+    unsigned vacantGateIdx = 0;
+    unsigned sqGateBarrierIdx = 0; // single-qubit gate
 
     // This method will update vacantMemIdx = idx + 1
-    const auto writeMemInst = [&](int idx, std::unique_ptr<MemoryInst> inst) {
+    const auto writeMemInst = [&](unsigned idx,
+                                  std::unique_ptr<MemoryInst> inst) {
       if (idx < instructions.size()) {
         assert(instructions[idx].mInst_->isNull());
         instructions[idx].setMInst(std::move(inst));
@@ -381,7 +382,7 @@ public:
         for (const auto& q : g->qubits())
           utils::push_back_if_not_present(candidateQubits, q);
         // accept fusion
-        if (candidateQubits.size() <= config.maxUpSize) {
+        if (candidateQubits.size() <= static_cast<unsigned>(config.maxUpSize)) {
           auto gate = cast::matmul(g.get(), lastUPGate.get());
           instructions[vacantGateIdx - 1].setGInst(
               std::make_unique<GInstUP>(gate, FPGAGateCategory::NonComp));

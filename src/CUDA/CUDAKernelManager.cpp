@@ -218,9 +218,9 @@ static llvm::Error optimizeLLVMIR_work(int llvmOptLevel,
 
 // TODO: use TLS to avoid creating target machine every time
 static llvm::Error compileLLVMIRToPTX_work(CUDAKernelInfo& kernel) {
-  std::string targetTriple = "nvptx64-nvidia-cuda";
+  std::string tripleStr = "nvptx64-nvidia-cuda";
   std::string err;
-  const auto* target = TargetRegistry::lookupTarget(targetTriple, err);
+  const auto* target = TargetRegistry::lookupTarget(tripleStr, err);
   if (!target) {
     return llvm::createStringError("Failed to lookup target: " + err);
   }
@@ -233,11 +233,12 @@ static llvm::Error compileLLVMIRToPTX_work(CUDAKernelInfo& kernel) {
 
   const auto createTargetMachine = [&]() -> TargetMachine* {
     return target->createTargetMachine(
-        targetTriple, archString, "", {}, std::nullopt);
+        tripleStr, archString, "", {}, std::nullopt);
   };
 
   auto* llvmModule = kernel.llvmFunc->getParent();
-  llvmModule->setTargetTriple(targetTriple);
+  Triple triple(tripleStr);
+  llvmModule->setTargetTriple(triple);
   llvmModule->setDataLayout(createTargetMachine()->createDataLayout());
   std::string errorStr;
   llvm::raw_string_ostream sstream(errorStr);
@@ -428,8 +429,9 @@ void CUDAKernelManager::execTh_work_() {
       assert(task.kernel->cubinData.size() > 0);
       CU_CHECK(cuModuleLoadData(&task.cuModule, task.kernel->cubinData.data()));
     }
+    std::string kernelName(task.kernel->getName());
     CU_CHECK(cuModuleGetFunction(
-        &task.cuFunction, task.cuModule, task.kernel->getName().data()));
+        &task.cuFunction, task.cuModule, kernelName.c_str()));
 
     // setup kernel launch parameters
     unsigned nCombos =

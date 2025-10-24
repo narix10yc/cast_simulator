@@ -483,13 +483,11 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
       }
     }
     LLVM_DEBUG(std::cerr << "- reSplitMasks: [";
-               for (const auto& e
-                    : reSplitMasks) std::cerr
+               for (const auto& e : reSplitMasks) std::cerr
                << utils::fmt_0b(e, sepBit + 1) << ",";
                std::cerr << "]\n";
                std::cerr << "- imSplitMasks: [";
-               for (const auto& e
-                    : imSplitMasks) std::cerr
+               for (const auto& e : imSplitMasks) std::cerr
                << utils::fmt_0b(e, sepBit + 1) << ",";
                std::cerr << "]\n";);
   } // end init [re/im]SplitMasks
@@ -541,7 +539,7 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
     std::vector<int>&cacheLHS = arr0, &cacheRHS = arr1, &cacheCombined = arr2;
     std::memcpy(arr0.data(), reSplitMasks.data(), S * sizeof(int));
     std::memcpy(arr1.data(), reSplitMasks.data() + S, S * sizeof(int));
-    int roundIdx = 0;
+    unsigned roundIdx = 0;
     while (roundIdx < lk) {
       LLVM_DEBUG(
           std::cerr << "Round " << roundIdx << ": ";
@@ -554,7 +552,8 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
 
       idxL = 0;
       idxR = 0;
-      for (int idxCombined = 0; idxCombined < (lCached << 1); idxCombined++) {
+      for (unsigned idxCombined = 0; idxCombined < (lCached << 1);
+           idxCombined++) {
         if (idxL == lCached) {
           // append cacheRHS[idxR:] to cacheCombined
           while (idxR < lCached) {
@@ -610,10 +609,10 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
     } // end while
 
     // init reimMergeMask
-    for (int pairIdx = 0; pairIdx < (vecSize >> s >> 1); pairIdx++) {
-      for (int i = 0; i < S; i++)
+    for (unsigned pairIdx = 0; pairIdx < (vecSize >> s >> 1); pairIdx++) {
+      for (unsigned i = 0; i < S; i++)
         reimMergeMask.push_back(S * pairIdx + i);
-      for (int i = 0; i < S; i++)
+      for (unsigned i = 0; i < S; i++)
         reimMergeMask.push_back(S * pairIdx + i + (vecSize >> 1));
     }
     LLVM_DEBUG(utils::printArray(std::cerr << "reimMergeMask: ",

@@ -65,8 +65,7 @@ void cast::getCudaComputeCapability(int& major, int& minor) {
   // during LLVM builds here:
   // build/lib/Target/NVPTX/NVPTXGenRegisterInfo.inc
   // As of LLVM 20, the maximum supported is sm_120 and sm_120a.
-
-#if LLVM_VERSION_MAJOR == 20
+#if LLVM_VERSION_MAJOR >= 20
   constexpr int MAJOR_CAP = 12;
   constexpr int MINOR_CAP = 0;
 #elif LLVM_VERSION_MAJOR == 19

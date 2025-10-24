@@ -44,7 +44,6 @@
       std::cerr << "\033[31m[CUDA Driver Error]\033[0m " << errStr             \
                 << " (code " << logerr << ")" << " at " << __FILE__ << ":"     \
                 << __LINE__ << " in CALL: " << #CALL << "\n";                  \
-      std::terminate();                                                        \
     }                                                                          \
   } while (0)
 #else

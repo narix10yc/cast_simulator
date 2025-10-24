@@ -1282,6 +1282,16 @@ CUDAKernelManager::gen_(const CUDAKernelGenConfig& config,
     return llvm::createStringError("Function verification failed: " +
                                    rso.str());
   }
+
+  // We must use calling conventions for PTX kernels with LLVM >= 21. That is,
+  // define ptx_kernel void @foo(...) { ... }
+  // Prior to LLVM 21, attaching the attribute was sufficient.
+  // Check LLVM docs:
+  // https://releases.llvm.org/20.1.0/docs/NVPTXUsage.html#marking-functions-as-kernels
+  // versus
+  // https://releases.llvm.org/21.1.0/docs/NVPTXUsage.html#marking-functions-as-kernels
+  // FIXME: Remove function metadata when we drop support for LLVM < 21.
+  func->setCallingConv(llvm::CallingConv::PTX_Kernel);
   return func;
 }
 
