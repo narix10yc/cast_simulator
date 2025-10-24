@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
   if (ArgF32) {
     std::cerr << BOLDCYAN("[Info]: ")
               << "Running single-precision experiments.\n";
-    CUDAKernelGenConfig cudaConfig(Precision::F32);
+    CUDAKernelGenConfig cudaConfig(Precision::FP32);
     if (auto err = cache.runExperiments(
             cudaConfig, nQubitsSV, nWorkerThreads, ArgNTests)) {
       std::cerr << BOLDRED("[Error]: ") << "Failed to run f32 experiments: "
@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
   if (ArgF64) {
     std::cerr << BOLDCYAN("[Info]: ")
               << "Running double-precision experiments.\n";
-    CUDAKernelGenConfig cudaConfig(Precision::F64);
+    CUDAKernelGenConfig cudaConfig(Precision::FP64);
     if (auto err = cache.runExperiments(
             cudaConfig, nQubitsSV, nWorkerThreads, ArgNTests)) {
       std::cerr << BOLDRED("[Error]: ") << "Failed to run f64 experiments: "

@@ -14,27 +14,32 @@ static cl::OptionCategory Category("Demo CUDA Fusion Options");
 
 static cl::opt<std::string>
 ArgInputFilename("i", cl::cat(Category),
-  cl::desc("Input file name"), cl::Positional, cl::Required);
+  cl::desc("Input file name"),
+  cl::Positional,
+  cl::Required);
 
 static cl::opt<std::string>
 ArgModelPath("model", cl::cat(Category),
-  cl::desc("Path to performance model"), cl::init(""));
+  cl::desc("Path to performance model"),
+  cl::Required);
 
 static cl::opt<int>
 ArgPrecision("precision", cl::cat(Category),
-  cl::desc("Precision for the simulation (32 or 64)"), cl::init(64));
+  cl::desc("Precision for the simulation (32 or 64)"),
+  cl::init(64));
 
 static cl::opt<int>
 ArgVerbose("verbose", cl::cat(Category),
-  cl::desc("Verbosity level"), cl::init(1));
+  cl::desc("Verbosity level"),
+  cl::init(1));
 
 // clang-format on
 
 static Precision getPrecision() {
   if (ArgPrecision == 32)
-    return Precision::F32;
+    return Precision::FP32;
   else if (ArgPrecision == 64)
-    return Precision::F64;
+    return Precision::FP64;
   else {
     std::cerr << "Unsupported precision: " << ArgPrecision << "\n";
     exit(1);
@@ -98,7 +103,7 @@ int main(int argc, const char** argv) {
   utils::InfoLogger logger(std::cerr, ArgVerbose);
   auto loggerB = logger.indent();
   logger.put("Input QASM file", ArgInputFilename);
-  logger.put("Precision", (precision == Precision::F32 ? "32" : "64"));
+  logger.put("Precision", (precision == Precision::FP32 ? "32" : "64"));
   logger.put("Number of qubits", cg->nQubits());
   logger.put("Number of gates", cg->nGates());
 
