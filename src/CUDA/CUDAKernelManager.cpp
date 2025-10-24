@@ -1,7 +1,6 @@
 #include "cast/CUDA/CUDAKernelManager.h"
 #include "cast/CUDA/Config.h"
 
-#include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -15,8 +14,6 @@
 #include "utils/Formats.h"
 #include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
-#include "utils/utils.h"
-#include <fstream>
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include "llvm/Support/Debug.h"

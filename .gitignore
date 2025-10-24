@@ -1,17 +1,14 @@
 .vscode/*
 .idea/*
-.python.envs/*
-*.o
-*.exe
-examples/*
-*.rec
 .DS_Store
 _deps/*
 drafts/*
 
-# build folders
-build*
-debug-build/*
+# build artifacts
+build/*
+build.debug/*
+build.release/*
+compile_commands.json
 
 # analysis files
 tmp/*
@@ -19,5 +16,8 @@ analysis/*
 *.csv
 
 # python-related
-python_envs/*
+.python.envs/*
 *.ipynb
+
+# others
+.cache/*

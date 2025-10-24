@@ -2,7 +2,6 @@
 
 #include "cast/CUDA/CUDAStatevector.h"
 #include "utils/Formats.h"
-#include "utils/iocolor.h"
 
 #include <cassert>
 #include <iostream>

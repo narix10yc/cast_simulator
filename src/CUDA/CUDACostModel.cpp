@@ -1,11 +1,8 @@
 #include "cast/CUDA/CUDACostModel.h"
 #include "cast/CUDA/CUDAStatevector.h"
-#include "cast/Core/Config.h"
 #include "cast/Internal/PerfCacheHelper.h"
 
-#include "timeit/timeit.h"
 #include "utils/Formats.h"
-#include "utils/iocolor.h"
 #include "utils/utils.h"
 
 #include <numeric> // for std::reduce

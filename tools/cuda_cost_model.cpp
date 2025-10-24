@@ -7,7 +7,6 @@
 #include <cuda_runtime.h>
 #include <fstream>
 #include <iostream>
-#include <set>
 #include <string>
 
 namespace cl = llvm::cl;

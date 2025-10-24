@@ -1,17 +1,12 @@
 #include "cast/CUDA/CUDAKernelManager.h"
-#include "cast/Core/KernelGenInternal.h"
 
+#include "cast/Core/ScalarKind.h"
 #include "utils/Formats.h"
-#include "utils/iocolor.h"
-#include "utils/utils.h"
 
-#include "llvm/CodeGen/Passes.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
-#include "llvm/MC/TargetRegistry.h"
-#include "llvm/Support/CodeGen.h"
-#include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
 
 #define DEBUG_TYPE "codegen-cuda"

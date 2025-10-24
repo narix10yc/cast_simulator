@@ -18,7 +18,7 @@ public:
 
   void setState(int idx, int value) {
     assert(idx >= 0);
-    if (idx >= states.size())
+    if (idx >= static_cast<int>(states.size()))
       states.resize(idx + 1);
     assert(states[idx] == 0 && "Trying to set a non-zero state");
     states[idx] = value;
@@ -35,7 +35,7 @@ public:
     if (indent == 0)
       return os;
     // col [0, indent - 2]
-    for (unsigned i = 0; i < indent - 1; ++i) {
+    for (int i = 0; i < indent - 1; ++i) {
       if (states[i] == 0)
         os << "  ";
       else
