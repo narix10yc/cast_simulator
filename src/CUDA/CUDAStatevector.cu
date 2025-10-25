@@ -1,4 +1,5 @@
 #include "cast/CUDA/CUDAStatevector.h"
+#include "cast/CUDA/Config.h"
 #include <curand.h>
 #include <curand_kernel.h>
 

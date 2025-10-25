@@ -69,26 +69,32 @@ void OptimizerBase::run(ir::CircuitGraphNode& graph,
   assert(fusionConfig_ != nullptr);
   // Step 1: Run canonicalization pass if enabled
   if (enableCanonicalization_) {
-    int nFused = cast::impl::applySizeTwoFusion(graph, fusionConfig_->swapTol);
-    logger.log(1) << "Canoicalization Block-wise Fusion Pass: " << nFused
+    int nFused = 0;
+    auto t = timeit::once([&]() {
+      nFused = cast::impl::applySizeTwoFusion(graph, fusionConfig_->swapTol);
+    });
+    logger.log(1) << "(" << utils::fmt_time(t)
+                  << ") Canonicalization Block-wise Fusion Pass: " << nFused
                   << " gates fused.\n";
   }
 
   // Step 2: Run agglomerative fusion pass if enabled
   if (enableFusion_) {
-    int nFused = 0;
-    double t = timeit::once([&]() {
-      for (int maxCandidateSize = fusionConfig_->sizeMin;
-           maxCandidateSize <= fusionConfig_->sizeMax;
-           ++maxCandidateSize) {
-        int nFusedThisRound =
-            impl::applyGateFusion(graph, fusionConfig_.get(), maxCandidateSize);
-        nFused += nFusedThisRound;
-        logger.log(2) << " At size " << maxCandidateSize << ", fused "
-                      << nFusedThisRound << " gates.\n";
-      } // for maxCandidateSize
-    });
-    logger.log(1) << "Agglomerative Fusion Pass: Finished in "
-                  << utils::fmt_time(t) << "\n";
+    int sMin = fusionConfig_->sizeMin;
+    if (sMin == 2 && enableCanonicalization_)
+      sMin = 3; // skip size 2 if canonicalization already done
+    int sMax = fusionConfig_->sizeMax;
+
+    for (int cddSize = sMin; cddSize <= sMax; ++cddSize) {
+      int nFused;
+      auto t = timeit::once([&]() {
+        nFused = impl::applyGateFusion(graph, fusionConfig_.get(), cddSize);
+      });
+      logger.log(2) << "(" << utils::fmt_time(t) << ") At size " << cddSize
+                    << ", fused " << nFused << " gates.\n";
+    } // for maxCandidateSize
+
+    logger.log(1) << "Agglomerative Fusion Pass finished: " << graph.nGates()
+                  << " remains.\n";
   } // if enableFusion_
 }

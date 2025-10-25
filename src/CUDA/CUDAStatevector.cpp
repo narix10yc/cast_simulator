@@ -1,6 +1,5 @@
-#ifdef CAST_USE_CUDA
-
 #include "cast/CUDA/CUDAStatevector.h"
+#include "cast/CUDA/Config.h"
 #include "utils/Formats.h"
 
 #include <cassert>
@@ -135,4 +134,3 @@ template class CUDAStatevector<float>;
 template class CUDAStatevector<double>;
 } // namespace cast
 
-#endif // CAST_USE_CUDA

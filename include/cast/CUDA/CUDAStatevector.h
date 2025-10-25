@@ -1,8 +1,6 @@
 #ifndef CAST_CUDA_CUDASTATEVECTOR_H
 #define CAST_CUDA_CUDASTATEVECTOR_H
 
-#include "cast/CUDA/Config.h"
-
 #include <cassert>
 #include <cmath>
 #include <cstring> // for std::memcpy

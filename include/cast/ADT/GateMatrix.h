@@ -130,6 +130,14 @@ public:
 
   static bool classof(const GateMatrix* gm) { return gm->kind() == GM_Scalar; }
 
+  static ScalarGateMatrixPtr Create(const ComplexSquareMatrix& matrix) {
+    return std::make_shared<ScalarGateMatrix>(matrix);
+  }
+
+  static ScalarGateMatrixPtr Create(ComplexSquareMatrix&& matrix) {
+    return std::make_shared<ScalarGateMatrix>(matrix);
+  }
+
   static ScalarGateMatrixPtr RandomUnitary(int nQubits) {
     return std::make_shared<ScalarGateMatrix>(
         ComplexSquareMatrix::RandomUnitary(1ULL << nQubits));

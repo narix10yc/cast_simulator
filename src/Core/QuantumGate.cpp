@@ -1,19 +1,379 @@
 #include "cast/Core/QuantumGate.h"
-#include "utils/PrintSpan.h"
-#include "utils/iocolor.h"
+#include "cast/ADT/ComplexSquareMatrix.h"
+#include "cast/ADT/GateMatrix.h"
 #include "utils/utils.h"
 #include "llvm/Support/Casting.h"
+#include <cassert>
+#include <iostream>
 
 using namespace cast;
+
+template <unsigned EdgeSize>
+static ComplexSquareMatrix matmul_SameTargets(const ComplexSquareMatrix& A,
+                                              const ComplexSquareMatrix& B) {
+  assert(A.edgeSize() == EdgeSize);
+  assert(B.edgeSize() == EdgeSize);
+
+  auto* aRe = A.reData();
+  auto* aIm = A.imData();
+  auto* bRe = B.reData();
+  auto* bIm = B.imData();
+  ComplexSquareMatrix C(EdgeSize);
+  auto* cRe = C.reData();
+  auto* cIm = C.imData();
+  for (uint64_t i = 0; i < EdgeSize; ++i) {
+    for (uint64_t j = 0; j < EdgeSize; ++j) {
+      double sumRe = 0.0;
+      double sumIm = 0.0;
+      for (uint64_t k = 0; k < EdgeSize; ++k) {
+        double aRe_ik = aRe[i * EdgeSize + k];
+        double aIm_ik = aIm[i * EdgeSize + k];
+        double bRe_kj = bRe[k * EdgeSize + j];
+        double bIm_kj = bIm[k * EdgeSize + j];
+        sumRe += aRe_ik * bRe_kj - aIm_ik * bIm_kj;
+        sumIm += aRe_ik * bIm_kj + aIm_ik * bRe_kj;
+      }
+      cRe[i * EdgeSize + j] = sumRe;
+      cIm[i * EdgeSize + j] = sumIm;
+    }
+  }
+
+  return C;
+}
+
+// Returns nullptr if this fast path is not applicable
+static ScalarGateMatrixPtr
+fastpath_SameTargets(const ScalarGateMatrix& scalarGM_A,
+                     const ScalarGateMatrix& scalarGM_B) {
+  assert(scalarGM_A.nQubits() == scalarGM_B.nQubits());
+  const auto& A = scalarGM_A.matrix();
+  const auto& B = scalarGM_B.matrix();
+
+  switch (scalarGM_A.nQubits()) {
+  case 1:
+    return ScalarGateMatrix::Create(matmul_SameTargets<2>(A, B));
+  case 2:
+    return ScalarGateMatrix::Create(matmul_SameTargets<4>(A, B));
+  case 3:
+    return ScalarGateMatrix::Create(matmul_SameTargets<8>(A, B));
+  default:
+    break;
+  }
+  return nullptr;
+}
+
+// (I \otimes A) B
+static ScalarGateMatrixPtr fastpath_a_ba(const ScalarGateMatrix& scalarGM_A,
+                                         const ScalarGateMatrix& scalarGM_B) {
+  assert(scalarGM_A.nQubits() == 1);
+  assert(scalarGM_B.nQubits() == 2);
+
+  auto* aRe = scalarGM_A.matrix().reData();
+  auto* aIm = scalarGM_A.matrix().imData();
+  auto* bRe = scalarGM_B.matrix().reData();
+  auto* bIm = scalarGM_B.matrix().imData();
+
+  return ScalarGateMatrix::Create(ComplexSquareMatrix{
+      // clang-format off
+  { // ---- Real ----
+    aRe[0]*bRe[0]  - aIm[0]*bIm[0]  + aRe[1]*bRe[8]  - aIm[1]*bIm[8],
+    aRe[0]*bRe[1]  - aIm[0]*bIm[1]  + aRe[1]*bRe[9]  - aIm[1]*bIm[9],
+    aRe[0]*bRe[2]  - aIm[0]*bIm[2]  + aRe[1]*bRe[10] - aIm[1]*bIm[10],
+    aRe[0]*bRe[3]  - aIm[0]*bIm[3]  + aRe[1]*bRe[11] - aIm[1]*bIm[11],
+
+    aRe[0]*bRe[4]  - aIm[0]*bIm[4]  + aRe[1]*bRe[12] - aIm[1]*bIm[12],
+    aRe[0]*bRe[5]  - aIm[0]*bIm[5]  + aRe[1]*bRe[13] - aIm[1]*bIm[13],
+    aRe[0]*bRe[6]  - aIm[0]*bIm[6]  + aRe[1]*bRe[14] - aIm[1]*bIm[14],
+    aRe[0]*bRe[7]  - aIm[0]*bIm[7]  + aRe[1]*bRe[15] - aIm[1]*bIm[15],
+
+    aRe[2]*bRe[0]  - aIm[2]*bIm[0]  + aRe[3]*bRe[8]  - aIm[3]*bIm[8],
+    aRe[2]*bRe[1]  - aIm[2]*bIm[1]  + aRe[3]*bRe[9]  - aIm[3]*bIm[9],
+    aRe[2]*bRe[2]  - aIm[2]*bIm[2]  + aRe[3]*bRe[10] - aIm[3]*bIm[10],
+    aRe[2]*bRe[3]  - aIm[2]*bIm[3]  + aRe[3]*bRe[11] - aIm[3]*bIm[11],
+
+    aRe[2]*bRe[4]  - aIm[2]*bIm[4]  + aRe[3]*bRe[12] - aIm[3]*bIm[12],
+    aRe[2]*bRe[5]  - aIm[2]*bIm[5]  + aRe[3]*bRe[13] - aIm[3]*bIm[13],
+    aRe[2]*bRe[6]  - aIm[2]*bIm[6]  + aRe[3]*bRe[14] - aIm[3]*bIm[14],
+    aRe[2]*bRe[7]  - aIm[2]*bIm[7]  + aRe[3]*bRe[15] - aIm[3]*bIm[15]
+  },
+  { // ---- Imag ----
+    aRe[0]*bIm[0]  + aIm[0]*bRe[0]  + aRe[1]*bIm[8]  + aIm[1]*bRe[8],
+    aRe[0]*bIm[1]  + aIm[0]*bRe[1]  + aRe[1]*bIm[9]  + aIm[1]*bRe[9],
+    aRe[0]*bIm[2]  + aIm[0]*bRe[2]  + aRe[1]*bIm[10] + aIm[1]*bRe[10],
+    aRe[0]*bIm[3]  + aIm[0]*bRe[3]  + aRe[1]*bIm[11] + aIm[1]*bRe[11],
+
+    aRe[0]*bIm[4]  + aIm[0]*bRe[4]  + aRe[1]*bIm[12] + aIm[1]*bRe[12],
+    aRe[0]*bIm[5]  + aIm[0]*bRe[5]  + aRe[1]*bIm[13] + aIm[1]*bRe[13],
+    aRe[0]*bIm[6]  + aIm[0]*bRe[6]  + aRe[1]*bIm[14] + aIm[1]*bRe[14],
+    aRe[0]*bIm[7]  + aIm[0]*bRe[7]  + aRe[1]*bIm[15] + aIm[1]*bRe[15],
+
+    aRe[2]*bIm[0]  + aIm[2]*bRe[0]  + aRe[3]*bIm[8]  + aIm[3]*bRe[8],
+    aRe[2]*bIm[1]  + aIm[2]*bRe[1]  + aRe[3]*bIm[9]  + aIm[3]*bRe[9],
+    aRe[2]*bIm[2]  + aIm[2]*bRe[2]  + aRe[3]*bIm[10] + aIm[3]*bRe[10],
+    aRe[2]*bIm[3]  + aIm[2]*bRe[3]  + aRe[3]*bIm[11] + aIm[3]*bRe[11],
+
+    aRe[2]*bIm[4]  + aIm[2]*bRe[4]  + aRe[3]*bIm[12] + aIm[3]*bRe[12],
+    aRe[2]*bIm[5]  + aIm[2]*bRe[5]  + aRe[3]*bIm[13] + aIm[3]*bRe[13],
+    aRe[2]*bIm[6]  + aIm[2]*bRe[6]  + aRe[3]*bIm[14] + aIm[3]*bRe[14],
+    aRe[2]*bIm[7]  + aIm[2]*bRe[7]  + aRe[3]*bIm[15] + aIm[3]*bRe[15]
+  }
+      // clang-format on
+  });
+}
+
+// (A \otimes I) B
+static ScalarGateMatrixPtr fastpath_b_ba(const ScalarGateMatrix& scalarGM_A,
+                                         const ScalarGateMatrix& scalarGM_B) {
+  assert(scalarGM_A.nQubits() == 1);
+  assert(scalarGM_B.nQubits() == 2);
+
+  auto* aRe = scalarGM_A.matrix().reData();
+  auto* aIm = scalarGM_A.matrix().imData();
+  auto* bRe = scalarGM_B.matrix().reData();
+  auto* bIm = scalarGM_B.matrix().imData();
+
+  return ScalarGateMatrix::Create(ComplexSquareMatrix{
+      // clang-format off
+  { // ---- Real (row-major) ----
+    aRe[0]*bRe[0]  - aIm[0]*bIm[0]  + aRe[1]*bRe[4]  - aIm[1]*bIm[4],
+    aRe[0]*bRe[1]  - aIm[0]*bIm[1]  + aRe[1]*bRe[5]  - aIm[1]*bIm[5],
+    aRe[0]*bRe[2]  - aIm[0]*bIm[2]  + aRe[1]*bRe[6]  - aIm[1]*bIm[6],
+    aRe[0]*bRe[3]  - aIm[0]*bIm[3]  + aRe[1]*bRe[7]  - aIm[1]*bIm[7],
+
+    aRe[2]*bRe[0]  - aIm[2]*bIm[0]  + aRe[3]*bRe[4]  - aIm[3]*bIm[4],
+    aRe[2]*bRe[1]  - aIm[2]*bIm[1]  + aRe[3]*bRe[5]  - aIm[3]*bIm[5],
+    aRe[2]*bRe[2]  - aIm[2]*bIm[2]  + aRe[3]*bRe[6]  - aIm[3]*bIm[6],
+    aRe[2]*bRe[3]  - aIm[2]*bIm[3]  + aRe[3]*bRe[7]  - aIm[3]*bIm[7],
+
+    aRe[0]*bRe[8]  - aIm[0]*bIm[8]  + aRe[1]*bRe[12] - aIm[1]*bIm[12],
+    aRe[0]*bRe[9]  - aIm[0]*bIm[9]  + aRe[1]*bRe[13] - aIm[1]*bIm[13],
+    aRe[0]*bRe[10] - aIm[0]*bIm[10] + aRe[1]*bRe[14] - aIm[1]*bIm[14],
+    aRe[0]*bRe[11] - aIm[0]*bIm[11] + aRe[1]*bRe[15] - aIm[1]*bIm[15],
+
+    aRe[2]*bRe[8]  - aIm[2]*bIm[8]  + aRe[3]*bRe[12] - aIm[3]*bIm[12],
+    aRe[2]*bRe[9]  - aIm[2]*bIm[9]  + aRe[3]*bRe[13] - aIm[3]*bIm[13],
+    aRe[2]*bRe[10] - aIm[2]*bIm[10] + aRe[3]*bRe[14] - aIm[3]*bIm[14],
+    aRe[2]*bRe[11] - aIm[2]*bIm[11] + aRe[3]*bRe[15] - aIm[3]*bIm[15]
+  },
+  { // ---- Imag ----
+    aRe[0]*bIm[0]  + aIm[0]*bRe[0]  + aRe[1]*bIm[4]  + aIm[1]*bRe[4],
+    aRe[0]*bIm[1]  + aIm[0]*bRe[1]  + aRe[1]*bIm[5]  + aIm[1]*bRe[5],
+    aRe[0]*bIm[2]  + aIm[0]*bRe[2]  + aRe[1]*bIm[6]  + aIm[1]*bRe[6],
+    aRe[0]*bIm[3]  + aIm[0]*bRe[3]  + aRe[1]*bIm[7]  + aIm[1]*bRe[7],
+
+    aRe[2]*bIm[0]  + aIm[2]*bRe[0]  + aRe[3]*bIm[4]  + aIm[3]*bRe[4],
+    aRe[2]*bIm[1]  + aIm[2]*bRe[1]  + aRe[3]*bIm[5]  + aIm[3]*bRe[5],
+    aRe[2]*bIm[2]  + aIm[2]*bRe[2]  + aRe[3]*bIm[6]  + aIm[3]*bRe[6],
+    aRe[2]*bIm[3]  + aIm[2]*bRe[3]  + aRe[3]*bIm[7]  + aIm[3]*bRe[7],
+
+    aRe[0]*bIm[8]  + aIm[0]*bRe[8]  + aRe[1]*bIm[12] + aIm[1]*bRe[12],
+    aRe[0]*bIm[9]  + aIm[0]*bRe[9]  + aRe[1]*bIm[13] + aIm[1]*bRe[13],
+    aRe[0]*bIm[10] + aIm[0]*bRe[10] + aRe[1]*bIm[14] + aIm[1]*bRe[14],
+    aRe[0]*bIm[11] + aIm[0]*bRe[11] + aRe[1]*bIm[15] + aIm[1]*bRe[15],
+
+    aRe[2]*bIm[8]  + aIm[2]*bRe[8]  + aRe[3]*bIm[12] + aIm[3]*bRe[12],
+    aRe[2]*bIm[9]  + aIm[2]*bRe[9]  + aRe[3]*bIm[13] + aIm[3]*bRe[13],
+    aRe[2]*bIm[10] + aIm[2]*bRe[10] + aRe[3]*bIm[14] + aIm[3]*bRe[14],
+    aRe[2]*bIm[11] + aIm[2]*bRe[11] + aRe[3]*bIm[15] + aIm[3]*bRe[15]
+  }
+      // clang-format on
+  });
+}
+
+// A (I \otimes B)
+static ScalarGateMatrixPtr fastpath_ba_a(const ScalarGateMatrix& scalarGM_A,
+                                         const ScalarGateMatrix& scalarGM_B) {
+  assert(scalarGM_A.nQubits() == 2);
+  assert(scalarGM_B.nQubits() == 1);
+
+  auto* aRe = scalarGM_A.matrix().reData();
+  auto* aIm = scalarGM_A.matrix().imData();
+  auto* bRe = scalarGM_B.matrix().reData();
+  auto* bIm = scalarGM_B.matrix().imData();
+
+  return ScalarGateMatrix::Create(ComplexSquareMatrix{
+      // clang-format off
+  { // -------- Real (row-major) --------
+    // row 0
+    aRe[0]*bRe[0] - aIm[0]*bIm[0] + aRe[1]*bRe[2] - aIm[1]*bIm[2],
+    aRe[0]*bRe[1] - aIm[0]*bIm[1] + aRe[1]*bRe[3] - aIm[1]*bIm[3],
+    aRe[2]*bRe[0] - aIm[2]*bIm[0] + aRe[3]*bRe[2] - aIm[3]*bIm[2],
+    aRe[2]*bRe[1] - aIm[2]*bIm[1] + aRe[3]*bRe[3] - aIm[3]*bIm[3],
+    // row 1
+    aRe[4]*bRe[0] - aIm[4]*bIm[0] + aRe[5]*bRe[2] - aIm[5]*bIm[2],
+    aRe[4]*bRe[1] - aIm[4]*bIm[1] + aRe[5]*bRe[3] - aIm[5]*bIm[3],
+    aRe[6]*bRe[0] - aIm[6]*bIm[0] + aRe[7]*bRe[2] - aIm[7]*bIm[2],
+    aRe[6]*bRe[1] - aIm[6]*bIm[1] + aRe[7]*bRe[3] - aIm[7]*bIm[3],
+    // row 2
+    aRe[8]*bRe[0] - aIm[8]*bIm[0] + aRe[9]*bRe[2] - aIm[9]*bIm[2],
+    aRe[8]*bRe[1] - aIm[8]*bIm[1] + aRe[9]*bRe[3] - aIm[9]*bIm[3],
+    aRe[10]*bRe[0] - aIm[10]*bIm[0] + aRe[11]*bRe[2] - aIm[11]*bIm[2],
+    aRe[10]*bRe[1] - aIm[10]*bIm[1] + aRe[11]*bRe[3] - aIm[11]*bIm[3],
+    // row 3
+    aRe[12]*bRe[0] - aIm[12]*bIm[0] + aRe[13]*bRe[2] - aIm[13]*bIm[2],
+    aRe[12]*bRe[1] - aIm[12]*bIm[1] + aRe[13]*bRe[3] - aIm[13]*bIm[3],
+    aRe[14]*bRe[0] - aIm[14]*bIm[0] + aRe[15]*bRe[2] - aIm[15]*bIm[2],
+    aRe[14]*bRe[1] - aIm[14]*bIm[1] + aRe[15]*bRe[3] - aIm[15]*bIm[3]
+  },
+  { // -------- Imag --------
+    // row 0
+    aRe[0]*bIm[0] + aIm[0]*bRe[0] + aRe[1]*bIm[2] + aIm[1]*bRe[2],
+    aRe[0]*bIm[1] + aIm[0]*bRe[1] + aRe[1]*bIm[3] + aIm[1]*bRe[3],
+    aRe[2]*bIm[0] + aIm[2]*bRe[0] + aRe[3]*bIm[2] + aIm[3]*bRe[2],
+    aRe[2]*bIm[1] + aIm[2]*bRe[1] + aRe[3]*bIm[3] + aIm[3]*bRe[3],
+    // row 1
+    aRe[4]*bIm[0] + aIm[4]*bRe[0] + aRe[5]*bIm[2] + aIm[5]*bRe[2],
+    aRe[4]*bIm[1] + aIm[4]*bRe[1] + aRe[5]*bIm[3] + aIm[5]*bRe[3],
+    aRe[6]*bIm[0] + aIm[6]*bRe[0] + aRe[7]*bIm[2] + aIm[7]*bRe[2],
+    aRe[6]*bIm[1] + aIm[6]*bRe[1] + aRe[7]*bIm[3] + aIm[7]*bRe[3],
+    // row 2
+    aRe[8]*bIm[0] + aIm[8]*bRe[0] + aRe[9]*bIm[2] + aIm[9]*bRe[2],
+    aRe[8]*bIm[1] + aIm[8]*bRe[1] + aRe[9]*bIm[3] + aIm[9]*bRe[3],
+    aRe[10]*bIm[0] + aIm[10]*bRe[0] + aRe[11]*bIm[2] + aIm[11]*bRe[2],
+    aRe[10]*bIm[1] + aIm[10]*bRe[1] + aRe[11]*bIm[3] + aIm[11]*bRe[3],
+    // row 3
+    aRe[12]*bIm[0] + aIm[12]*bRe[0] + aRe[13]*bIm[2] + aIm[13]*bRe[2],
+    aRe[12]*bIm[1] + aIm[12]*bRe[1] + aRe[13]*bIm[3] + aIm[13]*bRe[3],
+    aRe[14]*bIm[0] + aIm[14]*bRe[0] + aRe[15]*bIm[2] + aIm[15]*bRe[2],
+    aRe[14]*bIm[1] + aIm[14]*bRe[1] + aRe[15]*bIm[3] + aIm[15]*bRe[3]
+  }
+      // clang-format on
+  });
+}
+
+// A (B \otimes I)
+static ScalarGateMatrixPtr fastpath_ba_b(const ScalarGateMatrix& scalarGM_A,
+                                         const ScalarGateMatrix& scalarGM_B) {
+  assert(scalarGM_A.nQubits() == 2);
+  assert(scalarGM_B.nQubits() == 1);
+
+  auto* aRe = scalarGM_A.matrix().reData();
+  auto* aIm = scalarGM_A.matrix().imData();
+  auto* bRe = scalarGM_B.matrix().reData();
+  auto* bIm = scalarGM_B.matrix().imData();
+
+  return ScalarGateMatrix::Create(ComplexSquareMatrix{
+      // clang-format off
+    { // -------- Real (row-major) --------
+    // row 0
+    aRe[0]*bRe[0] - aIm[0]*bIm[0] + aRe[2]*bRe[2] - aIm[2]*bIm[2],
+    aRe[1]*bRe[0] - aIm[1]*bIm[0] + aRe[3]*bRe[2] - aIm[3]*bIm[2],
+    aRe[0]*bRe[1] - aIm[0]*bIm[1] + aRe[2]*bRe[3] - aIm[2]*bIm[3],
+    aRe[1]*bRe[1] - aIm[1]*bIm[1] + aRe[3]*bRe[3] - aIm[3]*bIm[3],
+    // row 1
+    aRe[4]*bRe[0] - aIm[4]*bIm[0] + aRe[6]*bRe[2] - aIm[6]*bIm[2],
+    aRe[5]*bRe[0] - aIm[5]*bIm[0] + aRe[7]*bRe[2] - aIm[7]*bIm[2],
+    aRe[4]*bRe[1] - aIm[4]*bIm[1] + aRe[6]*bRe[3] - aIm[6]*bIm[3],
+    aRe[5]*bRe[1] - aIm[5]*bIm[1] + aRe[7]*bRe[3] - aIm[7]*bIm[3],
+    // row 2
+    aRe[8]*bRe[0] - aIm[8]*bIm[0] + aRe[10]*bRe[2] - aIm[10]*bIm[2],
+    aRe[9]*bRe[0] - aIm[9]*bIm[0] + aRe[11]*bRe[2] - aIm[11]*bIm[2],
+    aRe[8]*bRe[1] - aIm[8]*bIm[1] + aRe[10]*bRe[3] - aIm[10]*bIm[3],
+    aRe[9]*bRe[1] - aIm[9]*bIm[1] + aRe[11]*bRe[3] - aIm[11]*bIm[3],
+    // row 3
+    aRe[12]*bRe[0] - aIm[12]*bIm[0] + aRe[14]*bRe[2] - aIm[14]*bIm[2],
+    aRe[13]*bRe[0] - aIm[13]*bIm[0] + aRe[15]*bRe[2] - aIm[15]*bIm[2],
+    aRe[12]*bRe[1] - aIm[12]*bIm[1] + aRe[14]*bRe[3] - aIm[14]*bIm[3],
+    aRe[13]*bRe[1] - aIm[13]*bIm[1] + aRe[15]*bRe[3] - aIm[15]*bIm[3]
+  },
+  { // -------- Imag --------
+    // row 0
+    aRe[0]*bIm[0] + aIm[0]*bRe[0] + aRe[2]*bIm[2] + aIm[2]*bRe[2],
+    aRe[1]*bIm[0] + aIm[1]*bRe[0] + aRe[3]*bIm[2] + aIm[3]*bRe[2],
+    aRe[0]*bIm[1] + aIm[0]*bRe[1] + aRe[2]*bIm[3] + aIm[2]*bRe[3],
+    aRe[1]*bIm[1] + aIm[1]*bRe[1] + aRe[3]*bIm[3] + aIm[3]*bRe[3],
+    // row 1
+    aRe[4]*bIm[0] + aIm[4]*bRe[0] + aRe[6]*bIm[2] + aIm[6]*bRe[2],
+    aRe[5]*bIm[0] + aIm[5]*bRe[0] + aRe[7]*bIm[2] + aIm[7]*bRe[2],
+    aRe[4]*bIm[1] + aIm[4]*bRe[1] + aRe[6]*bIm[3] + aIm[6]*bRe[3],
+    aRe[5]*bIm[1] + aIm[5]*bRe[1] + aRe[7]*bIm[3] + aIm[7]*bRe[3],
+    // row 2
+    aRe[8]*bIm[0] + aIm[8]*bRe[0] + aRe[10]*bIm[2] + aIm[10]*bRe[2],
+    aRe[9]*bIm[0] + aIm[9]*bRe[0] + aRe[11]*bIm[2] + aIm[11]*bRe[2],
+    aRe[8]*bIm[1] + aIm[8]*bRe[1] + aRe[10]*bIm[3] + aIm[10]*bRe[3],
+    aRe[9]*bIm[1] + aIm[9]*bRe[1] + aRe[11]*bIm[3] + aIm[11]*bRe[3],
+    // row 3
+    aRe[12]*bIm[0] + aIm[12]*bRe[0] + aRe[14]*bIm[2] + aIm[14]*bRe[2],
+    aRe[13]*bIm[0] + aIm[13]*bRe[0] + aRe[15]*bIm[2] + aIm[15]*bRe[2],
+    aRe[12]*bIm[1] + aIm[12]*bRe[1] + aRe[14]*bIm[3] + aIm[14]*bRe[3],
+    aRe[13]*bIm[1] + aIm[13]*bRe[1] + aRe[15]*bIm[3] + aIm[15]*bRe[3]
+  }
+      // clang-format on
+  });
+}
 
 /**** Matmul of Quantum Gates ****/
 QuantumGatePtr cast::matmul(const QuantumGate* gateA,
                             const QuantumGate* gateB) {
   assert(gateA != nullptr);
   assert(gateB != nullptr);
+
+  const auto* aStdQuGate = llvm::dyn_cast<StandardQuantumGate>(gateA);
+  const auto* bStdQuGate = llvm::dyn_cast<StandardQuantumGate>(gateB);
+
+  assert(aStdQuGate && bStdQuGate &&
+         "Only implemented matmul for StandardQuantumGate now");
+
+  assert(aStdQuGate->noiseChannel() == nullptr &&
+         bStdQuGate->noiseChannel() == nullptr &&
+         "Only implemented matmul for noiseless gates now");
+
+  const auto aScalarGM = aStdQuGate->getScalarGM();
+  const auto bScalarGM = bStdQuGate->getScalarGM();
+  assert(aScalarGM && bScalarGM &&
+         "Both gate matrices must be ScalarGateMatrix for now");
+
+  // fast path: same target qubits
+  if (aStdQuGate->qubits() == bStdQuGate->qubits()) {
+    // cScalarGM can be nullptr when nQubits() is large
+    auto cScalarGM = fastpath_SameTargets(*aScalarGM, *bScalarGM);
+    if (cScalarGM != nullptr) {
+      return StandardQuantumGate::Create(
+          cScalarGM, NoiseChannelPtr(nullptr), aStdQuGate->qubits());
+    }
+  }
+
+  // fast path: A acts on one qubit, B acts on two qubits
+  if (aStdQuGate->nQubits() == 1 && bStdQuGate->nQubits() == 2) {
+    // check if A's qubit is one of B's qubits
+    const int aQubit = aStdQuGate->qubits()[0];
+    const auto& bQubits = bStdQuGate->qubits();
+    if (aQubit == bQubits[0]) {
+      auto cScalarGM = fastpath_a_ba(*aScalarGM, *bScalarGM);
+      assert(cScalarGM != nullptr);
+      return StandardQuantumGate::Create(
+          cScalarGM, NoiseChannelPtr(nullptr), bStdQuGate->qubits());
+    } else if (aQubit == bQubits[1]) {
+      auto cScalarGM = fastpath_b_ba(*aScalarGM, *bScalarGM);
+      assert(cScalarGM != nullptr);
+      return StandardQuantumGate::Create(
+          cScalarGM, NoiseChannelPtr(nullptr), bStdQuGate->qubits());
+    }
+  }
+
+  // fast path: A acts on two qubits, B acts on one qubit
+  if (aStdQuGate->nQubits() == 2 && bStdQuGate->nQubits() == 1) {
+    // check if B's qubit is one of A's qubits
+    const int bQubit = bStdQuGate->qubits()[0];
+    const auto& aQubits = aStdQuGate->qubits();
+    if (bQubit == aQubits[0]) {
+      auto cScalarGM = fastpath_ba_a(*aScalarGM, *bScalarGM);
+      assert(cScalarGM != nullptr);
+      return StandardQuantumGate::Create(
+          cScalarGM, NoiseChannelPtr(nullptr), aStdQuGate->qubits());
+    } else if (bQubit == aQubits[1]) {
+      auto cScalarGM = fastpath_ba_b(*aScalarGM, *bScalarGM);
+      assert(cScalarGM != nullptr);
+      return StandardQuantumGate::Create(
+          cScalarGM, NoiseChannelPtr(nullptr), aStdQuGate->qubits());
+    }
+  }
+
+  // general case
   // C = AB
   const auto& aQubits = gateA->qubits();
   const auto& bQubits = gateB->qubits();
+
   const int anQubits = aQubits.size();
   const int bnQubits = bQubits.size();
 
@@ -146,24 +506,17 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
     }
   };
 
-  const auto* aStdQuGate = llvm::dyn_cast<StandardQuantumGate>(gateA);
-  const auto* bStdQuGate = llvm::dyn_cast<StandardQuantumGate>(gateB);
-  if (aStdQuGate && bStdQuGate) {
-    const auto aScalarGM = aStdQuGate->getScalarGM();
-    const auto bScalarGM = bStdQuGate->getScalarGM();
-    assert(aScalarGM != nullptr && bScalarGM != nullptr &&
-           "Both gate matrices must be ScalarGateMatrix for now");
-    const ComplexSquareMatrix& aCMat = aScalarGM->matrix();
-    const ComplexSquareMatrix& bCMat = bScalarGM->matrix();
-    ComplexSquareMatrix cCMat(1ULL << cnQubits);
-    matmulComplexSquareMatrix(aCMat, bCMat, cCMat);
+  const ComplexSquareMatrix& aCMat = aScalarGM->matrix();
+  const ComplexSquareMatrix& bCMat = bScalarGM->matrix();
+  ComplexSquareMatrix cCMat(1ULL << cnQubits);
+  matmulComplexSquareMatrix(aCMat, bCMat, cCMat);
 
-    return StandardQuantumGate::Create(
-        std::make_shared<ScalarGateMatrix>(std::move(cCMat)),
-        NoiseChannelPtr(nullptr), // No noise channel for now
-        cQubits);
-  }
-  assert(false && "Only implemented matmul for StandardQuantumGate now");
+  return StandardQuantumGate::Create(
+      std::make_shared<ScalarGateMatrix>(std::move(cCMat)),
+      NoiseChannelPtr(nullptr), // No noise channel for now
+      cQubits);
+
+  assert(false && "Matmul not implemented for these gate types yet");
   return nullptr;
 }
 

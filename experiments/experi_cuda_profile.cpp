@@ -13,14 +13,18 @@ struct ProfileStats : utils::CSVParsable<ProfileStats> {
   int num_qubits;
   cast::FusionOptLevel fusion_opt_level;
   cast::Precision precision;
+  int num_u3;
+  int num_cx;
+  int num_gates_after_fusion;
   float parse_opt_time;
   float jit_launch_time;
   float exec_time;
 
   // clang-format off
   CSV_DATA_FIELD(device_name, num_threads, benchmark_name, num_qubits,
-                 fusion_opt_level, precision, parse_opt_time, jit_launch_time,
-                 exec_time)
+                 fusion_opt_level, precision, num_u3, num_cx, 
+                 num_gates_after_fusion, 
+                 parse_opt_time, jit_launch_time, exec_time)
   // clang-format on
 };
 
@@ -102,6 +106,7 @@ int main(int argc, char** argv) {
                        Precision precision) {
     auto t0 = clock::now();
     auto circuit = llvm::cantFail(parseCircuitFromQASMFile(inputFilename));
+
     CUDAOptimizer opt;
     opt.enableCFO(false);
     if (auto e = opt.loadCUDACostModelFromFile(ArgCostModel, precision)) {
@@ -111,7 +116,17 @@ int main(int argc, char** argv) {
     }
     opt.getFusionConfig()->setOptLevel(fusionOpt);
     auto* cg = circuit->getAllCircuitGraphs()[0];
-    opt.run(*cg);
+    int nU3 = 0;
+    int nCX = 0;
+    auto allGates = cg->getAllGates();
+    for (const auto* gate : allGates) {
+      if (gate->nQubits() == 1)
+        nU3++;
+      else if (gate->nQubits() == 2)
+        nCX++;
+    }
+
+    opt.run(*cg, {std::cerr, static_cast<int>(ArgVerbose)});
 
     CUDAKernelGenConfig gConfig(precision);
     auto graphName = "graph_" + std::to_string(count++);
@@ -139,7 +154,11 @@ int main(int argc, char** argv) {
          .num_threads = nThreads,
          .benchmark_name = path.filename().string(),
          .num_qubits = cg->nQubits(),
+         .fusion_opt_level = fusionOpt,
          .precision = precision,
+         .num_u3 = nU3,
+         .num_cx = nCX,
+         .num_gates_after_fusion = static_cast<int>(cg->nGates()),
          .parse_opt_time = std::chrono::duration<float>(t1 - t0).count(),
          .jit_launch_time = wallT - gpuT,
          .exec_time = gpuT});
