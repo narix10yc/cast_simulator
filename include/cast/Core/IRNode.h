@@ -130,13 +130,13 @@ public:
 /// Correspondingly, when removing gates, always use \c removeGate .
 class CircuitGraphNode : public IRNode {
 private:
-  // _nQubits always equal to the size of each row
-  int _nQubits;
+  // nQubits_ always equal to the size of each row
+  int nQubits_;
   using row_t = std::vector<QuantumGate*>;
-  std::list<row_t> _tile;
+  std::list<row_t> tile_;
 
 public:
-  static int _gateMapId;
+  static int gateMapId_;
 
   // This is the width to display in each qubit wire.
   static int getWidthForVisualize();
@@ -145,48 +145,42 @@ public:
 
   using row_iterator = std::list<row_t>::iterator;
   using const_row_iterator = std::list<row_t>::const_iterator;
-  // struct TransparentHash {
-  //   using is_transparent = void;
-
-  //   std::size_t operator()(const QuantumGatePtr& gate) const noexcept {
-  //     return std::hash<QuantumGate*>()(gate.get());
-  //   }
-
-  //   size_t operator()(const QuantumGate* gate) const noexcept {
-  //     return std::hash<const QuantumGate*>()(gate);
-  //   }
-  // };
-
-  // struct TransparentEqual {
-  //   using is_transparent = void;
-
-  //   bool operator()(const QuantumGatePtr& lhs, const QuantumGatePtr& rhs)
-  //   const noexcept {
-  //     return lhs.get() == rhs.get();
-  //   }
-
-  //   bool operator()(const QuantumGate* lhs, const QuantumGatePtr& rhs) const
-  //   noexcept {
-  //     return lhs == rhs.get();
-  //   }
-
-  //   bool operator()(const QuantumGatePtr& lhs, const QuantumGate* rhs) const
-  //   noexcept {
-  //     return lhs.get() == rhs;
-  //   }
-  // };
-
-  // std::unordered_map<QuantumGatePtr, int, TransparentHash, TransparentEqual>
-  // _gateMap;
-
-  /* TODO
-   * We sometimes look up gates using raw pointers. Current approach is O(n)
-   */
 
 private:
-  // _gateMap manages memory and stores the id of gates
-  std::unordered_map<QuantumGatePtr, int> _gateMap;
+  struct TransparentHash {
+    using is_transparent = void;
 
+    std::size_t operator()(const QuantumGatePtr& gate) const noexcept {
+      return std::hash<QuantumGate*>()(gate.get());
+    }
+
+    size_t operator()(const QuantumGate* gate) const noexcept {
+      return std::hash<const QuantumGate*>()(gate);
+    }
+  };
+
+  struct TransparentEqual {
+    using is_transparent = void;
+
+    bool operator()(const QuantumGatePtr& lhs, const QuantumGatePtr& rhs)
+    const noexcept {
+      return lhs.get() == rhs.get();
+    }
+
+    bool operator()(const QuantumGate* lhs, const QuantumGatePtr& rhs) const
+    noexcept {
+      return lhs == rhs.get();
+    }
+
+    bool operator()(const QuantumGatePtr& lhs, const QuantumGate* rhs) const
+    noexcept {
+      return lhs.get() == rhs;
+    }
+  };
+
+  using GateMap = std::unordered_map<QuantumGatePtr, int, TransparentHash, TransparentEqual>;
+  GateMap   gateMap_;
+  
   void resizeRowsIfNeeded(int size);
 
 public:
@@ -194,9 +188,9 @@ public:
    * as public.
    **/
 
-  // This simply calls _tile.emplace(rowIt, row_t(DefaultRowCapacity, nullptr));
+  // This simply calls tile_.emplace(rowIt, row_t(DefaultRowCapacity, nullptr));
   row_iterator insertNewRow(row_iterator rowIt) {
-    return _tile.emplace(rowIt, row_t(DefaultRowCapacity, nullptr));
+    return tile_.emplace(rowIt, row_t(DefaultRowCapacity, nullptr));
   }
 
   /// Fuse two gates on the same row given by (*rowIt)[q0] and (*rowIt)[q1].
@@ -215,7 +209,7 @@ public:
   row_iterator fuseAndInsertDiffRow(row_iterator rowItL, int qubit);
 
 public:
-  CircuitGraphNode() : IRNode(IRNode_CircuitGraph), _nQubits(0), _tile() {}
+  CircuitGraphNode() : IRNode(IRNode_CircuitGraph), nQubits_(0), tile_() {}
 
   // Recommend to use assert(checkConsistency())
   bool checkConsistency() const;
@@ -252,8 +246,8 @@ public:
   void squeeze() { return squeeze(tile_begin()); }
 
   // gate map is read-only
-  const std::unordered_map<QuantumGatePtr, int>& gateMap() const {
-    return _gateMap;
+  const GateMap& gateMap() const {
+    return gateMap_;
   }
 
   // Return the id of the gate in the circuit graph. Return -1 if gate is not
@@ -261,8 +255,8 @@ public:
   int gateId(const QuantumGate* gate) const;
 
   int gateId(QuantumGatePtr gate) const {
-    auto it = _gateMap.find(gate);
-    if (it != _gateMap.end())
+    auto it = gateMap_.find(gate);
+    if (it != gateMap_.end())
       return it->second;
     return -1; // gate not found
   }
@@ -270,18 +264,18 @@ public:
   // Look up a gate in the graph. Return nullptr if not found.
   QuantumGatePtr lookup(QuantumGate* gate) const;
 
-  std::list<row_t>& tile() { return _tile; }
-  const std::list<row_t>& tile() const { return _tile; }
+  std::list<row_t>& tile() { return tile_; }
+  const std::list<row_t>& tile() const { return tile_; }
 
-  row_iterator tile_begin() { return _tile.begin(); }
-  const_row_iterator tile_begin() const { return _tile.begin(); }
+  row_iterator tile_begin() { return tile_.begin(); }
+  const_row_iterator tile_begin() const { return tile_.begin(); }
 
-  row_iterator tile_end() { return _tile.end(); }
-  const_row_iterator tile_end() const { return _tile.end(); }
+  row_iterator tile_end() { return tile_.end(); }
+  const_row_iterator tile_end() const { return tile_.end(); }
 
-  int nQubits() const { return _nQubits; }
+  int nQubits() const { return nQubits_; }
 
-  size_t nGates() const { return _gateMap.size(); }
+  size_t nGates() const { return gateMap_.size(); }
 
   // Collect gates in the circuit graph in order. This methods returns a vector
   // of raw pointers. These pointers could be invalidated when the circuit graph
@@ -305,7 +299,7 @@ public:
 
   void deepcopyTo(CircuitGraphNode& other) const {
     assert(other.getAllGates().size() == 0);
-    other._nQubits = _nQubits;
+    other.nQubits_ = nQubits_;
     auto allGates = getAllGatesShared();
     for (const auto& gate : allGates)
       other.insertGate(gate);

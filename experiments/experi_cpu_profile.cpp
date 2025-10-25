@@ -4,7 +4,7 @@
 
 #include "llvm/Support/CommandLine.h"
 
-#include <filesystem>
+#include <iostream>
 
 struct ProfileStats : utils::CSVParsable<ProfileStats> {
   std::string device_name;
@@ -105,18 +105,18 @@ int main(int argc, char** argv) {
     llvm::cantFail(opt.loadCPUCostModel(ArgCostModel, nThreads, precision));
     opt.getFusionConfig()->setOptLevel(fusionOpt);
     auto* cg = circuit->getAllCircuitGraphs()[0];
-    opt.run(*cg);
+    opt.run(*cg, {std::cerr, ArgVerbose});
 
     CPUKernelGenConfig gConfig(precision);
     auto graphName = "graph_" + std::to_string(count++);
-    llvm::cantFail(km.genGraphGates(gConfig, *cg, graphName));
+    // llvm::cantFail(km.genGraphGates(gConfig, *cg, graphName));
     auto t1 = clock::now();
 
-    llvm::cantFail(km.compilePool(graphName));
+    // llvm::cantFail(km.compilePool(graphName));
     auto t2 = clock::now();
 
-    llvm::cantFail(km.applyCPUKernelsFromGraph(
-        sv.data(), sv.nQubits(), graphName, nThreads));
+    // llvm::cantFail(km.applyCPUKernelsFromGraph(
+        // sv.data(), sv.nQubits(), graphName, nThreads));
     auto t3 = clock::now();
 
     std::filesystem::path path(inputFilename);
