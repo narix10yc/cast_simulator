@@ -188,7 +188,7 @@ int cast::impl::startFusion(ir::CircuitGraphNode& graph,
   fusedGates.emplace_back(prodGate, prodIt);
 
   // function that checks if candidateGate can be added to the fusedGates
-  const auto checkFuseable = [&](QuantumGate* candidateGate) {
+  const auto checkFuseable = [&](QuantumGate* candidateGate) -> bool {
     if (candidateGate == nullptr)
       return false;
     if (prodGate.get() == candidateGate)
@@ -322,8 +322,9 @@ int cast::impl::applySizeTwoFusion(ir::CircuitGraphNode& graph,
   // In that case, we will wait for the main fusion algorithm to handle it.
   auto it = graph.tile_begin();
   int nFused = 0;
+  const int nQubits = graph.nQubits();
   do {
-    for (int q = 0; q < graph.nQubits(); ++q) {
+    for (int q = 0; q < nQubits; ++q) {
       auto* gate = (*it)[q];
       if (gate == nullptr || gate->nQubits() != 1)
         continue;
@@ -341,7 +342,7 @@ int cast::impl::applySizeTwoFusion(ir::CircuitGraphNode& graph,
     if (nextIt == graph.tile_end())
       break; // no next row to fuse with
 
-    for (int q = 0; q < graph.nQubits(); ++q) {
+    for (int q = 0; q < nQubits; ++q) {
       auto* gateL = (*it)[q];
       if (gateL == nullptr || gateL->nQubits() != 2)
         continue;

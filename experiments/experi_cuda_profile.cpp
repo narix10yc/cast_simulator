@@ -114,6 +114,7 @@ int main(int argc, char** argv) {
                << "': " << llvm::toString(std::move(e)) << "\n";
       std::exit(1);
     }
+
     opt.getFusionConfig()->setOptLevel(fusionOpt);
     auto* cg = circuit->getAllCircuitGraphs()[0];
     int nU3 = 0;
