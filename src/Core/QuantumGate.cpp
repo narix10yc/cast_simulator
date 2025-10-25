@@ -6,7 +6,12 @@
 #include <cassert>
 #include <iostream>
 
+// FIXME: bugs in fast path implementation. Does not pass unit tests.
+#define DISABLE_GATE_MATMUL_FASTPATH
+
 using namespace cast;
+
+#ifndef DISABLE_GATE_MATMUL_FASTPATH
 
 template <unsigned EdgeSize>
 static ComplexSquareMatrix matmul_SameTargets(const ComplexSquareMatrix& A,
@@ -302,6 +307,8 @@ static ScalarGateMatrixPtr fastpath_ba_b(const ScalarGateMatrix& scalarGM_A,
   });
 }
 
+#endif // DISABLE_GATE_MATMUL_FASTPATH
+
 /**** Matmul of Quantum Gates ****/
 QuantumGatePtr cast::matmul(const QuantumGate* gateA,
                             const QuantumGate* gateB) {
@@ -323,6 +330,7 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
   assert(aScalarGM && bScalarGM &&
          "Both gate matrices must be ScalarGateMatrix for now");
 
+         #ifndef DISABLE_GATE_MATMUL_FASTPATH
   // fast path: same target qubits
   if (aStdQuGate->qubits() == bStdQuGate->qubits()) {
     // cScalarGM can be nullptr when nQubits() is large
@@ -368,6 +376,8 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
           cScalarGM, NoiseChannelPtr(nullptr), aStdQuGate->qubits());
     }
   }
+
+  #endif // DISABLE_GATE_MATMUL_FASTPATH
 
   // general case
   // C = AB
