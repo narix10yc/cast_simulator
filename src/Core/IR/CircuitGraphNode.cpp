@@ -1,5 +1,6 @@
 #include "cast/Core/IRNode.h"
 #include "utils/iocolor.h"
+#include "llvm/MC/MCDirectives.h"
 
 #include <iomanip>
 #include <set>
@@ -329,61 +330,81 @@ int CircuitGraphNode::gateId(const QuantumGate* gate) const {
 QuantumGatePtr CircuitGraphNode::lookup(QuantumGate* gate) const {
   if (gate == nullptr)
     return nullptr;
-  for (const auto& [itGate, id] : gateMap_) {
-    if (itGate.get() == gate)
-      return itGate;
-  }
-  return nullptr; // gate not found
+  auto it = gateMap_.find(gate);
+  if (it == gateMap_.end())
+    return nullptr;
+  return it->first;
 }
 
 void CircuitGraphNode::squeeze(row_iterator beginIt) {
   assert(beginIt != tile_end() && "beginIt cannot be the end iterator");
   // first step: relocate gates to the top
-  for (auto rowIt = std::next(beginIt), end = tile_end(); rowIt != end;
-       ++rowIt) {
+  // end is only to be used in the first step
+  const auto end = tile_end();
+  struct Vacancy {
+    row_iterator rowIt;
+    // rowIdx is the relative index from beginIt to rowIt
+    int rowIdx;
+  };
+  std::vector<Vacancy> vacancies(nQubits_,
+                                 {end, static_cast<int>(tile_.size())});
+  int rowIdx = 0;
+  for (auto rowIt = std::next(beginIt); rowIt != end; ++rowIt, ++rowIdx) {
     for (int q = 0; q < nQubits_; ++q) {
       auto* gate = (*rowIt)[q];
-      if (gate == nullptr)
-        continue;
-      // find the top-most vacant row
-      // when the while loop exits, candidateRow is the row we will insert the
-      // gate to
-      auto candidateRow = rowIt;
-      while (true) {
-        --candidateRow;
-        if (candidateRow == beginIt) {
-          if (!isRowVacant(candidateRow, gate->qubits()))
-            ++candidateRow;
-          break;
+      if (gate == nullptr) {
+        // record the vacancy if current vacancy is set to the end row
+        // otherwise, current row is not the top-most vacant row, so do nothing
+        if (vacancies[q].rowIdx > rowIdx) {
+          vacancies[q] = {rowIt, rowIdx};
         }
-        if (isRowVacant(candidateRow, gate->qubits()))
-          continue;
-        ++candidateRow;
-        break;
-      }
-      if (candidateRow == rowIt) {
-        // the gate is already in the right place
         continue;
       }
-      assert(isRowVacant(candidateRow, gate->qubits()));
 
-      // relocate the gate
-      for (const auto& qq : gate->qubits()) {
+      // find the top-most vacant row that fits the gate
+      const auto& qubits = gate->qubits();
+      unsigned nQubitsGate = qubits.size();
+      auto cddVacancy = vacancies[qubits[0]];
+      for (unsigned i = 1; i < nQubitsGate; ++i) {
+        auto qq = qubits[i];
+        if (vacancies[qq].rowIdx > cddVacancy.rowIdx) {
+          cddVacancy = vacancies[qq];
+        }
+      }
+      if (cddVacancy.rowIdx >= rowIdx) {
+        // no vacant row found above rowIt
+        // update vacancies
+        for (const auto& qq : qubits) {
+          vacancies[qq].rowIt = std::next(rowIt);
+          vacancies[qq].rowIdx = rowIdx + 1;
+        }
+        continue;
+      }
+
+      assert(cddVacancy.rowIt != end);
+      assert(isRowVacant(cddVacancy.rowIt, qubits));
+
+      // relocate the gate, update vacancies
+      for (const auto& qq : qubits) {
         assert((*rowIt)[qq] == gate);
-        assert((*candidateRow)[qq] == nullptr);
+        assert((*cddVacancy.rowIt)[qq] == nullptr);
         (*rowIt)[qq] = nullptr;
-        (*candidateRow)[qq] = gate;
+        (*cddVacancy.rowIt)[qq] = gate;
+
+        // update vacancy for qubit q
+        vacancies[qq].rowIt = std::next(cddVacancy.rowIt);
+        vacancies[qq].rowIdx = cddVacancy.rowIdx + 1;
       }
     }
   }
-
+  
   // second step: remove empty rows
   auto rowIt = tile_end();
   while (rowIt != beginIt) {
     --rowIt;
     bool isEmpty = true;
-    for (int q = 0; q < rowIt->size(); ++q) {
-      if ((*rowIt)[q] != nullptr) {
+    for (const auto* q : (*rowIt)) {
+      if (q != nullptr) {
         isEmpty = false;
         break;
       }
