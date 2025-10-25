@@ -1,5 +1,4 @@
 #include "cast/CPU/CPU.h"
-#include "cast/Core/Precision.h"
 #include "utils/CSVParsable.h"
 
 #include "llvm/Support/CommandLine.h"
@@ -13,14 +12,18 @@ struct ProfileStats : utils::CSVParsable<ProfileStats> {
   int num_qubits;
   cast::FusionOptLevel fusion_opt_level;
   cast::Precision precision;
+  int num_u3;
+  int num_cx;
+  int num_gates_after_fusion;
   float parse_opt_time;
   float jit_launch_time;
   float exec_time;
 
   // clang-format off
   CSV_DATA_FIELD(device_name, num_threads, benchmark_name, num_qubits,
-                 fusion_opt_level, precision, parse_opt_time, jit_launch_time,
-                 exec_time)
+                 fusion_opt_level, precision,
+                 num_u3, num_cx, num_gates_after_fusion,
+                 parse_opt_time, jit_launch_time, exec_time)
   // clang-format on
 };
 
@@ -105,18 +108,27 @@ int main(int argc, char** argv) {
     llvm::cantFail(opt.loadCPUCostModel(ArgCostModel, nThreads, precision));
     opt.getFusionConfig()->setOptLevel(fusionOpt);
     auto* cg = circuit->getAllCircuitGraphs()[0];
+    int nU3 = 0;
+    int nCX = 0;
+    const auto allGates = cg->getAllGates();
+    for (const auto* gate : allGates) {
+      if (gate->nQubits() == 1)
+        nU3++;
+      else
+        nCX++;
+    }
     opt.run(*cg, {std::cerr, ArgVerbose});
 
     CPUKernelGenConfig gConfig(precision);
     auto graphName = "graph_" + std::to_string(count++);
-    // llvm::cantFail(km.genGraphGates(gConfig, *cg, graphName));
+    llvm::cantFail(km.genGraphGates(gConfig, *cg, graphName));
     auto t1 = clock::now();
 
-    // llvm::cantFail(km.compilePool(graphName));
+    llvm::cantFail(km.compilePool(graphName));
     auto t2 = clock::now();
 
-    // llvm::cantFail(km.applyCPUKernelsFromGraph(
-        // sv.data(), sv.nQubits(), graphName, nThreads));
+    llvm::cantFail(km.applyCPUKernelsFromGraph(
+        sv.data(), sv.nQubits(), graphName, nThreads));
     auto t3 = clock::now();
 
     std::filesystem::path path(inputFilename);
@@ -127,6 +139,9 @@ int main(int argc, char** argv) {
          .benchmark_name = path.filename().string(),
          .num_qubits = cg->nQubits(),
          .precision = precision,
+         .num_u3 = nU3,
+         .num_cx = nCX,
+         .num_gates_after_fusion = static_cast<int>(cg->nGates()),
          .parse_opt_time = std::chrono::duration<float>(t1 - t0).count(),
          .jit_launch_time = std::chrono::duration<float>(t2 - t1).count(),
          .exec_time = std::chrono::duration<float>(t3 - t2).count()});
