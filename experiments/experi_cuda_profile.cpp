@@ -130,6 +130,11 @@ int main(int argc, char** argv) {
     opt.run(*cg, {std::cerr, static_cast<int>(ArgVerbose)});
 
     CUDAKernelGenConfig gConfig(precision);
+    if (count > 0) {
+      // clean up previous graph kernels and execution results
+      km.clearGraphKernels("graph_" + std::to_string(count - 1));
+      km.clearExecutionResults();
+    }
     auto graphName = "graph_" + std::to_string(count++);
     if (auto e = km.genGraphGates(gConfig, *cg, graphName)) {
       logerr() << "Failed to generate CUDA kernels for graph '" << graphName

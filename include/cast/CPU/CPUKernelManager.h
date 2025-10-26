@@ -7,6 +7,9 @@
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 #include "utils/InfoLogger.h"
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/Passes/OptimizationLevel.h"
+#include "llvm/Support/TargetSelect.h"
 
 #define CPU_KERNEL_TYPE void(void*)
 

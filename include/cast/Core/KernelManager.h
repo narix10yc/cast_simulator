@@ -1,15 +1,9 @@
 #ifndef CAST_CORE_KERNEL_MANAGER_H
 #define CAST_CORE_KERNEL_MANAGER_H
 
-#include "cast/Core/Precision.h"
-
-#include "llvm/ExecutionEngine/Orc/LLJIT.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Passes/OptimizationLevel.h"
-#include "llvm/Support/TargetSelect.h"
-
 #include "utils/TaskDispatcher.h"
-
+#include "llvm/IR/Module.h"
+#include <map>
 #include <ranges>
 
 namespace cast {
@@ -85,6 +79,13 @@ public:
 
   const Pool& getDefaultPool() const {
     return kernelPools_.at(DEFAULT_POOL_NAME);
+  }
+
+  std::span<const PoolItem> getKernelsIn(const std::string& poolName) const {
+    auto it = kernelPools_.find(poolName);
+    if (it == kernelPools_.end())
+      return {}; // empty span
+    return std::span<const PoolItem>(it->second.begin(), it->second.end());
   }
 
   auto all_kernels() {

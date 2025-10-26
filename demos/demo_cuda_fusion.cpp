@@ -2,6 +2,7 @@
 #include "cast/CUDA/CUDAOptimizer.h"
 #include "cast/CUDA/CUDAStatevector.h"
 
+#include "cast/Core/FusionConfig.h"
 #include "timeit/timeit.h"
 #include "utils/Formats.h"
 #include "utils/iocolor.h"
@@ -54,6 +55,11 @@ static cl::opt<bool>
 ArgRunDenseKernel("run-dense-kernel", cl::cat(Category),
   cl::desc("Run dense kernel"), cl::init(false));
 
+static cl::opt<std::string>
+ArgFusionOptLevel("fusion", cl::cat(Category),
+  cl::desc("Fusion optimization level: mild, balanced (default), aggressive"),
+  cl::init("balanced"));
+
 static cl::opt<int>
 ArgReplication("replication", cl::cat(Category),
   cl::desc("Number of replications"), cl::init(1));
@@ -74,7 +80,7 @@ struct CircuitGraphs {
 
   ir::CircuitGraphNode noFuseDense;
   ir::CircuitGraphNode sizeOnlyDense;
-  ir::CircuitGraphNode adaptiveDense; 
+  ir::CircuitGraphNode adaptiveDense;
 
   CircuitGraphs(const ir::CircuitGraphNode& cg) {
     auto allGates = cg.getAllGatesShared();
@@ -89,8 +95,10 @@ struct CircuitGraphs {
   }
 };
 
-static CircuitGraphs
-unwrapArguments(Precision& precision, int& nWorkerThreads, int& nQubitsSV) {
+static CircuitGraphs unwrapArguments(Precision& precision,
+                                     int& nWorkerThreads,
+                                     int& nQubitsSV,
+                                     FusionOptLevel& optLevel) {
   if (ArgPrecision == 32)
     precision = Precision::FP32;
   else if (ArgPrecision == 64)
@@ -101,10 +109,26 @@ unwrapArguments(Precision& precision, int& nWorkerThreads, int& nQubitsSV) {
               << ". Valid values are 32 or 64.\n";
     std::exit(1);
   }
+
+  // Number of worker threads
   if (ArgNWorkerThreads <= 0)
     nWorkerThreads = cast::get_cpu_num_threads();
   else
     nWorkerThreads = ArgNWorkerThreads;
+
+  // Fusion optimization level
+  if (ArgFusionOptLevel == "mild")
+    optLevel = FusionOptLevel::Mild;
+  else if (ArgFusionOptLevel == "balanced")
+    optLevel = FusionOptLevel::Balanced;
+  else if (ArgFusionOptLevel == "aggressive")
+    optLevel = FusionOptLevel::Aggressive;
+  else {
+    std::cerr << BOLDRED("[Error]: ")
+              << "Invalid fusion optimization level: " << ArgFusionOptLevel
+              << ". Valid values are mild, balanced, aggressive.\n";
+    std::exit(1);
+  }
 
   if (ArgRunAdaptiveFuse && ArgModelPath == "") {
     logerr()
@@ -138,7 +162,8 @@ int main(int argc, const char** argv) {
   Precision precision;
   int nWorkerThreads;
   int nQubitsSV;
-  auto graphs = unwrapArguments(precision, nWorkerThreads, nQubitsSV);
+  FusionOptLevel optLevel;
+  auto graphs = unwrapArguments(precision, nWorkerThreads, nQubitsSV, optLevel);
 
   /* Fusion */
   // Fusion: size only
@@ -146,6 +171,7 @@ int main(int argc, const char** argv) {
   if (ArgRunSizeOnlyFuse) {
     CUDAOptimizer opt;
     opt.setSizeOnlyFusionConfig(ArgSizeonlySize).enableCFO(false);
+    opt.getFusionConfig()->setOptLevel(optLevel);
 
     opt.run(graphs.sizeOnly, logger);
     if (ArgRunDenseKernel)
@@ -156,6 +182,8 @@ int main(int argc, const char** argv) {
   if (ArgRunAdaptiveFuse) {
     CUDAOptimizer opt;
     opt.enableCFO(false);
+    opt.getFusionConfig()->setOptLevel(optLevel);
+
     if (auto e = opt.loadCUDACostModelFromFile(ArgModelPath, precision)) {
       logerr() << "Failed to load CUDA cost model from " << ArgModelPath << ": "
                << llvm::toString(std::move(e)) << "\n";
@@ -256,10 +284,10 @@ int main(int argc, const char** argv) {
 
   const auto runAndDisplayResult = [&](const std::string& graphName,
                                        bool isDense) {
-    auto kernels = km.getKernelsFromGraphName(graphName);
+    auto kernels = km.getKernelsIn(graphName);
     double opCountTotal = 0.0;
-    for (const auto& kernel : kernels)
-      opCountTotal += kernel->gate->opCount(isDense ? 0.0 : 1e-8);
+    for (const auto& item : kernels)
+      opCountTotal += item.kernel->gate->opCount(isDense ? 0.0 : 1e-8);
 
     auto rawT0 = std::chrono::steady_clock::now();
     auto results = km.enqueueKernelLaunchesFromGraph(graphName);
@@ -278,7 +306,7 @@ int main(int argc, const char** argv) {
                        (precision == Precision::FP32 ? 8.0 : 16.0) / t;
     std::cerr << "- Num Kernels:    " << kernels.size() << "\n"
               << "- Total Op Count: " << opCountTotal << "\n"
-              << "- Run Time:       " 
+              << "- Run Time:       "
               << timeit::TimingResult::timeToString(t, 4) << " @ " << gflops
               << " GFLOPs per second\n"
               << "- Wall Time:      "

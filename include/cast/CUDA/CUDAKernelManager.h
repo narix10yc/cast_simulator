@@ -285,6 +285,12 @@ public:
     return count;
   }
 
+  void clearGraphKernels(const std::string& graphName) {
+    auto it = kernelPools_.find(graphName);
+    if (it != kernelPools_.end())
+      kernelPools_.erase(it);
+  }
+
   // Get kernel by name. Return nullptr if not found.
   CUDAKernelInfo* getKernelByName(const std::string& llvmFuncName);
 
@@ -318,7 +324,8 @@ public:
   /// syncKernelExecution() to wait for all kernels to finish running.
   /// The returned object is read-only, and should only be accessed after
   /// syncKernelExecution(). The returned object is invalidated upon the
-  /// destruction of this kernel manager.
+  /// destruction of this kernel manager or upon calling
+  /// clearExecutionResults().
   /// @remark: We do not embed the ExecutionResult inside CUDAKernelInfo because
   /// users are allowed to launch the same kernel multiple times (for example,
   /// in benchmarking).
