@@ -12,18 +12,23 @@ struct ProfileStats : utils::CSVParsable<ProfileStats> {
   int num_qubits;
   cast::FusionOptLevel fusion_opt_level;
   cast::Precision precision;
+
   int num_u3;
   int num_cx;
   int num_gates_after_fusion;
-  float parse_opt_time;
-  float jit_launch_time;
+
+  float parse_time;
+  float opt_time;
+  float kernel_gen_time;
+  float jit_compile_time;
   float exec_time;
 
   // clang-format off
   CSV_DATA_FIELD(device_name, num_threads, benchmark_name, num_qubits,
                  fusion_opt_level, precision,
                  num_u3, num_cx, num_gates_after_fusion,
-                 parse_opt_time, jit_launch_time, exec_time)
+                 parse_time, opt_time, kernel_gen_time, jit_compile_time,
+                 exec_time)
   // clang-format on
 };
 
@@ -101,6 +106,10 @@ int main(int argc, char** argv) {
   const auto run = [&](const std::string& inputFilename,
                        FusionOptLevel fusionOpt,
                        Precision precision) {
+    // t0 to t1: parsing circuit and loading optimizer
+    CPUKernelGenConfig gConfig(precision);
+    auto graphName = "graph_" + std::to_string(count++);
+
     auto t0 = clock::now();
     auto circuit = llvm::cantFail(parseCircuitFromQASMFile(inputFilename));
     CPUOptimizer opt;
@@ -108,6 +117,8 @@ int main(int argc, char** argv) {
     llvm::cantFail(opt.loadCPUCostModel(ArgCostModel, nThreads, precision));
     opt.getFusionConfig()->setOptLevel(fusionOpt);
     auto* cg = circuit->getAllCircuitGraphs()[0];
+    auto t1 = clock::now();
+
     int nU3 = 0;
     int nCX = 0;
     const auto allGates = cg->getAllGates();
@@ -117,19 +128,24 @@ int main(int argc, char** argv) {
       else
         nCX++;
     }
-    opt.run(*cg, {std::cerr, ArgVerbose});
 
-    CPUKernelGenConfig gConfig(precision);
-    auto graphName = "graph_" + std::to_string(count++);
-    llvm::cantFail(km.genGraphGates(gConfig, *cg, graphName));
-    auto t1 = clock::now();
-
-    llvm::cantFail(km.compilePool(graphName));
+    // t2 to t3: circuit optimization (fusion, etc.)
     auto t2 = clock::now();
+    opt.run(*cg, {std::cerr, ArgVerbose});
+    auto t3 = clock::now();
 
+    // t3 to t4: gate generation
+    llvm::cantFail(km.genGraphGates(gConfig, *cg, graphName));
+    auto t4 = clock::now();
+
+    // t4 to t5: JIT compilation
+    llvm::cantFail(km.compilePool(graphName));
+    auto t5 = clock::now();
+
+    // t5 to t6: execution
     llvm::cantFail(km.applyCPUKernelsFromGraph(
         sv.data(), sv.nQubits(), graphName, nThreads));
-    auto t3 = clock::now();
+    auto t6 = clock::now();
 
     std::filesystem::path path(inputFilename);
 
@@ -142,9 +158,11 @@ int main(int argc, char** argv) {
          .num_u3 = nU3,
          .num_cx = nCX,
          .num_gates_after_fusion = static_cast<int>(cg->nGates()),
-         .parse_opt_time = std::chrono::duration<float>(t1 - t0).count(),
-         .jit_launch_time = std::chrono::duration<float>(t2 - t1).count(),
-         .exec_time = std::chrono::duration<float>(t3 - t2).count()});
+         .parse_time = std::chrono::duration<float>(t1 - t0).count(),
+         .opt_time = std::chrono::duration<float>(t3 - t2).count(),
+         .kernel_gen_time = std::chrono::duration<float>(t4 - t3).count(),
+         .jit_compile_time = std::chrono::duration<float>(t5 - t4).count(),
+         .exec_time = std::chrono::duration<float>(t6 - t5).count()});
     stats.back().write(std::cout);
     std::cout << "\n";
   };
