@@ -3,6 +3,7 @@
 
 #include "llvm/Support/CommandLine.h"
 
+#include <filesystem>
 #include <iostream>
 
 struct ProfileStats : utils::CSVParsable<ProfileStats> {
@@ -144,7 +145,7 @@ int main(int argc, char** argv) {
 
     // t5 to t6: execution
     llvm::cantFail(km.applyCPUKernelsFromGraph(
-        sv.data(), sv.nQubits(), graphName, nThreads));
+        sv.data(), cg->nQubits(), graphName, nThreads));
     auto t6 = clock::now();
 
     std::filesystem::path path(inputFilename);
