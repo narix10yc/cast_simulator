@@ -149,9 +149,9 @@ TimingResult Timer::timeit(const std::function<void()>& method,
     repeat = static_cast<double>(repeat) * runTime / dur + 1;
   else
     tArr[0] *= repeat;
-  for (unsigned r = r0; r < replication; ++r) {
+  for (int r = r0; r < replication; ++r) {
     tic = Clock::now();
-    for (unsigned i = 0; i < repeat; ++i)
+    for (int i = 0; i < repeat; ++i)
       method();
     toc = Clock::now();
     dur = Duration(toc - tic).count();
@@ -183,9 +183,9 @@ Timer::timeitFixedRepeat(const std::function<void()>& method,
 
   setup();
   // main loop
-  for (unsigned r = 0; r < replication; ++r) {
+  for (int r = 0; r < replication; ++r) {
     tic = Clock::now();
-    for (unsigned i = 0; i < _repeat; ++i)
+    for (int i = 0; i < _repeat; ++i)
       method();
     toc = Clock::now();
     dur = Duration(toc - tic).count();
@@ -270,7 +270,7 @@ TimingResult Timer::timeitPartial(const std::function<void()>& preMethod,
     tArr[0] *= repeat;
   }
 
-  for (unsigned r = r0; r < replication; ++r) {
+  for (int r = r0; r < replication; ++r) {
     tic = Clock::now();
     double partialSum = 0.0;
     for (int i = 0; i < repeat; ++i) {

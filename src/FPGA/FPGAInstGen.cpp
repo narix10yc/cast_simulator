@@ -307,18 +307,17 @@ public:
   std::vector<Instruction> generate() {
     std::vector<Instruction> instructions;
     // The minimum indices at which we can insert mem / gate instructions
-    unsigned vacantMemIdx = 0;
-    unsigned vacantGateIdx = 0;
-    unsigned sqGateBarrierIdx = 0; // single-qubit gate
+    int vacantMemIdx = 0;
+    int vacantGateIdx = 0;
+    int sqGateBarrierIdx = 0; // single-qubit gate
 
     // This method will update vacantMemIdx = idx + 1
-    const auto writeMemInst = [&](unsigned idx,
-                                  std::unique_ptr<MemoryInst> inst) {
-      if (idx < instructions.size()) {
+    const auto writeMemInst = [&](int idx, std::unique_ptr<MemoryInst> inst) {
+      if (idx < static_cast<int>(instructions.size())) {
         assert(instructions[idx].mInst_->isNull());
         instructions[idx].setMInst(std::move(inst));
       } else {
-        assert(idx == instructions.size());
+        assert(idx == static_cast<int>(instructions.size()));
         instructions.emplace_back(std::move(inst), nullptr);
       }
       vacantMemIdx = idx + 1;
@@ -392,7 +391,7 @@ public:
         }
       }
       upFusionFlag = false;
-      if (vacantGateIdx == instructions.size()) {
+      if (vacantGateIdx == static_cast<int>(instructions.size())) {
         instructions.emplace_back(
             nullptr, std::make_unique<GInstUP>(g, getBlockKind(g)));
       } else {

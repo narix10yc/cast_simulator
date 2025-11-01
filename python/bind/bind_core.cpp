@@ -16,7 +16,7 @@ void bind_QuantumGate(py::module_& m) {
       .def_property_readonly(
           "qubits", [](const cast::QuantumGate& self) { return self.qubits(); })
       .def("op_count", &cast::QuantumGate::opCount, py::arg("zero_tol"))
-      .def("get_superop_gate", &cast::QuantumGate::getSuperopGate)
+      // .def("get_superop_gate", &cast::QuantumGate::getSuperopGate)
       .def(
           "get_info",
           [](const cast::QuantumGate& self, int verbose) {
@@ -41,7 +41,7 @@ void bind_QuantumGate(py::module_& m) {
       .def("set_noise_spc",
            &cast::StandardQuantumGate::setNoiseSPC,
            py::arg("p"))
-      .def("get_superop_gate", &cast::StandardQuantumGate::getSuperopGate)
+      // .def("get_superop_gate", &cast::StandardQuantumGate::getSuperopGate)
       .def(
           "get_info",
           [](const cast::StandardQuantumGate& self, int verbose) {

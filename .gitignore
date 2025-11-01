@@ -3,6 +3,8 @@
 .DS_Store
 _deps/*
 drafts/*
+*.so
+*.dylib
 
 # build artifacts
 build/*

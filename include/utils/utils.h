@@ -152,12 +152,12 @@ template <typename T = uint64_t> T insertOneToBit(T x, int bit) {
 }
 
 // parallel bit deposition
-uint64_t pdep64(uint64_t src, uint64_t mask, int nbits = 64);
-uint32_t pdep32(uint32_t src, uint32_t mask, int nbits = 32);
+uint64_t pdep64(uint64_t src, uint64_t mask, unsigned nbits = 64);
+uint32_t pdep32(uint32_t src, uint32_t mask, unsigned nbits = 32);
 
 // parallel bit extraction
-uint64_t pext64(uint64_t src, uint64_t mask, int nbits = 64);
-uint32_t pext32(uint32_t src, uint32_t mask, int nbits = 32);
+uint64_t pext64(uint64_t src, uint64_t mask, unsigned nbits = 64);
+uint32_t pext32(uint32_t src, uint32_t mask, unsigned nbits = 32);
 
 inline void displayProgressBar(float progress, int barWidth = 50) {
   // Clamp progress between 0 and 1

@@ -162,25 +162,26 @@ private:
   struct TransparentEqual {
     using is_transparent = void;
 
-    bool operator()(const QuantumGatePtr& lhs, const QuantumGatePtr& rhs)
-    const noexcept {
+    bool operator()(const QuantumGatePtr& lhs,
+                    const QuantumGatePtr& rhs) const noexcept {
       return lhs.get() == rhs.get();
     }
 
-    bool operator()(const QuantumGate* lhs, const QuantumGatePtr& rhs) const
-    noexcept {
+    bool operator()(const QuantumGate* lhs,
+                    const QuantumGatePtr& rhs) const noexcept {
       return lhs == rhs.get();
     }
 
-    bool operator()(const QuantumGatePtr& lhs, const QuantumGate* rhs) const
-    noexcept {
+    bool operator()(const QuantumGatePtr& lhs,
+                    const QuantumGate* rhs) const noexcept {
       return lhs.get() == rhs;
     }
   };
 
-  using GateMap = std::unordered_map<QuantumGatePtr, int, TransparentHash, TransparentEqual>;
-  GateMap   gateMap_;
-  
+  using GateMap = std::
+      unordered_map<QuantumGatePtr, int, TransparentHash, TransparentEqual>;
+  GateMap gateMap_;
+
   void resizeRowsIfNeeded(int size);
 
 public:
@@ -246,9 +247,7 @@ public:
   void squeeze() { return squeeze(tile_begin()); }
 
   // gate map is read-only
-  const GateMap& gateMap() const {
-    return gateMap_;
-  }
+  const GateMap& gateMap() const { return gateMap_; }
 
   // Return the id of the gate in the circuit graph. Return -1 if gate is not
   // in this circuit graph.

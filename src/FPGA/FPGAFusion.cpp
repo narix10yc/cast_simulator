@@ -136,7 +136,7 @@ int cast::fpga::applyFPGAGateFusion(ir::CircuitGraphNode& graph,
   bool hasChange = true;
   int nFused = 0;
   row_iterator rowIt;
-  unsigned q = 0;
+  int q = 0;
   // multi-traversal
   while (hasChange) {
     rowIt = graph.tile_begin();

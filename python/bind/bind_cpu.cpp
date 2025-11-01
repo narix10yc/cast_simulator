@@ -1,3 +1,4 @@
+#include "cast/Core/Precision.h"
 #include "pybind11/complex.h"
 #include "pybind11/pybind11.h"
 
@@ -87,7 +88,7 @@ void bind_CPUKernelManager(py::module_& m) {
       .export_values();
 
   py::class_<cast::CPUKernelGenConfig>(m, "CPUKernelGenConfig")
-      .def(py::init<>())
+      .def(py::init<cast::Precision>(), py::arg("precision"))
       .def_readwrite("simd_s", &cast::CPUKernelGenConfig::simdWidth)
       .def_readwrite("precision", &cast::CPUKernelGenConfig::precision)
       .def_readwrite("useFMA", &cast::CPUKernelGenConfig::useFMA)
@@ -176,7 +177,6 @@ void bind_CPUKernelManager(py::module_& m) {
           [](cast::CPUKernelManager& self,
              int nThreads,
              int optLevel,
-             bool useLazyJit,
              int verbose) {
             llvm::OptimizationLevel llvmOptLevel = llvm::OptimizationLevel::O0;
             switch (optLevel) {
@@ -197,14 +197,13 @@ void bind_CPUKernelManager(py::module_& m) {
               llvmOptLevel = llvm::OptimizationLevel::O1;
               break;
             }
-            if (auto e = self.compileAll(llvmOptLevel, useLazyJit, verbose)) {
+            if (auto e = self.compileAll(llvmOptLevel, verbose)) {
               throw std::runtime_error("Failed to initialize JIT: " +
                                        llvm::toString(std::move(e)));
             }
           },
           py::arg("num_threads") = 1,
           py::arg("opt_level") = 1,
-          py::arg("use_lazy_jit") = false,
           py::arg("verbose") = 0)
       .def(
           "apply_kernel_f32",
@@ -212,7 +211,7 @@ void bind_CPUKernelManager(py::module_& m) {
              cast::CPUStatevectorF32& sv,
              cast::CPUKernelInfo& kernel,
              int nThreads) {
-            if (kernel.precision != cast::Precision::F32) {
+            if (kernel.precision != cast::Precision::FP32) {
               throw std::runtime_error(
                   "Kernel precision mismatch: expected 32, got " +
                   std::to_string(static_cast<int>(kernel.precision)));
@@ -232,7 +231,7 @@ void bind_CPUKernelManager(py::module_& m) {
              cast::CPUStatevectorF64& sv,
              cast::CPUKernelInfo& kernel,
              int nThreads) {
-            if (kernel.precision != cast::Precision::F64) {
+            if (kernel.precision != cast::Precision::FP64) {
               throw std::runtime_error(
                   "Kernel precision mismatch: expected 64, got " +
                   std::to_string(static_cast<int>(kernel.precision)));

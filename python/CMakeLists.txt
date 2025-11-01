@@ -18,7 +18,7 @@ message(STATUS "Python libraries: ${Python3_LIBRARIES}")
 
 FetchContent_MakeAvailable(pybind11)
 
-file(GLOB SRCS "*.cpp")
+file(GLOB SRCS "bind/*.cpp")
 
 pybind11_add_module(cast_python MODULE ${SRCS})
 
@@ -37,5 +37,5 @@ add_custom_target(cast_python_copy_pyi ALL DEPENDS ${PYI_TARGET})
 add_dependencies(cast_python cast_python_copy_pyi)
 target_link_libraries(cast_python PRIVATE cast)
 target_compile_options(cast_python PRIVATE "-fexceptions" "-frtti")
-
-message(STATUS "Python bindings enabled")
+set_target_properties(cast_python PROPERTIES 
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

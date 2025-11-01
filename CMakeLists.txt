@@ -109,6 +109,8 @@ separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LLVM_DEFINITIONS_LIST})
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+# Enable PIC for all targets
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(src)
 add_subdirectory(tests)
