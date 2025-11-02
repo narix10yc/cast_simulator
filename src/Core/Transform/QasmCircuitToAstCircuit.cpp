@@ -41,8 +41,8 @@ transform::cvtQasmCircuitToAstCircuit(const openqasm::ast::RootNode& qasmRoot,
 
   return new (astCtx)
       ast::CircuitStmt(astCtx.createIdentifier("circuit_from_qasm"),
-                       LocationSpan(nullptr, nullptr), // No location info
-                       nullptr,                 // No parameter declaration
-                       ast::CircuitAttribute(), // No attributes
+                       LocationSpan(nullptr, nullptr),
+                       nullptr,
+                       ast::CircuitAttribute(),
                        astCtx.createSpan(stmts));
 } // transform::cvtQasmCircuitToAstCircuit

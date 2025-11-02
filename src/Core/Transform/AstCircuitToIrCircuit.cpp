@@ -3,7 +3,6 @@
 #include "llvm/Support/Casting.h"
 
 using namespace cast;
-using namespace cast;
 
 // forward declaration
 static std::unique_ptr<ir::IfMeasureNode>
@@ -97,8 +96,9 @@ convertIfMeasure(ast::IfStmt* astIf, ast::ASTContext& astCtx) {
 std::unique_ptr<ir::CircuitNode>
 transform::cvtAstCircuitToIrCircuit(const ast::CircuitStmt& astCircuit,
                                     ast::ASTContext& astCtx) {
-  auto* irCircuit = new ir::CircuitNode(std::string(astCircuit.name.str));
+  auto irCircuit =
+      std::make_unique<ir::CircuitNode>(std::string(astCircuit.name.str));
   convertSpanOfStmts(astCircuit.body, astCtx, irCircuit->body);
-  
-  return std::unique_ptr<ir::CircuitNode>(irCircuit);
+
+  return irCircuit;
 }

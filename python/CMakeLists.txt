@@ -20,22 +20,9 @@ FetchContent_MakeAvailable(pybind11)
 
 file(GLOB SRCS "bind/*.cpp")
 
-pybind11_add_module(cast_python MODULE ${SRCS})
+pybind11_add_module(cast_python_bind MODULE ${SRCS})
 
-# copy .pyi file alongside the built .so file
-set(PYI_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/cast_python.pyi)
-set(PYI_TARGET ${CMAKE_CURRENT_BINARY_DIR}/cast_python.pyi)
-
-add_custom_command(
-  OUTPUT ${PYI_TARGET}
-  DEPENDS ${PYI_SOURCE}
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PYI_SOURCE} ${PYI_TARGET}
-  COMMENT "Copying cast_python.pyi to output directory"
-)
-
-add_custom_target(cast_python_copy_pyi ALL DEPENDS ${PYI_TARGET})
-add_dependencies(cast_python cast_python_copy_pyi)
-target_link_libraries(cast_python PRIVATE cast)
-target_compile_options(cast_python PRIVATE "-fexceptions" "-frtti")
-set_target_properties(cast_python PROPERTIES 
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(cast_python_bind PRIVATE cast)
+target_compile_options(cast_python_bind PRIVATE "-fexceptions" "-frtti")
+set_target_properties(cast_python_bind PROPERTIES 
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cast)

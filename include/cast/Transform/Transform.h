@@ -5,13 +5,12 @@
 #include "cast/Core/AST/ASTContext.h"
 #include "cast/Core/IRNode.h"
 #include "openqasm/AST.h"
-#include <memory>
 
 namespace cast {
 
 namespace transform {
 
-ast::CircuitStmt*
+cast::ast::CircuitStmt*
 cvtQasmCircuitToAstCircuit(const openqasm::ast::RootNode& qasmRoot,
                            ast::ASTContext& astCtx);
 
@@ -19,9 +18,9 @@ cvtQasmCircuitToAstCircuit(const openqasm::ast::RootNode& qasmRoot,
 GateMatrixPtr cvtAstGateToGateMatrix(cast::ast::GateApplyStmt* astGate,
                                      cast::ast::ASTContext& astCtx);
 
-std::unique_ptr<ir::CircuitNode>
-cvtAstCircuitToIrCircuit(const ast::CircuitStmt& astCircuit,
-                         ast::ASTContext& astCtx);
+std::unique_ptr<cast::ir::CircuitNode>
+cvtAstCircuitToIrCircuit(const cast::ast::CircuitStmt& astCircuit,
+                         cast::ast::ASTContext& astCtx);
 
 } // namespace transform
 
