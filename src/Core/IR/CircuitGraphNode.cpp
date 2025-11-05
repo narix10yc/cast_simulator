@@ -1,4 +1,5 @@
 #include "cast/Core/IRNode.h"
+#include "utils/InfoLogger.h"
 #include "utils/iocolor.h"
 #include "llvm/MC/MCDirectives.h"
 
@@ -397,7 +398,7 @@ void CircuitGraphNode::squeeze(row_iterator beginIt) {
       }
     }
   }
-  
+
   // second step: remove empty rows
   auto rowIt = tile_end();
   while (rowIt != beginIt) {
@@ -469,16 +470,10 @@ std::ostream& CircuitGraphNode::print(std::ostream& os, int indent) const {
                                  << gateMap_.size() << " gates]\n";
 }
 
-std::ostream& CircuitGraphNode::displayInfo(std::ostream& os,
-                                            int verbose) const {
-  os << BOLDCYAN("=== Info of CircuitGraph @ " << this << " === ")
-     << "(Verbose " << verbose << ")\n";
-  os << CYAN("- nQubits:       ") << nQubits_ << "\n";
-  os << CYAN("- Num Gates:      ") << gateMap_.size() << "\n";
-  os << CYAN("- Num Rows:       ") << tile_.size() << "\n";
-
-  os << BOLDCYAN("====================================") << "\n";
-  return os;
+void CircuitGraphNode::displayInfo(utils::InfoLogger logger) const {
+  logger.put("Num Qubits", nQubits_)
+      .put("Num Gates", gateMap_.size())
+      .put("Num Rows", tile_.size());
 }
 
 std::ostream& CircuitGraphNode::impl_visualize(std::ostream& os,

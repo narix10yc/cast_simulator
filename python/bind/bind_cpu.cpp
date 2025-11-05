@@ -1,10 +1,11 @@
 #include "cast/Core/Precision.h"
-#include "pybind11/complex.h"
+#include "pybind11/iostream.h"
 #include "pybind11/pybind11.h"
 
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUOptimizer.h"
 #include "cast/CPU/CPUStatevector.h"
+#include <pybind11/cast.h>
 
 namespace py = pybind11;
 
@@ -17,6 +18,13 @@ void bind_simdWidth(py::module_& m) {
       .value("W128", cast::CPUSimdWidth::W128)
       .value("W256", cast::CPUSimdWidth::W256)
       .value("W512", cast::CPUSimdWidth::W512);
+}
+
+void bind_precision(py::module_& m) {
+  py::enum_<cast::Precision>(m, "Precision")
+      .value("FP32", cast::Precision::FP32)
+      .value("FP64", cast::Precision::FP64)
+      .value("Unknown", cast::Precision::Unknown);
 }
 
 void bind_CPUStatevector(py::module_& m) {
@@ -89,14 +97,14 @@ void bind_CPUKernelManager(py::module_& m) {
 
   py::class_<cast::CPUKernelGenConfig>(m, "CPUKernelGenConfig")
       .def(py::init<cast::Precision>(), py::arg("precision"))
-      .def_readwrite("simd_s", &cast::CPUKernelGenConfig::simdWidth)
+      .def_readwrite("simd_width", &cast::CPUKernelGenConfig::simdWidth)
       .def_readwrite("precision", &cast::CPUKernelGenConfig::precision)
-      .def_readwrite("useFMA", &cast::CPUKernelGenConfig::useFMA)
-      .def_readwrite("useFMS", &cast::CPUKernelGenConfig::useFMS)
-      .def_readwrite("usePDEP", &cast::CPUKernelGenConfig::usePDEP)
-      .def_readwrite("zeroTol", &cast::CPUKernelGenConfig::zeroTol)
-      .def_readwrite("oneTol", &cast::CPUKernelGenConfig::oneTol)
-      .def_readwrite("matrixLoadMode",
+      .def_readwrite("use_fma", &cast::CPUKernelGenConfig::useFMA)
+      .def_readwrite("use_fms", &cast::CPUKernelGenConfig::useFMS)
+      .def_readwrite("use_pdep", &cast::CPUKernelGenConfig::usePDEP)
+      .def_readwrite("zero_tol", &cast::CPUKernelGenConfig::zeroTol)
+      .def_readwrite("one_tol", &cast::CPUKernelGenConfig::oneTol)
+      .def_readwrite("matrix_load_mode",
                      &cast::CPUKernelGenConfig::matrixLoadMode)
       .def(
           "get_info",
@@ -172,8 +180,62 @@ void bind_CPUKernelManager(py::module_& m) {
             return self.getKernelByName(funcName);
           },
           py::arg("func_name"))
+      .def("compile_default_pool",
+           [](cast::CPUKernelManager& self, int optLevel) {
+             llvm::OptimizationLevel llvmOptLevel = llvm::OptimizationLevel::O0;
+             switch (optLevel) {
+             case 0:
+               llvmOptLevel = llvm::OptimizationLevel::O0;
+               break;
+             case 1:
+               llvmOptLevel = llvm::OptimizationLevel::O1;
+               break;
+             case 2:
+               llvmOptLevel = llvm::OptimizationLevel::O2;
+               break;
+             case 3:
+               llvmOptLevel = llvm::OptimizationLevel::O3;
+               break;
+             // we default it to O1
+             default:
+               llvmOptLevel = llvm::OptimizationLevel::O1;
+               break;
+             }
+             if (auto e = self.compileDefaultPool(llvmOptLevel)) {
+               throw std::runtime_error("Failed to compile default pool: " +
+                                        llvm::toString(std::move(e)));
+             }
+           })
+      .def("compile_pool",
+           [](cast::CPUKernelManager& self,
+              const std::string& poolName,
+              int optLevel) {
+             llvm::OptimizationLevel llvmOptLevel = llvm::OptimizationLevel::O0;
+             switch (optLevel) {
+             case 0:
+               llvmOptLevel = llvm::OptimizationLevel::O0;
+               break;
+             case 1:
+               llvmOptLevel = llvm::OptimizationLevel::O1;
+               break;
+             case 2:
+               llvmOptLevel = llvm::OptimizationLevel::O2;
+               break;
+             case 3:
+               llvmOptLevel = llvm::OptimizationLevel::O3;
+               break;
+             // we default it to O1
+             default:
+               llvmOptLevel = llvm::OptimizationLevel::O1;
+               break;
+             }
+             if (auto e = self.compilePool(poolName, llvmOptLevel)) {
+               throw std::runtime_error("Failed to compile pool '" + poolName +
+                                        "': " + llvm::toString(std::move(e)));
+             }
+           })
       .def(
-          "init_jit",
+          "compile_all",
           [](cast::CPUKernelManager& self,
              int nThreads,
              int optLevel,
@@ -198,7 +260,7 @@ void bind_CPUKernelManager(py::module_& m) {
               break;
             }
             if (auto e = self.compileAll(llvmOptLevel, verbose)) {
-              throw std::runtime_error("Failed to initialize JIT: " +
+              throw std::runtime_error("Failed to compile all pools: " +
                                        llvm::toString(std::move(e)));
             }
           },
@@ -250,10 +312,18 @@ void bind_CPUKernelManager(py::module_& m) {
 void bind_CPUOptimizer(py::module_& m) {
   py::class_<cast::CPUOptimizer, cast::OptimizerBase>(m, "CPUOptimizer")
       .def(py::init<>())
-      .def("enable_fusion", &cast::CPUOptimizer::enableFusion)
+      .def("enable_fusion",
+           &cast::CPUOptimizer::enableFusion,
+           py::arg("enable") = true)
       .def("enable_canonicalization",
-           &cast::CPUOptimizer::enableCanonicalization)
-      .def("enable_cfo", &cast::CPUOptimizer::enableCFO)
+           &cast::CPUOptimizer::enableCanonicalization,
+           py::arg("enable") = true)
+      .def("enable_cfo",
+           &cast::CPUOptimizer::enableCFO,
+           py::arg("enable") = true)
+      .def("set_sizeonly_fusion_config",
+           &cast::CPUOptimizer::setSizeOnlyFusionConfig,
+           py::arg("size"))
       .def(
           "get_info",
           [](const cast::CPUOptimizer& self, int verbose) {
@@ -261,6 +331,19 @@ void bind_CPUOptimizer(py::module_& m) {
             self.displayInfo({oss, verbose});
             return oss.str();
           },
+          py::arg("verbose") = 1)
+      .def(
+          "run",
+          [](const cast::CPUOptimizer& self,
+             cast::ir::CircuitGraphNode& graph,
+             int verbose) {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect;
+
+            utils::Logger logger(std::cout, verbose);
+            self.run(graph, logger);
+          },
+          py::arg("graph"),
           py::arg("verbose") = 1);
 }
 
@@ -268,6 +351,7 @@ void bind_CPUOptimizer(py::module_& m) {
 
 void bind_cpu(py::module_& m) {
   bind_simdWidth(m);
+  bind_precision(m);
   bind_CPUStatevector(m);
   bind_CPUKernelManager(m);
   bind_CPUOptimizer(m);

@@ -1,9 +1,9 @@
+#include "cast/Core/IRNode.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 
 #include "cast/Core/Optimizer.h"
 #include "cast/Transform/Transform.h"
-#include "openqasm/Parser.h"
 
 namespace py = pybind11;
 
@@ -70,16 +70,22 @@ void bind_CircuitGraph(py::module_& m) {
   using CircuitGraphNode = cast::ir::CircuitGraphNode;
   py::class_<CircuitGraphNode>(m, "CircuitGraph")
       .def("__str__",
-           [](const CircuitGraphNode& self) {
+           [](const CircuitGraphNode& self) -> std::string {
              std::ostringstream oss;
              self.print(oss, 0);
              return oss.str();
            })
       .def("get_all_gates", &CircuitGraphNode::getAllGates)
-      .def("get_visualization", [](const CircuitGraphNode& self) {
-        std::ostringstream oss;
-        self.visualize(oss);
-        return oss.str();
+      .def(
+          "get_info",
+          [](const CircuitGraphNode& self, int verbose) -> std::string {
+            std::ostringstream oss;
+            self.displayInfo({oss, verbose});
+            return oss.str();
+          },
+          py::arg("verbose") = 1)
+      .def("visualize", [](const CircuitGraphNode& self) -> void {
+        self.visualize(std::cerr);
       });
 }
 
@@ -96,14 +102,16 @@ void bind_Circuit(py::module_& m) {
            py::return_value_policy::reference_internal);
 }
 
-void bind_parse_circuit_from_qasm_file(py::module_& m) {
+void bind_parse_circuitgraph_from_qasm_file(py::module_& m) {
   using namespace cast::transform;
-  m.def("parse_circuit_from_qasm_file", [](const std::string& fileName) {
-    openqasm::Parser qasmParser(fileName);
-    auto qasmRoot = qasmParser.parse();
-    cast::ast::ASTContext astCtx;
-    auto astCircuit = cvtQasmCircuitToAstCircuit(*qasmRoot, astCtx);
-    return cvtAstCircuitToIrCircuit(*astCircuit, astCtx);
+  m.def("parse_circuitgraph_from_qasm_file", [](const std::string& fileName) {
+    auto cgOrError = cast::parseCircuitGraphFromQASMFile(fileName);
+    if (!cgOrError) {
+      throw std::runtime_error(
+          "Failed to parse circuit graph from QASM file: " +
+          llvm::toString(cgOrError.takeError()));
+    }
+    return std::move(*cgOrError);
   });
 }
 
@@ -120,7 +128,7 @@ void bind_OptimizerBase(py::module_& m) {
           py::arg("circuit"),
           py::arg("verbose") = 1)
       .def(
-          "run_circuit_graph",
+          "run_circuitgraph",
           [](const cast::OptimizerBase& self,
              cast::ir::CircuitGraphNode& graph,
              int verbose) {
@@ -137,6 +145,6 @@ void bind_core(py::module_& m) {
   bind_QuantumGate(m);
   bind_CircuitGraph(m);
   bind_Circuit(m);
-  bind_parse_circuit_from_qasm_file(m);
+  bind_parse_circuitgraph_from_qasm_file(m);
   bind_OptimizerBase(m);
 }

@@ -286,7 +286,7 @@ public:
 
   std::ostream& print(std::ostream& os, int indent) const override;
 
-  std::ostream& displayInfo(std::ostream& os, int verbose = 1) const;
+  void displayInfo(utils::InfoLogger logger) const;
 
   std::ostream& visualize(std::ostream& os) const;
 
@@ -365,6 +365,10 @@ namespace cast {
 /// The definition is in src/Core/IR/ParseCircuitFromQASM.cpp.
 llvm::Expected<std::unique_ptr<ir::CircuitNode>>
 parseCircuitFromQASMFile(const std::string& fileName);
+
+llvm::Expected<std::unique_ptr<ir::CircuitGraphNode>>
+parseCircuitGraphFromQASMFile(const std::string& fileName);
+
 }; // namespace cast
 
 #endif // CAST_CORE_IRNODE_H

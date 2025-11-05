@@ -1,6 +1,4 @@
 #include "cast/Core/QuantumGate.h"
-#include "utils/PrintSpan.h"
-#include "utils/iocolor.h"
 #include "llvm/Support/Casting.h"
 
 using namespace cast;

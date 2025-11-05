@@ -1,5 +1,5 @@
-def parse_circuit_from_qasm_file(file_name: str) -> Circuit:
-  """Parses a circuit from a QASM file."""
+def parse_circuitgraph_from_qasm_file(file_name: str) -> CircuitGraph:
+  """Parses a circuit graph from a QASM file."""
   ...
 
 class QuantumGate:
@@ -63,8 +63,12 @@ class CircuitGraph:
   def __str__(self) -> str:
     ...
 
-  def get_visualization(self, verbose=1) -> str:
-    """Returns a visualization of the circuit graph."""
+  def get_info(self, verbose=1) -> str:
+    """Returns information about the circuit graph."""
+    ...
+
+  def visualize(self) -> None:
+    """Visualizes the circuit graph."""
     ...
 
   def get_all_gates(self) -> list[QuantumGate]:
@@ -88,20 +92,28 @@ class CPUSimdWidth(Enum):
   W256 : CPUSimdWidth
   W512 : CPUSimdWidth
 
+class Precision(Enum):
+  """
+  Enum for precision types.
+  """
+  FP32 : Precision
+  FP64 : Precision
+  Unknown : Precision
+  
 class CPUKernelGenConfig:
   """
   Configuration for CPU kernel generation.
   """
-  simd_s : int
+  simd_width : int
   precision : int
-  useFMA : bool
-  useFMS : bool
-  usePDEP : bool
-  zeroTol : float
-  oneTol : float
-  matrixLoadMode : CPUMatrixLoadMode
+  use_fma : bool
+  use_fms : bool
+  use_pdep : bool
+  zero_tol : float
+  one_tol : float
+  matrix_load_mode : CPUMatrixLoadMode
 
-  def __init__(self) -> None:
+  def __init__(self, precision: Precision) -> None:
     ...
   
   def get_info(self) -> str:

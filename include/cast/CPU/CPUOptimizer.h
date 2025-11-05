@@ -37,8 +37,7 @@ public:
     logger.put("CPUOptimizer");
     if (fusionConfig_) {
       logger.put("Fusion Config");
-      auto l = logger.indent();
-      fusionConfig_->displayInfo(l);
+      fusionConfig_->displayInfo(logger.indent());
     } else {
       logger.put("Fusion Config", "None");
     }

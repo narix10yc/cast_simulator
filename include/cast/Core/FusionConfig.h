@@ -147,8 +147,7 @@ public:
   }
 
   void displayInfo(utils::InfoLogger logger) const override {
-    logger.put("SizeOnlyFusionConfig").put("size", sizeMin);
-    FusionConfig::displayInfo(logger.indent(logger.verbose - 1));
+    logger.put("SizeOnlyFusionConfig").put("size", sizeMax);
   }
 
   static bool classof(const FusionConfig* config) {
