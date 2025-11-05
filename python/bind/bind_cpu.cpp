@@ -1,11 +1,13 @@
 #include "cast/Core/Precision.h"
 #include "pybind11/iostream.h"
 #include "pybind11/pybind11.h"
+#include "pybind11/stl.h"
 
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUOptimizer.h"
 #include "cast/CPU/CPUStatevector.h"
 #include <pybind11/cast.h>
+#include <pybind11/detail/common.h>
 
 namespace py = pybind11;
 
@@ -146,19 +148,19 @@ void bind_CPUKernelManager(py::module_& m) {
           },
           py::arg("verbose") = 1)
       .def(
-          "gen_cpu_gate",
+          "gen_gate",
           [](cast::CPUKernelManager& self,
              const cast::CPUKernelGenConfig& config,
              const cast::QuantumGatePtr& gate,
              const std::string& func_name) {
             if (auto e = self.genGate(config, gate, func_name)) {
-              throw std::runtime_error("Failed to generate CPU gate: " +
+              throw std::runtime_error("Failed to generate gate: " +
                                        llvm::toString(std::move(e)));
             }
           },
           py::arg("config"),
           py::arg("gate"),
-          py::arg("func_name"))
+          py::arg("func_name") = "")
       .def(
           "gen_graph_gates",
           [](cast::CPUKernelManager& self,
@@ -267,6 +269,27 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("num_threads") = 1,
           py::arg("opt_level") = 1,
           py::arg("verbose") = 0)
+      .def(
+          "get_kernels_in_pool",
+          [](const cast::CPUKernelManager& self,
+             const std::string& poolName) -> py::list {
+            if (self.pools().find(poolName) == self.pools().end()) {
+              throw std::runtime_error("Kernel pool not found: " + poolName);
+            }
+            const auto& pool = self.pools().at(poolName);
+
+            py::list out;
+
+            py::handle parent = py::cast(&self);
+
+            for (const auto& item : pool.items()) {
+              out.append(py::cast(
+                  *item.kernel, py::return_value_policy::reference, parent));
+            }
+            return out;
+          },
+          py::arg("pool_name"),
+          py::return_value_policy::reference_internal)
       .def(
           "apply_kernel_f32",
           [](cast::CPUKernelManager& self,

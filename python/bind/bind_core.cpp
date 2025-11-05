@@ -75,6 +75,7 @@ void bind_CircuitGraph(py::module_& m) {
              self.print(oss, 0);
              return oss.str();
            })
+      .def("num_qubits", &CircuitGraphNode::nQubits)
       .def("get_all_gates", &CircuitGraphNode::getAllGates)
       .def(
           "get_info",

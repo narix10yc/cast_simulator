@@ -57,6 +57,9 @@ protected:
     const_iterator begin() const { return items_.begin(); }
     const_iterator end() const { return items_.end(); }
 
+    std::vector<PoolItem>& items() { return items_; }
+    const std::vector<PoolItem>& items() const { return items_; }
+
     size_t size() const { return items_.size(); }
     bool empty() const { return items_.empty(); }
 
@@ -74,6 +77,9 @@ public:
       : KernelManagerBase(nWorkerThreads) {
     kernelPools_.insert({DEFAULT_POOL_NAME, Pool()});
   }
+
+  KernelPools& pools() { return kernelPools_; }
+  const KernelPools& pools() const { return kernelPools_; }
 
   Pool& getDefaultPool() { return kernelPools_.at(DEFAULT_POOL_NAME); }
 

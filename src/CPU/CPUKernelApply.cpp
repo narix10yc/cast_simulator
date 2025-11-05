@@ -1,4 +1,5 @@
 #include "cast/CPU/CPUKernelManager.h"
+#include "cast/CPU/Config.h"
 
 using namespace cast;
 
@@ -54,10 +55,8 @@ llvm::Error CPUKernelManager::applyCPUKernel(void* sv,
     return llvm::createStringError(
         "Kernel executable not available. Did you call initJIT()?");
   }
-  if (nThreads <= 0) {
-    return llvm::createStringError("Invalid number of threads: " +
-                                   llvm::Twine(nThreads));
-  }
+  if (nThreads <= 0)
+    nThreads = cast::get_cpu_num_threads();
 
   const int simd_s = cast::get_simd_s(kernel.simdWidth, kernel.precision);
   const int tmp = nQubits - kernel.gate->nQubits() - simd_s;
@@ -98,7 +97,7 @@ llvm::Error CPUKernelManager::applyCPUKernel(void* sv,
 
   kernel.tpExecStart = std::chrono::steady_clock::now();
 
-  for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)
+  for (int tIdx = 0; tIdx < nThreads; ++tIdx)
     threads.emplace_back(kernel.executable, &argvs[tIdx * 4]);
   for (auto& t : threads)
     t.join();

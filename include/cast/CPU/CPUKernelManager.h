@@ -207,44 +207,50 @@ public:
 
   /* Apply Kernels */
 
+  /// The entry function to apply a CPU kernel.
+  /// @param sv: raw pointer to the statevector data.
+  /// @param nQubitsSV: number of qubits in the statevector.
+  /// @param kernel: the CPUKernelInfo object.
+  /// @param nThreads: number of threads to use. If <=0, query from
+  /// cast::get_cpu_num_threads().
   llvm::Error applyCPUKernel(void* sv,
                              int nQubitsSV,
                              CPUKernelInfo& kernelInfo,
-                             int nThreads = 1);
+                             int nThreads = 0);
 
   llvm::Error applyCPUKernel(void* sv,
                              int nQubitsSV,
                              const std::string& llvmFuncName,
-                             int nThreads = 1);
+                             int nThreads = 0);
 
   llvm::Error applyCPUKernel(CPUStatevectorF32& sv,
                              CPUKernelInfo& kernelInfo,
-                             int nThreads = 1) {
+                             int nThreads = 0) {
     return applyCPUKernel(sv.data(), sv.nQubits(), kernelInfo, nThreads);
   }
 
   llvm::Error applyCPUKernel(CPUStatevectorF64& sv,
                              CPUKernelInfo& kernelInfo,
-                             int nThreads = 1) {
+                             int nThreads = 0) {
     return applyCPUKernel(sv.data(), sv.nQubits(), kernelInfo, nThreads);
   }
 
   llvm::Error applyCPUKernel(CPUStatevectorF32& sv,
                              const std::string& llvmFuncName,
-                             int nThreads = 1) {
+                             int nThreads = 0) {
     return applyCPUKernel(sv.data(), sv.nQubits(), llvmFuncName, nThreads);
   }
 
   llvm::Error applyCPUKernel(CPUStatevectorF64& sv,
                              const std::string& llvmFuncName,
-                             int nThreads = 1) {
+                             int nThreads = 0) {
     return applyCPUKernel(sv.data(), sv.nQubits(), llvmFuncName, nThreads);
   }
 
   llvm::Error applyCPUKernelsFromGraph(void* sv,
                                        int nQubitsSV,
                                        const std::string& graphName,
-                                       int nThreads = 1);
+                                       int nThreads = 0);
 
   void dumpIR(const std::string& funcName,
               llvm::raw_ostream& os = llvm::errs());
