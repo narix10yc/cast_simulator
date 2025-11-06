@@ -7,7 +7,10 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <mutex>
 #include <thread>
+
+#include <llvm/Support/Error.h>
 
 namespace utils {
 
@@ -18,12 +21,13 @@ class TaskDispatcher {
   mutable std::mutex mtx;
   std::condition_variable cv;
   std::condition_variable syncCV;
+  llvm::Error err = llvm::Error::success();
 
   std::atomic<int> nTotalTasks = 0;
   std::atomic<int> nActiveWorkers = 0;
   std::atomic<bool> stopFlag = false;
 
-  void worker_work();
+  void worker_work_();
 
 public:
   TaskDispatcher(int nWorkers);
@@ -41,10 +45,32 @@ public:
     cv.notify_all();
     for (auto& thread : workers)
       thread.join();
+    assert(!err);
+    llvm::consumeError(std::move(err));
   }
 
   // Add a new task to the queue
   void enqueue(const std::function<void()>& task);
+
+  void enqueueMayErr(const std::function<llvm::Error()>& task) {
+    enqueue([this, task]() {
+      if (auto e = task()) {
+        std::lock_guard lk(mtx);
+        this->err = llvm::joinErrors(std::move(this->err), std::move(e));
+      }
+    });
+  }
+
+  bool hasError() const {
+    std::lock_guard lk(mtx);
+    // llvm::Error::operator bool() is non-const
+    return static_cast<bool>(const_cast<llvm::Error&>(err));
+  }
+
+  llvm::Error takeError() {
+    std::lock_guard lk(mtx);
+    return std::exchange(err, llvm::Error::success());
+  }
 
   int getNumWorkers() const { return workers.size(); }
 

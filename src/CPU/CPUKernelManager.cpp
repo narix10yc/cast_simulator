@@ -150,44 +150,29 @@ llvm::Error CPUKernelManager::compilePool(const std::string& poolName,
   assert(llvmJIT != nullptr && "llvmJIT is null");
 
   auto it = kernelPools_.find(poolName);
-  if (it == kernelPools_.end()) {
+  if (it == kernelPools_.end())
     return llvm::createStringError("Pool " + poolName + " not found");
-  }
 
   for (auto& item : it->second) {
-    dispatcher.enqueue([this, &item, optLevel]() {
+    dispatcher.enqueueMayErr([this, &item, optLevel]() -> llvm::Error {
       if (item.kernel->executable)
-        return;
-      if (auto e = compileItem(item, optLevel)) {
-        llvm::errs() << "Error compiling kernel " << item.kernel->llvmFuncName
-                     << ": " << toString(std::move(e)) << "\n";
-        std::abort();
-      }
+        return llvm::Error::success();
+      return compileItem(item, optLevel);
     });
   }
 
   dispatcher.sync(progressBar);
-  return llvm::Error::success();
+  return dispatcher.takeError();
 }
 
 llvm::Error CPUKernelManager::compileAll(OptimizationLevel optLevel,
                                          bool progressBar) {
   assert(llvmJIT != nullptr && "llvmJIT is null");
-  for (auto& [_, pool] : kernelPools_) {
-    for (auto& item : pool) {
-      dispatcher.enqueue([this, &item, optLevel]() {
-        if (item.kernel->executable)
-          return;
-        if (auto e = compileItem(item, optLevel)) {
-          llvm::errs() << "Error compiling kernel " << item.kernel->llvmFuncName
-                       << ": " << toString(std::move(e)) << "\n";
-          std::abort();
-        }
-      });
-    }
-  }
-  dispatcher.sync(progressBar);
-  return llvm::Error::success();
+  llvm::Error err = llvm::Error::success();
+  for (auto& [name, pool] : kernelPools_)
+    err = llvm::joinErrors(compilePool(name), std::move(err));
+
+  return err;
 }
 
 void CPUKernelManager::dumpIR(const std::string& funcName,

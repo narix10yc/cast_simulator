@@ -15,7 +15,7 @@ TaskDispatcher::TaskDispatcher(int nWorkers) {
   assert(nWorkers > 0);
   workers.reserve(nWorkers);
   for (int i = 0; i < nWorkers; ++i)
-    workers.emplace_back(&TaskDispatcher::worker_work, this);
+    workers.emplace_back(&TaskDispatcher::worker_work_, this);
 }
 
 void TaskDispatcher::enqueue(const std::function<void()>& task) {
@@ -47,7 +47,7 @@ void TaskDispatcher::ensure_tls_ready_() {
       tls_instance_t(tls_manager_.creator(), tls_manager_.deleter);
 }
 
-void TaskDispatcher::worker_work() {
+void TaskDispatcher::worker_work_() {
   std::function<void()> task;
   bool tlExit = false;
   while (true) {

@@ -13,6 +13,7 @@
 #include "cast/CUDA/Config.h"
 #include "utils/Formats.h"
 #include "utils/iocolor.h"
+#include "llvm/Support/Error.h"
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include <llvm/Support/Debug.h>
@@ -565,7 +566,7 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
   auto* semaphore = initialLaunches_.push(kernel, er);
 
   // add compilation task to the dispatcher
-  dispatcher.enqueue([kernel, er, semaphore, this]() {
+  dispatcher.enqueueMayErr([kernel, er, semaphore, this]() -> llvm::Error {
     CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
     assert(semaphore != nullptr);
 
@@ -587,13 +588,16 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
         if (kernel->cubinData.empty()) {
           // If PTX is not available, we optimize LLVM IR and generate PTX
           if (kernel->ptxString.empty()) {
-            if (auto e = optimizeLLVMIR_work(1, *kernel)) {
-              std::cerr << "Failed to optimize LLVM IR for kernel "
-                        << kernel->getName() << ": "
-                        << llvm::toString(std::move(e)) << "\n";
-              std::abort();
+            auto e = optimizeLLVMIR_work(1, *kernel);
+            e = llvm::joinErrors(std::move(e),
+                                 compileLLVMIRToPTX_work(*kernel));
+            if (e) {
+              return llvm::joinErrors(
+                  llvm::createStringError(
+                      llvm::Twine("Failed to prepare PTX for kernel ") +
+                      kernel->getName()),
+                  std::move(e));
             }
-            llvm::cantFail(compileLLVMIRToPTX_work(*kernel));
           }
           // PTX is now available. Compile to cubin
           compileToCubin_work(1, *kernel);
@@ -623,10 +627,10 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
     er->status.store(ExecutionResult::ReadyToLaunch);
     // only one exec thread
     execCV_.notify_one();
+    return llvm::Error::success();
   });
 
   execCV_.notify_one();
-
   return er;
 }
 

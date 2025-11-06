@@ -151,6 +151,7 @@ private:
   private:
     std::mutex mtx_;
     std::deque<InitialLaunch> queue_;
+    // There should be a reason we don't use shared_ptr here (can't remember)
     struct Semaphore {
       std::unique_ptr<KernelSemaphore> semaphore;
       int refCount;
@@ -226,7 +227,8 @@ private:
 
   LaunchConfig launchConfig_;
 
-  bool timingEnabled_ = false;
+  // timing enabled by default
+  bool timingEnabled_ = true;
 
   // execution thread work
   void execTh_work_();
