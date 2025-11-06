@@ -17,11 +17,11 @@ ArgOutputFilename("o", cl::cat(ArgCategory),
     cl::desc("Output file name"), cl::Required);
 
 static cl::opt<bool>
-ArgF32("f32", cl::cat(ArgCategory),
+ArgFP32("f32", cl::cat(ArgCategory),
     cl::desc("Enable single-precision"), cl::init(false));
 
 static cl::opt<bool>
-ArgF64("f64", cl::cat(ArgCategory),
+ArgFP64("f64", cl::cat(ArgCategory),
     cl::desc("Enable double-precision"), cl::init(true));
 
 static cl::opt<int>
@@ -110,13 +110,13 @@ int main(int argc, char** argv) {
   inFile.close();
 
   CPUPerformanceCache cache;
-  if (ArgF32) {
+  if (ArgFP32) {
     std::cerr << BOLDCYAN("[Info]: ")
               << "Running single-precision experiments.\n";
     CPUKernelGenConfig cpuConfig(simdWidth, Precision::FP32);
     cache.runExperiments(cpuConfig, ArgNQubits, nThreads, ArgNTests);
   }
-  if (ArgF64) {
+  if (ArgFP64) {
     std::cerr << BOLDCYAN("[Info]: ")
               << "Running double-precision experiments.\n";
     CPUKernelGenConfig cpuConfig(simdWidth, Precision::FP64);

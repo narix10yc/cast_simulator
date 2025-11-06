@@ -241,7 +241,7 @@ static void cuda_benchmark(const std::vector<GateType>& gateTypes,
   CUDAKernelManager kernelMgr(NUM_THREADS);
   CUDAKernelGenConfig kernelGenConfig;
   kernelGenConfig.precision =
-      (std::is_same_v<ScalarType, float> ? Precision::F32 : Precision::F64);
+      (std::is_same_v<ScalarType, float> ? Precision::FP32 : Precision::FP64);
 
   std::vector<QuantumGatePtr> gates;
   for (const auto& gateType : gateTypes)

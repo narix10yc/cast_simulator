@@ -54,14 +54,14 @@ template <int nQubits> void runU2qTest() {
     km.syncKernelExecution();
 
     // check norm
-    suite.assertCloseF64(
+    suite.assertCloseFP64(
         svCUDA.norm(), 1.0, "CUDA SV norm equals 1", GET_INFO());
 
     svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gate.get()));
 
     // compare per-qubit probabilities
     for (int q : gate->qubits()) {
-      suite.assertCloseF64(svCUDA.prob(q),
+      suite.assertCloseFP64(svCUDA.prob(q),
                            svCPU.prob(q),
                            "CUDA vs CPU probability match for qubit " +
                                std::to_string(q),

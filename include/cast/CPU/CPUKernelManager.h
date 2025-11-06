@@ -138,9 +138,8 @@ class CPUKernelManager : public KernelManager<CPUKernelInfo> {
                           Pool& pool);
 
 public:
-  CPUKernelManager(int nWorkerThreads = -1)
-      : KernelManager<CPUKernelInfo>(
-            nWorkerThreads > 0 ? nWorkerThreads : cast::get_cpu_num_threads()) {
+  CPUKernelManager(int nWorkerThreads = 0)
+      : KernelManager<CPUKernelInfo>(nWorkerThreads) {
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmParser();
     llvm::InitializeNativeTargetAsmPrinter();
@@ -223,25 +222,25 @@ public:
                              const std::string& llvmFuncName,
                              int nThreads = 0);
 
-  llvm::Error applyCPUKernel(CPUStatevectorF32& sv,
+  llvm::Error applyCPUKernel(CPUStatevectorFP32& sv,
                              CPUKernelInfo& kernelInfo,
                              int nThreads = 0) {
     return applyCPUKernel(sv.data(), sv.nQubits(), kernelInfo, nThreads);
   }
 
-  llvm::Error applyCPUKernel(CPUStatevectorF64& sv,
+  llvm::Error applyCPUKernel(CPUStatevectorFP64& sv,
                              CPUKernelInfo& kernelInfo,
                              int nThreads = 0) {
     return applyCPUKernel(sv.data(), sv.nQubits(), kernelInfo, nThreads);
   }
 
-  llvm::Error applyCPUKernel(CPUStatevectorF32& sv,
+  llvm::Error applyCPUKernel(CPUStatevectorFP32& sv,
                              const std::string& llvmFuncName,
                              int nThreads = 0) {
     return applyCPUKernel(sv.data(), sv.nQubits(), llvmFuncName, nThreads);
   }
 
-  llvm::Error applyCPUKernel(CPUStatevectorF64& sv,
+  llvm::Error applyCPUKernel(CPUStatevectorFP64& sv,
                              const std::string& llvmFuncName,
                              int nThreads = 0) {
     return applyCPUKernel(sv.data(), sv.nQubits(), llvmFuncName, nThreads);

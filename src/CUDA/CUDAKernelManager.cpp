@@ -12,7 +12,6 @@
 
 #include "cast/CUDA/Config.h"
 #include "utils/Formats.h"
-#include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
@@ -23,55 +22,52 @@
 using namespace cast;
 using namespace llvm;
 
-std::ostream& CUDAKernelGenConfig::displayInfo(std::ostream& os) const {
-  os << std::scientific;
-  os << CYAN("=== CUDA Kernel Gen Config ===\n") << "precision        : f"
-     << static_cast<int>(precision) << "\n"
-     << "zeroTolerance    : " << zeroTol << "\n"
-     << "oneTolerance     : " << oneTol << "\n"
-     << "matrixLoadMode   : ";
-
-  switch (this->matrixLoadMode) {
-  case CUDAMatrixLoadMode::UseMatImmValues:
-    os << "UseMatImmValues\n";
-    break;
-  case CUDAMatrixLoadMode::LoadInDefaultMemSpace:
-    os << "LoadInDefaultMemSpace\n";
-    break;
-  case CUDAMatrixLoadMode::LoadInConstMemSpace:
-    os << "LoadInConstMemSpace\n";
-    break;
-  }
-
-  return os << CYAN("================================\n");
+void CUDAKernelGenConfig::displayInfo(utils::InfoLogger logger) const {
+  logger.put("Precision", precision)
+      .put("Zero Tolerance", zeroTol)
+      .put("One Tolerance", oneTol)
+      .put("Matrix Load Mode", [&](std::ostream& os) {
+        switch (matrixLoadMode) {
+        case CUDAMatrixLoadMode::UseMatImmValues:
+          os << "UseMatImmValues";
+          break;
+        case CUDAMatrixLoadMode::LoadInDefaultMemSpace:
+          os << "LoadInDefaultMemSpace";
+          break;
+        case CUDAMatrixLoadMode::LoadInConstMemSpace:
+          os << "LoadInConstMemSpace";
+          break;
+        default:
+          os << "Unknown";
+          break;
+        }
+      });
 }
 
-std::ostream& CUDAKernelInfo::displayInfo(std::ostream& os) const {
-  os << CYAN("=== Info of CUDA Kernel @ " << (void*)this << " ===\n")
-     << "Function Name    : " << getName() << "\n"
-     << "Precision        : f" << static_cast<int>(precision) << "\n"
-     << "Gate             : " << gate.get() << "\n"
-     << "PTX              : ";
-  if (ptxString.empty())
-    os << "No\n";
-  else
-    os << "Yes, with size " << utils::fmt_mem(ptxString.size()) << "\n";
-
-  os << "CUBIN            : ";
-  if (cubinData.empty())
-    os << "No\n";
-  else
-    os << "Yes, with size " << utils::fmt_mem(cubinData.size()) << "\n";
-
-  return os << CYAN("================================\n");
+void CUDAKernelInfo::displayInfo(utils::InfoLogger logger) const {
+  logger.put("Function Name", getName())
+      .put("Precision", static_cast<int>(precision))
+      .put("Gate Ptr", (void*)(gate.get()))
+      .put("PTX",
+           [&](std::ostream& os) -> void {
+             if (ptxString.empty())
+               os << "None";
+             else
+               os << "Yes, with size " << utils::fmt_mem(ptxString.size());
+           })
+      .put("CUBIN", [&](std::ostream& os) -> void {
+        if (cubinData.empty())
+          os << "None";
+        else
+          os << "Yes, with size " << utils::fmt_mem(cubinData.size());
+      });
 }
 
-std::ostream& CUDAKernelManager::displayInfo(std::ostream& os) const {
-  os << CYAN("=== Info of CUDA Kernel Manager @ " << (void*)this << " ===\n")
-     << "Num Worker Threads : " << dispatcher.getNumWorkers() << "\n"
-     << "CU Device          : " << cuDevice << "\n"
-     << "Primary CU Context : " << primaryCuCtx << "\n"
-     << "Primary CU Stream  : " << primaryCuStream << "\n";
+void CUDAKernelManager::displayInfo(utils::InfoLogger logger) const {
+  logger.put("Num Worker Threads", dispatcher.getNumWorkers())
+      .put("CU Device         ", cuDevice)
+      .put("Primary CU Context", primaryCuCtx)
+      .put("Primary CU Stream ", primaryCuStream);
 
   int nKernels = 0;
   size_t totalPTXSize = 0, totalCUBINSize = 0;
@@ -85,12 +81,16 @@ std::ostream& CUDAKernelManager::displayInfo(std::ostream& os) const {
     totalPTXSize += kernel->ptxString.size();
     totalCUBINSize += kernel->cubinData.size();
   }
-  os << "Num Kernels        : " << nKernels << "\n"
-     << "PTX     : " << nActivePTX << " availables\n"
-     << "  Total PTX Size   : " << utils::fmt_mem(totalPTXSize) << "\n"
-     << "CUBIN   : " << nActiveCUBIN << " availables\n"
-     << "  Total CUBIN Size : " << utils::fmt_mem(totalCUBINSize) << "\n";
-  return os << CYAN("================================\n");
+  logger.put("Num Kernels        ", nKernels)
+      .put("PTX     ",
+           [&](std::ostream& os) {
+             os << nActivePTX << " availables, total size "
+                << utils::fmt_mem(totalPTXSize);
+           })
+      .put("CUBIN", [&](std::ostream& os) {
+        os << nActiveCUBIN << " availables, total size "
+           << utils::fmt_mem(totalCUBINSize);
+      });
 }
 
 std::ostream&
@@ -106,8 +106,7 @@ CUDAKernelManager::ExecutionResult::displayInfo(std::ostream& os) const {
 }
 
 CUDAKernelManager::CUDAKernelManager(int nWorkerThreads, int deviceOrdinal)
-    : KernelManager<CUDAKernelInfo>(
-          nWorkerThreads > 0 ? nWorkerThreads : cast::get_cpu_num_threads()) {
+    : KernelManager<CUDAKernelInfo>(nWorkerThreads) {
   LLVMInitializeNVPTXTarget();
   LLVMInitializeNVPTXTargetInfo();
   LLVMInitializeNVPTXTargetMC();

@@ -1,11 +1,7 @@
-#include "llvm/Support/TargetSelect.h"
-
 #include "cast/CPU/CPUKernelManager.h"
 #include "utils/Formats.h"
 #include "utils/TaskDispatcher.h"
-#include "utils/iocolor.h"
 
-#include "llvm/IR/OptBisect.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/StandardInstrumentations.h"

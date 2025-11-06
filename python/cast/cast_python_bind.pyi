@@ -222,7 +222,7 @@ class CPUKernelManager:
     ...
 
   def apply_kernel_f32(self,
-                       sv: CPUStatevectorF32,
+                       sv: CPUStatevectorFP32,
                        kenrel: CPUKernelInfo,
                        num_threads: int) -> None:
     """
@@ -231,7 +231,7 @@ class CPUKernelManager:
     ...
 
   def apply_kernel_f64(self,
-                       sv: CPUStatevectorF64,
+                       sv: CPUStatevectorFP64,
                        kenrel: CPUKernelInfo,
                        num_threads: int) -> None:
     """
@@ -239,7 +239,7 @@ class CPUKernelManager:
     """
     ...
 
-class CPUStatevectorF32:
+class CPUStatevectorFP32:
   """
   Represents a statevector in single precision (float).
   """
@@ -274,7 +274,7 @@ class CPUStatevectorF32:
     """
     ...
   
-class CPUStatevectorF64:
+class CPUStatevectorFP64:
   """
   Represents a statevector in double precision (double).
   """

@@ -171,12 +171,12 @@ double maximum_norm(const square_matrix<data_t>& m0,
 square_matrix<std::complex<double>> randomUnitaryMatrix(unsigned edgeSize);
 
 std::ostream&
-printComplexMatrixF64(std::ostream& os,
+printComplexMatrixFP64(std::ostream& os,
                       const square_matrix<std::complex<double>>& matrix);
 
 inline std::ostream&
-printComplexMatrixF64(const square_matrix<std::complex<double>>& matrix) {
-  return printComplexMatrixF64(std::cerr, matrix);
+printComplexMatrixFP64(const square_matrix<std::complex<double>>& matrix) {
+  return printComplexMatrixFP64(std::cerr, matrix);
 }
 
 } // namespace utils

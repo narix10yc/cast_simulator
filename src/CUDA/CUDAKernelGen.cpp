@@ -709,16 +709,16 @@ Value* buildOffset(IRBuilder<>& B,
   return offset;
 }
 
-static Value* warpBroadcastF32(IRBuilder<>& B, Value* valF32, Value* srcLane) {
+static Value* warpBroadcastFP32(IRBuilder<>& B, Value* valFP32, Value* srcLane) {
   auto& C = B.getContext();
   Value* mask = ConstantInt::get(Type::getInt32Ty(C), -1);
 
   auto shfl = Intrinsic::getOrInsertDeclaration(
       B.GetInsertBlock()->getModule(), Intrinsic::nvvm_shfl_sync_idx_i32);
 
-  Value* valI32 = B.CreateBitCast(valF32, Type::getInt32Ty(C));
+  Value* valI32 = B.CreateBitCast(valFP32, Type::getInt32Ty(C));
   Value* resI32 = B.CreateCall(shfl, {mask, valI32, srcLane, B.getInt32(31)});
-  return B.CreateBitCast(resI32, valF32->getType());
+  return B.CreateBitCast(resI32, valFP32->getType());
 }
 
 static void

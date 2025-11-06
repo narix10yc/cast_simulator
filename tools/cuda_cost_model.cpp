@@ -41,12 +41,12 @@ ArgNTests("N", cl::cat(ArgCategory),
     cl::Required);
 
 static cl::opt<bool>
-ArgF32("f32", cl::cat(ArgCategory),
+ArgFP32("f32", cl::cat(ArgCategory),
     cl::desc("Enable single-precision (f32) kernels"),
     cl::init(false));
 
 static cl::opt<bool>
-ArgF64("f64", cl::cat(ArgCategory),
+ArgFP64("f64", cl::cat(ArgCategory),
     cl::desc("Enable double-precision (f64) kernels"),
     cl::init(false));
 
@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
   int nQubitsSV = ArgNQubits;
   int nWorkerThreads = (ArgNWorkerThreads <= 0) ? cast::get_cpu_num_threads()
                                                 : ArgNWorkerThreads;
-  if (!ArgF32 && !ArgF64) {
+  if (!ArgFP32 && !ArgFP64) {
     std::cerr << BOLDRED("[Error]: ")
               << "At least one of -f32 or -f64 must be specified.\n";
     return 1;
@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
   inFile.close();
 
   CUDAPerformanceCache cache;
-  if (ArgF32) {
+  if (ArgFP32) {
     std::cerr << BOLDCYAN("[Info]: ")
               << "Running single-precision experiments.\n";
     CUDAKernelGenConfig cudaConfig(Precision::FP32);
@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
       return 1;
     }
   }
-  if (ArgF64) {
+  if (ArgFP64) {
     std::cerr << BOLDCYAN("[Info]: ")
               << "Running double-precision experiments.\n";
     CUDAKernelGenConfig cudaConfig(Precision::FP64);

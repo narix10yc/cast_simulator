@@ -1,13 +1,8 @@
-#include "cast/Core/Precision.h"
-#include "pybind11/iostream.h"
-#include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
+#include "cast/CPU/CPU.h"
 
-#include "cast/CPU/CPUKernelManager.h"
-#include "cast/CPU/CPUOptimizer.h"
-#include "cast/CPU/CPUStatevector.h"
-#include <pybind11/cast.h>
 #include <pybind11/detail/common.h>
+#include <pybind11/iostream.h>
+#include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
@@ -22,72 +17,65 @@ void bind_simdWidth(py::module_& m) {
       .value("W512", cast::CPUSimdWidth::W512);
 }
 
-void bind_precision(py::module_& m) {
-  py::enum_<cast::Precision>(m, "Precision")
-      .value("FP32", cast::Precision::FP32)
-      .value("FP64", cast::Precision::FP64)
-      .value("Unknown", cast::Precision::Unknown);
-}
-
 void bind_CPUStatevector(py::module_& m) {
-  py::class_<cast::CPUStatevectorF32>(m, "CPUStatevectorF32")
+  py::class_<cast::CPUStatevectorFP32>(m, "CPUStatevectorFP32")
       .def(py::init<int, cast::CPUSimdWidth>(),
            py::arg("num_qubits"),
            py::arg("simd_width"))
       .def(
           "__getitem__",
-          [](const cast::CPUStatevectorF32& self, size_t idx) {
+          [](const cast::CPUStatevectorFP32& self, size_t idx) {
             if (idx >= self.getN()) {
               throw std::out_of_range(
-                  "Index out of range in CPUStatevectorF32");
+                  "Index out of range in CPUStatevectorFP32");
             }
             return self.amp(idx);
           },
           py::arg("idx"))
       .def_property_readonly(
           "num_qubits",
-          [](const cast::CPUStatevectorF32& self) { return self.nQubits(); })
-      .def("normSquared", &cast::CPUStatevectorF32::normSquared)
-      .def("norm", &cast::CPUStatevectorF32::norm)
-      .def("probability", &cast::CPUStatevectorF32::prob, py::arg("qubit"))
+          [](const cast::CPUStatevectorFP32& self) { return self.nQubits(); })
+      .def("normSquared", &cast::CPUStatevectorFP32::normSquared)
+      .def("norm", &cast::CPUStatevectorFP32::norm)
+      .def("probability", &cast::CPUStatevectorFP32::prob, py::arg("qubit"))
       .def("initialize",
-           &cast::CPUStatevectorF32::initialize,
+           &cast::CPUStatevectorFP32::initialize,
            py::arg("num_threads") = 1)
       .def("normalize",
-           &cast::CPUStatevectorF32::normalize,
+           &cast::CPUStatevectorFP32::normalize,
            py::arg("num_threads") = 1)
       .def("randomize",
-           &cast::CPUStatevectorF32::randomize,
+           &cast::CPUStatevectorFP32::randomize,
            py::arg("num_threads") = 1);
 
-  py::class_<cast::CPUStatevectorF64>(m, "CPUStatevectorF64")
+  py::class_<cast::CPUStatevectorFP64>(m, "CPUStatevectorFP64")
       .def(py::init<int, cast::CPUSimdWidth>(),
            py::arg("num_qubits"),
            py::arg("simd_width"))
       .def(
           "__getitem__",
-          [](const cast::CPUStatevectorF64& self, size_t idx) {
+          [](const cast::CPUStatevectorFP64& self, size_t idx) {
             if (idx >= self.getN()) {
               throw std::out_of_range(
-                  "Index out of range in CPUStatevectorF64");
+                  "Index out of range in CPUStatevectorFP64");
             }
             return self.amp(idx);
           },
           py::arg("idx"))
       .def_property_readonly(
           "num_qubits",
-          [](const cast::CPUStatevectorF32& self) { return self.nQubits(); })
-      .def("normSquared", &cast::CPUStatevectorF64::normSquared)
-      .def("norm", &cast::CPUStatevectorF64::norm)
-      .def("probability", &cast::CPUStatevectorF64::prob, py::arg("qubit"))
+          [](const cast::CPUStatevectorFP32& self) { return self.nQubits(); })
+      .def("normSquared", &cast::CPUStatevectorFP64::normSquared)
+      .def("norm", &cast::CPUStatevectorFP64::norm)
+      .def("probability", &cast::CPUStatevectorFP64::prob, py::arg("qubit"))
       .def("initialize",
-           &cast::CPUStatevectorF64::initialize,
+           &cast::CPUStatevectorFP64::initialize,
            py::arg("num_threads") = 1)
       .def("normalize",
-           &cast::CPUStatevectorF64::normalize,
+           &cast::CPUStatevectorFP64::normalize,
            py::arg("num_threads") = 1)
       .def("randomize",
-           &cast::CPUStatevectorF64::randomize,
+           &cast::CPUStatevectorFP64::randomize,
            py::arg("num_threads") = 1);
 }
 
@@ -293,7 +281,7 @@ void bind_CPUKernelManager(py::module_& m) {
       .def(
           "apply_kernel_f32",
           [](cast::CPUKernelManager& self,
-             cast::CPUStatevectorF32& sv,
+             cast::CPUStatevectorFP32& sv,
              cast::CPUKernelInfo& kernel,
              int nThreads) {
             if (kernel.precision != cast::Precision::FP32) {
@@ -313,7 +301,7 @@ void bind_CPUKernelManager(py::module_& m) {
       .def(
           "apply_kernel_f64",
           [](cast::CPUKernelManager& self,
-             cast::CPUStatevectorF64& sv,
+             cast::CPUStatevectorFP64& sv,
              cast::CPUKernelInfo& kernel,
              int nThreads) {
             if (kernel.precision != cast::Precision::FP64) {
@@ -374,7 +362,6 @@ void bind_CPUOptimizer(py::module_& m) {
 
 void bind_cpu(py::module_& m) {
   bind_simdWidth(m);
-  bind_precision(m);
   bind_CPUStatevector(m);
   bind_CPUKernelManager(m);
   bind_CPUOptimizer(m);

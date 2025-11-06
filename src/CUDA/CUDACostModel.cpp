@@ -17,7 +17,7 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
                           int verbose,
                           impl::CostModelWeightType& weights) {
   CUDAKernelManager km(nWorkerThreads);
-  CUDAStatevectorF64 sv(nQubits);
+  CUDAStatevectorFP64 sv(nQubits);
   sv.initialize();
 
   // generate {1,2,3,4,5}-qubit gates acting on MSB qubits
@@ -106,7 +106,7 @@ CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
   }
 
   CUDAKernelManager km(nWorkerThreads);
-  CUDAStatevectorF64 sv(nQubitsSV);
+  CUDAStatevectorFP64 sv(nQubitsSV);
   sv.initialize();
   km.setLaunchConfig(sv.getDevicePtr(), sv.nQubits());
   km.enableTiming();
@@ -220,7 +220,7 @@ void CUDACostModel::showEntries(std::ostream& os, int nLines) const {
   os << "k | Precision | Dense (GiB/s) | Per Op Per Sec\n";
   for (const auto& [key, value] : bucket_) {
     auto denseGateGiBTime = 1.0f / (value * (1U << (key.k + 2)));
-    os << key.k << " | " << (key.precision == Precision::FP32 ? "F32" : "F64")
+    os << key.k << " | " << (key.precision == Precision::FP32 ? "FP32" : "FP64")
        << " | " << utils::fmt_1_to_1e3(denseGateGiBTime) << " | "
        << utils::fmt_mem(value * 1e6) << "\n";
     if (--nToDisplay <= 0)

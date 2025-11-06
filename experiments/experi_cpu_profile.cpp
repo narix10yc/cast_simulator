@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
   std::string deviceName = ArgDeviceName;
   int nThreads = cast::get_cpu_num_threads();
   cast::CPUKernelManager km;
-  CPUStatevectorF64 sv(getNumQubitsSV(), cast::get_cpu_simd_width());
+  CPUStatevectorFP64 sv(getNumQubitsSV(), cast::get_cpu_simd_width());
 
   int count = 0;
   const auto run = [&](const std::string& inputFilename,

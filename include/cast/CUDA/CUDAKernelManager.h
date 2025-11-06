@@ -5,12 +5,11 @@
 #define CAST_CUDA_CUDAKERNELMANAGER_H
 
 #include "cast/CUDA/CUDAStatevector.h"
-#include "cast/CUDA/Config.h"
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 
-#include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
+#include "utils/InfoLogger.h"
 
 #include "llvm/Support/Error.h"
 
@@ -26,7 +25,6 @@ enum class CUDAMatrixLoadMode {
 };
 
 struct CUDAKernelInfo {
-
   std::string ptxString;
   std::vector<uint8_t> cubinData;
   ConstQuantumGatePtr gate = nullptr;
@@ -46,7 +44,7 @@ struct CUDAKernelInfo {
 
   std::string_view getName() const { return llvmFunc->getName(); }
 
-  std::ostream& displayInfo(std::ostream& os) const;
+  void displayInfo(utils::InfoLogger logger) const;
 }; // struct CUDAKernelInfo
 
 struct CUDAKernelGenConfig {
@@ -58,11 +56,10 @@ struct CUDAKernelGenConfig {
 
   explicit CUDAKernelGenConfig(Precision p = Precision::FP64) : precision(p) {}
 
-  std::ostream& displayInfo(std::ostream& os) const;
+  void displayInfo(utils::InfoLogger logger) const;
 };
 
 class CUDAKernelManager : public KernelManager<CUDAKernelInfo> {
-
   CUdevice cuDevice;
   CUcontext primaryCuCtx = nullptr;
   CUstream primaryCuStream = nullptr;
@@ -235,7 +232,7 @@ private:
   void execTh_work_();
 
 public:
-  CUDAKernelManager(int nWorkerThreads = -1, int deviceOrdinal = 0);
+  CUDAKernelManager(int nWorkerThreads = 0, int deviceOrdinal = 0);
 
   CUDAKernelManager(const CUDAKernelManager&) = delete;
   CUDAKernelManager(CUDAKernelManager&&) = delete;
@@ -244,7 +241,7 @@ public:
 
   ~CUDAKernelManager();
 
-  std::ostream& displayInfo(std::ostream& os) const;
+  void displayInfo(utils::InfoLogger logger) const;
 
   // Generate a kernel for a single gate into the default kernel pool.
   // \c funcName: if empty, a default name "k_<index>" will be assigned. If
@@ -306,11 +303,11 @@ public:
     launchConfig_.blockSize = blockSize;
   }
 
-  void setLaunchConfig(CUDAStatevectorF32& sv, unsigned blockSize = 64) {
+  void setLaunchConfig(CUDAStatevectorFP32& sv, unsigned blockSize = 64) {
     setLaunchConfig(sv.getDevicePtr(), sv.nQubits(), blockSize);
   }
 
-  void setLaunchConfig(CUDAStatevectorF64& sv, unsigned blockSize = 64) {
+  void setLaunchConfig(CUDAStatevectorFP64& sv, unsigned blockSize = 64) {
     setLaunchConfig(sv.getDevicePtr(), sv.nQubits(), blockSize);
   }
 

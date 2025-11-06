@@ -78,7 +78,7 @@ int main(int argc, const char** argv) {
   auto t1 = clock::now();
 
   auto* cg = (*circuit)->getAllCircuitGraphs()[0];
-  CUDAStatevectorF64 sv(cg->nQubits());
+  CUDAStatevectorFP64 sv(cg->nQubits());
   sv.initialize();
   CUDAKernelManager km;
   km.enableTiming();

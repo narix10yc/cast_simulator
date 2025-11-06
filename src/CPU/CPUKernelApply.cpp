@@ -83,12 +83,12 @@ llvm::Error CPUKernelManager::applyCPUKernel(void* sv,
 
   // Thread t will access tasks from taskIds[t] to taskIds[t + 1]
   std::unique_ptr<uint64_t[]> taskIds(new uint64_t[nThreads + 1]);
-  for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx)
+  for (int tIdx = 0; tIdx < nThreads; ++tIdx)
     taskIds[tIdx] = nTasksPerThread * tIdx;
   taskIds[nThreads] = nTasks; // Last thread will handle the rest
 
   std::unique_ptr<void*[]> argvs(new void*[4 * nThreads]);
-  for (unsigned tIdx = 0; tIdx < nThreads; ++tIdx) {
+  for (int tIdx = 0; tIdx < nThreads; ++tIdx) {
     argvs[tIdx * 4] = sv;                       // state vector
     argvs[tIdx * 4 + 1] = &(taskIds[tIdx]);     // taskID begin
     argvs[tIdx * 4 + 2] = &(taskIds[tIdx + 1]); // taskID end

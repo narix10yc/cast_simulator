@@ -2,6 +2,6 @@
 
 using namespace cast;
 
-// const CPUKernelGenConfig CPUKernelGenConfig::NativeDefaultF32 {
+// const CPUKernelGenConfig CPUKernelGenConfig::NativeDefaultFP32 {
 //
 // };

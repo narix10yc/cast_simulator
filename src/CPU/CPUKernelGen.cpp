@@ -343,14 +343,14 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
   LLVM_DEBUG(debugPrintMatData(std::cerr, matData););
 
   // split qubits
-  int sepBit;
-  llvm::SmallVector<int, 6U> simdBits, hiBits, loBits;
+  unsigned sepBit;
+  llvm::SmallVector<unsigned, 6U> simdBits, hiBits, loBits;
   { // start of qubit splitting
     unsigned q = 0;
     auto qubitsIt = qubits.begin();
     const auto qubitsEnd = qubits.end();
     while (simdBits.size() != s) {
-      if (qubitsIt != qubitsEnd && *qubitsIt == q) {
+      if (qubitsIt != qubitsEnd && static_cast<unsigned>(*qubitsIt) == q) {
         loBits.push_back(q);
         ++qubitsIt;
       } else {
@@ -420,10 +420,10 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
     llvm::Value* idxStartV = B.getInt64(0ULL);
     llvm::Value* tmpCounterV;
     uint64_t mask = 0ULL;
-    int highestQ = hiBits.back();
-    int qIdx = 0;
-    int counterQ = 0;
-    for (int q = sepBit; q <= highestQ; q++) {
+    auto highestQ = hiBits.back();
+    unsigned qIdx = 0;
+    unsigned counterQ = 0;
+    for (unsigned q = sepBit; q <= highestQ; q++) {
       if (q < hiBits[qIdx]) {
         mask |= (1 << counterQ++);
         continue;
@@ -534,7 +534,7 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
   reimMergeMask.reserve(vecSize);
   {
     int idxL, idxR;
-    unsigned lCached; // length of cached array
+    int lCached; // length of cached array
     std::vector<int> arr0(LK * S), arr1(LK * S), arr2(LK * S);
     std::vector<int>&cacheLHS = arr0, &cacheRHS = arr1, &cacheCombined = arr2;
     std::memcpy(arr0.data(), reSplitMasks.data(), S * sizeof(int));
@@ -552,8 +552,7 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
 
       idxL = 0;
       idxR = 0;
-      for (unsigned idxCombined = 0; idxCombined < (lCached << 1);
-           idxCombined++) {
+      for (int idxCombined = 0; idxCombined < (lCached << 1); idxCombined++) {
         if (idxL == lCached) {
           // append cacheRHS[idxR:] to cacheCombined
           while (idxR < lCached) {
@@ -702,7 +701,7 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
      * Round 1: (xx00, xx10) => xx00
      * Round 2: (x000, x100) => x000
      */
-    assert((1 << mergeMasks.size()) == updatedReAmps.size());
+    assert((1ULL << mergeMasks.size()) == updatedReAmps.size());
     for (unsigned mergeIdx = 0; mergeIdx < lk; mergeIdx++) {
       for (unsigned pairIdx = 0; pairIdx < (LK >> mergeIdx >> 1); pairIdx++) {
         unsigned idxL = pairIdx << mergeIdx << 1;

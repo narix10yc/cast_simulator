@@ -47,13 +47,13 @@ public:
 
   void assertFalse(const std::string& title, const std::string& info);
 
-  void assertCloseF32(float a,
+  void assertCloseFP32(float a,
                       float b,
                       const std::string& title,
                       const std::string& info,
                       float tol = 1e-4);
 
-  void assertCloseF64(double a,
+  void assertCloseFP64(double a,
                       double b,
                       const std::string& title,
                       const std::string& info,

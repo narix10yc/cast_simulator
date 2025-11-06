@@ -278,7 +278,7 @@ int main(int argc, const char** argv) {
   }
 
   /* Launch and Time Kernels */
-  CUDAStatevectorF64 sv(nQubitsSV);
+  CUDAStatevectorFP64 sv(nQubitsSV);
   sv.randomize();
   km.setLaunchConfig(sv.getDevicePtr(), sv.nQubits());
 

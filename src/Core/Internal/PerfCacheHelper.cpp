@@ -11,7 +11,7 @@ double cast::internal::calculateMemUpdateSpeed(int nQubits,
   assert(precision == Precision::FP32 || precision == Precision::FP64);
   assert(t > 0.0);
 
-  // F32 takes 8 bytes because of complex number
+  // FP32 takes 8 bytes because of complex number
   uint64_t dataSize = (precision == Precision::FP32 ? 8ULL : 16ULL) << nQubits;
   return static_cast<double>(dataSize) * 1e-9 / t;
 }

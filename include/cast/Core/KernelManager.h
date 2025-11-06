@@ -1,6 +1,7 @@
 #ifndef CAST_CORE_KERNEL_MANAGER_H
 #define CAST_CORE_KERNEL_MANAGER_H
 
+#include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
 #include "utils/TaskDispatcher.h"
 #include "llvm/IR/Module.h"
 #include <map>
@@ -22,7 +23,9 @@ protected:
   // calling \c initJIT
   utils::TaskDispatcher dispatcher;
 
-  explicit KernelManagerBase(int nWorkerThreads) : dispatcher(nWorkerThreads) {}
+  explicit KernelManagerBase(int nWorkerThreads)
+      : dispatcher(nWorkerThreads > 0 ? nWorkerThreads
+                                      : cast::get_cpu_num_threads()) {}
 };
 
 // KernelManager offers CRTP style interface to manage kernel storage and

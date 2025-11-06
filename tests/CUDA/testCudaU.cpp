@@ -43,7 +43,7 @@ template <unsigned nQubits> static void f() {
     ss << "Apply U1q at " << q << ": ";
 
     randomizeSV();
-    suite.assertCloseF64(svCUDA.prob(q),
+    suite.assertCloseFP64(svCUDA.prob(q),
                          svCPU.prob(q),
                          ss.str() + "Prob match before applying gate",
                          GET_INFO());
@@ -58,9 +58,9 @@ template <unsigned nQubits> static void f() {
     km.enqueueKernelLaunch(*kernelInfo);
     km.syncKernelExecution();
 
-    suite.assertCloseF64(
+    suite.assertCloseFP64(
         svCUDA.norm(), 1.0, ss.str() + "CUDA SV norm equals to 1", GET_INFO());
-    suite.assertCloseF64(svCUDA.prob(q),
+    suite.assertCloseFP64(svCUDA.prob(q),
                          svCPU.prob(q),
                          ss.str() + "Prob match after applying gate",
                          GET_INFO());

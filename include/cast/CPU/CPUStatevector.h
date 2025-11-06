@@ -4,14 +4,9 @@
 #include "cast/CPU/Config.h"
 #include "cast/Core/QuantumGate.h"
 #include "utils/Formats.h"
-#include "utils/TaskDispatcher.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
-#include <algorithm>
-#include <cmath>
-#include <complex>
-#include <cstdlib>
 #include <iostream>
 #include <random>
 #include <thread>
@@ -302,8 +297,8 @@ public:
 
 }; // class CPUStatevector
 
-using CPUStatevectorF32 = CPUStatevector<float>;
-using CPUStatevectorF64 = CPUStatevector<double>;
+using CPUStatevectorFP32 = CPUStatevector<float>;
+using CPUStatevectorFP64 = CPUStatevector<double>;
 
 template <typename ScalarType>
 ScalarType fidelity(const CPUStatevector<ScalarType>& sv0,
@@ -319,23 +314,20 @@ ScalarType fidelity(const CPUStatevector<ScalarType>& sv0,
   return re * re + im * im;
 }
 
-using CPUStatevectorF32 = CPUStatevector<float>;
-using CPUStatevectorF64 = CPUStatevector<double>;
-
-// This is a wrapper around F32 and F64 CPU Statevectors. Internally just a
+// This is a wrapper around FP32 and FP64 CPU Statevectors. Internally just a
 // std::variant.
 class CPUStatevectorWrapper {
 private:
-  std::variant<CPUStatevectorF32, CPUStatevectorF64> sv;
+  std::variant<CPUStatevectorFP32, CPUStatevectorFP64> sv;
 
 public:
   CPUStatevectorWrapper(Precision precision,
                         int nQubits,
                         CPUSimdWidth simdWidth) {
     if (precision == Precision::FP32)
-      sv = CPUStatevectorF32(nQubits, simdWidth);
+      sv = CPUStatevectorFP32(nQubits, simdWidth);
     else if (precision == Precision::FP64)
-      sv = CPUStatevectorF64(nQubits, simdWidth);
+      sv = CPUStatevectorFP64(nQubits, simdWidth);
     else
       assert(false && "Unsupported precision for CPUStatevectorWrapper");
   }

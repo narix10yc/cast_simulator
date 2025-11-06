@@ -108,7 +108,7 @@ int main(int argc, char** arv) {
   // Right after kernel generation
   auto t2 = my_clock::now();
 
-  CPUStatevectorF64 sv(cg->nQubits(), gConfig.simdWidth);
+  CPUStatevectorFP64 sv(cg->nQubits(), gConfig.simdWidth);
   sv.initialize(nThreads);
 
   // Right after state init

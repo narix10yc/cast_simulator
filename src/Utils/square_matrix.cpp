@@ -32,7 +32,7 @@ utils::randomUnitaryMatrix(unsigned edgeSize) {
   return matrix;
 }
 
-std::ostream& utils::printComplexMatrixF64(
+std::ostream& utils::printComplexMatrixFP64(
     std::ostream& os,
     const utils::square_matrix<std::complex<double>>& matrix) {
   if (matrix.edgeSize() == 0)

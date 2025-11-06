@@ -3,5 +3,6 @@
 
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUOptimizer.h"
+#include "cast/CPU/CPUStatevector.h"
 
 #endif // CAST_CPU_CPU_H

@@ -9,6 +9,13 @@ namespace py = pybind11;
 
 namespace {
 
+void bind_precision(py::module_& m) {
+  py::enum_<cast::Precision>(m, "Precision")
+      .value("FP32", cast::Precision::FP32)
+      .value("FP64", cast::Precision::FP64)
+      .value("Unknown", cast::Precision::Unknown);
+}
+
 void bind_QuantumGate(py::module_& m) {
   // Base class: QuantumGate
   py::class_<cast::QuantumGate, cast::QuantumGatePtr>(m, "QuantumGate")
@@ -143,6 +150,7 @@ void bind_OptimizerBase(py::module_& m) {
 } // end of anonymous namespace
 
 void bind_core(py::module_& m) {
+  bind_precision(m);
   bind_QuantumGate(m);
   bind_CircuitGraph(m);
   bind_Circuit(m);

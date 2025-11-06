@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
   std::string deviceName = ArgDeviceName;
   int nThreads = cast::get_cpu_num_threads();
   cast::CUDAKernelManager km;
-  CUDAStatevectorF64 sv(getNumQubitsSV());
+  CUDAStatevectorFP64 sv(getNumQubitsSV());
   sv.initialize();
 
   int count = 0;

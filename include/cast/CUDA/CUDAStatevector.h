@@ -61,10 +61,11 @@ public:
   }
 
 public:
-  CUDAStatevector(int nQubits, int deviceOrdinal = 0)
+  CUDAStatevector(int nQubits, bool initialize = true, int deviceOrdinal = 0)
       : nQubits_(nQubits), dData_(nullptr), hData_(nullptr) {
     cudaSetDevice(deviceOrdinal);
-    cudaFree(0);
+    if (initialize)
+      this->initialize();
   }
 
   ~CUDAStatevector() {
@@ -87,6 +88,7 @@ public:
   CUdeviceptr getDevicePtr() const {
     return reinterpret_cast<CUdeviceptr>(dData_);
   }
+
   ScalarType* hData() const { return hData_; }
 
   size_t sizeInBytes() const { return (2ULL << nQubits_) * sizeof(ScalarType); }
@@ -116,11 +118,8 @@ public:
   }
 };
 
-extern template class CUDAStatevector<float>;
-extern template class CUDAStatevector<double>;
-
-using CUDAStatevectorF32 = CUDAStatevector<float>;
-using CUDAStatevectorF64 = CUDAStatevector<double>;
+using CUDAStatevectorFP32 = CUDAStatevector<float>;
+using CUDAStatevectorFP64 = CUDAStatevector<double>;
 
 } // namespace cast
 

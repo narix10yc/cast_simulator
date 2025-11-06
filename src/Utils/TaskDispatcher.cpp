@@ -1,6 +1,5 @@
 #include "utils/TaskDispatcher.h"
 
-#include "utils/iocolor.h"
 #include "utils/utils.h"
 #include <condition_variable>
 #include <iostream>
