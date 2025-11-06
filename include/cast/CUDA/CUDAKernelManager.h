@@ -11,7 +11,7 @@
 
 #include "utils/InfoLogger.h"
 
-#include "llvm/Support/Error.h"
+#include <llvm/Support/Error.h>
 
 #include <cuda.h>
 #include <map>

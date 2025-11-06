@@ -2,8 +2,8 @@
 #include "cast/Core/IRNode.h"
 #include "cast/Transform/Transform.h"
 #include "openqasm/Parser.h"
-#include "llvm/Support/Casting.h"
-#include "llvm/Support/Error.h"
+#include <llvm/Support/Casting.h>
+#include <llvm/Support/Error.h>
 
 using namespace cast;
 

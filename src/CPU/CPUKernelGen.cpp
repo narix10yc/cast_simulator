@@ -1,4 +1,4 @@
-#include "llvm/IR/IntrinsicsX86.h"
+#include <llvm/IR/IntrinsicsX86.h>
 
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/Core/KernelGenInternal.h"
@@ -11,7 +11,7 @@
 #include <cmath>
 
 #define DEBUG_TYPE "codegen-cpu"
-#include "llvm/Support/Debug.h"
+#include <llvm/Support/Debug.h>
 // #define LLVM_DEBUG(X) X
 
 using namespace cast;

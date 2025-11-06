@@ -1,9 +1,9 @@
 #include "cast/ADT/GateMatrix.h"
 #include "utils/iocolor.h"
 #include "utils/utils.h"
-#include "llvm/Support/Casting.h"
+#include <llvm/Support/Casting.h>
 
-#include "llvm/Support/Casting.h"
+#include <llvm/Support/Casting.h>
 
 using namespace cast;
 

@@ -1,7 +1,7 @@
 #include "cast/CPU/CPUStatevector.h"
 #include "cast/CUDA/CUDAStatevector.h"
 #include "tests/TestKit.h"
-#include "llvm/ADT/Twine.h"
+#include <llvm/ADT/Twine.h>
 
 using namespace cast::test;
 

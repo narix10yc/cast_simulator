@@ -3,7 +3,7 @@
 
 #include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
 #include "utils/TaskDispatcher.h"
-#include "llvm/IR/Module.h"
+#include <llvm/IR/Module.h>
 #include <map>
 #include <ranges>
 

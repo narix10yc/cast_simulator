@@ -1,6 +1,6 @@
 #include "cast/Core/AST/AST.h"
 #include "cast/Core/AST/ASTContext.h"
-#include "llvm/Support/Casting.h"
+#include <llvm/Support/Casting.h>
 
 #include <numeric> // for std::gcd
 

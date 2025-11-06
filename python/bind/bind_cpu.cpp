@@ -1,5 +1,6 @@
 #include "cast/CPU/CPU.h"
 
+
 #include <pybind11/detail/common.h>
 #include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
@@ -7,6 +8,22 @@
 namespace py = pybind11;
 
 namespace {
+
+llvm::OptimizationLevel mapIntToLLVMOptLevel(int optLevel) {
+  switch (optLevel) {
+  case 0:
+    return llvm::OptimizationLevel::O0;
+  case 1:
+    return llvm::OptimizationLevel::O1;
+  case 2:
+    return llvm::OptimizationLevel::O2;
+  case 3:
+    return llvm::OptimizationLevel::O3;
+  // we default it to O1
+  default:
+    return llvm::OptimizationLevel::O1;
+  }
+}
 
 void bind_simdWidth(py::module_& m) {
   py::enum_<cast::CPUSimdWidth>(m, "CPUSimdWidth")
@@ -17,73 +34,35 @@ void bind_simdWidth(py::module_& m) {
       .value("W512", cast::CPUSimdWidth::W512);
 }
 
-void bind_CPUStatevector(py::module_& m) {
-  py::class_<cast::CPUStatevectorFP32>(m, "CPUStatevectorFP32")
+template <typename SVType>
+void bind_CPUStatevector(py::module_& m, const char* pyName) {
+  py::class_<SVType>(m, pyName)
       .def(py::init<int, cast::CPUSimdWidth>(),
            py::arg("num_qubits"),
            py::arg("simd_width"))
       .def(
           "__getitem__",
-          [](const cast::CPUStatevectorFP32& self, size_t idx) {
-            if (idx >= self.getN()) {
-              throw std::out_of_range(
-                  "Index out of range in CPUStatevectorFP32");
-            }
+          [](const SVType& self, size_t idx) {
+            if (idx >= self.getN())
+              throw std::out_of_range("Index out of range");
             return self.amp(idx);
           },
           py::arg("idx"))
       .def_property_readonly(
           "num_qubits",
-          [](const cast::CPUStatevectorFP32& self) { return self.nQubits(); })
-      .def("normSquared", &cast::CPUStatevectorFP32::normSquared)
-      .def("norm", &cast::CPUStatevectorFP32::norm)
-      .def("probability", &cast::CPUStatevectorFP32::prob, py::arg("qubit"))
-      .def("initialize",
-           &cast::CPUStatevectorFP32::initialize,
-           py::arg("num_threads") = 1)
-      .def("normalize",
-           &cast::CPUStatevectorFP32::normalize,
-           py::arg("num_threads") = 1)
-      .def("randomize",
-           &cast::CPUStatevectorFP32::randomize,
-           py::arg("num_threads") = 1);
-
-  py::class_<cast::CPUStatevectorFP64>(m, "CPUStatevectorFP64")
-      .def(py::init<int, cast::CPUSimdWidth>(),
-           py::arg("num_qubits"),
-           py::arg("simd_width"))
-      .def(
-          "__getitem__",
-          [](const cast::CPUStatevectorFP64& self, size_t idx) {
-            if (idx >= self.getN()) {
-              throw std::out_of_range(
-                  "Index out of range in CPUStatevectorFP64");
-            }
-            return self.amp(idx);
-          },
-          py::arg("idx"))
-      .def_property_readonly(
-          "num_qubits",
-          [](const cast::CPUStatevectorFP32& self) { return self.nQubits(); })
-      .def("normSquared", &cast::CPUStatevectorFP64::normSquared)
-      .def("norm", &cast::CPUStatevectorFP64::norm)
-      .def("probability", &cast::CPUStatevectorFP64::prob, py::arg("qubit"))
-      .def("initialize",
-           &cast::CPUStatevectorFP64::initialize,
-           py::arg("num_threads") = 1)
-      .def("normalize",
-           &cast::CPUStatevectorFP64::normalize,
-           py::arg("num_threads") = 1)
-      .def("randomize",
-           &cast::CPUStatevectorFP64::randomize,
-           py::arg("num_threads") = 1);
+          [](const SVType& self) -> int { return self.nQubits(); })
+      .def("normSquared", &SVType::normSquared)
+      .def("norm", &SVType::norm)
+      .def("probability", &SVType::prob, py::arg("qubit"))
+      .def("initialize", &SVType::initialize, py::arg("num_threads") = 0)
+      .def("normalize", &SVType::normalize, py::arg("num_threads") = 0)
+      .def("randomize", &SVType::randomize, py::arg("num_threads") = 0);
 }
 
 void bind_CPUKernelManager(py::module_& m) {
   py::enum_<cast::CPUMatrixLoadMode>(m, "CPUMatrixLoadMode")
       .value("UseMatImmValues", cast::CPUMatrixLoadMode::UseMatImmValues)
-      .value("StackLoadMatElems", cast::CPUMatrixLoadMode::StackLoadMatElems)
-      .export_values();
+      .value("StackLoadMatElems", cast::CPUMatrixLoadMode::StackLoadMatElems);
 
   py::class_<cast::CPUKernelGenConfig>(m, "CPUKernelGenConfig")
       .def(py::init<cast::Precision>(), py::arg("precision"))
@@ -106,7 +85,6 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("verbose") = 1);
 
   py::class_<cast::CPUKernelInfo>(m, "CPUKernelInfo")
-      .def(py::init<>())
       .def_readonly("precision", &cast::CPUKernelInfo::precision)
       .def_readonly("llvm_func_name", &cast::CPUKernelInfo::llvmFuncName)
       .def_readonly("gate", &cast::CPUKernelInfo::gate)
@@ -172,25 +150,7 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("func_name"))
       .def("compile_default_pool",
            [](cast::CPUKernelManager& self, int optLevel) {
-             llvm::OptimizationLevel llvmOptLevel = llvm::OptimizationLevel::O0;
-             switch (optLevel) {
-             case 0:
-               llvmOptLevel = llvm::OptimizationLevel::O0;
-               break;
-             case 1:
-               llvmOptLevel = llvm::OptimizationLevel::O1;
-               break;
-             case 2:
-               llvmOptLevel = llvm::OptimizationLevel::O2;
-               break;
-             case 3:
-               llvmOptLevel = llvm::OptimizationLevel::O3;
-               break;
-             // we default it to O1
-             default:
-               llvmOptLevel = llvm::OptimizationLevel::O1;
-               break;
-             }
+             auto llvmOptLevel = mapIntToLLVMOptLevel(optLevel);
              if (auto e = self.compileDefaultPool(llvmOptLevel)) {
                throw std::runtime_error("Failed to compile default pool: " +
                                         llvm::toString(std::move(e)));
@@ -200,25 +160,7 @@ void bind_CPUKernelManager(py::module_& m) {
            [](cast::CPUKernelManager& self,
               const std::string& poolName,
               int optLevel) {
-             llvm::OptimizationLevel llvmOptLevel = llvm::OptimizationLevel::O0;
-             switch (optLevel) {
-             case 0:
-               llvmOptLevel = llvm::OptimizationLevel::O0;
-               break;
-             case 1:
-               llvmOptLevel = llvm::OptimizationLevel::O1;
-               break;
-             case 2:
-               llvmOptLevel = llvm::OptimizationLevel::O2;
-               break;
-             case 3:
-               llvmOptLevel = llvm::OptimizationLevel::O3;
-               break;
-             // we default it to O1
-             default:
-               llvmOptLevel = llvm::OptimizationLevel::O1;
-               break;
-             }
+             auto llvmOptLevel = mapIntToLLVMOptLevel(optLevel);
              if (auto e = self.compilePool(poolName, llvmOptLevel)) {
                throw std::runtime_error("Failed to compile pool '" + poolName +
                                         "': " + llvm::toString(std::move(e)));
@@ -230,25 +172,7 @@ void bind_CPUKernelManager(py::module_& m) {
              int nThreads,
              int optLevel,
              int verbose) {
-            llvm::OptimizationLevel llvmOptLevel = llvm::OptimizationLevel::O0;
-            switch (optLevel) {
-            case 0:
-              llvmOptLevel = llvm::OptimizationLevel::O0;
-              break;
-            case 1:
-              llvmOptLevel = llvm::OptimizationLevel::O1;
-              break;
-            case 2:
-              llvmOptLevel = llvm::OptimizationLevel::O2;
-              break;
-            case 3:
-              llvmOptLevel = llvm::OptimizationLevel::O3;
-              break;
-            // we default it to O1
-            default:
-              llvmOptLevel = llvm::OptimizationLevel::O1;
-              break;
-            }
+            auto llvmOptLevel = mapIntToLLVMOptLevel(optLevel);
             if (auto e = self.compileAll(llvmOptLevel, verbose)) {
               throw std::runtime_error("Failed to compile all pools: " +
                                        llvm::toString(std::move(e)));
@@ -279,7 +203,7 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("pool_name"),
           py::return_value_policy::reference_internal)
       .def(
-          "apply_kernel_f32",
+          "apply_kernel_fp32",
           [](cast::CPUKernelManager& self,
              cast::CPUStatevectorFP32& sv,
              cast::CPUKernelInfo& kernel,
@@ -299,7 +223,7 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("gate"),
           py::arg("num_threads") = 1)
       .def(
-          "apply_kernel_f64",
+          "apply_kernel_fp64",
           [](cast::CPUKernelManager& self,
              cast::CPUStatevectorFP64& sv,
              cast::CPUKernelInfo& kernel,
@@ -362,7 +286,8 @@ void bind_CPUOptimizer(py::module_& m) {
 
 void bind_cpu(py::module_& m) {
   bind_simdWidth(m);
-  bind_CPUStatevector(m);
+  bind_CPUStatevector<cast::CPUStatevectorFP32>(m, "CPUStatevectorFP32");
+  bind_CPUStatevector<cast::CPUStatevectorFP64>(m, "CPUStatevectorFP64");
   bind_CPUKernelManager(m);
   bind_CPUOptimizer(m);
 }

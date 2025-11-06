@@ -6,7 +6,7 @@
 #include "utils/PrintSpan.h"
 #include "utils/iocolor.h"
 
-#include "llvm/Support/CommandLine.h"
+#include <llvm/Support/CommandLine.h>
 
 namespace cl = llvm::cl;
 

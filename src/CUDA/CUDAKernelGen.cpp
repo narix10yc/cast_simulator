@@ -3,14 +3,14 @@
 #include "cast/Core/ScalarKind.h"
 #include "utils/Formats.h"
 
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/IntrinsicsNVPTX.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/Target/TargetMachine.h"
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/IntrinsicsNVPTX.h>
+#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/Verifier.h>
+#include <llvm/Target/TargetMachine.h>
 
 #define DEBUG_TYPE "codegen-cuda"
-#include "llvm/Support/Debug.h"
+#include <llvm/Support/Debug.h>
 // #define LLVM_DEBUG(X) X
 
 using namespace cast;

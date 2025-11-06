@@ -3,7 +3,7 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
-#include "llvm/Config/llvm-config.h"
+#include <llvm/Config/llvm-config.h>
 
 using namespace cast;
 

@@ -1,7 +1,7 @@
 #include "cast/Core/IRNode.h"
 #include "utils/InfoLogger.h"
 #include "utils/iocolor.h"
-#include "llvm/MC/MCDirectives.h"
+#include <llvm/MC/MCDirectives.h>
 
 #include <iomanip>
 #include <set>

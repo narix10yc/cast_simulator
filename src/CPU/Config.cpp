@@ -2,9 +2,9 @@
 #include "utils/iocolor.h"
 #include "utils/utils.h"
 
-#include "llvm/ADT/StringMap.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/TargetParser/Host.h"
+#include <llvm/ADT/StringMap.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/TargetParser/Host.h>
 
 #include <cassert>
 #include <cstdlib>

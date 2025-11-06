@@ -3,7 +3,7 @@
  * NoiseChannel.
  */
 #include "cast/Core/QuantumGate.h"
-#include "llvm/Support/Casting.h"
+#include <llvm/Support/Casting.h>
 
 using namespace cast;
 
@@ -41,7 +41,7 @@ static ScalarGateMatrixPtr permuteSGateMatrix(const ScalarGateMatrix* sMat,
                                               const std::vector<int>& flags) {
   assert(sMat != nullptr);
   assert(isPermutation(flags));
-  assert(sMat->nQubits() == flags.size());
+  assert(sMat->nQubits() == static_cast<int>(flags.size()));
 
   auto matrix = std::make_shared<ScalarGateMatrix>(sMat->nQubits());
   unsigned edgeSize = matrix->matrix().edgeSize();
@@ -73,7 +73,7 @@ permutePGateMatrix(ParametrizedGateMatrix* pMat,
 
 GateMatrixPtr cast::permute(GateMatrixPtr gm, const std::vector<int>& flags) {
   assert(isPermutation(flags) && "Flags must be a permutation");
-  assert(gm->nQubits() == flags.size());
+  assert(gm->nQubits() == static_cast<int>(flags.size()));
 
   if (gm == nullptr)
     return nullptr;
@@ -96,7 +96,7 @@ NoiseChannelPtr cast::permute(NoiseChannelPtr nc,
 
   if (nc == nullptr)
     return nullptr;
-  assert(nc->nQubits() == flags.size());
+  assert(nc->nQubits() == static_cast<int>(flags.size()));
   if (isIdentityPermutation(flags))
     return nc;
 

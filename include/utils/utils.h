@@ -11,8 +11,8 @@
 #include <span>
 #include <vector>
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/SmallVector.h"
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/SmallVector.h>
 
 namespace utils {
 

@@ -3,8 +3,8 @@
 
 #include "cast/Core/AST/LocationSpan.h"
 #include "cast/Core/AST/PrettyPrinter.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/ErrorOr.h"
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/Support/ErrorOr.h>
 #include <cmath>
 #include <iostream>
 #include <span>

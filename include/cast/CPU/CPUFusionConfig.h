@@ -4,7 +4,7 @@
 #include "cast/CPU/CPUCostModel.h"
 #include "cast/Core/FusionConfig.h"
 
-#include "llvm/Support/Casting.h"
+#include <llvm/Support/Casting.h>
 
 namespace cast {
 

@@ -2,14 +2,14 @@
 #include "utils/Formats.h"
 #include "utils/TaskDispatcher.h"
 
-#include "llvm/IR/Verifier.h"
-#include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/StandardInstrumentations.h"
+#include <llvm/IR/Verifier.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Passes/StandardInstrumentations.h>
 
 #include <cassert>
 
 #define DEBUG_TYPE "cpu-kernel-mgr"
-#include "llvm/Support/Debug.h"
+#include <llvm/Support/Debug.h>
 // #define LLVM_DEBUG(X) X
 
 using namespace cast;

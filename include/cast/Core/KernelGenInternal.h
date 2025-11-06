@@ -2,7 +2,7 @@
 #define CAST_CORE_KERNEL_MANAGER_INTERNAL_H
 
 #include "cast/Core/ScalarKind.h"
-#include "llvm/IR/IRBuilder.h"
+#include <llvm/IR/IRBuilder.h>
 
 #include <vector>
 

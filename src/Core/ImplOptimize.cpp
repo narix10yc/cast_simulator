@@ -2,10 +2,10 @@
 
 #include "utils/PrintSpan.h"
 
-#include "llvm/Support/Casting.h"
+#include <llvm/Support/Casting.h>
 
 #define DEBUG_TYPE "impl-optimize"
-#include "llvm/Support/Debug.h"
+#include <llvm/Support/Debug.h>
 // #define LLVM_DEBUG(X) X
 
 using namespace cast;

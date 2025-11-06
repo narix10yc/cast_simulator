@@ -1,5 +1,5 @@
 #include "cast/Core/QuantumGate.h"
-#include "llvm/Support/Casting.h"
+#include <llvm/Support/Casting.h>
 
 using namespace cast;
 

@@ -3,7 +3,7 @@
 #include "cast/CUDA/CUDAStatevector.h"
 #include "utils/Formats.h"
 
-#include "llvm/Support/CommandLine.h"
+#include <llvm/Support/CommandLine.h>
 
 namespace cl = llvm::cl;
 

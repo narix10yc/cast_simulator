@@ -16,14 +16,14 @@ std::ostream& IfMeasureNode::print(std::ostream& os, int indent) const {
 
 std::ostream&
 IfMeasureNode::impl_visualize(std::ostream& os, int width, int n_qubits) const {
-  for (unsigned i = 0; i < qubit * width; ++i)
+  for (int i = 0; i < qubit * width; ++i)
     os.put('=');
-  for (unsigned i = 0; i < width / 2; ++i)
+  for (int i = 0; i < width / 2; ++i)
     os.put(' ');
   os << "M";
-  for (unsigned i = 0; i < width / 2; ++i)
+  for (int i = 0; i < width / 2; ++i)
     os.put(' ');
-  for (unsigned i = 0; i < (n_qubits - qubit - 1) * (width + 1); ++i)
+  for (int i = 0; i < (n_qubits - qubit - 1) * (width + 1); ++i)
     os.put('=');
 
   // then block
@@ -31,7 +31,7 @@ IfMeasureNode::impl_visualize(std::ostream& os, int width, int n_qubits) const {
   thenBody.impl_visualize(os, width, n_qubits);
 
   // separation
-  for (unsigned i = 0; i < n_qubits * width + (n_qubits - 1); ++i)
+  for (int i = 0; i < n_qubits * width + (n_qubits - 1); ++i)
     os.put('=');
 
   // else block
@@ -39,7 +39,7 @@ IfMeasureNode::impl_visualize(std::ostream& os, int width, int n_qubits) const {
   elseBody.impl_visualize(os, width, n_qubits);
 
   // separation
-  for (unsigned i = 0; i < n_qubits * width + (n_qubits - 1); ++i)
+  for (int i = 0; i < n_qubits * width + (n_qubits - 1); ++i)
     os.put('=');
 
   os.write(" Join\n", 6);

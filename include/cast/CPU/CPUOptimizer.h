@@ -4,7 +4,7 @@
 #include "cast/CPU/CPUFusionConfig.h"
 #include "cast/Core/Optimizer.h"
 
-#include "llvm/Support/Casting.h"
+#include <llvm/Support/Casting.h>
 
 namespace cast {
 
