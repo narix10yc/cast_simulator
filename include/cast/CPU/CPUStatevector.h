@@ -134,21 +134,46 @@ public:
 
   size_t sizeInBytes() const { return (2ULL << nQubits_) * sizeof(ScalarType); }
 
-  double normSquared() const {
-    double s = 0.0;
-    for (size_t i = 0; i < 2 * getN(); i++) {
-      double a = static_cast<double>(data_[i]);
-      s += a * a;
+  double normSquared(int nThreads = 0) const {
+    if (nThreads <= 0)
+      nThreads = cast::get_cpu_num_threads();
+
+    double sum = 0.0;
+    std::vector<std::thread> threads;
+    threads.reserve(nThreads);
+    std::vector<double> partialSums(nThreads, 0.0);
+    auto N = getN();
+    size_t nTasksPerThread = 2ULL * N / nThreads;
+    for (int t = 0; t < nThreads; ++t) {
+      size_t t0 = nTasksPerThread * t;
+      size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
+      threads.emplace_back([this, t0, t1, p = partialSums.data() + t]() {
+        double localSum = 0.0;
+        for (size_t i = t0; i < t1; ++i)
+          localSum += data_[i] * data_[i];
+        *p = localSum;
+      });
     }
-    return s;
+    for (auto& t : threads) {
+      if (t.joinable())
+        t.join();
+    }
+    for (const auto& s : partialSums)
+      sum += s;
+    return sum;
   }
 
-  double norm() const { return std::sqrt(normSquared()); }
+  double norm(int nThreads = 0) const {
+    return std::sqrt(normSquared(nThreads));
+  }
 
   /// @brief Initialize to the |00...00> state.
   /// Notice: even though we provide nThreads parameter, this function
   /// uses a single-thread std::fill_n to initialize the statevector.
-  void initialize(int nThreads = 1) {
+  void initialize(int nThreads = 0) {
+    if (nThreads <= 0)
+      nThreads = cast::get_cpu_num_threads();
+
     std::vector<std::thread> threads;
     threads.reserve(nThreads);
     auto N = getN();
@@ -167,15 +192,35 @@ public:
   }
 
   /// Notice: nThreads parameter is ignored in this function.
-  void normalize(int nThreads = 1) {
-    auto factor = 1.0 / norm();
-    for (size_t i = 0; i < 2 * getN(); ++i)
-      data_[i] *= factor;
+  void normalize(int nThreads = 0) {
+    if (nThreads <= 0)
+      nThreads = cast::get_cpu_num_threads();
+
+    auto factor = 1.0 / norm(nThreads);
+    std::vector<std::thread> threads;
+    threads.reserve(nThreads);
+    auto N = getN();
+    size_t nTasksPerThread = 2ULL * N / nThreads;
+    for (int t = 0; t < nThreads; ++t) {
+      size_t t0 = nTasksPerThread * t;
+      size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
+      threads.emplace_back([this, t0, t1, factor]() {
+        for (size_t i = t0; i < t1; ++i)
+          data_[i] *= factor;
+      });
+    }
+    for (auto& t : threads) {
+      if (t.joinable())
+        t.join();
+    }
   }
 
   /// @brief Uniform randomize statevector (by the Haar-measure on sphere).
   /// nThreads parameter does work here.
-  void randomize(int nThreads = 1) {
+  void randomize(int nThreads = 0) {
+    if (nThreads <= 0)
+      nThreads = cast::get_cpu_num_threads();
+
     std::vector<std::thread> threads;
     threads.reserve(nThreads);
     auto N = getN();
@@ -336,11 +381,11 @@ public:
     return std::visit([](auto& s) { return static_cast<void*>(s.data()); }, sv);
   }
 
-  void randomize(int nThreads = 1) {
+  void randomize(int nThreads = 0) {
     std::visit([nThreads](auto& s) { s.randomize(nThreads); }, sv);
   }
 
-  void initialize(int nThreads = 1) {
+  void initialize(int nThreads = 0) {
     std::visit([nThreads](auto& s) { s.initialize(nThreads); }, sv);
   }
 

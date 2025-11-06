@@ -6,7 +6,7 @@
 using namespace cast;
 using namespace cast::test;
 
-template <unsigned nQubits> static void f() {
+template <int nQubits> static void f() {
   test::TestSuite suite("Gate U1q (" + std::to_string(nQubits) + " qubits)");
 
   // we have to use W0 here to allow memcpy from cuda sv to cpu sv
@@ -34,19 +34,19 @@ template <unsigned nQubits> static void f() {
   cfg.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
   cfg.precision = Precision::FP64;
 
-  for (unsigned q = 0; q < nQubits; q++)
+  for (int q = 0; q < nQubits; q++)
     CHECK(suite, km.genGate(cfg, gates[q], "gateImm_" + std::to_string(q)));
 
-  for (unsigned q = 0; q < nQubits; q++) {
+  for (int q = 0; q < nQubits; q++) {
     std::stringstream ss;
     assert(q == gates[q]->qubits()[0]);
     ss << "Apply U1q at " << q << ": ";
 
     randomizeSV();
     suite.assertCloseFP64(svCUDA.prob(q),
-                         svCPU.prob(q),
-                         ss.str() + "Prob match before applying gate",
-                         GET_INFO());
+                          svCPU.prob(q),
+                          ss.str() + "Prob match before applying gate",
+                          GET_INFO());
 
     // Apply CPU gate
     svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gates[q].get()));
@@ -61,9 +61,9 @@ template <unsigned nQubits> static void f() {
     suite.assertCloseFP64(
         svCUDA.norm(), 1.0, ss.str() + "CUDA SV norm equals to 1", GET_INFO());
     suite.assertCloseFP64(svCUDA.prob(q),
-                         svCPU.prob(q),
-                         ss.str() + "Prob match after applying gate",
-                         GET_INFO());
+                          svCPU.prob(q),
+                          ss.str() + "Prob match after applying gate",
+                          GET_INFO());
   }
   suite.displayResult();
 }

@@ -100,6 +100,21 @@ template <typename ScalarType> void CUDAStatevector<ScalarType>::randomize() {
 }
 
 template <typename ScalarType>
+std::complex<ScalarType> CUDAStatevector<ScalarType>::amp(size_t idx) const {
+  assert(dData_ != nullptr);
+  assert(2ULL * idx + 1 < size());
+
+  ScalarType re, im;
+  CUDA_CHECK(cudaMemcpy(
+      &re, dData_ + 2ULL * idx, sizeof(ScalarType), cudaMemcpyDeviceToHost));
+  CUDA_CHECK(cudaMemcpy(&im,
+                        dData_ + 2ULL * idx + 1,
+                        sizeof(ScalarType),
+                        cudaMemcpyDeviceToHost));
+  return std::complex<ScalarType>(re, im);
+}
+
+template <typename ScalarType>
 ScalarType CUDAStatevector<ScalarType>::prob(int qubit) const {
   using Helper = cast::internal::HelperCUDAKernels<ScalarType>;
   assert(dData_ != nullptr);
@@ -133,4 +148,3 @@ namespace cast {
 template class CUDAStatevector<float>;
 template class CUDAStatevector<double>;
 } // namespace cast
-

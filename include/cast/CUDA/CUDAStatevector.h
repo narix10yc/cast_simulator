@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <complex>
 #include <cstring> // for std::memcpy
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -102,6 +103,9 @@ public:
 
   ScalarType normSquared() const;
   ScalarType norm() const { return std::sqrt(normSquared()); }
+
+  // Get the amplitude without full synchronization
+  std::complex<ScalarType> amp(size_t idx) const;
 
   ScalarType prob(int qubits) const;
 
