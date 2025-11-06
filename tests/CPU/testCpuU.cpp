@@ -41,7 +41,7 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U1q() {
           km.genGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q)));
   }
 
-  CHECK(suite, km.compileAll());
+  CHECK(suite, km.compileAllPools());
   for (unsigned i = 0; i < nQubits; i++) {
     randomizeSV();
     std::stringstream ss;
@@ -108,7 +108,7 @@ template <CPUSimdWidth SimdWidth, unsigned nQubits> static void internal_U2q() {
           km.genGate(cpuConfig, gates[q], "gateLoad_" + std::to_string(q)));
   }
 
-  CHECK(suite, km.compileAll());
+  CHECK(suite, km.compileAllPools());
   for (unsigned i = 0; i < nQubits; i++) {
     randomizeSV();
     int a = gates[i]->qubits()[0];

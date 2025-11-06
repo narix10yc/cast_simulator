@@ -1,6 +1,6 @@
 #include "cast/Core/IRNode.h"
 #include "pybind11/pybind11.h"
-#include "pybind11/stl.h"
+#include <pybind11/iostream.h>
 
 #include "cast/Core/Optimizer.h"
 #include "cast/Transform/Transform.h"
@@ -130,7 +130,10 @@ void bind_OptimizerBase(py::module_& m) {
           [](const cast::OptimizerBase& self,
              cast::ir::CircuitNode& circuit,
              int verbose) {
-            utils::Logger logger(std::cerr, verbose);
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect;
+
+            utils::Logger logger(std::cout, verbose);
             self.run(circuit, logger);
           },
           py::arg("circuit"),
@@ -140,7 +143,10 @@ void bind_OptimizerBase(py::module_& m) {
           [](const cast::OptimizerBase& self,
              cast::ir::CircuitGraphNode& graph,
              int verbose) {
-            utils::Logger logger(std::cerr, verbose);
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect;
+
+            utils::Logger logger(std::cout, verbose);
             self.run(graph, logger);
           },
           py::arg("graph"),

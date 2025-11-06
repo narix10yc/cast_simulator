@@ -21,7 +21,7 @@ template <CPUSimdWidth SimdWidth> static void f() {
   llvm::cantFail(km.genGate(genCfg, getH(2), "gate_h_2"));
   llvm::cantFail(km.genGate(genCfg, getH(3), "gate_h_3"));
 
-  llvm::cantFail(km.compileAll());
+  llvm::cantFail(km.compileAllPools());
 
   CPUStatevector<double> sv(6, SimdWidth);
   sv.initialize();

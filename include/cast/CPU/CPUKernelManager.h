@@ -160,18 +160,10 @@ public:
     return compilePool(DEFAULT_POOL_NAME, optLevel, progressBar);
   }
 
-  /// Initialize JIT session. When succeeds, \c llvmContextModulePairs
-  /// will be cleared and \c llvmJIT will be non-null. This function can only be
-  /// called once and cannot be undone.
-  /// \param nThreads Number of threads to use.
-  /// \param optLevel Apply LLVM optimization passes.
-  /// \param useLazyJIT If true, use lazy compilation features provided by LLVM
-  /// ORC JIT engine. This means all kernels only get compiled just before being
-  /// called. If set to false, all kernels are ready to be executed when this
-  /// function returns (good for benchmarks).
-  llvm::Error
-  compileAll(llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O1,
-             bool progressBar = false);
+  // Compile all pools, including the default pool.
+  llvm::Error compileAllPools(
+      llvm::OptimizationLevel optLevel = llvm::OptimizationLevel::O1,
+      bool progressBar = false);
 
   /* Generate Kernels */
 
@@ -190,7 +182,7 @@ public:
   // TODO: do we still need the order
   llvm::Error genGraphGates(const CPUKernelGenConfig& config,
                             const ir::CircuitGraphNode& graph,
-                            const std::string& graphName);
+                            const std::string& poolName);
 
   /* Get Kernels */
 

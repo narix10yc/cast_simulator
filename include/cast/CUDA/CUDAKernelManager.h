@@ -97,7 +97,8 @@ public:
     time_point_t t_cubinPrepareFinish;
 
     // kernel execution time in milliseconds
-    float kernelTime_ms{};
+    // Negative values indicate timing not enabled
+    float kernelTime_ms = -1.0f;
 
     enum Status {
       // The initial launch status
@@ -116,7 +117,7 @@ public:
 
     ExecutionResult() = default;
 
-    std::ostream& displayInfo(std::ostream& os) const;
+    void displayInfo(utils::InfoLogger logger) const;
 
     // Get the compilation time in seconds
     float getCompileTime() const {
@@ -219,6 +220,9 @@ private:
   // To load and store under execMtx_
   SyncStatus syncFlag_ = NotSyncing;
 
+  // We need launch config because it is shared between the thread that poses
+  // launch requests and the execution threads that actually launches the
+  // kernels.
   struct LaunchConfig {
     CUdeviceptr devicePtr = 0;
     int nQubitsSV = 0;
@@ -258,7 +262,7 @@ public:
   // TODO: do we still need the order
   llvm::Error genGraphGates(const CUDAKernelGenConfig& config,
                             const ir::CircuitGraphNode& graph,
-                            const std::string& graphName);
+                            const std::string& poolName);
 
   void dumpPTX(std::ostream& os, const std::string& kernelName) const;
 
@@ -298,11 +302,40 @@ public:
 
   /* --- Kernel Launch --- */
 
+  // No lock/atomic needed because this is only called by the main thread.
+  // launchConfig_ is only accessed after calling setLaunchConfig().
   void
   setLaunchConfig(CUdeviceptr dData, int nQubitsSV, unsigned blockSize = 64) {
+    // Setting launch config with ongoing kernel launches is not allowed.
+    // Potential inconsistency between when posing launch requests and actual
+    // kernel execution
+    assert(dispatcher.isIdle());
+
+    // For compatibility (python api), we sync here
+    dispatcher.sync();
+
     launchConfig_.devicePtr = dData;
     launchConfig_.nQubitsSV = nQubitsSV;
     launchConfig_.blockSize = blockSize;
+  }
+
+  bool isLaunchConfigValid() const {
+    if (launchConfig_.devicePtr == 0)
+      return false;
+    if (launchConfig_.nQubitsSV <= 0)
+      return false;
+
+    switch (launchConfig_.blockSize) {
+    case 32:
+    case 64:
+    case 128:
+    case 256:
+    case 512:
+    case 1024:
+      return true;
+    default:
+      return false;
+    }
   }
 
   void setLaunchConfig(CUDAStatevectorFP32& sv, unsigned blockSize = 64) {
@@ -325,9 +358,9 @@ public:
   /// syncKernelExecution(). The returned object is invalidated upon the
   /// destruction of this kernel manager or upon calling
   /// clearExecutionResults().
-  /// @remark: We do not embed the ExecutionResult inside CUDAKernelInfo because
-  /// users are allowed to launch the same kernel multiple times (for example,
-  /// in benchmarking).
+  /// @remark: We do not embed the ExecutionResult inside CUDAKernelInfo
+  /// because users are allowed to launch the same kernel multiple times (for
+  /// example, in benchmarking).
   const ExecutionResult* enqueueKernelLaunch(CUDAKernelInfo& kernel);
 
   float getTotalExecTime() const {

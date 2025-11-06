@@ -92,7 +92,7 @@ template <typename ScalarType> static void benchmark() {
   // Initialize JIT engine
   utils::timedExecute(
       [&]() {
-        if (auto e = km.compileAll(llvm::OptimizationLevel::O1)) {
+        if (auto e = km.compileAllPools(llvm::OptimizationLevel::O1)) {
           logerr() << "In initializing JIT engine: "
                    << llvm::toString(std::move(e)) << "\n";
           std::exit(EXIT_FAILURE);

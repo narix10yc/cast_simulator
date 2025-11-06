@@ -165,7 +165,7 @@ llvm::Error CPUKernelManager::compilePool(const std::string& poolName,
   return dispatcher.takeError();
 }
 
-llvm::Error CPUKernelManager::compileAll(OptimizationLevel optLevel,
+llvm::Error CPUKernelManager::compileAllPools(OptimizationLevel optLevel,
                                          bool progressBar) {
   assert(llvmJIT != nullptr && "llvmJIT is null");
   llvm::Error err = llvm::Error::success();

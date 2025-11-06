@@ -76,6 +76,10 @@ public:
 
   int getWorkerID() const;
 
+  bool isIdle() const {
+    return nTotalTasks.load() == 0 && nActiveWorkers.load() == 0;
+  }
+
   /// @brief A blocking method that waits until all tasks are finished.
   void sync(bool progressBar = false);
 

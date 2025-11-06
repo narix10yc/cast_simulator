@@ -1377,21 +1377,21 @@ llvm::Error CUDAKernelManager::genGate(const CUDAKernelGenConfig& config,
 
 llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
                                              const ir::CircuitGraphNode& graph,
-                                             const std::string& graphName) {
+                                             const std::string& poolName) {
   assert(graph.checkConsistency());
 
-  if (kernelPools_.contains(graphName)) {
-    return llvm::createStringError("Already exists a pool named '" + graphName +
+  if (kernelPools_.contains(poolName)) {
+    return llvm::createStringError("Already exists a pool named '" + poolName +
                                    "'");
   }
 
-  kernelPools_.emplace(graphName, Pool());
-  auto& pool = kernelPools_.at(graphName);
+  kernelPools_.emplace(poolName, Pool());
+  auto& pool = kernelPools_.at(poolName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
 
   for (const auto& gate : allGates) {
-    auto name = graphName + "_" + std::to_string(order++) + "_" +
+    auto name = poolName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
 
     // genCUDAGate_ will put the new kernel into pool

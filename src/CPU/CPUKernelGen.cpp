@@ -92,21 +92,21 @@ llvm::Error CPUKernelManager::genGate(const CPUKernelGenConfig& config,
 
 llvm::Error CPUKernelManager::genGraphGates(const CPUKernelGenConfig& config,
                                             const ir::CircuitGraphNode& graph,
-                                            const std::string& graphName) {
+                                            const std::string& poolName) {
   assert(graph.checkConsistency());
 
-  if (kernelPools_.contains(graphName)) {
-    return llvm::createStringError("Already exists a pool named '" + graphName +
-                                   "'");
+  if (kernelPools_.contains(poolName)) {
+    return llvm::createStringError("Pool named '" + poolName +
+                                   "' already exists.");
   }
 
-  kernelPools_.insert({graphName, Pool()});
-  auto& pool = kernelPools_.at(graphName);
+  kernelPools_.insert({poolName, Pool()});
+  auto& pool = kernelPools_.at(poolName);
   auto allGates = graph.getAllGatesShared();
   int order = 0;
 
   for (const auto& gate : allGates) {
-    auto name = graphName + "_" + std::to_string(order++) + "_" +
+    auto name = poolName + "_" + std::to_string(order++) + "_" +
                 std::to_string(graph.gateId(gate));
 
     // genCPUGate_ will put the new kernel into pool

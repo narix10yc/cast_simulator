@@ -1,8 +1,6 @@
 #include "cast/CPU/CPU.h"
 
-
 #include <pybind11/detail/common.h>
-#include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
@@ -132,8 +130,8 @@ void bind_CPUKernelManager(py::module_& m) {
           [](cast::CPUKernelManager& self,
              const cast::CPUKernelGenConfig& config,
              const cast::ir::CircuitGraphNode& graph,
-             const std::string& graph_name) {
-            if (auto e = self.genGraphGates(config, graph, graph_name)) {
+             const std::string& pool_name) {
+            if (auto e = self.genGraphGates(config, graph, pool_name)) {
               throw std::runtime_error(
                   "Failed to generate CPU gates from graph: " +
                   llvm::toString(std::move(e)));
@@ -141,7 +139,7 @@ void bind_CPUKernelManager(py::module_& m) {
           },
           py::arg("config"),
           py::arg("graph"),
-          py::arg("graph_name"))
+          py::arg("pool_name"))
       .def(
           "get_kernel_by_name",
           [](cast::CPUKernelManager& self, const std::string& funcName) {
@@ -167,18 +165,14 @@ void bind_CPUKernelManager(py::module_& m) {
              }
            })
       .def(
-          "compile_all",
-          [](cast::CPUKernelManager& self,
-             int nThreads,
-             int optLevel,
-             int verbose) {
+          "compile_all_pools",
+          [](cast::CPUKernelManager& self, int optLevel, int verbose) {
             auto llvmOptLevel = mapIntToLLVMOptLevel(optLevel);
-            if (auto e = self.compileAll(llvmOptLevel, verbose)) {
+            if (auto e = self.compileAllPools(llvmOptLevel, verbose)) {
               throw std::runtime_error("Failed to compile all pools: " +
                                        llvm::toString(std::move(e)));
             }
           },
-          py::arg("num_threads") = 1,
           py::arg("opt_level") = 1,
           py::arg("verbose") = 0)
       .def(
@@ -191,7 +185,6 @@ void bind_CPUKernelManager(py::module_& m) {
             const auto& pool = self.pools().at(poolName);
 
             py::list out;
-
             py::handle parent = py::cast(&self);
 
             for (const auto& item : pool.items()) {
@@ -245,8 +238,22 @@ void bind_CPUKernelManager(py::module_& m) {
 }
 
 void bind_CPUOptimizer(py::module_& m) {
+  // C++ inheritance is
+  // CPUOptimizer -> Optimizer<CPUOptimizer> -> OptimizerBase
+  // We bound OptimizerBase in bind_core.cpp, exposed run_circuit and
+  // run_circuitgraph.
+  // enable_fusion, enable_canonicalization, enable_cfo, and
+  // set_sizeonly_fusion_config must be bound here.
   py::class_<cast::CPUOptimizer, cast::OptimizerBase>(m, "CPUOptimizer")
       .def(py::init<>())
+      .def(
+          "get_info",
+          [](const cast::CPUOptimizer& self, int verbose) {
+            std::ostringstream oss;
+            self.displayInfo({oss, verbose});
+            return oss.str();
+          },
+          py::arg("verbose") = 1)
       .def("enable_fusion",
            &cast::CPUOptimizer::enableFusion,
            py::arg("enable") = true)
@@ -258,28 +265,7 @@ void bind_CPUOptimizer(py::module_& m) {
            py::arg("enable") = true)
       .def("set_sizeonly_fusion_config",
            &cast::CPUOptimizer::setSizeOnlyFusionConfig,
-           py::arg("size"))
-      .def(
-          "get_info",
-          [](const cast::CPUOptimizer& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
-          },
-          py::arg("verbose") = 1)
-      .def(
-          "run",
-          [](const cast::CPUOptimizer& self,
-             cast::ir::CircuitGraphNode& graph,
-             int verbose) {
-            py::gil_scoped_acquire gil;
-            py::scoped_ostream_redirect redirect;
-
-            utils::Logger logger(std::cout, verbose);
-            self.run(graph, logger);
-          },
-          py::arg("graph"),
-          py::arg("verbose") = 1);
+           py::arg("size"));
 }
 
 } // end of anonymous namespace

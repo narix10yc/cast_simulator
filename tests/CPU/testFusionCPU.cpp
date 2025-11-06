@@ -46,7 +46,7 @@ template <CPUSimdWidth SimdWidth> static void f() {
 
     // generate gates after fusion
     llvm::cantFail(km.genGraphGates(genCfg, *graphs[0], "graphAfterFusion"));
-    llvm::cantFail(km.compileAll());
+    llvm::cantFail(km.compileAllPools());
 
     cast::CPUStatevector<double> sv0(graphs[0]->nQubits(), SimdWidth);
     cast::CPUStatevector<double> sv1(graphs[0]->nQubits(), SimdWidth);

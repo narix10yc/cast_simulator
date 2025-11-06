@@ -12,6 +12,7 @@
 
 #include "cast/CUDA/Config.h"
 #include "utils/Formats.h"
+#include "utils/InfoLogger.h"
 #include "utils/iocolor.h"
 #include "llvm/Support/Error.h"
 
@@ -94,16 +95,37 @@ void CUDAKernelManager::displayInfo(utils::InfoLogger logger) const {
       });
 }
 
-std::ostream&
-CUDAKernelManager::ExecutionResult::displayInfo(std::ostream& os) const {
-  os << "Kernel Name       : " << kernelName << "\n"
-     << "PTX -> CUBIN time : "
-     << utils::fmt_time(std::chrono::duration<double>(t_cubinPrepareFinish -
-                                                      t_cubinPrepareStart)
-                            .count())
-     << "\n"
-     << "Kernel Time       : " << utils::fmt_time(kernelTime_ms * 1e-3) << "\n";
-  return os;
+void CUDAKernelManager::ExecutionResult::displayInfo(
+    utils::InfoLogger logger) const {
+  logger.put("Kernel Name", kernelName)
+      .put("Status",
+           [&](std::ostream& os) {
+             switch (status.load()) {
+             case Status::Pending:
+               os << "Pending";
+               break;
+             case Status::ReadyToLaunch:
+               os << "ReadyToLaunch";
+               break;
+             case Status::Running:
+               os << "Running";
+               break;
+             case Status::Finished:
+               os << "Finished";
+               break;
+             case Status::CleanedUp:
+               os << "CleanedUp";
+               break;
+             }
+           })
+      .put("Compile Time (s)", utils::fmt_time(getCompileTime()))
+      .put("Kernel Time (s)", [&](std::ostream& os) {
+        auto t = getKernelTime();
+        if (t < 0.0f)
+          os << "N/A";
+        else
+          os << utils::fmt_time(t);
+      });
 }
 
 CUDAKernelManager::CUDAKernelManager(int nWorkerThreads, int deviceOrdinal)
@@ -143,7 +165,6 @@ CUDAKernelManager::~CUDAKernelManager() {
 }
 
 namespace {
-
 class raw_pwrite_vector_ostream : public llvm::raw_pwrite_stream {
   std::string& out;
 
@@ -552,9 +573,7 @@ void CUDAKernelManager::execTh_work_() {
 
 const CUDAKernelManager::ExecutionResult*
 CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
-  assert(launchConfig_.devicePtr != 0);
-  assert(launchConfig_.blockSize > 0);
-  assert(launchConfig_.nQubitsSV > 0);
+  assert(isLaunchConfigValid());
 
   auto* kernel = &kernel_;
 

@@ -113,7 +113,7 @@ int main(int argc, char** arv) {
 
   // Right after state init
   auto t3 = my_clock::now();
-  if (auto e = km.compileAll()) {
+  if (auto e = km.compileAllPools()) {
     std::cerr << "Error initializing JIT: " << llvm::toString(std::move(e))
               << "\n";
     return 1;

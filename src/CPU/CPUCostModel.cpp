@@ -152,7 +152,7 @@ void CPUPerformanceCache::runPreliminaryExperiments(
       auto gate = StandardQuantumGate::RandomUnitary(qubits);
       llvm::cantFail(km.genGate(cpuConfig, gate, "gate_k" + std::to_string(k)));
     }
-    llvm::cantFail(km.compileAll(llvm::OptimizationLevel::O1, false));
+    llvm::cantFail(km.compileAllPools(llvm::OptimizationLevel::O1, false));
   };
 
   if (verbose > 0) {
@@ -300,7 +300,7 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
 
   utils::timedExecute(
       [&]() {
-        if (auto e = km.compileAll(llvm::OptimizationLevel::O1, false)) {
+        if (auto e = km.compileAllPools(llvm::OptimizationLevel::O1, false)) {
           std::cerr << RED("Error: ") << "Failed to initialize JIT engine: "
                     << llvm::toString(std::move(e)) << "\n";
           std::exit(1);
