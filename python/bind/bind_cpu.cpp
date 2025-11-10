@@ -1,6 +1,7 @@
 #include "cast/CPU/CPU.h"
 
 #include <pybind11/detail/common.h>
+#include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
@@ -74,11 +75,11 @@ void bind_CPUKernelManager(py::module_& m) {
       .def_readwrite("matrix_load_mode",
                      &cast::CPUKernelGenConfig::matrixLoadMode)
       .def(
-          "get_info",
-          [](const cast::CPUKernelGenConfig& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::CPUKernelGenConfig& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1);
 
@@ -93,22 +94,22 @@ void bind_CPUKernelManager(py::module_& m) {
       .def("get_jit_time", &cast::CPUKernelInfo::getJitTime)
       .def("get_exec_time", &cast::CPUKernelInfo::getExecTime)
       .def(
-          "get_info",
-          [](const cast::CPUKernelInfo& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::CPUKernelInfo& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1);
 
   py::class_<cast::CPUKernelManager>(m, "CPUKernelManager")
       .def(py::init<>())
       .def(
-          "get_info",
-          [](const cast::CPUKernelManager& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::CPUKernelManager& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1)
       .def(
@@ -247,11 +248,11 @@ void bind_CPUOptimizer(py::module_& m) {
   py::class_<cast::CPUOptimizer, cast::OptimizerBase>(m, "CPUOptimizer")
       .def(py::init<>())
       .def(
-          "get_info",
-          [](const cast::CPUOptimizer& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::CPUOptimizer& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1)
       .def("enable_fusion",

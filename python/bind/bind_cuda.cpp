@@ -1,10 +1,7 @@
 #include "cast/CUDA/CUDA.h"
-#include "cast/CUDA/CUDAKernelManager.h"
-#include "cast/CUDA/CUDAOptimizer.h"
 
-#include <pybind11/cast.h>
 #include <pybind11/complex.h>
-#include <pybind11/detail/common.h>
+#include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
@@ -48,12 +45,11 @@ void bind_cudaKernelManager(py::module_& m) {
       .def_readwrite("matrix_load_mode",
                      &cast::CUDAKernelGenConfig::matrixLoadMode)
       .def(
-          "get_info",
-          [](const cast::CUDAKernelGenConfig& self,
-             int verbose) -> std::string {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::CUDAKernelGenConfig& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1);
 
@@ -73,11 +69,11 @@ void bind_cudaKernelManager(py::module_& m) {
              return self.ptxString;
            })
       .def(
-          "get_info",
-          [](const cast::CUDAKernelInfo& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::CUDAKernelInfo& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1);
 
@@ -86,12 +82,12 @@ void bind_cudaKernelManager(py::module_& m) {
       .def_readonly("kernel_name",
                     &cast::CUDAKernelManager::ExecutionResult::kernelName)
       .def(
-          "get_info",
+          "print_info",
           [](const cast::CUDAKernelManager::ExecutionResult& self,
-             int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+             int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1)
       .def("get_compile_time",
@@ -102,11 +98,11 @@ void bind_cudaKernelManager(py::module_& m) {
   py::class_<cast::CUDAKernelManager>(m, "CUDAKernelManager")
       .def(py::init<>())
       .def(
-          "get_info",
-          [](const cast::CUDAKernelManager& self, int verbose) -> std::string {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::CUDAKernelManager& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1)
       .def(
@@ -193,11 +189,11 @@ void bind_cudaOptimizer(py::module_& m) {
   py::class_<cast::CUDAOptimizer, cast::OptimizerBase>(m, "CUDAOptimizer")
       .def(py::init<>())
       .def(
-          "get_info",
-          [](const cast::CUDAOptimizer& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::CUDAOptimizer& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1)
       .def("enable_fusion",

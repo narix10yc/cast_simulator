@@ -25,11 +25,11 @@ void bind_QuantumGate(py::module_& m) {
       .def("op_count", &cast::QuantumGate::opCount, py::arg("zero_tol"))
       // .def("get_superop_gate", &cast::QuantumGate::getSuperopGate)
       .def(
-          "get_info",
-          [](const cast::QuantumGate& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::QuantumGate& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1);
 
@@ -50,11 +50,11 @@ void bind_QuantumGate(py::module_& m) {
            py::arg("p"))
       // .def("get_superop_gate", &cast::StandardQuantumGate::getSuperopGate)
       .def(
-          "get_info",
-          [](const cast::StandardQuantumGate& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::StandardQuantumGate& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1);
 
@@ -63,11 +63,11 @@ void bind_QuantumGate(py::module_& m) {
              cast::QuantumGate,
              cast::SuperopQuantumGatePtr>(m, "SuperopQuantumGate")
       .def(
-          "get_info",
-          [](const cast::SuperopQuantumGate& self, int verbose) {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const cast::SuperopQuantumGate& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1);
 }
@@ -85,11 +85,11 @@ void bind_CircuitGraph(py::module_& m) {
       .def("num_qubits", &CircuitGraphNode::nQubits)
       .def("get_all_gates", &CircuitGraphNode::getAllGates)
       .def(
-          "get_info",
-          [](const CircuitGraphNode& self, int verbose) -> std::string {
-            std::ostringstream oss;
-            self.displayInfo({oss, verbose});
-            return oss.str();
+          "print_info",
+          [](const CircuitGraphNode& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1)
       .def("visualize", [](const CircuitGraphNode& self) -> void {
@@ -131,7 +131,7 @@ void bind_OptimizerBase(py::module_& m) {
              cast::ir::CircuitNode& circuit,
              int verbose) {
             py::gil_scoped_acquire gil;
-            py::scoped_ostream_redirect redirect;
+            py::scoped_ostream_redirect redirect(std::cout);
 
             utils::Logger logger(std::cout, verbose);
             self.run(circuit, logger);
@@ -144,7 +144,7 @@ void bind_OptimizerBase(py::module_& m) {
              cast::ir::CircuitGraphNode& graph,
              int verbose) {
             py::gil_scoped_acquire gil;
-            py::scoped_ostream_redirect redirect;
+            py::scoped_ostream_redirect redirect(std::cout);
 
             utils::Logger logger(std::cout, verbose);
             self.run(graph, logger);
