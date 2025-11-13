@@ -1,6 +1,7 @@
 #include "utils/utils.h"
 #include "utils/Formats.h"
 
+#include <chrono>
 #include <random>
 
 int utils::parseNonNegativeInt(const char* str) noexcept {
@@ -48,16 +49,6 @@ void utils::sampleNoReplacement(unsigned N,
     std::swap(pool[i], pool[j]);
     holder.push_back(pool[i]);
   }
-}
-
-bool utils::isPermutation(llvm::ArrayRef<int> arr) {
-  std::vector<int> copy(arr.begin(), arr.end());
-  std::ranges::sort(copy);
-  for (unsigned i = 0, S = copy.size(); i < S; ++i) {
-    if (copy[i] != i)
-      return false;
-  }
-  return true;
 }
 
 uint64_t utils::pdep64(uint64_t src, uint64_t mask, unsigned nbits) {

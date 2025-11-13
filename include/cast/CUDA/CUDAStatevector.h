@@ -125,6 +125,9 @@ public:
 using CUDAStatevectorFP32 = CUDAStatevector<float>;
 using CUDAStatevectorFP64 = CUDAStatevector<double>;
 
+extern template class CUDAStatevector<float>;
+extern template class CUDAStatevector<double>;
+
 } // namespace cast
 
 #endif // CAST_CUDA_CUDASTATEVECTOR_H

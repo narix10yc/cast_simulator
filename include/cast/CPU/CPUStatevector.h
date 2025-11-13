@@ -38,90 +38,14 @@ private:
 public:
   CPUStatevector() : data_(nullptr), nQubits_(0), simd_s(0) {}
 
-  CPUStatevector(int nQubits, CPUSimdWidth simdWidth) {
-    assert(nQubits > 0);
-    nQubits_ = nQubits;
+  CPUStatevector(int nQubits, CPUSimdWidth simdWidth);
 
-    // initialize _data
-    data_ = allocate();
-
-    // initialize simd_s
-    if constexpr (std::is_same_v<ScalarType, float>) {
-      switch (simdWidth) {
-      case CPUSimdWidth::W0:
-        simd_s = 0;
-        break; // 1 element
-      case CPUSimdWidth::W128:
-        simd_s = 2;
-        break; // 4 elements
-      case CPUSimdWidth::W256:
-        simd_s = 3;
-        break; // 8 elements
-      case CPUSimdWidth::W512:
-        simd_s = 4;
-        break; // 16 elements
-      default:
-        assert(false && "Unsupported SIMD Width for float");
-      }
-    } else if constexpr (std::is_same_v<ScalarType, double>) {
-      switch (simdWidth) {
-      case CPUSimdWidth::W0:
-        simd_s = 0;
-        break; // 1 element
-      case CPUSimdWidth::W128:
-        simd_s = 1;
-        break; // 2 elements
-      case CPUSimdWidth::W256:
-        simd_s = 2;
-        break; // 4 elements
-      case CPUSimdWidth::W512:
-        simd_s = 3;
-        break; // 8 elements
-      default:
-        assert(false && "Unsupported SIMD Width for double");
-      }
-    } else {
-      static_assert(std::is_same_v<ScalarType, float> ||
-                        std::is_same_v<ScalarType, double>,
-                    "Unsupported ScalarType for CPUStatevector");
-    }
-  }
-
-  CPUStatevector(const CPUStatevector& other) {
-    nQubits_ = other.nQubits_;
-    simd_s = other.simd_s;
-    data_ = allocate();
-    std::memcpy(data_, other.data_, sizeInBytes());
-  }
-
-  CPUStatevector(CPUStatevector&& other) noexcept {
-    if (this == &other)
-      return;
-    nQubits_ = other.nQubits_;
-    simd_s = other.simd_s;
-    data_ = other.data_;
-    other.data_ = nullptr; // Prevent double deletion
-  }
+  CPUStatevector(const CPUStatevector& other);
+  CPUStatevector(CPUStatevector&& other) noexcept;
+  CPUStatevector& operator=(const CPUStatevector& that);
+  CPUStatevector& operator=(CPUStatevector&& other) noexcept;
 
   ~CPUStatevector() { ::operator delete(data_); }
-
-  CPUStatevector& operator=(const CPUStatevector& that) {
-    if (this == &that)
-      return *this;
-    std::memcpy(data_, that.data_, sizeInBytes());
-    return *this;
-  }
-
-  CPUStatevector& operator=(CPUStatevector&& other) noexcept {
-    if (this == &other)
-      return *this;
-    ::operator delete(data_);
-    nQubits_ = other.nQubits_;
-    simd_s = other.simd_s;
-    data_ = other.data_;
-    other.data_ = nullptr; // Prevent double deletion
-    return *this;
-  }
 
   ScalarType* data() { return data_; }
   const ScalarType* data() const { return data_; }
@@ -134,34 +58,7 @@ public:
 
   size_t sizeInBytes() const { return (2ULL << nQubits_) * sizeof(ScalarType); }
 
-  double normSquared(int nThreads = 0) const {
-    if (nThreads <= 0)
-      nThreads = cast::get_cpu_num_threads();
-
-    double sum = 0.0;
-    std::vector<std::thread> threads;
-    threads.reserve(nThreads);
-    std::vector<double> partialSums(nThreads, 0.0);
-    auto N = getN();
-    size_t nTasksPerThread = 2ULL * N / nThreads;
-    for (int t = 0; t < nThreads; ++t) {
-      size_t t0 = nTasksPerThread * t;
-      size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
-      threads.emplace_back([this, t0, t1, p = partialSums.data() + t]() {
-        double localSum = 0.0;
-        for (size_t i = t0; i < t1; ++i)
-          localSum += data_[i] * data_[i];
-        *p = localSum;
-      });
-    }
-    for (auto& t : threads) {
-      if (t.joinable())
-        t.join();
-    }
-    for (const auto& s : partialSums)
-      sum += s;
-    return sum;
-  }
+  double normSquared(int nThreads = 0) const;
 
   double norm(int nThreads = 0) const {
     return std::sqrt(normSquared(nThreads));
@@ -170,79 +67,14 @@ public:
   /// @brief Initialize to the |00...00> state.
   /// Notice: even though we provide nThreads parameter, this function
   /// uses a single-thread std::fill_n to initialize the statevector.
-  void initialize(int nThreads = 0) {
-    if (nThreads <= 0)
-      nThreads = cast::get_cpu_num_threads();
+  void initialize(int nThreads = 0);
 
-    std::vector<std::thread> threads;
-    threads.reserve(nThreads);
-    auto N = getN();
-    size_t nTasksPerThread = 2ULL * N / nThreads;
-    for (int t = 0; t < nThreads; ++t) {
-      size_t t0 = nTasksPerThread * t;
-      size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
-      threads.emplace_back(
-          [this, t0, t1]() { std::fill(data_ + t0, data_ + t1, 0.0); });
-    }
-    for (auto& t : threads) {
-      if (t.joinable())
-        t.join();
-    }
-    data_[0] = 1.0;
-  }
-
-  /// Notice: nThreads parameter is ignored in this function.
-  void normalize(int nThreads = 0) {
-    if (nThreads <= 0)
-      nThreads = cast::get_cpu_num_threads();
-
-    auto factor = 1.0 / norm(nThreads);
-    std::vector<std::thread> threads;
-    threads.reserve(nThreads);
-    auto N = getN();
-    size_t nTasksPerThread = 2ULL * N / nThreads;
-    for (int t = 0; t < nThreads; ++t) {
-      size_t t0 = nTasksPerThread * t;
-      size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
-      threads.emplace_back([this, t0, t1, factor]() {
-        for (size_t i = t0; i < t1; ++i)
-          data_[i] *= factor;
-      });
-    }
-    for (auto& t : threads) {
-      if (t.joinable())
-        t.join();
-    }
-  }
+  /// @brief Normalize the statevector.
+  void normalize(int nThreads = 0);
 
   /// @brief Uniform randomize statevector (by the Haar-measure on sphere).
   /// nThreads parameter does work here.
-  void randomize(int nThreads = 0) {
-    if (nThreads <= 0)
-      nThreads = cast::get_cpu_num_threads();
-
-    std::vector<std::thread> threads;
-    threads.reserve(nThreads);
-    auto N = getN();
-    size_t nTasksPerThread = 2ULL * N / nThreads;
-    for (int t = 0; t < nThreads; ++t) {
-      size_t t0 = nTasksPerThread * t;
-      size_t t1 = (t == nThreads - 1) ? 2ULL * N : nTasksPerThread * (t + 1);
-      threads.emplace_back([this, t0, t1]() {
-        std::random_device rd;
-        std::mt19937 gen{rd()};
-        std::normal_distribution<ScalarType> d(0.0, 1.0);
-        for (size_t i = t0; i < t1; ++i)
-          this->data_[i] = d(gen);
-      });
-    }
-    for (auto& t : threads) {
-      if (t.joinable())
-        t.join();
-    }
-
-    normalize(nThreads);
-  }
+  void randomize(int nThreads = 0);
 
   ScalarType& real(size_t idx) {
     return data_[utils::insertZeroToBit(idx, simd_s)];
@@ -262,19 +94,7 @@ public:
     return {data_[tmp], data_[tmp | (1 << simd_s)]};
   }
 
-  std::ostream& display(std::ostream& os = std::cerr) const {
-    auto N = getN();
-    if (N > 32) {
-      os << BOLDCYAN("Info: ")
-         << "statevector has more than 5 qubits, "
-            "only the first 32 entries are shown.\n";
-    }
-    for (size_t i = 0; i < std::min<size_t>(32, N); i++) {
-      os << utils::fmt_0b(i, 5) << " : " << utils::fmt_complex(real(i), imag(i))
-         << "\n";
-    }
-    return os;
-  }
+  std::ostream& display(std::ostream& os = std::cerr) const;
 
   /// @brief Compute the probability of measuring 1 on qubit q
   double prob(int q) const {
@@ -295,55 +115,14 @@ public:
     return os;
   }
 
-  CPUStatevector& applyGate(const cast::StandardQuantumGate& stdQuGate) {
-    const auto scalarGM = stdQuGate.getScalarGM();
-    assert(scalarGM && "Can only apply constant gateMatrix");
-    const auto& mat = scalarGM->matrix();
-
-    const unsigned k = stdQuGate.nQubits();
-    const unsigned K = 1 << k;
-    assert(mat.edgeSize() == K);
-    std::vector<size_t> ampIndices(K);
-    std::vector<std::complex<ScalarType>> ampUpdated(K);
-
-    size_t pdepMaskTask = ~static_cast<size_t>(0);
-    size_t pdepMaskAmp = 0;
-    for (const auto q : stdQuGate.qubits()) {
-      pdepMaskTask ^= (1ULL << q);
-      pdepMaskAmp |= (1ULL << q);
-    }
-
-    for (size_t taskId = 0; taskId < (getN() >> k); taskId++) {
-      auto pdepTaskId = utils::pdep64(taskId, pdepMaskTask);
-      for (size_t ampId = 0; ampId < K; ampId++) {
-        ampIndices[ampId] = pdepTaskId + utils::pdep64(ampId, pdepMaskAmp);
-      }
-
-      // std::cerr << "taskId = " << taskId
-      //           << " (" << utils::as0b(taskId, nQubits - k) << "):\n";
-      // utils::printVectorWithPrinter(ampIndices,
-      //   [&](size_t n, std::ostream& os) {
-      //     os << n << " (" << utils::as0b(n, nQubits) << ")";
-      //   }, std::cerr << " ampIndices: ") << "\n";
-
-      for (unsigned r = 0; r < K; r++) {
-        ampUpdated[r] = 0.0;
-        for (unsigned c = 0; c < K; c++) {
-          ampUpdated[r] += mat.rc(r, c) * this->amp(ampIndices[c]);
-        }
-      }
-      for (unsigned r = 0; r < K; r++) {
-        this->real(ampIndices[r]) = ampUpdated[r].real();
-        this->imag(ampIndices[r]) = ampUpdated[r].imag();
-      }
-    }
-    return *this;
-  }
-
+  CPUStatevector& applyGate(const cast::StandardQuantumGate& stdQuGate);
 }; // class CPUStatevector
 
 using CPUStatevectorFP32 = CPUStatevector<float>;
 using CPUStatevectorFP64 = CPUStatevector<double>;
+
+extern template class CPUStatevector<float>;
+extern template class CPUStatevector<double>;
 
 template <typename ScalarType>
 ScalarType fidelity(const CPUStatevector<ScalarType>& sv0,

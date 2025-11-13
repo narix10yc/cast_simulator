@@ -1,3 +1,6 @@
+// TODO: To deprecate this file by using fast math flags in IRBuilder instead.
+// We don't need to manually generate fused operations.
+
 #ifndef CAST_CORE_KERNEL_MANAGER_INTERNAL_H
 #define CAST_CORE_KERNEL_MANAGER_INTERNAL_H
 
@@ -22,7 +25,7 @@ llvm::Value* genMulAdd(llvm::IRBuilder<>& B,
                        llvm::Value* b,
                        llvm::Value* c,
                        ScalarKind aKind,
-                       const llvm::Twine& name = "");
+                       llvm::Twine name = "");
 
 // genFMA: generate negate-multiply-add operation -a * b + c.
 // @param b cannot be nullptr
@@ -32,13 +35,13 @@ llvm::Value* genNegMulAdd(llvm::IRBuilder<>& B,
                           llvm::Value* b,
                           llvm::Value* c,
                           ScalarKind aKind,
-                          const llvm::Twine& name = "");
+                          llvm::Twine name = "");
 
 std::pair<llvm::Value*, llvm::Value*>
 genComplexInnerProduct(llvm::IRBuilder<>& B,
                        const std::vector<llvm::Value*>& aVec,
                        const std::vector<llvm::Value*>& bVec,
-                       const llvm::Twine& name = "",
+                       llvm::Twine name = "",
                        FusedOpKind foKind = FO_FMA_FMS);
 
 }; // namespace cast::internal

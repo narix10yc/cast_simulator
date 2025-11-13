@@ -2,10 +2,8 @@
 #define CAST_CORE_COSTMODEL_H
 
 #include "cast/Core/Config.h"
-#include "cast/Core/Precision.h"
 #include "cast/Core/QuantumGate.h"
 #include "utils/InfoLogger.h"
-#include <string>
 
 namespace cast {
 

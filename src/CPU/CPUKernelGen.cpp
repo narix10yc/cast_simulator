@@ -389,14 +389,13 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
   const unsigned HK = 1 << hk;
 
   // debug print qubit splits
-  LLVM_DEBUG(std::cerr << CYAN("-- qubit split done\n");
-             utils::printArray(std::cerr << "- lower bits:  ", loBits) << "\n";
-             utils::printArray(std::cerr << "- higher bits: ", hiBits) << "\n";
-             utils::printArray(std::cerr << "- simd bits:   ", simdBits)
-             << "\n";
-             std::cerr << "- reImBit (simd_s): " << s << "\n";
-             std::cerr << "- sepBit:           " << sepBit << "\n";
-             std::cerr << "- vecSize:          " << vecSize << "\n";);
+  // LLVM_DEBUG(std::cerr << CYAN("-- qubit split done\n");
+  //            utils::printSpan(std::cerr << "- lower bits:  ", loBits) <<
+  //            "\n"; utils::printSpan(std::cerr << "- higher bits: ", hiBits)
+  //            << "\n"; utils::printSpan(std::cerr << "- simd bits:   ",
+  //            simdBits) << "\n"; std::cerr << "- reImBit (simd_s): " << s <<
+  //            "\n"; std::cerr << "- sepBit:           " << sepBit << "\n";
+  //            std::cerr << "- vecSize:          " << vecSize << "\n";);
 
   // entryBB->print(llvm::errs());
 
@@ -541,10 +540,6 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
     std::memcpy(arr1.data(), reSplitMasks.data() + S, S * sizeof(int));
     unsigned roundIdx = 0;
     while (roundIdx < lk) {
-      LLVM_DEBUG(
-          std::cerr << "Round " << roundIdx << ": ";
-          utils::printArray(std::cerr, llvm::ArrayRef(cacheLHS)) << " and ";
-          utils::printArray(std::cerr, llvm::ArrayRef(cacheRHS)) << "\n";);
 
       lCached = S << roundIdx;
       mergeMasks.emplace_back(lCached << 1);
@@ -579,12 +574,7 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
           ++idxR;
         }
       }
-      LLVM_DEBUG(
-          utils::printArray(std::cerr << "  Cache Combined: ",
-                            llvm::ArrayRef(cacheCombined))
-              << "\n";
-          utils::printArray(std::cerr << "  Mask: ", llvm::ArrayRef(mask))
-          << "\n";);
+
       // rotate the assignments of
       // (cacheLHS, cacheRHS, cacheCombined) with (arr0, arr1, arr2)
       if (++roundIdx == lk)
@@ -614,10 +604,6 @@ CPUKernelManager::gen_(const CPUKernelGenConfig& config,
       for (unsigned i = 0; i < S; i++)
         reimMergeMask.push_back(S * pairIdx + i + (vecSize >> 1));
     }
-    LLVM_DEBUG(utils::printArray(std::cerr << "reimMergeMask: ",
-                                 llvm::ArrayRef(reimMergeMask))
-                   << "\n";
-               std::cerr << CYAN("- Merged masks initiated\n"););
   }
 
   std::vector<llvm::Value*> updatedReAmps(LK);

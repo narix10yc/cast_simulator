@@ -182,7 +182,28 @@ void bind_cudaKernelManager(py::module_& m) {
           },
           py::arg("sv"),
           py::arg("kernel"),
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def(
+          "launch_kernel_fp64",
+          [](cast::CUDAKernelManager& self,
+             cast::CUDAStatevectorFP64& sv,
+             cast::CUDAKernelInfo& kernel) {
+            if (kernel.precision != cast::Precision::FP64) {
+              throw std::runtime_error(
+                  "Kernel precision mismatch: expected 64, got " +
+                  std::to_string(static_cast<int>(kernel.precision)));
+            }
+            if (self.isLaunchConfigValid() == false) {
+              throw std::runtime_error("Launch configuration is not valid. "
+                                       "Call set_launch_config first.");
+            }
+            return self.enqueueKernelLaunch(kernel);
+          },
+          py::arg("sv"),
+          py::arg("kernel"),
+          py::return_value_policy::reference_internal)
+      .def("sync_kernel_execution",
+           &cast::CUDAKernelManager::syncKernelExecution);
 }
 
 void bind_cudaOptimizer(py::module_& m) {

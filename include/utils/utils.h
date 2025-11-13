@@ -1,12 +1,9 @@
 #ifndef UTILS_UTILS_H
 #define UTILS_UTILS_H
 
-#include <algorithm>
 #include <cassert>
-#include <chrono>
 #include <complex>
 #include <functional>
-#include <iomanip>
 #include <iostream>
 #include <span>
 #include <vector>
@@ -23,8 +20,6 @@ int parseNonNegativeInt(const char* str) noexcept;
 /// @brief Sample K unique integers from [0, N-1] without replacement.
 /// @param holder: will be cleared and filled with K unique integers.
 void sampleNoReplacement(unsigned N, unsigned K, std::vector<int>& holder);
-
-bool isPermutation(llvm::ArrayRef<int> arr);
 
 template <typename T>
 bool isOrdered(const std::vector<T>& vec, bool ascending = true) {
@@ -48,87 +43,6 @@ bool isOrdered(const std::vector<T>& vec, bool ascending = true) {
 
 std::ostream&
 print_complex(std::ostream& os, std::complex<double> c, int precision = 3);
-
-template <typename T>
-std::ostream& printArrayNoBrackets(std::ostream& os,
-                                   llvm::ArrayRef<T> arr,
-                                   const char sep = ',') {
-  if (arr.empty())
-    return os;
-  auto it = arr.begin();
-  os << *it;
-  while (++it != arr.end()) {
-    os.put(sep);
-    os << *it;
-  }
-  return os;
-}
-
-template <typename T>
-std::ostream&
-printArray(std::ostream& os, llvm::ArrayRef<T> arr, const char sep = ',') {
-  if (arr.empty())
-    return os << "[]";
-  auto it = arr.begin();
-  os << "[" << *it;
-  while (++it != arr.end()) {
-    os.put(sep);
-    os << *it;
-  }
-  return os << "]";
-}
-
-template <typename T>
-std::ostream&
-printArray(std::ostream& os, std::span<T> arr, const char sep = ',') {
-  if (arr.empty())
-    return os << "[]";
-  auto it = arr.begin();
-  os << "[" << *it;
-  while (++it != arr.end()) {
-    os.put(sep);
-    os << *it;
-  }
-  return os << "]";
-}
-
-template <typename T, typename Printer>
-std::ostream& printArray(std::ostream& os,
-                         llvm::ArrayRef<T> arr,
-                         Printer pFunc,
-                         const char sep = ',') {
-  if (arr.empty())
-    return os << "[]";
-  auto it = arr.begin();
-  os << "[";
-  pFunc(os, *it);
-  while (++it != arr.end()) {
-    os.put(sep);
-    pFunc(os, *it);
-  }
-  return os << "]";
-}
-
-template <typename T, unsigned N>
-std::ostream& printArray(std::ostream& os,
-                         const llvm::SmallVector<T, N>& arr,
-                         const char sep = ',') {
-  return printArray(os, llvm::ArrayRef<T>(arr), sep);
-}
-
-// @param f: The printer is expected to take inputs (const T&, std::ostream&)
-template <typename T, typename Printer>
-std::ostream& printVectorWithPrinter(const std::vector<T>& v,
-                                     Printer f,
-                                     std::ostream& os = std::cerr) {
-  if (v.empty())
-    return os << "[]";
-  auto it = v.cbegin();
-  f(*it, os << "[");
-  while (++it != v.cend())
-    f(*it, os << ",");
-  return os << "]";
-}
 
 template <typename T>
 void push_back_if_not_present(std::vector<T>& vec, const T& elem) {

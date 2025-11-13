@@ -8,7 +8,7 @@ Value* cast::internal::genMulAdd(IRBuilder<>& B,
                                  Value* b,
                                  Value* c,
                                  ScalarKind aKind,
-                                 const Twine& name) {
+                                 Twine name) {
   assert(b && "operand b cannot be null when calling genMulAdd");
   switch (aKind) {
   case SK_Runtime: {
@@ -53,7 +53,7 @@ Value* cast::internal::genNegMulAdd(IRBuilder<>& B,
                                     Value* b,
                                     Value* c,
                                     ScalarKind aKind,
-                                    const Twine& name) {
+                                    Twine name) {
   assert(b && "operand b cannot be null when calling genNegMulAdd");
   // special-a cases
   switch (aKind) {
@@ -104,7 +104,7 @@ std::pair<Value*, Value*>
 cast::internal::genComplexInnerProduct(IRBuilder<>& B,
                                        const std::vector<Value*>& aVec,
                                        const std::vector<Value*>& bVec,
-                                       const Twine& name,
+                                       Twine name,
                                        cast::internal::FusedOpKind foKind) {
   assert(aVec.size() == bVec.size());
   // unsigned size = aVec.size();
