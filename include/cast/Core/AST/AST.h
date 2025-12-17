@@ -3,10 +3,9 @@
 
 #include "cast/Core/AST/LocationSpan.h"
 #include "cast/Core/AST/PrettyPrinter.h"
+#include <iostream>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/ErrorOr.h>
-#include <cmath>
-#include <iostream>
 #include <span>
 #include <string>
 
@@ -474,8 +473,8 @@ public:
               ParameterDeclExpr* paramDecl,
               CircuitAttribute attr,
               std::span<Stmt*> body)
-      : Stmt(NK_Stmt_Circuit), name(name), nameLoc(nameLoc),
-        attr(attr), paramDecl(paramDecl), body(body) {}
+      : Stmt(NK_Stmt_Circuit), name(name), nameLoc(nameLoc), attr(attr),
+        paramDecl(paramDecl), body(body) {}
 
   std::ostream& print(std::ostream& os) const override;
 
