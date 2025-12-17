@@ -20,9 +20,9 @@ CAST is built with cmake and depends on the [LLVM project](https://github.com/ll
 
 CAST is under active developments. We provide two presets to compile CAST, controlled by enviroment variable.
 
-- Either set enviroment variable `CAST_LLVM_RELEASE_ROOT` to the LLVM installation directory. This is the quickest method.
+- Either set enviroment variable `CAST_LLVM_ROOT` to the LLVM installation directory. This is the quickest method.
 - Or set enviroment variable `CAST_LLVM_ROOT` to a specific structure (detailed below). This will create a development enviroment for CAST.
-- If both are set, `CAST_LLVM_RELEASE_ROOT` will be prioritized. 
+- If both are set, `CAST_LLVM_ROOT` will be prioritized. 
 
 The development enviromnent of CAST requires a specific structure of LLVM installation, and we recommand compiling and installing the LLVM project afresh.
 
@@ -42,7 +42,7 @@ where `<dir>` is the pull path to `llvm-project-${version}.src`.
 
 Then call
 ```
-export CAST_LLVM_RELEASE_ROOT=<dir>/release-install
+export CAST_LLVM_ROOT=<dir>/release-install
 ```
 
 Build CAST

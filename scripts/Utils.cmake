@@ -1,68 +1,84 @@
-
 ### Handle LLVM Dependency ###
 function(handle_llvm_dep)
-  # There are two modes: 
-  # 1. Enviroment variable CAST_LLVM_ROOT is set: We expect there are two
-  #    subdirectories under CAST_LLVM_ROOT: 'release-install' and 'debug-install'.
-  # 2. CAST_LLVM_RELEASE_ROOT: The root directory of the LLVM release-install.
-  #    In this case, we won't have debug infos in debug builds.
-  # If both CAST_LLVM_ROOT and CAST_LLVM_RELEASE_ROOT are defined, we issue a
-  # warning and use the second case.
+  # Default mode: release-only LLVM.
+  #   - Users should pass CAST_LLVM_ROOT via cmake -DCAST_LLVM_ROOT=...
+  #   - CAST_LLVM_ROOT is the install prefix of a *release* LLVM build
+  #     (e.g. from apt, brew, or a prebuilt tarball).
+  #
+  # Optional dev mode (debug-enabled development):
+  #   - Users can pass CAST_DEV_LLVM_ROOT which is expected to contain BOTH
+  #     'release-install' and 'debug-install' subdirectories.
+  #   - In this case CAST_LLVM_ROOT is set to <dev>/release-install and
+  #     CAST_LLVM_DEBUG_ROOT is set to <dev>/debug-install (unless already 
+  #     provided).
+  #
+  # Environment variables are only used as a fallback when the corresponding
+  # CMake variables (cmake -D) are not provided.
 
-  if(DEFINED CAST_LLVM_RELEASE_ROOT)
-    # already cached
+  # --- Release root (preferred: CMake -D..., fallback: env) ---
+  if(DEFINED CAST_LLVM_ROOT)
+    # already set / cached
   elseif(DEFINED ENV{CAST_LLVM_ROOT})
-    # debug + release llvm versions
-    set(CAST_LLVM_DEBUG_ROOT "$ENV{CAST_LLVM_ROOT}/debug-install" CACHE PATH
-      "Path to the llvm debug-install directory")
-    set(CAST_LLVM_RELEASE_ROOT "$ENV{CAST_LLVM_ROOT}/release-install" CACHE PATH
-      "Path to the llvm release-install directory")
-    if(NOT EXISTS "${CAST_LLVM_RELEASE_ROOT}")
-      message(FATAL_ERROR "${CAST_LLVM_RELEASE_ROOT} does not exist!")
-    endif()
-    if(NOT IS_DIRECTORY "${CAST_LLVM_RELEASE_ROOT}")
-      message(FATAL_ERROR "${CAST_LLVM_RELEASE_ROOT} is not a directory!")
-    endif()
-    if(NOT EXISTS "${CAST_LLVM_DEBUG_ROOT}")
-      message(FATAL_ERROR "${CAST_LLVM_DEBUG_ROOT} does not exist!")
-    endif()
-    if(NOT IS_DIRECTORY "${CAST_LLVM_DEBUG_ROOT}")
-      message(FATAL_ERROR "${CAST_LLVM_DEBUG_ROOT} is not a directory!")
-    endif()
-  elseif(DEFINED ENV{CAST_LLVM_RELEASE_ROOT})
-    # release only llvm version
-    set(CAST_LLVM_RELEASE_ROOT "$ENV{CAST_LLVM_RELEASE_ROOT}" CACHE PATH
-      "Path to the llvm release-install directory")
+    set(CAST_LLVM_ROOT "$ENV{CAST_LLVM_ROOT}" CACHE PATH
+      "Path to the LLVM release install prefix" FORCE)
   endif()
 
-  message(STATUS "CAST_LLVM_RELEASE_ROOT is set to: ${CAST_LLVM_RELEASE_ROOT}")
-  message(STATUS "CAST_LLVM_DEBUG_ROOT is set to: ${CAST_LLVM_DEBUG_ROOT}")
-
-  if(DEFINED ENV{CAST_LLVM_ROOT} AND DEFINED ENV{CAST_LLVM_RELEASE_ROOT})
-    message(WARNING
-      "Both CAST_LLVM_ROOT and CAST_LLVM_RELEASE_ROOT are defined. "
-      "CAST_LLVM_ROOT will be ignored."
-      "So in debug builds, LLVM-related debug infos will not be available. ")
+  # --- Optional dev/debug roots (preferred: CMake -D..., fallback: env) ---
+  # If users provide CAST_DEV_LLVM_ROOT we expect both `debug-install` and
+  # `release-install` subdirectories.
+  if(DEFINED CAST_LLVM_DEBUG_ROOT)
+    # already set / cached
+  elseif(DEFINED CAST_DEV_LLVM_ROOT)
+    if(NOT DEFINED CAST_LLVM_ROOT)
+      set(CAST_LLVM_ROOT "${CAST_DEV_LLVM_ROOT}/release-install" CACHE PATH
+        "Path to the LLVM release install prefix" FORCE)
+    endif()
+    set(CAST_LLVM_DEBUG_ROOT "${CAST_DEV_LLVM_ROOT}/debug-install" CACHE PATH
+      "Path to the llvm debug-install directory" FORCE)
+  elseif(DEFINED ENV{CAST_DEV_LLVM_ROOT})
+    if(NOT DEFINED CAST_LLVM_ROOT)
+      set(CAST_LLVM_ROOT "$ENV{CAST_DEV_LLVM_ROOT}/release-install" CACHE PATH
+        "Path to the LLVM release install prefix" FORCE)
+    endif()
+    set(CAST_LLVM_DEBUG_ROOT "$ENV{CAST_DEV_LLVM_ROOT}/debug-install" CACHE PATH
+      "Path to the llvm debug-install directory" FORCE)
   endif()
 
-  if(NOT DEFINED CAST_LLVM_ROOT AND NOT DEFINED CAST_LLVM_RELEASE_ROOT)
+  # --- Validation ---
+  if(NOT DEFINED CAST_LLVM_ROOT)
     message(FATAL_ERROR
-      "Neither CAST_LLVM_ROOT nor CAST_LLVM_RELEASE_ROOT is defined. "
-      "Please set one of them to the root directory of your LLVM installation.")
+      "LLVM is not configured. Please set:\n"
+      "  -DCAST_LLVM_ROOT=<llvm-install-prefix>\n"
+      "Optionally for debug-enabled development builds:\n"
+      "  -DCAST_DEV_LLVM_ROOT=<dir with release-install/ and debug-install/>")
+  endif()
+
+  if(NOT EXISTS "${CAST_LLVM_ROOT}")
+    message(FATAL_ERROR "CAST_LLVM_ROOT: ${CAST_LLVM_ROOT} does not exist!")
+  endif()
+  if(NOT IS_DIRECTORY "${CAST_LLVM_ROOT}")
+    message(FATAL_ERROR "CAST_LLVM_ROOT: ${CAST_LLVM_ROOT} is not a directory!")
+  endif()
+
+  message(STATUS "CAST_LLVM_ROOT is set to: ${CAST_LLVM_ROOT}")
+  if(DEFINED CAST_LLVM_DEBUG_ROOT)
+    message(STATUS "CAST_LLVM_DEBUG_ROOT is set to: ${CAST_LLVM_DEBUG_ROOT}")
+  else()
+    message(STATUS "CAST_LLVM_DEBUG_ROOT is not set (release-only LLVM mode)")
   endif()
 endfunction() # handle_llvm_dep
 
 
 function(use_llvm_compilers)
-  if(EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang" AND
-    EXISTS "${CAST_LLVM_RELEASE_ROOT}/bin/clang++")
+  if(EXISTS "${CAST_LLVM_ROOT}/bin/clang" AND
+    EXISTS "${CAST_LLVM_ROOT}/bin/clang++")
     message(STATUS "Using compilers under LLVM release-install at "
-      "${CAST_LLVM_RELEASE_ROOT}")
-    set(CMAKE_C_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang" PARENT_SCOPE)
-    set(CMAKE_CXX_COMPILER "${CAST_LLVM_RELEASE_ROOT}/bin/clang++" PARENT_SCOPE)
+      "${CAST_LLVM_ROOT}")
+    set(CMAKE_C_COMPILER "${CAST_LLVM_ROOT}/bin/clang" PARENT_SCOPE)
+    set(CMAKE_CXX_COMPILER "${CAST_LLVM_ROOT}/bin/clang++" PARENT_SCOPE)
   else()
     message(WARNING "Cannot find clang/clang++ under "
-      "${CAST_LLVM_RELEASE_ROOT}/bin/, using system defaults.")
+      "${CAST_LLVM_ROOT}/bin/, using system defaults.")
   endif()
 
   # On Mac OS we need to tell the compiler where to find the SDK (detect via 
@@ -96,13 +112,13 @@ endfunction() # use_llvm_compilers
 function(use_llvm_libcxx)
   # check if libc++ is installed along with LLVM
   # include path is almost always
-  # ${CAST_LLVM_RELEASE_ROOT}/include/c++/v1
-  set(LIBCXX_INCLUDE_DIR "${CAST_LLVM_RELEASE_ROOT}/include/c++/v1")
+  # ${CAST_LLVM_ROOT}/include/c++/v1
+  set(LIBCXX_INCLUDE_DIR "${CAST_LLVM_ROOT}/include/c++/v1")
 
   # but the library path may vary. For example,
-  # ${CAST_LLVM_RELEASE_ROOT}/lib
-  # ${CAST_LLVM_RELEASE_ROOT}/lib/x86_64-unknown-linux-gnu
-  file(GLOB_RECURSE LIBCXX_LIB_PATHS "${CAST_LLVM_RELEASE_ROOT}/lib/*libc++.*")
+  # ${CAST_LLVM_ROOT}/lib
+  # ${CAST_LLVM_ROOT}/lib/x86_64-unknown-linux-gnu
+  file(GLOB_RECURSE LIBCXX_LIB_PATHS "${CAST_LLVM_ROOT}/lib/*libc++.*")
   if(LIBCXX_LIB_PATHS)
     list(GET LIBCXX_LIB_PATHS 0 LIBCXX_LIB_PATH)
     get_filename_component(LIBCXX_LIB_DIR "${LIBCXX_LIB_PATH}" DIRECTORY)

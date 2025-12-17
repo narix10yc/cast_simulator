@@ -3,8 +3,6 @@ cmake_minimum_required(VERSION 3.20)
 ##### Handle LLVM Dependency ######
 include(scripts/Utils.cmake)
 handle_llvm_dep()
-message(STATUS "CAST_LLVM_DEBUG_ROOT: ${CAST_LLVM_DEBUG_ROOT}")
-message(STATUS "CAST_LLVM_RELEASE_ROOT: ${CAST_LLVM_RELEASE_ROOT}")
 
 ##### User Options ######
 message("### User Options ###")
@@ -45,7 +43,7 @@ string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
 if(CAST_LLVM_DEBUG_ROOT AND CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
   set(LLVM_DIR "${CAST_LLVM_DEBUG_ROOT}/lib/cmake/llvm")
 else()
-  set(LLVM_DIR "${CAST_LLVM_RELEASE_ROOT}/lib/cmake/llvm")
+  set(LLVM_DIR "${CAST_LLVM_ROOT}/lib/cmake/llvm")
 endif()
 
 message(STATUS "LLVM_DIR is set to: ${LLVM_DIR}")

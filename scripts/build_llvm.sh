@@ -85,7 +85,7 @@ if [[ ! -d "$ARC_LLVM_SRC_DIR" ]]; then
 fi
 
 CAST_LLVM_ROOT=$(dirname "$ARC_LLVM_SRC_DIR")
-CAST_LLVM_RELEASE_ROOT="${CAST_LLVM_ROOT}/release-install"
+CAST_LLVM_ROOT="${CAST_LLVM_ROOT}/release-install"
 CAST_LLVM_DEBUG_ROOT="${CAST_LLVM_ROOT}/debug-install"
 
 # Get paths to cmake and ninja
@@ -138,15 +138,15 @@ cmake -S "${ARC_LLVM_SRC_DIR}/llvm" -G Ninja \
 cmake --build "${CAST_LLVM_ROOT}/release-build"
 
 cmake --install "${CAST_LLVM_ROOT}/release-build" \
-      --prefix "${CAST_LLVM_RELEASE_ROOT}"
+      --prefix "${CAST_LLVM_ROOT}"
 
 # end of release build
 if [[ $ARG_RELEASE_ONLY -eq 1 ]]; then
   echo -e "${INFO} LLVM release-version installed successfully."
   echo -e "${INFO} LLVM is installed for targets ${ARG_LLVM_TARGETS_TO_BUILD}"
-  echo -e "${INFO} Release install is in ${CAST_LLVM_RELEASE_ROOT}"
+  echo -e "${INFO} Release install is in ${CAST_LLVM_ROOT}"
   echo -e "${INFO} Don't forget to set your environment variables:"
-  echo -e "${INFO} export CAST_LLVM_RELEASE_ROOT=${CAST_LLVM_RELEASE_ROOT}"
+  echo -e "${INFO} export CAST_LLVM_ROOT=${CAST_LLVM_ROOT}"
   echo -e "${INFO} You may remove build directories by running:"
   echo -e "${INFO} rm -rf ${CAST_LLVM_ROOT}/release-build"
   exit 0
@@ -159,31 +159,31 @@ echo -e "${INFO} LLVM release-version installed successfully. "\
 ARG_SET_USE_CLANG=""
 if [[ $ARG_BUILD_CLANG -eq 1 ]]; then
   ARG_SET_USE_CLANG=(
-    "-DCMAKE_C_COMPILER=${CAST_LLVM_RELEASE_ROOT}/bin/clang"
-    "-DCMAKE_CXX_COMPILER=${CAST_LLVM_RELEASE_ROOT}/bin/clang++"
-    "-DCMAKE_LINKER=${CAST_LLVM_RELEASE_ROOT}/bin/ld.lld"
+    "-DCMAKE_C_COMPILER=${CAST_LLVM_ROOT}/bin/clang"
+    "-DCMAKE_CXX_COMPILER=${CAST_LLVM_ROOT}/bin/clang++"
+    "-DCMAKE_LINKER=${CAST_LLVM_ROOT}/bin/ld.lld"
   )
 fi
 
 ARG_SET_USE_LIBCXX=""
 if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
   ARG_SET_USE_LIBCXX=(
-    -DCMAKE_CXX_FLAGS="-stdlib=libc++ -I${CAST_LLVM_RELEASE_ROOT}/include/c++/v1"
-    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -L${CAST_LLVM_RELEASE_ROOT}/lib"
-    -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++ -L${CAST_LLVM_RELEASE_ROOT}/lib"
-    -DCMAKE_INSTALL_RPATH="${CAST_LLVM_RELEASE_ROOT}/lib"
+    -DCMAKE_CXX_FLAGS="-stdlib=libc++ -I${CAST_LLVM_ROOT}/include/c++/v1"
+    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -L${CAST_LLVM_ROOT}/lib"
+    -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++ -L${CAST_LLVM_ROOT}/lib"
+    -DCMAKE_INSTALL_RPATH="${CAST_LLVM_ROOT}/lib"
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
   )
   # It seems that libc++ is not always installed in release-install/lib. 
   # It might be in release-install/lib/x86_64-unknown-linux-gnu or similar.
   # We will try to find it and set the path accordingly.
-  LIBCXX_DIR=$(find "${CAST_LLVM_RELEASE_ROOT}/lib" \
+  LIBCXX_DIR=$(find "${CAST_LLVM_ROOT}/lib" \
                -type f \( -name "libc++*.so*" -o -name "libc++*.dylib*" \)
                -exec dirname {} \; | head -n 1)
   if [[ -n "$LIBCXX_DIR" ]]; then
     echo -e "${INFO} Found libc++ in directory: ${LIBCXX_DIR}"
   else
-    echo -e "${WARN} libc++ not found in ${CAST_LLVM_RELEASE_ROOT}/lib. "\
+    echo -e "${WARN} libc++ not found in ${CAST_LLVM_ROOT}/lib. "\
             "This means we may have not correctly set up runtime lib path "\
             "and second phase of this build may fail."
   fi
@@ -218,7 +218,7 @@ cmake --install "${CAST_LLVM_ROOT}/debug-build" \
 
 echo -e "${INFO} LLVM build completed successfully."
 echo -e "${INFO} LLVM is installed for targets ${ARG_LLVM_TARGETS_TO_BUILD}"
-echo -e "${INFO} Release install is in ${CAST_LLVM_RELEASE_ROOT}"
+echo -e "${INFO} Release install is in ${CAST_LLVM_ROOT}"
 echo -e "${INFO} Debug install is in ${CAST_LLVM_DEBUG_ROOT}"
 echo -e "${INFO} Don't forget to set your environment variables:"
 echo -e "${INFO} export CAST_LLVM_ROOT=${CAST_LLVM_ROOT}"
