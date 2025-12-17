@@ -1,10 +1,13 @@
 #ifndef CAST_ADT_COMPLEX_SQUARE_MATRIX_H
 #define CAST_ADT_COMPLEX_SQUARE_MATRIX_H
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <complex>
 #include <cstring>
+#include <memory>
+#include <ostream>
 
 namespace cast {
 
@@ -14,24 +17,18 @@ class ComplexSquareMatrix {
   // constexpr static size_t AlignSize = 64;
 private:
   size_t edgeSize_;
-  double* data_;
+  std::unique_ptr<double[]> data_;
 
   void allocData() {
     assert(edgeSize_ > 0);
-    data_ = new double[edgeSize_ * edgeSize_ * 2];
+    data_ = std::make_unique<double[]>(edgeSize_ * edgeSize_ * 2);
     assert(data_ != nullptr && "Allocation failed");
-  }
-
-  void freeData() {
-    delete[] data_;
-    data_ = nullptr;
   }
 
 public:
   ComplexSquareMatrix() : edgeSize_(0), data_(nullptr) {}
 
-  ComplexSquareMatrix(size_t edgeSize) {
-    edgeSize_ = edgeSize;
+  explicit ComplexSquareMatrix(size_t edgeSize) : edgeSize_(edgeSize) {
     allocData();
   }
 
@@ -46,34 +43,33 @@ public:
     std::memcpy(imData(), im.begin(), im.size() * sizeof(double));
   }
 
-  ComplexSquareMatrix(const ComplexSquareMatrix& other) {
-    edgeSize_ = other.edgeSize_;
-    allocData();
-    std::memcpy(data_, other.data_, sizeInBytes());
+  ComplexSquareMatrix(const ComplexSquareMatrix& other)
+      : edgeSize_(other.edgeSize_) {
+    if (edgeSize_ > 0) {
+      allocData();
+      std::memcpy(data_.get(), other.data_.get(), sizeInBytes());
+    }
   }
 
-  ComplexSquareMatrix(ComplexSquareMatrix&& other) noexcept
-      : edgeSize_(other.edgeSize_), data_(other.data_) {
-    other.data_ = nullptr;
-  }
+  ComplexSquareMatrix(ComplexSquareMatrix&& other) noexcept = default;
 
   ComplexSquareMatrix& operator=(const ComplexSquareMatrix& other) {
     if (this == &other)
       return *this;
-    this->~ComplexSquareMatrix();
-    new (this) ComplexSquareMatrix(other);
+    edgeSize_ = other.edgeSize_;
+    if (edgeSize_ > 0) {
+      allocData();
+      std::memcpy(data_.get(), other.data_.get(), sizeInBytes());
+    } else {
+      data_.reset();
+    }
     return *this;
   }
 
-  ComplexSquareMatrix& operator=(ComplexSquareMatrix&& other) noexcept {
-    if (this == &other)
-      return *this;
-    this->~ComplexSquareMatrix();
-    new (this) ComplexSquareMatrix(std::move(other));
-    return *this;
-  }
+  ComplexSquareMatrix&
+  operator=(ComplexSquareMatrix&& other) noexcept = default;
 
-  ~ComplexSquareMatrix() { freeData(); }
+  ~ComplexSquareMatrix() = default;
 
   size_t edgeSize() const { return edgeSize_; }
 
@@ -89,49 +85,55 @@ public:
     return sizeof(double) * 2ULL * edgeSize_ * edgeSize_;
   }
 
-  void fillZeros() { std::fill(data_, data_ + size(), 0.0); }
+  void fillZeros() {
+    if (!data_)
+      return;
+    std::fill(data_.get(), data_.get() + size(), 0.0);
+  }
 
-  double* data() { return data_; }
-  const double* data() const { return data_; }
+  double* data() { return data_.get(); }
+  const double* data() const { return data_.get(); }
 
-  double* reData() { return data_; }
-  double* reBegin() { return data_; }
-  double* reEnd() { return data_ + edgeSize_ * edgeSize_; }
+  double* reData() { return data_.get(); }
+  double* reBegin() { return data_.get(); }
+  double* reEnd() { return data_.get() + edgeSize_ * edgeSize_; }
 
-  double* imData() { return data_ + edgeSize_ * edgeSize_; }
-  double* imBegin() { return data_ + edgeSize_ * edgeSize_; }
-  double* imEnd() { return data_ + 2 * edgeSize_ * edgeSize_; }
+  double* imData() { return data_.get() + edgeSize_ * edgeSize_; }
+  double* imBegin() { return data_.get() + edgeSize_ * edgeSize_; }
+  double* imEnd() { return data_.get() + 2 * edgeSize_ * edgeSize_; }
 
-  const double* reData() const { return data_; }
-  const double* reBegin() const { return data_; }
-  const double* reEnd() const { return data_ + edgeSize_ * edgeSize_; }
+  const double* reData() const { return data_.get(); }
+  const double* reBegin() const { return data_.get(); }
+  const double* reEnd() const { return data_.get() + edgeSize_ * edgeSize_; }
 
-  const double* imData() const { return data_ + edgeSize_ * edgeSize_; }
-  const double* imBegin() const { return data_ + edgeSize_ * edgeSize_; }
-  const double* imEnd() const { return data_ + 2 * edgeSize_ * edgeSize_; }
+  const double* imData() const { return data_.get() + edgeSize_ * edgeSize_; }
+  const double* imBegin() const { return data_.get() + edgeSize_ * edgeSize_; }
+  const double* imEnd() const {
+    return data_.get() + 2 * edgeSize_ * edgeSize_;
+  }
 
   double& real(unsigned row, unsigned col) {
     assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
-    return data_[row * edgeSize_ + col];
+    return data_.get()[row * edgeSize_ + col];
   }
 
   double real(unsigned row, unsigned col) const {
     assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
-    return data_[row * edgeSize_ + col];
+    return data_.get()[row * edgeSize_ + col];
   }
 
   double& imag(unsigned row, unsigned col) {
     assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
-    return data_[(row + edgeSize_) * edgeSize_ + col];
+    return data_.get()[(row + edgeSize_) * edgeSize_ + col];
   }
 
   double imag(unsigned row, unsigned col) const {
     assert(row < edgeSize_ && col < edgeSize_ &&
            "Row or column index out of bounds");
-    return data_[(row + edgeSize_) * edgeSize_ + col];
+    return data_.get()[(row + edgeSize_) * edgeSize_ + col];
   }
 
   std::complex<double> rc(unsigned row, unsigned col) const {

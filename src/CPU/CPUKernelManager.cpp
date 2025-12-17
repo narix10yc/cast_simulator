@@ -166,7 +166,7 @@ llvm::Error CPUKernelManager::compilePool(const std::string& poolName,
 }
 
 llvm::Error CPUKernelManager::compileAllPools(OptimizationLevel optLevel,
-                                         bool progressBar) {
+                                              bool progressBar) {
   assert(llvmJIT != nullptr && "llvmJIT is null");
   llvm::Error err = llvm::Error::success();
   for (auto& [name, pool] : kernelPools_)

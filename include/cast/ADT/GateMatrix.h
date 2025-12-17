@@ -26,9 +26,12 @@ using ParametrizedGateMatrixPtr = std::shared_ptr<ParametrizedGateMatrix>;
 using ConstParametrizedGateMatrixPtr =
     std::shared_ptr<const ParametrizedGateMatrix>;
 
-/// @brief \c GateMatrix is a base class for all gate matrices.
-/// It knows the number of qubits, but not which qubits.
-/// Gate matrices here are `not` always unitary.
+/// @brief `GateMatrix` is a base class for all gate matrices. Sub-classes
+/// include scalar (ScalarGateMatrix), unitary permutation
+/// (UnitaryPermGateMatrix), and parametrized (ParametrizedGateMatrix) gate
+/// matrices.
+/// Each gate matrix knows the number of qubits but not which qubits.
+/// Gate matrices are *not* always unitary.
 class GateMatrix {
 public:
   enum GateMatrixKind {
@@ -55,10 +58,10 @@ public:
 
   /// Compute the gate matrix of a subsystem.
   /// @param mask A bitmask indicating which qubits to keep. For example, a
-  /// mask of 0b011 means to keep the least significant 2 qubits by partial
-  /// tracing away the more significant qubits.
+  /// mask of 0b011 means to keep the two least significant qubits by
+  /// partial-tracing away the more significant qubits.
   virtual GateMatrixPtr subsystem(uint32_t mask) const {
-    assert(false && "Not implemented yet (called from base class)");
+    assert(false && "Called from base class");
     return nullptr;
   }
 
@@ -71,7 +74,7 @@ public:
   }
 }; // class GateMatrix
 
-/// @brief \c ScalarGateMatrix is a wrapper around \c ComplexSquareMatrix whose
+/// @brief `ScalarGateMatrix` is a wrapper around `ComplexSquareMatrix` whose
 /// edgeSize is always a power-of-2.
 class ScalarGateMatrix : public GateMatrix {
 private:

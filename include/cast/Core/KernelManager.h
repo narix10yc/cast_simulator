@@ -19,8 +19,6 @@ std::string demangleGraphName(const std::string& mangledName);
 
 class KernelManagerBase {
 protected:
-  // A vector of pairs of LLVM context and module. Expected to be cleared after
-  // calling \c initJIT
   utils::TaskDispatcher dispatcher;
 
   explicit KernelManagerBase(int nWorkerThreads)
@@ -28,8 +26,7 @@ protected:
                                       : cast::get_cpu_num_threads()) {}
 };
 
-// KernelManager offers CRTP style interface to manage kernel storage and
-// provides iterators.
+// A CRTP class for kernel managers.
 template <typename KernelInfoType>
 class KernelManager : public KernelManagerBase {
 protected:
