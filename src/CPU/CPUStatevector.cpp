@@ -1,9 +1,10 @@
 #include "cast/CPU/CPUStatevector.h"
 #include "utils/Formats.h"
+#include "utils/iocolor.h"
+#include <algorithm>
 #include <bit>
 #include <random>
 #include <thread>
-#include "utils/iocolor.h"
 
 using namespace cast;
 
@@ -303,13 +304,28 @@ std::vector<uint64_t> CPUStatevector<ScalarType>::sample(unsigned nShots,
 
   // accumulate
   for (size_t i = 1, K = cdf.size(); i < K; ++i) {
-    cdf[i] += cdf[i-1];
+    cdf[i] += cdf[i - 1];
   }
 
   // Sample nShots times
   std::random_device rd;
   std::mt19937 gen{rd()};
-  std::uniform_real_distribution<double> dis(0.0, 1.0);   
+  std::uniform_real_distribution<double> dis(0.0, 1.0);
+  for (unsigned shot = 0; shot < nShots; ++shot) {
+    double r = dis(gen);
+    // binary search
+    size_t left = 0;
+    size_t right = cdf.size() - 1;
+    while (left < right) {
+      size_t mid = left + (right - left) / 2;
+      if (r <= cdf[mid]) {
+        right = mid;
+      } else {
+        left = mid + 1;
+      }
+    }
+    results.push_back(left);
+  }
 
   return results;
 }
