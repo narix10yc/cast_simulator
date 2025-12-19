@@ -1,4 +1,9 @@
 #include "cast/CPU/CPUStatevector.h"
+#include "utils/Formats.h"
+#include <bit>
+#include <random>
+#include <thread>
+#include "utils/iocolor.h"
 
 using namespace cast;
 
@@ -262,6 +267,51 @@ CPUStatevector<ScalarType>& CPUStatevector<ScalarType>::applyGate(
     }
   }
   return *this;
+}
+
+template <typename ScalarType>
+std::vector<uint64_t> CPUStatevector<ScalarType>::sample(unsigned nShots,
+                                                         uint64_t flag) const {
+
+  std::vector<uint64_t> results;
+  results.reserve(nShots);
+
+  // zero out irrelevant bits
+  flag = flag & ((1ULL << nQubits_) - 1);
+  auto k = std::popcount(flag);
+
+  std::vector<double> cdf(size_t(1) << k, 0.0);
+
+  // compute CDF
+  // TODO: use PDEP/PEXT
+  for (size_t i = 0; i < getN(); i++) {
+    size_t idx = 0;
+    size_t bitPos = 0;
+
+    for (size_t q = 0; q < nQubits_; q++) {
+      if (flag & (1ULL << q)) {
+        if (i & (1ULL << q)) {
+          idx |= (1ULL << bitPos);
+        }
+        bitPos++;
+      }
+    }
+    const double re = real(i);
+    const double im = imag(i);
+    cdf[idx] += (re * re + im * im);
+  }
+
+  // accumulate
+  for (size_t i = 1, K = cdf.size(); i < K; ++i) {
+    cdf[i] += cdf[i-1];
+  }
+
+  // Sample nShots times
+  std::random_device rd;
+  std::mt19937 gen{rd()};
+  std::uniform_real_distribution<double> dis(0.0, 1.0);   
+
+  return results;
 }
 
 namespace cast {

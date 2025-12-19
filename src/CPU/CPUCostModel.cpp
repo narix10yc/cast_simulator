@@ -7,6 +7,8 @@
 #include "utils/Formats.h"
 #include "utils/PrintSpan.h"
 #include "utils/utils.h"
+#include "utils/iocolor.h"
+#include <random>
 
 using namespace cast;
 

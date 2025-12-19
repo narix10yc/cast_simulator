@@ -9,6 +9,10 @@
 #include <span>
 #include <string>
 
+#ifndef M_PI
+#define M_PI (3.141592653589)
+#endif
+
 namespace cast::legacy {
 class CircuitGraph;
 } // namespace cast::legacy

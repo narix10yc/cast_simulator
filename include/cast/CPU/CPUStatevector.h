@@ -3,13 +3,9 @@
 
 #include "cast/CPU/Config.h"
 #include "cast/Core/QuantumGate.h"
-#include "utils/Formats.h"
-#include "utils/iocolor.h"
 #include "utils/utils.h"
 
 #include <iostream>
-#include <random>
-#include <thread>
 #include <variant>
 
 namespace cast {
@@ -95,6 +91,15 @@ public:
   }
 
   std::ostream& display(std::ostream& os = std::cerr) const;
+
+  /// Sample nShot measurements.
+  /// flag indicates which qubits to measure (1 = measure, 0 = ignore).
+  /// For example, for an 8-qubit statevector, flag = 0b00101010 means to
+  /// measure qubits 1, 3, and 5. In this case, the returned vector contains
+  /// nShots samples where in each sample, the lowest 3 bits correspond to
+  /// qubits 1, 3, and 5.
+  /// Sampling relies on building a partial CDF.
+  std::vector<uint64_t> sample(unsigned nShots, uint64_t flag) const;
 
   /// @brief Compute the probability of measuring 1 on qubit q
   double prob(int q) const {
