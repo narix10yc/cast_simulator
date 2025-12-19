@@ -24,5 +24,9 @@ pybind11_add_module(cast_python_bind MODULE ${SRCS})
 
 target_link_libraries(cast_python_bind PRIVATE cast)
 target_compile_options(cast_python_bind PRIVATE "-fexceptions" "-frtti")
+
+# We put the built library here: cast_root/python/cast/<name>.so 
+# because it is along with the __init__.py and .pyi file.
+# Most IDEs will be happier in this way.
 set_target_properties(cast_python_bind PROPERTIES 
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cast)

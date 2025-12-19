@@ -1,4 +1,4 @@
-if (CAST_USE_CUDA)
+if (CAST_USE_CUDA OR CAST_PYTHON_BIND)
   set(RTTI "-frtti")
 else()
   set(RTTI "-fno-rtti")

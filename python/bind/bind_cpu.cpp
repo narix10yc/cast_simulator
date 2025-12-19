@@ -10,7 +10,7 @@ namespace {
 
 llvm::OptimizationLevel mapIntToLLVMOptLevel(int optLevel) {
   switch (optLevel) {
-  case 0:
+
     return llvm::OptimizationLevel::O0;
   case 1:
     return llvm::OptimizationLevel::O1;
@@ -243,7 +243,7 @@ void bind_CPUOptimizer(py::module_& m) {
   // CPUOptimizer -> Optimizer<CPUOptimizer> -> OptimizerBase
   // We bound OptimizerBase in bind_core.cpp, exposed run_circuit and
   // run_circuitgraph.
-  // enable_fusion, enable_canonicalization, enable_cfo, and
+  // Now, enable_fusion, enable_canonicalization, enable_cfo, and
   // set_sizeonly_fusion_config must be bound here.
   py::class_<cast::CPUOptimizer, cast::OptimizerBase>(m, "CPUOptimizer")
       .def(py::init<>())

@@ -1,3 +1,6 @@
+// We do not exclude this file in cmake. Disable compilation using this macro.
+#ifdef CAST_USE_CUDA
+
 #include "cast/CUDA/CUDA.h"
 
 #include <pybind11/complex.h>
@@ -239,3 +242,5 @@ void bind_cuda(py::module_& m) {
   bind_cudaKernelManager(m);
   bind_cudaOptimizer(m);
 }
+
+#endif // CAST_USE_CUDA
