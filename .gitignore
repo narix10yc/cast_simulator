@@ -18,8 +18,8 @@ analysis/*
 *.csv
 
 # python-related
-.python.envs/*
 *.ipynb
+python/cast/__pycache__/*
 
 # others
 .cache/*
