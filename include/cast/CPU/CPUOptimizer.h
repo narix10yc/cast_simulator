@@ -10,7 +10,7 @@ class CPUOptimizer : public Optimizer<CPUOptimizer> {
 public:
   CPUOptimizer() = default;
 
-  llvm::Error loadCPUCostModel(const std::string& filename,
+  llvm::Error loadCPUCostModel(const std::string& cacheFilename,
                                int queryNThreads,
                                Precision queryPrecision);
 

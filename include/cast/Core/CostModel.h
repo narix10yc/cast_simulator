@@ -38,7 +38,9 @@ public:
 
   CostModelKind getKind() const { return _kind; }
 
-  // The time it takes to update 1 GiB of memory, in seconds.
+  /// The time it takes to update 1 GiB of memory, in seconds.
+  /// This is the function optimizers will call to estimate the cost of applying
+  /// a quantum gate.
   virtual double computeGiBTime(const QuantumGate* gate) const = 0;
 
   virtual void displayInfo(utils::InfoLogger logger) const {
@@ -67,6 +69,7 @@ public:
   }
 };
 
+/// A trivial cost model that each gate takes constant time.
 class ConstantCostModel : public CostModel {
 public:
   ConstantCostModel() : CostModel(CM_Constant) {}

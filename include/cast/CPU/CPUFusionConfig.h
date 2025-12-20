@@ -16,14 +16,6 @@ public:
     this->costModel_ = std::move(cpuCM);
   }
 
-  static std::unique_ptr<CPUFusionConfig>
-  LoadFromFile(const std::string& fileName) {
-    auto cm = CPUCostModel::LoadFromFile(fileName);
-    if (!cm)
-      return nullptr;
-    return std::make_unique<CPUFusionConfig>(std::move(cm));
-  }
-
   void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const FusionConfig* config) {

@@ -6,30 +6,25 @@
 #include "timeit/timeit.h"
 #include "utils/Formats.h"
 #include "utils/PrintSpan.h"
-#include "utils/utils.h"
 #include "utils/iocolor.h"
+#include "utils/utils.h"
 #include <random>
 
 using namespace cast;
 
-CPUCostModel::CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
-                           double zeroTol)
-    : CostModel(CM_CPU), cache(std::move(cache)), zeroTol(zeroTol), items() {
-  items.reserve(32);
-
+llvm::Error CPUCostModel::loadCache(const CPUPerformanceCache& cache) {
   // loop through cache and initialize this->items
-  for (const auto& cacheItem : this->cache->items()) {
+  for (const auto& item : cache.items()) {
     auto it =
-        std::ranges::find_if(this->items, [&cacheItem](const Item& thisItem) {
-          return thisItem.nQubits == cacheItem.nQubits &&
-                 thisItem.precision == cacheItem.precision &&
-                 thisItem.nThreads == cacheItem.nThreads;
+        std::ranges::find_if(this->buckets, [&item](const Bucket& thisItem) {
+          return thisItem.nQubits == item.nQubits &&
+                 thisItem.precision == item.precision &&
+                 thisItem.nThreads == item.nThreads;
         });
     // time it takes to update 1 GiB memory per opCount
-    auto t = 1.0 / (cacheItem.memUpdateSpeed * cacheItem.opCount);
-    if (it == this->items.end()) {
-      items.emplace_back(
-          cacheItem.nQubits, cacheItem.precision, cacheItem.nThreads, 1, t);
+    auto t = 1.0 / (item.memUpdateSpeed * item.opCount);
+    if (it == this->buckets.end()) {
+      buckets.emplace_back(item.nQubits, item.precision, item.nThreads, 1, t);
     } else {
       it->nData++;
       it->totalGibTimePerOpCount += t;
@@ -37,20 +32,27 @@ CPUCostModel::CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
   }
 
   // initialize minGibTimeCap
-  assert(!items.empty());
+
+  if (buckets.empty()) {
+    return llvm::createStringError(
+        "CPUCostModel: empty buckets after loading cache");
+  }
+
   this->minGibTimeCap = 1e6; // a large number
-  for (const auto& item : items) {
+  for (const auto& item : buckets) {
     // The time it takes to update 1 GiB memory on dense gates
     double opCount = static_cast<double>(1ULL << (item.nQubits + 2));
     auto t = item.totalGibTimePerOpCount * opCount / item.nData;
     if (t < this->minGibTimeCap)
       this->minGibTimeCap = t;
   }
+
+  return llvm::Error::success();
 }
 
 double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
   assert(gate != nullptr);
-  assert(!items.empty());
+  assert(!buckets.empty());
 
   assert(queryNThreads > 0 &&
          "CPUCostModel: Must set queryNThreads before calling computeGiBTime");
@@ -58,9 +60,9 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
          "CPUCostModel: Must set queryPrecision before calling computeGiBTime");
 
   auto gateNQubits = gate->nQubits();
-  auto gateOpCount = gate->opCount(zeroTol);
+  auto gateOpCount = gate->opCount(zTol);
   // Try to find an exact match
-  for (const auto& item : items) {
+  for (const auto& item : buckets) {
     if (item.nQubits == gateNQubits && item.precision == queryPrecision &&
         item.nThreads == queryNThreads) {
       auto t = item.getAvgGibTimePerOpCount() * gateOpCount;
@@ -69,10 +71,10 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
   }
 
   // No exact match. Estimate it
-  auto bestMatchIt = items.begin();
+  auto bestMatchIt = buckets.begin();
 
-  auto it = items.cbegin();
-  const auto end = items.cend();
+  auto it = buckets.cbegin();
+  const auto end = buckets.cend();
   while (++it != end) {
     // priority: nThreads > nQubits > precision
     const int bestNThreadsDiff =
@@ -124,17 +126,17 @@ double CPUCostModel::computeGiBTime(const QuantumGate* gate) const {
 }
 
 void CPUCostModel::showEntries(std::ostream& os, int nLines) const {
-  const int nLinesToDisplay = std::min<int>(nLines, items.size());
+  const int nLinesToDisplay = std::min<int>(nLines, buckets.size());
 
   os << "Memory Bandwidth: " << utils::fmt_1_to_1e3(1.0 / this->minGibTimeCap)
      << " GiBps\n";
   os << "  nQubits | Precision | nThreads | Dense MemSpd \n";
   for (int i = 0; i < nLinesToDisplay; ++i) {
-    double opCount = static_cast<double>(1ULL << (items[i].nQubits + 2));
-    double timePerGiB = items[i].getAvgGibTimePerOpCount() * opCount;
-    os << "    " << std::fixed << std::setw(2) << items[i].nQubits
-       << "    |    f" << static_cast<int>(items[i].precision) << "    |    "
-       << items[i].nThreads << "    |    "
+    double opCount = static_cast<double>(1ULL << (buckets[i].nQubits + 2));
+    double timePerGiB = buckets[i].getAvgGibTimePerOpCount() * opCount;
+    os << "    " << std::fixed << std::setw(2) << buckets[i].nQubits
+       << "    |    f" << static_cast<int>(buckets[i].precision) << "    |    "
+       << buckets[i].nThreads << "    |    "
        << utils::fmt_1_to_1e3(1.0 / timePerGiB) << "\n";
   }
 }

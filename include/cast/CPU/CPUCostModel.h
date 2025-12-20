@@ -5,6 +5,8 @@
 #include "cast/Core/Precision.h"
 #include "utils/CSVParsable.h"
 
+#include <llvm/Support/Error.h>
+
 #include <fstream>
 #include <span>
 
@@ -92,13 +94,11 @@ public:
 /// \c CPUCostModel assumes simulation time is proportional to opCount and
 /// independent to target qubits.
 class CPUCostModel : public CostModel {
-  std::unique_ptr<CPUPerformanceCache> cache;
-  double zeroTol;
   // Minimum time it will take to update 1GiB memory. Calculated by
   // 1.0 / bandwidth
-  double minGibTimeCap;
+  double minGibTimeCap = 0.0;
 
-  struct Item {
+  struct Bucket {
     int nQubits;
     Precision precision;
     int nThreads;
@@ -109,26 +109,20 @@ class CPUCostModel : public CostModel {
       return totalGibTimePerOpCount / nData;
     }
   };
-  std::vector<Item> items;
+  std::vector<Bucket> buckets;
 
-  int queryNThreads = -1; // -1 means not set
-  Precision queryPrecision = Precision::Unknown;
+  int queryNThreads;
+  Precision queryPrecision;
+  double zTol;
 
 public:
-  CPUCostModel(std::unique_ptr<CPUPerformanceCache> cache,
-               double zeroTol = 1e-8);
+  CPUCostModel(int queryNThreads, Precision queryPrecision, double zTol = 1e-8)
+      : CostModel(CM_CPU), queryNThreads(queryNThreads),
+        queryPrecision(queryPrecision), zTol(zTol) {}
 
-  static std::unique_ptr<CPUCostModel>
-  LoadFromFile(const std::string& filename) {
-    auto pc = CPUPerformanceCache::LoadFromFile(filename);
-    if (!pc)
-      return nullptr;
-    return std::make_unique<CPUCostModel>(std::move(pc));
-  }
+  void clearCache() { buckets.clear(); }
 
-  void setQueryNThreads(int nThreads) { queryNThreads = nThreads; }
-
-  void setQueryPrecision(Precision precision) { queryPrecision = precision; }
+  llvm::Error loadCache(const CPUPerformanceCache& cache);
 
   double computeGiBTime(const QuantumGate* gate) const override;
 

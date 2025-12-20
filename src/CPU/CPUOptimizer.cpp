@@ -1,23 +1,25 @@
 #include "cast/CPU/CPUOptimizer.h"
+#include "cast/CPU/CPUCostModel.h"
 #include "cast/CPU/CPUFusionConfig.h"
+#include "llvm/Support/Error.h"
 
 using namespace cast;
 
-llvm::Error CPUOptimizer::loadCPUCostModel(const std::string& filename,
+llvm::Error CPUOptimizer::loadCPUCostModel(const std::string& cacheFilename,
                                            int queryNThreads,
                                            Precision queryPrecision) {
-  auto fc = CPUFusionConfig::LoadFromFile(filename);
-  if (fc == nullptr) {
-    return llvm::createStringError("Unable to load cost model from " +
-                                   filename);
+  auto cache = CPUPerformanceCache::LoadFromFile(cacheFilename);
+  if (cache == nullptr) {
+    return llvm::createStringError("Unable to load performance cache from " +
+                                   cacheFilename);
   }
-  // Fusion configs do not have queries. Cost models do.
-  auto* cm = llvm::dyn_cast_or_null<CPUCostModel>(fc->getCostModel());
-  if (cm == nullptr) {
-    return llvm::createStringError("No CPU Cost Model found");
+  auto cm = std::make_unique<CPUCostModel>(queryNThreads, queryPrecision);
+  if (auto e = cm->loadCache(*cache)) {
+    return llvm::joinErrors(llvm::createStringError(__PRETTY_FUNCTION__),
+                            std::move(e));
   }
-  cm->setQueryNThreads(queryNThreads);
-  cm->setQueryPrecision(queryPrecision);
+
+  auto fc = std::make_unique<CPUFusionConfig>(std::move(cm));
   this->setFusionConfig(std::move(fc));
 
   return llvm::Error::success();
