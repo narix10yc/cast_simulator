@@ -116,7 +116,7 @@ public:
     return *this;
   }
 
-  // General types
+  // General types: call operator<<(std::ostream&, const T&)
   template <typename T>
   InfoLogger& put(const char* label, const T& value, int requireVerbose = 1) {
     if (verbose < requireVerbose)

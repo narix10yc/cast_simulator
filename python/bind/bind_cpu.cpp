@@ -10,7 +10,7 @@ namespace {
 
 llvm::OptimizationLevel mapIntToLLVMOptLevel(int optLevel) {
   switch (optLevel) {
-
+  case 0:
     return llvm::OptimizationLevel::O0;
   case 1:
     return llvm::OptimizationLevel::O1;

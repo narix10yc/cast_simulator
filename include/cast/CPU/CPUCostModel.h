@@ -1,7 +1,6 @@
 #ifndef CAST_CPU_CPUCOSTMODEL_H
 #define CAST_CPU_CPUCOSTMODEL_H
 
-#include "cast/CPU/Config.h"
 #include "cast/Core/CostModel.h"
 #include "cast/Core/Precision.h"
 #include "utils/CSVParsable.h"

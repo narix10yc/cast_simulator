@@ -39,7 +39,8 @@ struct CPUKernelInfo {
   // we need opCount here due to the zeroTol value
   double opCount;
 
-  using time_point_t = std::chrono::time_point<std::chrono::steady_clock>;
+  using clock_t = std::chrono::steady_clock;
+  using time_point_t = std::chrono::time_point<clock_t>;
   time_point_t tpJitStart{};
   time_point_t tpJitFinish{};
   time_point_t tpExecStart{};
@@ -128,7 +129,7 @@ class CPUKernelManager : public KernelManager<CPUKernelInfo> {
                        const std::string& funcName,
                        llvm::Module& llvmModule);
 
-  // Generate a CPU kernel for the given gate. This function will wraps around
+  // Generate a CPU kernel for the given gate. This function wraps around
   // when gate is a StandardQuantumGate (with or without noise) or
   // SuperopQuantumGate, and call gen_ with a corresponding ComplexSquareMatrix.
   // The generated kernel will be put into the given pool.
@@ -170,8 +171,8 @@ public:
   /// Generate a CPU kernel for the given gate. The generated kernel will be
   /// put into the default kernel pool. This function checks for name
   /// conflicts and will not overwrite existing kernels.
-  /// @param gate: The quantum gate. It needs to be in a shared pointer because
-  /// the kernel manager keeps track of the gate.
+  /// @param gate: The quantum gate. It must be a shared pointer because
+  /// the kernel manager keeps a record of the gate.
   llvm::Error genGate(const CPUKernelGenConfig& config,
                       ConstQuantumGatePtr gate,
                       const std::string& funcName);

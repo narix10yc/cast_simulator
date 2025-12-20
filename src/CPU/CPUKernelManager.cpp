@@ -114,6 +114,9 @@ llvm::Error CPUKernelManager::compileItem(PoolItem& item,
     return llvm::joinErrors(llvm::createStringError("Failed to add IR module"),
                             std::move(e));
   }
+
+  // currently the JIT time only records the lookup time.
+
   item.kernel->tpJitStart = std::chrono::steady_clock::now();
   auto addr = llvmJIT->lookup(item.kernel->llvmFuncName);
   if (!addr) {
@@ -132,15 +135,16 @@ llvm::Error CPUKernelManager::compileItem(PoolItem& item,
 llvm::Error CPUKernelManager::initLLVMJIT_() {
   if (llvmJIT != nullptr)
     return llvm::Error::success();
+
   // eager JIT engine
   orc::LLJITBuilder eagerJitBuilder;
   eagerJitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
-  auto t = eagerJitBuilder.create();
-  if (!t) {
+  auto tmp = eagerJitBuilder.create();
+  if (!tmp) {
     return llvm::joinErrors(llvm::createStringError("Failed to create LLJIT"),
-                            t.takeError());
+                            tmp.takeError());
   }
-  llvmJIT = std::move(*t);
+  llvmJIT = std::move(*tmp);
   return llvm::Error::success();
 }
 

@@ -32,7 +32,12 @@ class KernelManager : public KernelManagerBase {
 protected:
   using KernelInfoPtr = std::unique_ptr<KernelInfoType>;
 
-  // A PoolItem is bounded to a KernelInfo, LLVM Context and LLVM Module
+  /// A PoolItem is bounded to a KernelInfo, LLVM Context and LLVM Module
+  /// In most cases, when users make JIT requests, the `llvmContext` and
+  /// `llvmModule` objects will be transferred to a ThreadSafeModule, managed by
+  /// the kernel manager. After this point, the `kernel` object contains
+  /// references to the core information of the compiled kernel, and the IR
+  /// level information should only be queried directly from the kernel manager.
   struct PoolItem {
     KernelInfoPtr kernel;
     std::unique_ptr<llvm::LLVMContext> llvmContext;
@@ -45,6 +50,7 @@ protected:
     }
   };
 
+  /// The Pool class with associated iterators.
   class Pool {
     std::vector<PoolItem> items_;
 
