@@ -158,20 +158,19 @@ void CPUPerformanceCache::runPreliminaryExperiments(
   CPUKernelManager km;
   std::vector<int> qubits;
 
-  const auto generateGatesAndInitJit = [&]() {
+  double t;
+  t = timeit::once([&]() {
     for (int k = 1; k <= 5; ++k) {
       utils::sampleNoReplacement(nQubits, k, qubits);
       auto gate = StandardQuantumGate::RandomUnitary(qubits);
       llvm::cantFail(km.genGate(cpuConfig, gate, "gate_k" + std::to_string(k)));
     }
     llvm::cantFail(km.compileAllPools(llvm::OptimizationLevel::O1, false));
-  };
+  });
 
   if (verbose > 0) {
-    utils::timedExecute(generateGatesAndInitJit,
-                        "Code Generation and JIT Initialization");
-  } else {
-    generateGatesAndInitJit();
+    std::cerr << "Preliminary code generation time: " << utils::fmt_time(t)
+              << "\n";
   }
 
   CPUStatevectorWrapper sv(cpuConfig.precision, nQubits, cpuConfig.simdWidth);
@@ -248,6 +247,16 @@ CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
                                     int nRuns,
                                     int logLevel) {
 
+  if (logLevel > 0) {
+    std::cerr << "Running CPU performance experiments with config:\n"
+              << "  nQubits :   " << nQubits << "\n"
+              << "  nThreads :  " << nThreads << "\n"
+              << "  precision : " << cpuConfig.precision << "\n";
+  }
+
+  // timing logs
+  double t;
+
   std::vector<StandardQuantumGatePtr> gates;
   gates.reserve(nRuns);
 
@@ -298,36 +307,42 @@ CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
   }
 
   CPUKernelManager km;
-  utils::timedExecute(
-      [&]() {
-        int i = 0;
-        for (const auto& gate : gates) {
-          if (auto e =
-                  km.genGate(cpuConfig, gate, "gate_" + std::to_string(i++))) {
-            std::cerr << RED("Error: ") << "Failed to generate kernel for gate "
-                      << i - 1 << ": " << llvm::toString(std::move(e)) << "\n";
-            std::exit(1);
-          }
-        }
-      },
-      "Code Generation");
+  // code gen
+  t = timeit::once([&]() {
+    int i = 0;
+    for (const auto& gate : gates) {
+      if (auto e = km.genGate(cpuConfig, gate, "gate_" + std::to_string(i++))) {
+        std::cerr << RED("Error: ") << "Failed to generate kernel for gate "
+                  << i - 1 << ": " << llvm::toString(std::move(e)) << "\n";
+        std::exit(1);
+      }
+    }
+  });
+  if (logLevel > 0) {
+    std::cerr << "Code generation time for " << gates.size()
+              << " gates: " << utils::fmt_time(t) << "\n";
+  }
 
-  utils::timedExecute(
-      [&]() {
-        if (auto e = km.compileAllPools(llvm::OptimizationLevel::O1, false)) {
-          std::cerr << RED("Error: ") << "Failed to initialize JIT engine: "
-                    << llvm::toString(std::move(e)) << "\n";
-          std::exit(1);
-        }
-      },
-      "Initialize JIT Engine");
+  // JIT compile
+  t = timeit::once([&]() {
+    if (auto e = km.compileAllPools(llvm::OptimizationLevel::O1, false)) {
+      std::cerr << RED("Error: ") << "Failed to initialize JIT engine: "
+                << llvm::toString(std::move(e)) << "\n";
+      std::exit(1);
+    }
+  });
+  if (logLevel > 0) {
+    std::cerr << "JIT initialization time: " << utils::fmt_time(t) << "\n";
+  }
 
   timeit::Timer timer(3, /* verbose */ 0);
   timeit::TimingResult tr;
 
   CPUStatevectorWrapper sv(cpuConfig.precision, nQubits, cpuConfig.simdWidth);
-  utils::timedExecute([&]() { sv.randomize(nThreads); },
-                      "Initialize statevector");
+  t = timeit::once([&]() { sv.randomize(nThreads); });
+  if (logLevel > 0) {
+    std::cerr << "Randomize statevector: " << utils::fmt_time(t) << "\n";
+  }
 
   for (auto& kernel : km.all_kernels()) {
     tr = timer.timeit([&]() {

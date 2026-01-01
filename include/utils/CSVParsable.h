@@ -1,37 +1,45 @@
 #ifndef UTILS_CSVPARSABLE_H
 #define UTILS_CSVPARSABLE_H
 
+#include <algorithm>
 #include <array>
 #include <cassert>
+#include <charconv>
+#include <concepts>
 #include <iostream>
-#include <sstream>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <variant>
 #include <vector>
 
 namespace utils {
 
-template <class> inline constexpr bool dependent_false_v = false;
-
 // CSVField: Every parsable type should provide a specialization of this struct
 template <typename T> struct CSVField {
-  static void parse(std::string_view token, T& field) {
-    static_assert(dependent_false_v<T>,
-                  "CSVField<T>::parse must be specialized for type T");
-  }
-
-  static void write(std::ostream& os, const T& value) {
-    static_assert(dependent_false_v<T>,
-                  "CSVField<T>::write must be specialized for type T");
-  }
+  static void parse(std::string_view token, T& field);
+  static void write(std::ostream& os, const T& value);
 };
+
+template <typename T>
+concept CSVFieldConcept =
+    requires(std::string_view token, T& out, std::ostream& os, const T& in) {
+      { CSVField<T>::parse(token, out) } -> std::same_as<void>;
+      { CSVField<T>::write(os, in) } -> std::same_as<void>;
+    };
 
 // Specializations for common types
 template <> struct CSVField<int> {
   static void parse(std::string_view token, int& field) {
-    field = std::stoi(std::string(token));
+    const char* first = token.data();
+    const char* last = token.data() + token.size();
+    auto [ptr, ec] = std::from_chars(first, last, field);
+    (void)ptr;
+    if (ec != std::errc{}) {
+      // Keep behavior simple: fall back to 0 on parse failure.
+      // (Callers typically validate input upstream.)
+      field = 0;
+    }
   }
 
   static void write(std::ostream& os, const int& value) { os << value; }
@@ -74,6 +82,9 @@ template <> struct CSVField<std::string_view> {
 // -------------------- CSV Helper --------------------
 inline std::vector<std::string_view> split_csv(std::string_view line) {
   std::vector<std::string_view> result;
+  // Reserve: number of fields is commas + 1.
+  result.reserve(
+      1 + static_cast<std::size_t>(std::count(line.begin(), line.end(), ',')));
   size_t start = 0;
   size_t end = 0;
 
@@ -107,6 +118,10 @@ template <typename Derived> struct CSVParsable {
     auto fields = static_cast<Derived*>(this)->tie_fields();
     for_each(fields, [&](auto& field, std::size_t i) {
       using FieldType = std::decay_t<decltype(field)>;
+      static_assert(
+          CSVFieldConcept<FieldType>,
+          "CSVField<T> must provide: static void parse(std::string_view, T&) "
+          "and static void write(std::ostream&, const T&)");
       CSVField<FieldType>::parse(tokens[i], field); // Use CSVField<T>::parse
     });
   }
@@ -120,6 +135,10 @@ template <typename Derived> struct CSVParsable {
       }
       first = false;
       using FieldType = std::decay_t<decltype(field)>;
+      static_assert(
+          CSVFieldConcept<FieldType>,
+          "CSVField<T> must provide: static void parse(std::string_view, T&) "
+          "and static void write(std::ostream&, const T&)");
       CSVField<FieldType>::write(os, field); // Use CSVField<T>::write
     });
   }
@@ -127,14 +146,17 @@ template <typename Derived> struct CSVParsable {
 
 // -------------------- Macro for Field Registration --------------------
 
-// Trim the leading and trailing spaces from a string_view
+// Helper for trim
+consteval bool is_space(char c) { return c == ' ' || c == '\t'; }
+
+// Trim the leading and trailing spaces and tabs from a string_view
 consteval std::string_view trim(std::string_view str) {
   std::size_t start = 0;
   std::size_t end = str.size();
 
-  while (start < end && str[start] == ' ')
+  while (start < end && is_space(str[start]))
     ++start;
-  while (end > start && str[end - 1] == ' ')
+  while (end > start && is_space(str[end - 1]))
     --end;
 
   return str.substr(start, end - start);
@@ -147,7 +169,7 @@ consteval auto clean_csv_title(const char (&input)[N]) {
   std::size_t out_i = 0;
 
   std::size_t token_start = 0;
-  for (std::size_t i = 0; i <= N; ++i) {
+  for (std::size_t i = 0; i < N; ++i) {
     if (input[i] == ',' || input[i] == '\0') {
       auto token = trim(std::string_view(&input[token_start], i - token_start));
       for (char c : token)
@@ -162,7 +184,11 @@ consteval auto clean_csv_title(const char (&input)[N]) {
     }
   }
 
-  out[out_i] = '\0';
+  if (out_i < N) {
+    out[out_i] = '\0';
+  } else {
+    out[N - 1] = '\0';
+  }
   return out;
 }
 

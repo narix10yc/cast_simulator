@@ -1,6 +1,8 @@
 #ifndef CAST_CORE_PRECISION_H
 #define CAST_CORE_PRECISION_H
 
+#include <ostream>
+
 namespace cast {
 
 enum class Precision : int {
@@ -13,6 +15,17 @@ enum class Precision : int {
 
   Unknown = -1
 };
+
+inline std::ostream& operator<<(std::ostream& os, Precision p) {
+  switch (p) {
+  case Precision::FP32:
+    return os << "FP32";
+  case Precision::FP64:
+    return os << "FP64";
+  default:
+    return os << "Unknown";
+  }
+}
 
 } // namespace cast
 

@@ -253,7 +253,8 @@ void bind_CPUPerformanceCache(py::module_& m) {
              int nRuns,
              int verbose) {
             py::gil_scoped_acquire gil;
-            py::scoped_ostream_redirect redirect(std::cout);
+            py::scoped_ostream_redirect redirect_out(std::cout);
+            py::scoped_ostream_redirect redirect_err(std::cerr);
             if (auto e = self.runExperiments(
                     cpuConfig, nQubits, nThreads, nRuns, verbose)) {
               throw std::runtime_error(

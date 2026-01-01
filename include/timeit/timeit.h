@@ -2,14 +2,24 @@
 #define TIMEIT_TIMEIT_H
 
 #include <cassert>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
 
 namespace timeit {
+using clock_t = std::chrono::steady_clock;
 
-double once(std::function<void()> method);
+/// Execute the function once and return the elapsed time in seconds. This
+/// wrapper is designed with minimal overhead (one function call and two time
+/// points).
+template <typename F> [[nodiscard]] inline double once(F&& f) {
+  auto t0 = clock_t::now();
+  f();
+  auto t1 = clock_t::now();
+  return std::chrono::duration<double>(t1 - t0).count();
+}
 
 class TimingResult {
   int repeat, replication;
