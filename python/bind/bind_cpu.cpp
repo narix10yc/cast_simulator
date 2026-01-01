@@ -238,6 +238,89 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("num_threads") = 1);
 }
 
+void bind_CPUPerformanceCache(py::module_& m) {
+  py::class_<cast::CPUPerformanceCache>(m, "CPUPerformanceCache")
+      .def(py::init<>())
+      .def("load_from_file",
+           &cast::CPUPerformanceCache::loadFromFile,
+           py::arg("filename"))
+      .def(
+          "run_experiments",
+          [](cast::CPUPerformanceCache& self,
+             const cast::CPUKernelGenConfig& cpuConfig,
+             int nQubits,
+             int nThreads,
+             int nRuns,
+             int verbose) {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            if (auto e = self.runExperiments(
+                    cpuConfig, nQubits, nThreads, nRuns, verbose)) {
+              throw std::runtime_error(
+                  "Failed to run CPU performance experiments: " +
+                  llvm::toString(std::move(e)));
+            }
+          },
+          py::arg("cpu_config"),
+          py::arg("n_qubits"),
+          py::arg("n_threads"),
+          py::arg("n_runs"),
+          py::arg("verbose") = 1)
+      .def("raw",
+           [](const cast::CPUPerformanceCache& self) -> std::string {
+             std::ostringstream oss;
+             self.writeCache(oss);
+             return oss.str();
+           })
+      .def(
+          "save",
+          [](const cast::CPUPerformanceCache& self,
+             const std::string& filename,
+             bool overwrite) {
+            if (auto e = self.save(filename, overwrite)) {
+              throw std::runtime_error(
+                  "Failed to save CPU performance cache: " +
+                  llvm::toString(std::move(e)));
+            }
+          },
+          py::arg("filename"),
+          py::arg("overwrite") = false);
+}
+
+void bind_CPUCostModel(py::module_& m) {
+  py::class_<cast::CPUCostModel, cast::CostModel>(m, "CPUCostModel")
+      .def(py::init<int, cast::Precision, double>(),
+           py::arg("query_num_threads"),
+           py::arg("query_precision"),
+           py::arg("zero_tol") = 1e-8)
+      .def(
+          "print_info",
+          [](const cast::CPUCostModel& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
+          },
+          py::arg("verbose") = 1)
+      .def(
+          "show_entries",
+          [](const cast::CPUCostModel& self, int nLines) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.showEntries(std::cout, nLines);
+          },
+          py::arg("n_lines") = 5)
+      .def("clear_cache", &cast::CPUCostModel::clearCache)
+      .def(
+          "load_cache",
+          [](cast::CPUCostModel& self, const cast::CPUPerformanceCache& cache) {
+            if (auto e = self.loadCache(cache)) {
+              throw std::runtime_error(
+                  "Failed to load CPU performance cache: " +
+                  llvm::toString(std::move(e)));
+            }
+          });
+}
+
 void bind_CPUOptimizer(py::module_& m) {
   // C++ inheritance is
   // CPUOptimizer -> Optimizer<CPUOptimizer> -> OptimizerBase
@@ -276,5 +359,7 @@ void bind_cpu(py::module_& m) {
   bind_CPUStatevector<cast::CPUStatevectorFP32>(m, "CPUStatevectorFP32");
   bind_CPUStatevector<cast::CPUStatevectorFP64>(m, "CPUStatevectorFP64");
   bind_CPUKernelManager(m);
+  bind_CPUPerformanceCache(m);
+  bind_CPUCostModel(m);
   bind_CPUOptimizer(m);
 }

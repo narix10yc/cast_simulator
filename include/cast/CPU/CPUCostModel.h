@@ -82,13 +82,18 @@ public:
     return true;
   }
 
-  void runExperiments(const CPUKernelGenConfig& cpuConfig,
-                      int nQubits,
-                      int nThreads,
-                      int nRuns,
-                      int verbose = 1);
+  llvm::Error runExperiments(const CPUKernelGenConfig& cpuConfig,
+                             int nQubits,
+                             int nThreads,
+                             int nRuns,
+                             int logLevel = 1);
 
-  void writeResults(std::ostream& os) const;
+  /// Write the cache. Does not write CSV title.
+  void writeCache(std::ostream& os) const;
+
+  /// Save the cache to a file. If `overwrite` is true, truncate the file.
+  /// Otherwise, append to the file.
+  llvm::Error save(const std::string& filename, bool overwrite = false) const;
 };
 
 /// \c CPUCostModel assumes simulation time is proportional to opCount and
@@ -128,7 +133,7 @@ public:
 
   void showEntries(std::ostream& os, int nLines) const;
 
-  void displayInfo(utils::InfoLogger logger) const override {}
+  void displayInfo(utils::InfoLogger logger) const override;
 
   static bool classof(const CostModel* model) {
     return model->getKind() == CM_CPU;

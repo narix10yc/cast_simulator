@@ -12,6 +12,14 @@
 
 using namespace cast;
 
+void CPUCostModel::displayInfo(utils::InfoLogger logger) const {
+  logger.put("CPUCostModel")
+      .put("Query nThreads   ", queryNThreads)
+      .put("Query precision  ", static_cast<int>(queryPrecision))
+      .put("Number of buckets", buckets.size())
+      .put("Memory Bandwidth ", utils::fmt_mem(1e9 / this->minGibTimeCap));
+}
+
 llvm::Error CPUCostModel::loadCache(const CPUPerformanceCache& cache) {
   // loop through cache and initialize this->items
   for (const auto& item : cache.items()) {
@@ -233,18 +241,20 @@ void CPUPerformanceCache::runPreliminaryExperiments(
   }
 }
 
-void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
-                                         int nQubits,
-                                         int nThreads,
-                                         int nRuns,
-                                         int verbose) {
+llvm::Error
+CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
+                                    int nQubits,
+                                    int nThreads,
+                                    int nRuns,
+                                    int logLevel) {
+
   std::vector<StandardQuantumGatePtr> gates;
   gates.reserve(nRuns);
 
   // nQubitsWeights[k-1] denotes the weight for k-qubit gates
   WeightType nQubitsWeights;
   runPreliminaryExperiments(
-      cpuConfig, nQubits, nThreads, nQubitsWeights, verbose);
+      cpuConfig, nQubits, nThreads, nQubitsWeights, logLevel);
 
   // Add a random quantum gate whose size follows distribution of nQubitsWeights
   const auto addRandomQuGate = [&](float erasureProb) {
@@ -331,17 +341,48 @@ void CPUPerformanceCache::runExperiments(const CPUKernelGenConfig& cpuConfig,
                         kernel->precision,
                         nThreads,
                         memSpd);
-    if (verbose > 0) {
+    if (logLevel > 0) {
       utils::printSpan(std::cerr << "Gate @ ",
                        std::span(kernel->gate->qubits()));
       std::cerr << ": " << memSpd << " GiBps\n";
     }
   }
+
+  return llvm::Error::success();
 }
 
-void CPUPerformanceCache::writeResults(std::ostream& os) const {
+void CPUPerformanceCache::writeCache(std::ostream& os) const {
   for (const auto& item : items_) {
     item.write(os);
     os << "\n";
   }
+}
+
+llvm::Error CPUPerformanceCache::save(const std::string& filename,
+                                      bool overwrite) const {
+  namespace fs = std::filesystem;
+
+  bool needTitle = true;
+  if (!overwrite && fs::exists(filename) && fs::file_size(filename) > 0) {
+    // non-overwrite mode: non-empty file => no title needed
+    needTitle = false;
+  }
+
+  std::ofstream ofs;
+  if (overwrite)
+    ofs.open(filename, std::ios::out | std::ios::trunc);
+  else
+    ofs.open(filename, std::ios::out | std::ios::app);
+
+  if (!ofs.is_open()) {
+    return llvm::createStringError("Failed to open file for writing: " +
+                                   filename);
+  }
+
+  if (needTitle) {
+    ofs << cast::CPUPerformanceCache::CSVTitle() << "\n";
+  }
+
+  this->writeCache(ofs);
+  return llvm::Error::success();
 }

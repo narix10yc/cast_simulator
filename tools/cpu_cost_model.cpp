@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
     CPUKernelGenConfig cpuConfig(simdWidth, Precision::FP64);
     cache.runExperiments(cpuConfig, ArgNQubits, nThreads, ArgNTests);
   }
-  cache.writeResults(outFile);
+  cache.writeCache(outFile);
 
   outFile.close();
   return 0;

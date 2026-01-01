@@ -1,8 +1,15 @@
 #ifndef UTILS_FORMATS_H
 #define UTILS_FORMATS_H
 
+#include <algorithm>
+#include <array>
 #include <cassert>
+#include <cmath>
+#include <concepts>
+#include <cstddef>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <span>
@@ -116,21 +123,104 @@ public:
   }
 }; // class fmt_time
 
+// Fixed-width formatter base (CRTP).
 //
-class fmt_mem {
-  size_t memInBytes;
+// Derived classes should implement:
+//   buf_t fmt() const;
+// where buf_t is std::array<char, N>.
+template <class Derived, size_t N> class fmt_fixed_width {
+public:
+  using buf_t = std::array<char, N>;
+
+  const Derived& derived() const { return static_cast<const Derived&>(*this); }
+
+  friend std::ostream& operator<<(std::ostream& os, const fmt_fixed_width& b)
+    requires requires(const Derived& d) {
+      { d.fmt() } -> std::same_as<std::array<char, N>>;
+    }
+  {
+    const auto buf = b.derived().fmt();
+    os.write(buf.data(), static_cast<std::streamsize>(N));
+    return os;
+  }
+};
+
+/// Format a memory quantity into exactly N characters.
+/// Default N=9 yields strings like:
+/// 512    -> "  512   B"
+/// 1234   -> " 1234   B"
+/// 12345  -> "12.35 MiB"
+/// 123456 -> "123.5 MiB"
+template <size_t N = 9> class fmt_mem : public fmt_fixed_width<fmt_mem<N>, N> {
+  using base_t = fmt_fixed_width<fmt_mem<N>, N>;
+  size_t bytes;
+
+  static constexpr const char* unit_str(unsigned u) {
+    // 3-char units to keep suffix width fixed.
+    switch (u) {
+    case 0:
+      return "  B";
+    case 1:
+      return "KiB";
+    case 2:
+      return "MiB";
+    case 3:
+      return "GiB";
+    default:
+      return "TiB";
+    }
+  }
 
 public:
-  explicit fmt_mem(size_t memInBytes) : memInBytes(memInBytes) {}
+  explicit fmt_mem(size_t bytes) : bytes(bytes) {}
 
-  friend std::ostream& operator<<(std::ostream& os, const fmt_mem& fmt) {
-    if (fmt.memInBytes >= (1ULL << 30))
-      return os << fmt.memInBytes / (1 << 30) << " GiB";
-    if (fmt.memInBytes >= (1ULL << 20))
-      return os << fmt.memInBytes / (1 << 20) << " MiB";
-    if (fmt.memInBytes >= (1ULL << 10))
-      return os << fmt.memInBytes / (1 << 10) << " KiB";
-    return os << fmt.memInBytes << " B";
+  base_t::buf_t fmt() const {
+    static_assert(N >= 8, "fmt_mem<N>: N must be >= 8");
+    constexpr size_t k_suffix = 4; // " " + 3-char unit
+    static_assert(N > k_suffix, "fmt_mem<N>: N too small");
+
+    const int num_w = static_cast<int>(N - k_suffix);
+
+    // Decimal scaling (1000-based) to match the examples.
+    unsigned unit = 0;
+    double value = static_cast<double>(bytes);
+    while (unit < 4 && value >= 1000.0) {
+      value /= 1000.0;
+      ++unit;
+    }
+
+    // Choose decimals so the numeric field fits nicely into num_w.
+    // We aim for ~4 significant digits, but never exceed the field.
+    int decimals = 0;
+    if (value >= 100.0)
+      decimals = std::max(0, num_w - 4);
+    else if (value >= 10.0)
+      decimals = std::max(0, num_w - 3);
+    else if (value >= 1.0)
+      decimals = std::max(0, num_w - 2);
+    else
+      decimals = std::max(0, num_w - 1);
+
+    // Format into a temporary buffer (N+1 for snprintf's terminator).
+    char tmp[N + 1];
+    std::memset(tmp, ' ', sizeof(tmp));
+    tmp[N] = '\0';
+
+    // Right-align numeric field into num_w, then " " + unit.
+    const int written = std::snprintf(
+        tmp, sizeof(tmp), "%*.*f %s", num_w, decimals, value, unit_str(unit));
+
+    typename base_t::buf_t out{};
+    if (written < 0) {
+      out.fill('#');
+      return out;
+    }
+
+    // Ensure exactly N characters (pad with spaces if snprintf produced fewer).
+    for (size_t i = 0; i < N; ++i)
+      out[i] = (tmp[i] == '\0') ? ' ' : tmp[i];
+
+    return out;
   }
 };
 

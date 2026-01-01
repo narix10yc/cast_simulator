@@ -1,3 +1,4 @@
+#include "cast/Core/CostModel.h"
 #include "cast/Core/IRNode.h"
 #include "pybind11/pybind11.h"
 #include <pybind11/iostream.h>
@@ -123,6 +124,10 @@ void bind_parse_circuitgraph_from_qasm_file(py::module_& m) {
   });
 }
 
+void bind_CostModel(py::module_& m) {
+  py::class_<cast::CostModel>(m, "CostModel");
+}
+
 void bind_OptimizerBase(py::module_& m) {
   py::class_<cast::OptimizerBase>(m, "OptimizerBase")
       .def(
@@ -161,5 +166,6 @@ void bind_core(py::module_& m) {
   bind_CircuitGraph(m);
   bind_Circuit(m);
   bind_parse_circuitgraph_from_qasm_file(m);
+  bind_CostModel(m);
   bind_OptimizerBase(m);
 }

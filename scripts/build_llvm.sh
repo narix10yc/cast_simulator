@@ -8,7 +8,7 @@ ARG_BUILD_LIBCXX=0
 ARG_RELEASE_ONLY=0
 ARG_NATIVE_ONLY=0
 ARG_MINIMAL=0
-ARC_LLVM_SRC_DIR=""
+ARG_LLVM_SRC_DIR=""
 
 INFO='\033[0;36m[Info]\033[0m'
 WARN='\033[0;33m[Warning]\033[0m'
@@ -49,8 +49,8 @@ while [[ $# -gt 0 ]]; do
     ;;
   *)
     # llvm source is assumed to be positional
-    if [[ -z "$ARC_LLVM_SRC_DIR" ]]; then
-      ARC_LLVM_SRC_DIR="$1"
+    if [[ -z "$ARG_LLVM_SRC_DIR" ]]; then
+      ARG_LLVM_SRC_DIR="$1"
     else
       echo -e "${WARN} Ignoring additional positional argument: $1"
     fi
@@ -73,28 +73,31 @@ if [[ $ARG_MINIMAL -eq 1 ]]; then
   ARG_BUILD_LIBCXX=0
 fi
 
-if [[ -z "$ARC_LLVM_SRC_DIR" ]]; then
+if [[ -z "$ARG_LLVM_SRC_DIR" ]]; then
   echo "Usage: $0 <llvm-src-dir> [-build-libc++] [-build-clang] " \
        "[-release-only] [-native-only]"
   exit 1
 fi
 
-if [[ ! -d "$ARC_LLVM_SRC_DIR" ]]; then
-  echo -e "${ERR} LLVM source directory '$ARC_LLVM_SRC_DIR' does not exist."
+if [[ ! -d "$ARG_LLVM_SRC_DIR" ]]; then
+  echo -e "${ERR} LLVM source directory '$ARG_LLVM_SRC_DIR' does not exist."
   exit 1
 fi
 
-CAST_LLVM_ROOT=$(dirname "$ARC_LLVM_SRC_DIR")
-CAST_LLVM_ROOT="${CAST_LLVM_ROOT}/release-install"
-CAST_LLVM_DEBUG_ROOT="${CAST_LLVM_ROOT}/debug-install"
+LLVM_ROOT=$(dirname "$ARG_LLVM_SRC_DIR")
+RELEASE_INSTALL_ROOT="${LLVM_ROOT}/release-install"
+RELEASE_BUILD_ROOT="${LLVM_ROOT}/release-build"
+DEBUG_INSTALL_ROOT="${LLVM_ROOT}/debug-install"
+DEBUG_BUILD_ROOT="${LLVM_ROOT}/debug-build"
+
 
 # Get paths to cmake and ninja
 CMAKE_PATH="$(command -v cmake)"
 NINJA_PATH="$(command -v ninja)"
 echo -e "$INFO using cmake in $CMAKE_PATH"
 echo -e "$INFO using ninja in $NINJA_PATH"
-echo -e "$INFO LLVM source is $ARC_LLVM_SRC_DIR"
-echo -e "$INFO CAST_LLVM_ROOT is $CAST_LLVM_ROOT"
+echo -e "$INFO LLVM source is $ARG_LLVM_SRC_DIR"
+echo -e "$INFO LLVM_ROOT is $LLVM_ROOT"
 echo -e "$INFO build-clang is set to $ARG_BUILD_CLANG"
 echo -e "$INFO build-libc++ is set to $ARG_BUILD_LIBCXX"
 echo -e "$INFO release-only is set to $ARG_RELEASE_ONLY"
@@ -127,63 +130,60 @@ if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
   )
 fi
 
-cmake -S "${ARC_LLVM_SRC_DIR}/llvm" -G Ninja \
-  -B "${CAST_LLVM_ROOT}/release-build" \
+# release build
+
+cmake -S "${ARG_LLVM_SRC_DIR}/llvm" -G Ninja \
+  -B "${RELEASE_BUILD_ROOT}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_ENABLE_RTTI=ON \
   "-DLLVM_TARGETS_TO_BUILD=${ARG_LLVM_TARGETS_TO_BUILD}" \
   ${ARG_LLVM_ENABLE_PROJECTS:+${ARG_LLVM_ENABLE_PROJECTS[@]}} \
   ${ARG_LLVM_ENABLE_RUNTIMES:+${ARG_LLVM_ENABLE_RUNTIMES[@]}}
 
-cmake --build "${CAST_LLVM_ROOT}/release-build"
+cmake --build "${RELEASE_BUILD_ROOT}"
+cmake --install "${RELEASE_BUILD_ROOT}" --prefix "${RELEASE_INSTALL_ROOT}"
 
-cmake --install "${CAST_LLVM_ROOT}/release-build" \
-      --prefix "${CAST_LLVM_ROOT}"
-
-# end of release build
+# exit if only release build was requested
 if [[ $ARG_RELEASE_ONLY -eq 1 ]]; then
   echo -e "${INFO} LLVM release-version installed successfully."
   echo -e "${INFO} LLVM is installed for targets ${ARG_LLVM_TARGETS_TO_BUILD}"
-  echo -e "${INFO} Release install is in ${CAST_LLVM_ROOT}"
-  echo -e "${INFO} Don't forget to set your environment variables:"
-  echo -e "${INFO} export CAST_LLVM_ROOT=${CAST_LLVM_ROOT}"
+  echo -e "${INFO} Release install root: ${RELEASE_INSTALL_ROOT}"
   echo -e "${INFO} You may remove build directories by running:"
-  echo -e "${INFO} rm -rf ${CAST_LLVM_ROOT}/release-build"
+  echo -e "${INFO} rm -rf ${RELEASE_BUILD_ROOT}"
   exit 0
 fi
 
-# start of debug build
 echo -e "${INFO} LLVM release-version installed successfully. "\
           "Continuing with debug build..."
 
 ARG_SET_USE_CLANG=""
 if [[ $ARG_BUILD_CLANG -eq 1 ]]; then
   ARG_SET_USE_CLANG=(
-    "-DCMAKE_C_COMPILER=${CAST_LLVM_ROOT}/bin/clang"
-    "-DCMAKE_CXX_COMPILER=${CAST_LLVM_ROOT}/bin/clang++"
-    "-DCMAKE_LINKER=${CAST_LLVM_ROOT}/bin/ld.lld"
+    "-DCMAKE_C_COMPILER=${RELEASE_INSTALL_ROOT}/bin/clang"
+    "-DCMAKE_CXX_COMPILER=${RELEASE_INSTALL_ROOT}/bin/clang++"
+    "-DCMAKE_LINKER=${RELEASE_INSTALL_ROOT}/bin/ld.lld"
   )
 fi
 
 ARG_SET_USE_LIBCXX=""
 if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
   ARG_SET_USE_LIBCXX=(
-    -DCMAKE_CXX_FLAGS="-stdlib=libc++ -I${CAST_LLVM_ROOT}/include/c++/v1"
-    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -L${CAST_LLVM_ROOT}/lib"
-    -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++ -L${CAST_LLVM_ROOT}/lib"
-    -DCMAKE_INSTALL_RPATH="${CAST_LLVM_ROOT}/lib"
+    -DCMAKE_CXX_FLAGS="-stdlib=libc++ -I${RELEASE_INSTALL_ROOT}/include/c++/v1"
+    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -L${RELEASE_INSTALL_ROOT}/lib"
+    -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++ -L${RELEASE_INSTALL_ROOT}/lib"
+    -DCMAKE_INSTALL_RPATH="${RELEASE_INSTALL_ROOT}/lib"
     -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
   )
   # It seems that libc++ is not always installed in release-install/lib. 
   # It might be in release-install/lib/x86_64-unknown-linux-gnu or similar.
   # We will try to find it and set the path accordingly.
-  LIBCXX_DIR=$(find "${CAST_LLVM_ROOT}/lib" \
+  LIBCXX_DIR=$(find "${LLVM_ROOT}/lib" \
                -type f \( -name "libc++*.so*" -o -name "libc++*.dylib*" \)
                -exec dirname {} \; | head -n 1)
   if [[ -n "$LIBCXX_DIR" ]]; then
     echo -e "${INFO} Found libc++ in directory: ${LIBCXX_DIR}"
   else
-    echo -e "${WARN} libc++ not found in ${CAST_LLVM_ROOT}/lib. "\
+    echo -e "${WARN} libc++ not found in ${RELEASE_INSTALL_ROOT}/lib. "\
             "This means we may have not correctly set up runtime lib path "\
             "and second phase of this build may fail."
   fi
@@ -203,24 +203,22 @@ if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
   esac
 fi
 
-cmake -S "${ARC_LLVM_SRC_DIR}/llvm" -G Ninja \
-  -B "${CAST_LLVM_ROOT}/debug-build" \
+# debug build
+
+cmake -S "${ARG_LLVM_SRC_DIR}/llvm" -G Ninja \
+  -B "${DEBUG_BUILD_ROOT}" \
   -DCMAKE_BUILD_TYPE=Debug \
   -DLLVM_ENABLE_RTTI=ON \
   "-DLLVM_TARGETS_TO_BUILD=${ARG_LLVM_TARGETS_TO_BUILD}" \
   ${ARG_SET_USE_CLANG:+${ARG_SET_USE_CLANG[@]}} \
   ${ARG_SET_USE_LIBCXX:+${ARG_SET_USE_LIBCXX[@]}}
 
-cmake --build "${CAST_LLVM_ROOT}/debug-build"
+cmake --build "${DEBUG_BUILD_ROOT}"
 
-cmake --install "${CAST_LLVM_ROOT}/debug-build" \
-      --prefix "${CAST_LLVM_DEBUG_ROOT}"
+cmake --install "${DEBUG_BUILD_ROOT}" --prefix "${DEBUG_INSTALL_ROOT}"
 
-echo -e "${INFO} LLVM build completed successfully."
+echo -e "${INFO} LLVM *debug* build completed successfully."
 echo -e "${INFO} LLVM is installed for targets ${ARG_LLVM_TARGETS_TO_BUILD}"
-echo -e "${INFO} Release install is in ${CAST_LLVM_ROOT}"
-echo -e "${INFO} Debug install is in ${CAST_LLVM_DEBUG_ROOT}"
-echo -e "${INFO} Don't forget to set your environment variables:"
-echo -e "${INFO} export CAST_LLVM_ROOT=${CAST_LLVM_ROOT}"
+echo -e "${INFO} Debug install root: ${DEBUG_INSTALL_ROOT}"
 echo -e "${INFO} You may remove build directories by running:"
-echo -e "${INFO} rm -rf ${CAST_LLVM_ROOT}/release-build ${CAST_LLVM_ROOT}/debug-build"
+echo -e "${INFO} rm -rf ${DEBUG_BUILD_ROOT}"
