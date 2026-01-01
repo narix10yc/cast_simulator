@@ -124,7 +124,7 @@ public:
   virtual void displayInfo(utils::InfoLogger logger) const {
     if (costModel_) {
       logger.put("CostModel");
-      costModel_->displayInfo(logger.indent());
+      logger.indent([&](auto& l) { costModel_->displayInfo(l); });
     } else {
       logger.put("CostModel", "None");
     }

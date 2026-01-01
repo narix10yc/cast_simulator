@@ -44,8 +44,9 @@ void StandardQuantumGate::displayInfo(utils::InfoLogger logger) const {
   if (gateMatrix_ == nullptr) {
     logger.put("Gate Matrix", "None");
   } else {
-    logger.put("Gate Matrix");
-    gateMatrix_->displayInfo(logger.indent());
+    logger.put("Gate Matrix").indent([&](auto& l) {
+      gateMatrix_->displayInfo(l);
+    });
   }
 
   // noise channel

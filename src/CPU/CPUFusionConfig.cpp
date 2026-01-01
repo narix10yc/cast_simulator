@@ -4,6 +4,7 @@
 using namespace cast;
 
 void CPUFusionConfig::displayInfo(utils::InfoLogger logger) const {
-  logger.put("CPUFusionConfig");
-  FusionConfig::displayInfo(logger.indent());
+  logger.put("CPUFusionConfig").indent([&](auto& l) {
+    FusionConfig::displayInfo(l);
+  });
 }

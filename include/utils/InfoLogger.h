@@ -69,26 +69,6 @@ public:
     return *this;
   }
 
-  // For pointer types
-  template <typename T>
-  InfoLogger& put(const char* label,
-                  const T* ptr,
-                  int requireVerbose = 1,
-                  int subVerbose = 1)
-    requires requires(const T* p) { p->displayInfo(*this); }
-  {
-    if (verbose < requireVerbose)
-      return *this;
-    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : ";
-    if (ptr == nullptr) {
-      os_ << "None\n";
-      return *this;
-    }
-
-    ptr->displayInfo(this->indent(subVerbose));
-    return *this;
-  }
-
   // Custom printing function
   template <typename Func>
     requires std::invocable<Func, std::ostream&>
@@ -127,10 +107,18 @@ public:
     return *this;
   }
 
-  InfoLogger indent() const { return InfoLogger(os_, verbose, depth + 1); }
+  /// Log with indentation, using the same verbosity level
+  InfoLogger& indent(std::function<void(InfoLogger&)> f) {
+    InfoLogger logger(os_, this->verbose, depth + 1);
+    f(logger);
+    return *this;
+  }
 
-  InfoLogger indent(int verbose) const {
-    return InfoLogger(os_, verbose, depth + 1);
+  /// Log with indentation and a different verbosity level
+  InfoLogger& indent(int verbose, std::function<void(InfoLogger&)> f) {
+    InfoLogger logger(os_, verbose, depth + 1);
+    f(logger);
+    return *this;
   }
 };
 } // namespace utils

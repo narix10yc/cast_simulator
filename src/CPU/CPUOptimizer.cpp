@@ -28,8 +28,9 @@ llvm::Error CPUOptimizer::loadCPUCostModel(const std::string& cacheFilename,
 void CPUOptimizer::displayInfo(utils::InfoLogger logger) const {
   logger.put("CPUOptimizer");
   if (fusionConfig_) {
-    logger.put("Fusion Config");
-    fusionConfig_->displayInfo(logger.indent());
+    logger.put("Fusion Config").indent([&](auto& l) {
+      fusionConfig_->displayInfo(l);
+    });
   } else {
     logger.put("Fusion Config", "None");
   }

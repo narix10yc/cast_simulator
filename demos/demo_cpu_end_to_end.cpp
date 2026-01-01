@@ -1,6 +1,7 @@
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUOptimizer.h"
 #include "cast/CPU/CPUStatevector.h"
+#include "utils/Formats.h"
 
 #include <llvm/Support/CommandLine.h>
 
@@ -134,16 +135,17 @@ int main(int argc, char** arv) {
 
   // Statistics
   utils::InfoLogger logger(std::cerr, ArgVerbose);
-  auto loggerB = logger.indent();
   logger.put("Input file", ArgInputFilename)
       .put("Num Threads", nThreads)
       .put("Precision", precision)
       .put("Num Gates After Opt", cg->nGates())
-      .put("Total Time", getTime(t0, t5));
-  loggerB.put("Parse & Optimize", getTime(t0, t1))
-      .put("Kernel Gen", getTime(t1, t2))
-      .put("State Init", getTime(t2, t3))
-      .put("JIT", getTime(t3, t4))
-      .put("Execution", getTime(t4, t5));
+      .put("Total Time", getTime(t0, t5))
+      .indent([&](auto& l) {
+        l.put("Parse & Optimize", getTime(t0, t1))
+            .put("Kernel Gen", getTime(t1, t2))
+            .put("State Init", getTime(t2, t3))
+            .put("JIT", getTime(t3, t4))
+            .put("Execution", getTime(t4, t5));
+      });
   return 0;
 }
