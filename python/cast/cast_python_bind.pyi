@@ -1,49 +1,95 @@
+import numpy as np
+
 def parse_circuitgraph_from_qasm_file(file_name: str) -> CircuitGraph:
-  """Parses a circuit graph from a QASM file."""
+  """
+  Parses a circuit graph from a QASM file.
+  """
   ...
+  
+class ComplexSquareMatrix:
+  """
+  Represents a complex square matrix. Matrix data is arranged in row-major
+  order with separate real and imaginary parts.
+  """
+  @property
+  def edgesize(self) -> int:
+    """
+    Read-only. Edge size of the square matrix.
+    """
+    ...
+  
+  def to_numpy(self) -> np.ndarray:
+    """
+    Converts the matrix to a NumPy array. This method creates a copy of the
+    matrix data.
+    """
+    ...
+  
+class GateMatrix:
+  """
+  Represents a gate matrix. This is the base class of all gate matrices.
+  There are currently two types of gate matrices:
+  - ScalarGateMatrix: Represented by a complex square matrix.
+  - UnitaryPermutationGateMatrix: Represented by a unitary permutation matrix.
+  """
+  ...
+  
+class ScalarGateMatrix(GateMatrix):
+  """
+  Represents a scalar gate matrix, which is represented by a complex square
+  matrix.
+  """
+  @property
+  def matrix(self) -> ComplexSquareMatrix:
+    """
+    Read-only. The complex square matrix representing the gate matrix.
+    """
+    ...
 
 class QuantumGate:
   """
-  Represents a quantum gate in a quantum circuit. This class is binded from a
-  shared pointer in C++ so should not be instantiated directly.
+  Represents a quantum gate in a quantum circuit. This class represents the base
+  class of all quantum gates. There are currently three types of quantum gates:
+  - StandardGate: Represented by a gate matrix and an optional noise channel.
+  - SuperopQuantumGate: Represented by a superoperator.
+  - ParametrizedQuantumGate: Represented by a parameterized gate matrix and an
+    optional noise channel (not in use yet).
   """
-  def get_info(self, verbose=1) -> str:
-    """Returns information about the quantum gate."""
-    ...
-  
-  def get_superop_gate(self) -> SuperopQuantumGate:
-    """
-    Returns the superoperator representation of this quantum gate.
-    """
-    ...
 
   @property
   def num_qubits(self) -> int:
     """
-    Returns the number of qubits this quantum gate acts on.
+    Read-only. Number of qubits.
     """
     ...
   
   @property
   def qubits(self) -> list[int]:
     """
-    Returns the qubits this quantum gate acts on.
+    Read-only. List of qubit indices the gate acts on.
     """
     ...
 
-class StandardGate(QuantumGate):
+class StandardQuantumGate(QuantumGate):
   """
   Standard quantum gates are representated by a gate matrix and an optional 
   noise channel.
   """
-  def set_noise_spc(self, p: float) -> None:
+
+  @staticmethod
+  def random_unitary(qubits: list[int]) -> StandardQuantumGate:
     """
-    Set the noise to be the Symmetric Pauli Channel with probability p. 
-    Effectively this is saying we have a probability of p/3 to apply each of
-    the Pauli gates (X, Y, Z) as error and a probability of 1-p to have no 
-    error.
+    Generates a random unitary gate acting on the given qubits.
     """
     ...
+    
+  @property
+  def gatematrix(self) -> ScalarGateMatrix:
+    """
+    Read-only. The gate matrix of the quantum gate.
+    """
+    ...
+
 
 class SuperopQuantumGate(QuantumGate):
   """
@@ -63,8 +109,8 @@ class CircuitGraph:
   def __str__(self) -> str:
     ...
 
-  def get_info(self, verbose=1) -> str:
-    """Returns information about the circuit graph."""
+  def print_info(self, verbose = 1) -> None:
+    """Prints information about the circuit graph."""
     ...
 
   def visualize(self) -> None:
@@ -116,10 +162,9 @@ class CPUKernelGenConfig:
   def __init__(self, precision: Precision) -> None:
     ...
   
-  def get_info(self) -> str:
+  def print_info(self, verbose: int = 1) -> None:
     """
-    Get the information about the CPU kernel generation configuration, returned
-    as a string.
+    Prints information about the CPU kernel generation configuration.
     """
     ...
 
@@ -128,6 +173,11 @@ class CPUKernelInfo:
   Information about a CPU kernel. This is a read-only class and should not be 
   returned by other methods, such as CPUKernelManager.get_kernels().
   """
+  
+  def print_info(self, verbose: int = 1) -> None:
+    """Prints information about the CPU kernel."""
+    ...
+
   @property
   def precision(self) -> int:
     ...
@@ -161,10 +211,6 @@ class CPUKernelInfo:
     """
     ...
 
-  def get_info(self) -> str:
-    """Returns information about the CPU kernel."""
-    ...
-
 class CPUKernelManager:
   """
   Manages CPU kernel generation and execution.
@@ -172,9 +218,9 @@ class CPUKernelManager:
   def __init__(self) -> None:
     ...
   
-  def get_info(self) -> str:
+  def print_info(self, verbose: int = 1) -> None:
     """
-    Returns information about this CPU kernel manager.
+    Prints information about this CPU kernel manager.
     """
     ...
 
@@ -185,13 +231,16 @@ class CPUKernelManager:
     """
     ...
 
-  def gen_cpu_gate(self, 
-                   config: CPUKernelGenConfig, 
-                   gate: QuantumGate,
-                   func_name: str = "") -> None:
+  def gen_gate(self,
+               config: CPUKernelGenConfig,
+               gate: QuantumGate,
+               func_name: str = "") -> CPUKernelInfo | None:
     """
-    Generates a CPU kernel for the given quantum gatex. This method throws 
-    RuntimeError if there already exists kernels with name func_name.
+    Generates a CPU kernel for the given quantum gate. The generated kernel is
+    put into the default pool. 
+    
+    - func_name: Name of the generated LLVM function. If empty, a unique name
+      will be generated automatically.
     """
     ...
   

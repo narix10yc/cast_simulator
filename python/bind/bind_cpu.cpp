@@ -1,5 +1,7 @@
 #include "cast/CPU/CPU.h"
+#include "cast/CPU/CPUKernelManager.h"
 
+#include <cstddef>
 #include <pybind11/detail/common.h>
 #include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
@@ -59,10 +61,12 @@ void bind_CPUStatevector(py::module_& m, const char* pyName) {
 }
 
 void bind_CPUKernelManager(py::module_& m) {
+  // CPUMatrixLoadMode
   py::enum_<cast::CPUMatrixLoadMode>(m, "CPUMatrixLoadMode")
       .value("UseMatImmValues", cast::CPUMatrixLoadMode::UseMatImmValues)
       .value("StackLoadMatElems", cast::CPUMatrixLoadMode::StackLoadMatElems);
 
+  // CPUKernelGenConfig
   py::class_<cast::CPUKernelGenConfig>(m, "CPUKernelGenConfig")
       .def(py::init<cast::Precision>(), py::arg("precision"))
       .def_readwrite("simd_width", &cast::CPUKernelGenConfig::simdWidth)
@@ -83,6 +87,7 @@ void bind_CPUKernelManager(py::module_& m) {
           },
           py::arg("verbose") = 1);
 
+  // CPUKernelInfo
   py::class_<cast::CPUKernelInfo>(m, "CPUKernelInfo")
       .def_readonly("precision", &cast::CPUKernelInfo::precision)
       .def_readonly("llvm_func_name", &cast::CPUKernelInfo::llvmFuncName)
@@ -102,6 +107,7 @@ void bind_CPUKernelManager(py::module_& m) {
           },
           py::arg("verbose") = 1);
 
+  // CPUKernelManager
   py::class_<cast::CPUKernelManager>(m, "CPUKernelManager")
       .def(py::init<>())
       .def(
@@ -117,15 +123,22 @@ void bind_CPUKernelManager(py::module_& m) {
           [](cast::CPUKernelManager& self,
              const cast::CPUKernelGenConfig& config,
              const cast::QuantumGatePtr& gate,
-             const std::string& func_name) {
+             const std::string& func_name) -> const cast::CPUKernelInfo* {
             if (auto e = self.genGate(config, gate, func_name)) {
               throw std::runtime_error("Failed to generate gate: " +
                                        llvm::toString(std::move(e)));
             }
+            const auto& items = self.getDefaultPool().items();
+            if (items.empty()) {
+              // should not happen -- just a safe guard
+              return nullptr;
+            }
+            return items.back().kernel.get();
           },
           py::arg("config"),
           py::arg("gate"),
-          py::arg("func_name") = "")
+          py::arg("func_name") = "",
+          py::return_value_policy::reference_internal)
       .def(
           "gen_graph_gates",
           [](cast::CPUKernelManager& self,

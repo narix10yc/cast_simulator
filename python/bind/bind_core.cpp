@@ -1,14 +1,69 @@
 #include "cast/Core/CostModel.h"
 #include "cast/Core/IRNode.h"
-#include "pybind11/pybind11.h"
-#include <pybind11/iostream.h>
-
 #include "cast/Core/Optimizer.h"
 #include "cast/Transform/Transform.h"
+
+#include <pybind11/detail/common.h>
+#include <pybind11/pybind11.h>
+
+#include <pybind11/complex.h>
+#include <pybind11/iostream.h>
+#include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 
 namespace py = pybind11;
 
 namespace {
+
+void bind_ComplexSquareMatrix(py::module_& m) {
+  py::class_<cast::ComplexSquareMatrix>(m, "ComplexSquareMatrix")
+      .def(py::init<int>(), py::arg("edge_size"))
+      .def_property_readonly("edgesize", &cast::ComplexSquareMatrix::edgeSize)
+      .def("to_numpy", [](const cast::ComplexSquareMatrix& self) {
+        const ssize_t N = static_cast<ssize_t>(self.edgeSize());
+        py::array_t<std::complex<double>> arr({N, N});
+        auto* out = arr.mutable_data();
+        for (ssize_t i = 0; i < N; ++i) {
+          for (ssize_t j = 0; j < N; ++j) {
+            out[i * N + j] =
+                std::complex<double>(self.real(i, j), self.imag(i, j));
+          }
+        }
+        return arr;
+      });
+}
+
+void bind_GateMatrix(py::module_& m) {
+  // The base class: GateMatrix
+  py::class_<cast::GateMatrix, cast::GateMatrixPtr>(m, "GateMatrix")
+      .def_property_readonly("num_qubits", &cast::GateMatrix::nQubits)
+      .def(
+          "print_info",
+          [](const cast::GateMatrix& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
+          },
+          py::arg("verbose") = 1);
+
+  // Derived class: ScalarGateMatrix
+  py::class_<cast::ScalarGateMatrix,
+             cast::GateMatrix,
+             cast::ScalarGateMatrixPtr>(m, "ScalarGateMatrix")
+      .def_property_readonly(
+          "matrix",
+          [](cast::ScalarGateMatrix& self) -> cast::ComplexSquareMatrix& {
+            return self.matrix();
+          })
+      .def(
+          "print_info",
+          [](const cast::ScalarGateMatrix& self, int verbose) -> void {
+            py::gil_scoped_acquire gil;
+            py::scoped_ostream_redirect redirect(std::cout);
+            self.displayInfo({std::cout, verbose});
+          },
+          py::arg("verbose") = 1);
+}
 
 void bind_precision(py::module_& m) {
   py::enum_<cast::Precision>(m, "Precision")
@@ -46,10 +101,6 @@ void bind_QuantumGate(py::module_& m) {
           py::arg("qubits"))
       .def_static("I1", &cast::StandardQuantumGate::I1, py::arg("q"))
       .def_static("H", &cast::StandardQuantumGate::H, py::arg("q"))
-      .def("set_noise_spc",
-           &cast::StandardQuantumGate::setNoiseSPC,
-           py::arg("p"))
-      // .def("get_superop_gate", &cast::StandardQuantumGate::getSuperopGate)
       .def(
           "print_info",
           [](const cast::StandardQuantumGate& self, int verbose) -> void {
@@ -57,7 +108,14 @@ void bind_QuantumGate(py::module_& m) {
             py::scoped_ostream_redirect redirect(std::cout);
             self.displayInfo({std::cout, verbose});
           },
-          py::arg("verbose") = 1);
+          py::arg("verbose") = 1)
+      .def("set_noise_spc",
+           &cast::StandardQuantumGate::setNoiseSPC,
+           py::arg("p"))
+      .def_property_readonly("gatematrix",
+                             [](const cast::StandardQuantumGate& self) {
+                               return self.gateMatrix();
+                             });
 
   // Derived class: SuperopQuantumGate
   py::class_<cast::SuperopQuantumGate,
@@ -161,6 +219,8 @@ void bind_OptimizerBase(py::module_& m) {
 } // end of anonymous namespace
 
 void bind_core(py::module_& m) {
+  bind_ComplexSquareMatrix(m);
+  bind_GateMatrix(m);
   bind_precision(m);
   bind_QuantumGate(m);
   bind_CircuitGraph(m);
