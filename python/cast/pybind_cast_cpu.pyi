@@ -67,7 +67,7 @@ class CPUStatevectorFP32:
 
     def probability(self, qubit: int) -> float:
         """
-        Return probability of measuring `1` on the given qubit (convention per implementation).
+        Return probability of measuring `1` on the given qubit.
         """
         ...
 

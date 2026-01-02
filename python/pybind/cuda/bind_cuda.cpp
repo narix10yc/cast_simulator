@@ -56,14 +56,14 @@ void bind_cudaKernelManager(py::module_& m) {
   py::class_<cast::CUDAKernelInfo>(m, "CUDAKernelInfo")
       .def_readonly("gate", &cast::CUDAKernelInfo::gate)
       .def_readonly("precision", &cast::CUDAKernelInfo::precision)
-      .def_property_readonly("has_ptx",
-                             [](const cast::CUDAKernelInfo& self) {
-                               return !self.ptxString.empty();
-                             })
-      .def_property_readonly("has_cubin",
-                             [](const cast::CUDAKernelInfo& self) {
-                               return !self.cubinData.empty();
-                             })
+      .def("has_ptx",
+           [](const cast::CUDAKernelInfo& self) {
+             return !self.ptxString.empty();
+           })
+      .def("has_cubin",
+           [](const cast::CUDAKernelInfo& self) {
+             return !self.cubinData.empty();
+           })
       .def("get_ptx",
            [](const cast::CUDAKernelInfo& self) -> std::string {
              return self.ptxString;
@@ -202,8 +202,12 @@ void bind_cudaKernelManager(py::module_& m) {
           py::arg("sv"),
           py::arg("kernel"),
           py::return_value_policy::reference_internal)
-      .def("sync_kernel_execution",
-           &cast::CUDAKernelManager::syncKernelExecution);
+      .def(
+          "sync_kernel_execution",
+          [](cast::CUDAKernelManager& self, bool progress_bar) {
+            self.syncKernelExecution(progress_bar);
+          },
+          py::arg("progress_bar") = false);
 }
 
 void bind_cudaOptimizer(py::module_& m) {

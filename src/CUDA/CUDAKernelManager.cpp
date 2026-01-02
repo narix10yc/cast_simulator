@@ -1,20 +1,19 @@
 #include "cast/CUDA/CUDAKernelManager.h"
 #include "cast/CUDA/Config.h"
 
+#include "utils/Formats.h"
+#include "utils/InfoLogger.h"
+#include "utils/iocolor.h"
+
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/StandardInstrumentations.h>
+#include <llvm/Support/Error.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/TargetParser/Host.h>
-
-#include "cast/CUDA/Config.h"
-#include "utils/Formats.h"
-#include "utils/InfoLogger.h"
-#include "utils/iocolor.h"
-#include "llvm/Support/Error.h"
 
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include <llvm/Support/Debug.h>
@@ -83,15 +82,22 @@ void CUDAKernelManager::displayInfo(utils::InfoLogger logger) const {
     totalPTXSize += kernel->ptxString.size();
     totalCUBINSize += kernel->cubinData.size();
   }
-  logger.put("Num Kernels        ", nKernels)
-      .put("PTX     ",
+
+  logger.put("Num Kernels ", nKernels)
+      .put("PTX  ",
            [&](std::ostream& os) {
-             os << nActivePTX << " availables, total size "
-                << utils::fmt_mem(totalPTXSize);
+             if (nActivePTX == 0)
+               os << "None";
+             else
+               os << nActivePTX << " availables, total size "
+                  << utils::fmt_mem(totalPTXSize);
            })
       .put("CUBIN", [&](std::ostream& os) {
-        os << nActiveCUBIN << " availables, total size "
-           << utils::fmt_mem(totalCUBINSize);
+        if (nActiveCUBIN == 0)
+          os << "None";
+        else
+          os << nActiveCUBIN << " availables, total size "
+             << utils::fmt_mem(totalCUBINSize);
       });
 }
 
