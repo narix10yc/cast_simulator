@@ -2,7 +2,6 @@
 #define CAST_UTILS_INFOLOGGER_H
 
 #include <functional>
-#include <iomanip>
 #include <ostream>
 #include <span>
 #include <string>
