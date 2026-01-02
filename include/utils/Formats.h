@@ -14,8 +14,56 @@
 #include <iomanip>
 #include <iostream>
 #include <span>
+#include <type_traits>
 
 namespace utils {
+
+/// Writes precisely N digits of an unsigned integer into the provided buffer,
+/// zero-padded. Intentionally trauncate if the value has more than N digits.
+/// For example, write_uint<5>(buf, 123) will write "00123" into buf, while
+/// write_uint<3>(buf, 123456) will write "456".
+template <typename UInt, size_t N> void write_uint(char* out, UInt value) {
+  static_assert(std::is_unsigned<UInt>::value);
+
+  // compilers should be smart enough
+  for (size_t i = 0; i < N; ++i) {
+    char r = value % 10;
+    value = value / 10;
+    out[N - 1 - i] = static_cast<char>('0' + r);
+  }
+}
+
+/// Writes a *non-negative* fixed-point number into the provided buffer. This
+/// function writes (I + D + 1) characters, where I is the number of integer
+/// digits, D is the number of decimal digits, and 1 is for the decimal point.
+/// The value is rounded to D decimal places. The integer part is zero-padded
+/// and truncated (internally uses write_uint). For example,
+/// `write_fp<5,2>(buf, 123.456)` will write "00123.46" while
+/// `write_fp<3,2>(buf, 12345.678)` will write "345.68". The decimal part is
+/// rounded.
+/// Notice that we should avoid truncating the integer part due to limited
+/// precision of FP numbers.
+template <typename FP, size_t I, size_t D> void write_fp(char* out, FP value) {
+  static_assert(std::is_floating_point_v<FP>);
+  assert(value >= 0.0);
+
+  using UInt = uint64_t;
+
+  UInt scaler = 1;
+  for (size_t i = 0; i < D; ++i) {
+    scaler *= 10;
+  }
+
+  // Round to nearest integer (value is always posible)
+  UInt ivalue = static_cast<UInt>(value * scaler + 0.5);
+
+  UInt ipart = ivalue / scaler;
+  UInt dpart = ivalue % scaler;
+
+  write_uint<UInt, I>(out, ipart);
+  out[I] = '.';
+  write_uint<UInt, D>(out + I + 1, dpart);
+}
 
 // fmt_0b: helper class to print binary of an integer
 // uses: 'std::cerr << fmt_0b(123, 12)' to print 12 LSB of integer 123.
@@ -70,65 +118,11 @@ public:
   }
 }; // class fmt_complex
 
-// Format time with 4 significant digits. For example, fmt_time(0.001234)
-// will print "1.234 ms".
-class fmt_time {
-  double t_in_sec;
-
-public:
-  explicit fmt_time(double t_in_sec) : t_in_sec(t_in_sec) {
-    assert(t_in_sec >= 0.0);
-  }
-
-  friend std::ostream& operator<<(std::ostream& os, const fmt_time& fmt) {
-    // seconds
-    if (fmt.t_in_sec >= 1e3)
-      return os << static_cast<unsigned>(fmt.t_in_sec) << " s";
-    if (fmt.t_in_sec >= 1e2)
-      return os << std::fixed << std::setprecision(1) << fmt.t_in_sec << " s";
-    if (fmt.t_in_sec >= 1e1)
-      return os << std::fixed << std::setprecision(2) << fmt.t_in_sec << " s";
-    if (fmt.t_in_sec >= 1.0)
-      return os << std::fixed << std::setprecision(3) << fmt.t_in_sec << " s";
-    // milliseconds
-    if (fmt.t_in_sec >= 1e-1)
-      return os << std::fixed << std::setprecision(1) << 1e3 * fmt.t_in_sec
-                << " ms";
-    if (fmt.t_in_sec >= 1e-2)
-      return os << std::fixed << std::setprecision(2) << 1e3 * fmt.t_in_sec
-                << " ms";
-    if (fmt.t_in_sec >= 1e-3)
-      return os << std::fixed << std::setprecision(3) << 1e3 * fmt.t_in_sec
-                << " ms";
-    // microseconds
-    if (fmt.t_in_sec >= 1e-4)
-      return os << std::fixed << std::setprecision(1) << 1e6 * fmt.t_in_sec
-                << " us";
-    if (fmt.t_in_sec >= 1e-5)
-      return os << std::fixed << std::setprecision(2) << 1e6 * fmt.t_in_sec
-                << " us";
-    if (fmt.t_in_sec >= 1e-6)
-      return os << std::fixed << std::setprecision(3) << 1e6 * fmt.t_in_sec
-                << " us";
-    // nanoseconds
-    if (fmt.t_in_sec >= 1e-7)
-      return os << std::fixed << std::setprecision(1) << 1e9 * fmt.t_in_sec
-                << " ns";
-    if (fmt.t_in_sec >= 1e-8)
-      return os << std::fixed << std::setprecision(2) << 1e9 * fmt.t_in_sec
-                << " ns";
-    if (fmt.t_in_sec >= 1e-9)
-      return os << std::fixed << std::setprecision(3) << 1e9 * fmt.t_in_sec
-                << " ns";
-    return os << "< 1.0 ns";
-  }
-}; // class fmt_time
-
-// Fixed-width formatter base (CRTP).
-//
-// Derived classes should implement:
-//   buf_t fmt() const;
-// where buf_t is std::array<char, N>.
+/// Fixed-width formatter base (CRTP).
+///
+/// Derived classes should implement:
+///   void fmt(char*) const;
+/// which fills the provided buffer (of size N) with the formatted string.
 template <class Derived, size_t N> class fmt_fixed_width {
 public:
   using buf_t = std::array<char, N>;
@@ -136,117 +130,232 @@ public:
   const Derived& derived() const { return static_cast<const Derived&>(*this); }
 
   friend std::ostream& operator<<(std::ostream& os, const fmt_fixed_width& b)
-    requires requires(const Derived& d) {
-      { d.fmt() } -> std::same_as<std::array<char, N>>;
+    requires requires(const Derived& d, char* c) {
+      { d.fmt(c) } -> std::same_as<void>;
     }
   {
-    const auto buf = b.derived().fmt();
-    os.write(buf.data(), static_cast<std::streamsize>(N));
+    char buf[N];
+    b.derived().fmt(buf);
+    os.write(buf, static_cast<std::streamsize>(N));
     return os;
   }
-};
+}; // class fmt_fixed_width
 
-/// Format a memory quantity into exactly N characters.
-/// Default N=9 yields strings like:
-/// 512    -> "  512   B"
-/// 1234   -> " 1234   B"
-/// 12345  -> "12.35 MiB"
-/// 123456 -> "123.5 MiB"
-template <size_t N = 9> class fmt_mem : public fmt_fixed_width<fmt_mem<N>, N> {
-  using base_t = fmt_fixed_width<fmt_mem<N>, N>;
-  size_t bytes;
+/// Format a number in the range [1.0, 1000.0) to a string with specified
+/// width. For example, fmt_1_to_1e3<5>(123.45678) will print "123.5",
+template <size_t N = 5>
+class fmt_1_to_1e3 : public fmt_fixed_width<fmt_1_to_1e3<N>, N> {
+  using base_t = fmt_fixed_width<fmt_1_to_1e3<N>, N>;
+  double n;
 
-  static constexpr const char* unit_str(unsigned u) {
-    // 3-char units to keep suffix width fixed.
-    switch (u) {
-    case 0:
-      return "  B";
-    case 1:
-      return "KiB";
-    case 2:
-      return "MiB";
-    case 3:
-      return "GiB";
-    default:
-      return "TiB";
-    }
+public:
+  explicit fmt_1_to_1e3(double n) : n(n) {
+    static_assert(N > 4);
+    assert(n >= 1.0 && n < 1000.0);
   }
+
+  void fmt(char* out) const {
+    assert(n >= 1.0 && n < 1000.0);
+
+    if (n < 10.0) {
+      write_fp<double, 1, N - 2>(out, n);
+      return;
+    }
+    if (n < 100.0) {
+      write_fp<double, 2, N - 3>(out, n);
+      return;
+    }
+    // n < 1000.0
+    write_fp<double, 3, N - 4>(out, n);
+    return;
+  }
+}; // class fmt_1_to_1e3
+
+/* Format a memory quantity into exactly 9 characters.
+ *
+ * Examples:
+ *       0   B
+ *       1   B
+ *      12   B
+ *     123   B
+ *    1234   B
+ *   12.35 KiB
+ *   123.4 KiB
+ *   1.235 MiB
+ *   12.35 MiB
+ *   123.5 MiB
+ *   1.235 GiB
+ *   ...
+ *   123.5 TiB
+ *   > 1.0 PiB
+ */
+class fmt_mem : public fmt_fixed_width<fmt_mem, 9> {
+  size_t bytes;
 
 public:
   explicit fmt_mem(size_t bytes) : bytes(bytes) {}
 
-  base_t::buf_t fmt() const {
-    static_assert(N >= 8, "fmt_mem<N>: N must be >= 8");
-    constexpr size_t k_suffix = 4; // " " + 3-char unit
-    static_assert(N > k_suffix, "fmt_mem<N>: N too small");
-
-    const int num_w = static_cast<int>(N - k_suffix);
-
-    // Decimal scaling (1000-based) to match the examples.
-    unsigned unit = 0;
-    double value = static_cast<double>(bytes);
-    while (unit < 4 && value >= 1000.0) {
-      value /= 1000.0;
-      ++unit;
+  void fmt(char* out) const {
+    // Special case
+    if (bytes < 10000) {
+      out[5] = ' ';
+      out[6] = ' ';
+      out[7] = ' ';
+      out[8] = 'B';
+      if (bytes < 10) {
+        out[0] = ' ';
+        out[1] = ' ';
+        out[2] = ' ';
+        out[3] = ' ';
+        out[4] = static_cast<char>('0' + bytes);
+        return;
+      }
+      if (bytes < 100) {
+        out[0] = ' ';
+        out[1] = ' ';
+        out[2] = ' ';
+        write_uint<size_t, 2>(out + 3, bytes);
+        return;
+      }
+      if (bytes < 1000) {
+        out[0] = ' ';
+        out[1] = ' ';
+        write_uint<size_t, 3>(out + 2, bytes);
+        return;
+      }
+      // bytes < 10_000
+      out[0] = ' ';
+      write_uint<size_t, 4>(out + 1, bytes);
+      return;
     }
 
-    // Choose decimals so the numeric field fits nicely into num_w.
-    // We aim for ~4 significant digits, but never exceed the field.
-    int decimals = 0;
-    if (value >= 100.0)
-      decimals = std::max(0, num_w - 4);
-    else if (value >= 10.0)
-      decimals = std::max(0, num_w - 3);
-    else if (value >= 1.0)
-      decimals = std::max(0, num_w - 2);
-    else
-      decimals = std::max(0, num_w - 1);
-
-    // Format into a temporary buffer (N+1 for snprintf's terminator).
-    char tmp[N + 1];
-    std::memset(tmp, ' ', sizeof(tmp));
-    tmp[N] = '\0';
-
-    // Right-align numeric field into num_w, then " " + unit.
-    const int written = std::snprintf(
-        tmp, sizeof(tmp), "%*.*f %s", num_w, decimals, value, unit_str(unit));
-
-    typename base_t::buf_t out{};
-    if (written < 0) {
-      out.fill('#');
-      return out;
+    if (bytes >= (1ULL << 50) * 1024) {
+      std::memcpy(out, "> 1.0 PiB", 9);
+      return;
     }
 
-    // Ensure exactly N characters (pad with spaces if snprintf produced fewer).
-    for (size_t i = 0; i < N; ++i)
-      out[i] = (tmp[i] == '\0') ? ' ' : tmp[i];
+    double value;
+    out[5] = ' ';
+    // out[6] will be written later
+    out[7] = 'i';
+    out[8] = 'B';
 
-    return out;
+    if (bytes < (1ULL << 20)) {
+      // KiB
+      value = static_cast<double>(bytes) / 1024.0;
+      out[6] = 'K';
+    } else if (bytes < (1ULL << 30)) {
+      // MiB
+      value = static_cast<double>(bytes) / (1ULL << 20);
+      out[6] = 'M';
+    } else if (bytes < (1ULL << 40)) {
+      // GiB
+      value = static_cast<double>(bytes) / (1ULL << 30);
+      out[6] = 'G';
+    } else {
+      // TiB
+      assert(bytes < (1ULL << 50));
+      value = static_cast<double>(bytes) / (1ULL << 40);
+      out[6] = 'T';
+    }
+
+    if (value >= 1000.0) {
+      // [1000.0, 1024.0)
+      write_fp<double, 4, 0>(out, value);
+    } else {
+      // [1.0, 1000.0)
+      assert(1.0 <= value && value < 1000.0);
+      fmt_1_to_1e3<5>(value).fmt(out);
+    }
   }
-};
+}; // class fmt_mem
 
-/// Format a number in the range [1.0, 1000.0) to a string with specified width.
-/// For example, fmt_1_to_1e3(123.45678, 5) will print "123.5",
-class fmt_1_to_1e3 {
-  double number;
-  int width;
+/*
+ * Format a time duration (in seconds) into a fixed-width, 8-character string.
+ * Special cases:
+ *   - Values < 1 ns are formatted as "< 1.0 ns"
+ *   - Values >= 100000 s are formatted as ">99999 s"
+ *
+ * Examples:
+ *   < 1.0 ns
+ *   1.235 ns
+ *   12.35 ns
+ *   123.5 ns
+ *   1.235 us
+ *   12.35 us
+ *   123.5 us
+ *   1.235 ms
+ *   12.35 ms
+ *   123.5 ms
+ *   1.235  s
+ *   12.35  s
+ *   123.5  s
+ *    1234  s
+ *   12345  s
+ *   >99999 s
+ */
+class fmt_time : public fmt_fixed_width<fmt_time, 8> {
+  using base_t = fmt_fixed_width<fmt_time, 8>;
+
+  double t_in_sec;
 
 public:
-  explicit fmt_1_to_1e3(double n, int width = 5) : number(n), width(width) {
-    assert(n >= 0.0 &&
-           "fmt_1_to_1e3: Currently only supporting positive numbers");
-    assert(width >= 4);
-    // assert(n >= 1.0 && n <= 1e3);
+  explicit fmt_time(double t_in_sec) : t_in_sec(t_in_sec) {
+    assert(t_in_sec >= 0.0);
   }
 
-  friend std::ostream& operator<<(std::ostream& os, const fmt_1_to_1e3& fmt) {
-    if (fmt.number >= 100.0)
-      return os << std::fixed << std::setprecision(fmt.width - 4) << fmt.number;
-    if (fmt.number >= 10.0)
-      return os << std::fixed << std::setprecision(fmt.width - 3) << fmt.number;
-    return os << std::fixed << std::setprecision(fmt.width - 2) << fmt.number;
+  void fmt(char* out) const {
+    // Special cases
+    if (t_in_sec < 1e-9) {
+      std::memcpy(out, "< 1.0 ns", 8);
+      return;
+    }
+
+    if (t_in_sec >= 1e5) {
+      std::memcpy(out, ">99999 s", 8);
+      return;
+    }
+
+    double value;
+
+    out[5] = ' ';
+    out[6] = ' ';
+    out[7] = 's';
+    if (t_in_sec >= 1.0) {
+      // seconds. early return
+      if (t_in_sec < 1000.0) {
+        fmt_1_to_1e3<5>(t_in_sec).fmt(out);
+        return;
+      }
+      if (t_in_sec < 10000.0) {
+        out[0] = ' ';
+        write_uint<uint64_t, 4>(out + 1, static_cast<uint64_t>(t_in_sec));
+        return;
+      }
+      // t_in_sec < 100_000 (asserted)
+      write_uint<uint64_t, 5>(out, static_cast<uint64_t>(t_in_sec));
+      return;
+    }
+
+    if (t_in_sec < 1e-6) {
+      // nanoseconds
+      value = t_in_sec * 1e9;
+      out[6] = 'n';
+    } else if (t_in_sec < 1e-3) {
+      // microseconds
+      value = t_in_sec * 1e6;
+      out[6] = 'u';
+    } else {
+      assert(t_in_sec < 1.0);
+      // milliseconds
+      value = t_in_sec * 1e3;
+      out[6] = 'm';
+    }
+
+    assert(1.0 <= value && value < 1000.0);
+    fmt_1_to_1e3<5>(value).fmt(out);
   }
-};
+}; // class fmt_time
 
 // Format a span of elements with a separator and square brakets. For example,
 // std::cerr << fmt_span(std::span<int>{1, 2, 3}) will give "[1,2,3]"
