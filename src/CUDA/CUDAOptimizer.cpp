@@ -27,8 +27,9 @@ void CUDAOptimizer::displayInfo(utils::InfoLogger logger) const {
   logger.put("CUDAOptimizer");
 
   if (fusionConfig_) {
-    logger.put("Fusion Config");
-    fusionConfig_->displayInfo(logger.indent());
+    logger.put("Fusion Config").indent([&](auto& l) {
+      fusionConfig_->displayInfo(l);
+    });
   } else {
     logger.put("Fusion Config", "None");
   }

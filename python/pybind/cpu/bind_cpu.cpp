@@ -378,7 +378,9 @@ void bind_CPUOptimizer(py::module_& m) {
 
 } // end of anonymous namespace
 
-void bind_cpu(py::module_& m) {
+PYBIND11_MODULE(pybind_cast_cpu, m) {
+  m.doc() = "CAST CPU-related module";
+
   bind_simdWidth(m);
   bind_CPUStatevector<cast::CPUStatevectorFP32>(m, "CPUStatevectorFP32");
   bind_CPUStatevector<cast::CPUStatevectorFP64>(m, "CPUStatevectorFP64");

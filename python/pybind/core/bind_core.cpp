@@ -218,7 +218,10 @@ void bind_OptimizerBase(py::module_& m) {
 
 } // end of anonymous namespace
 
-void bind_core(py::module_& m) {
+// the name 'pybind_cast' has to be consistent with that in CMakeLists.txt
+PYBIND11_MODULE(pybind_cast, m) {
+  m.doc() = "CAST core module";
+
   bind_ComplexSquareMatrix(m);
   bind_GateMatrix(m);
   bind_precision(m);
