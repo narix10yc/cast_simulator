@@ -244,8 +244,9 @@ public:
                                        const std::string& graphName,
                                        int nThreads = 0);
 
-  void dumpIR(const std::string& funcName,
-              llvm::raw_ostream& os = llvm::errs());
+  /// Try to locate and dump IR of a function. This function could fail in some
+  /// cases. For example, when the function is not found
+  llvm::Expected<std::string> getIR(const std::string& funcName) const;
 
   // TODO: not implemented yet
   void dumpAsm(const std::string& funcName, llvm::raw_ostream& os);

@@ -6,8 +6,6 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/StandardInstrumentations.h>
 
-#include <cassert>
-
 #define DEBUG_TYPE "cpu-kernel-mgr"
 #include <llvm/Support/Debug.h>
 // #define LLVM_DEBUG(X) X
@@ -179,9 +177,36 @@ llvm::Error CPUKernelManager::compileAllPools(OptimizationLevel optLevel,
   return err;
 }
 
-void CPUKernelManager::dumpIR(const std::string& funcName,
-                              llvm::raw_ostream& os) {
-  assert(false && "Not implemented yet");
+llvm::Expected<std::string>
+CPUKernelManager::getIR(const std::string& funcName) const {
+  // search in all pools
+  // If JIT is requested we cannot retrieve the IR
+  for (const auto& [_, pool] : kernelPools_) {
+    for (const auto& item : pool) {
+      if (item.kernel->llvmFuncName != funcName)
+        continue;
+      if (item.llvmModule == nullptr)
+        continue;
+      // got it there
+      for (const auto& f : item.llvmModule->functions()) {
+        if (f.getName() == funcName) {
+          std::string str;
+          llvm::raw_string_ostream os(str);
+          f.print(os);
+          return str;
+        }
+      }
+
+      return llvm::createStringError("We found the module, but function '" +
+                                     funcName + "' is not in the module");
+    }
+  }
+
+  if (llvmJIT == nullptr)
+    return llvm::createStringError("Cannot find kernel '" + funcName + "'");
+
+  return llvm::createStringError(
+      "JIT'ed session does not support retrieving IR");
 }
 
 #undef DEBUG_TYPE

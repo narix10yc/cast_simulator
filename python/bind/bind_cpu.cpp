@@ -1,7 +1,7 @@
 #include "cast/CPU/CPU.h"
-#include "cast/CPU/CPUKernelManager.h"
 
-#include <cstddef>
+#include <llvm/Support/Error.h>
+
 #include <pybind11/detail/common.h>
 #include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
@@ -154,6 +154,16 @@ void bind_CPUKernelManager(py::module_& m) {
           py::arg("config"),
           py::arg("graph"),
           py::arg("pool_name"))
+      .def(
+          "get_ir",
+          [](cast::CPUKernelManager& self,
+             const std::string& funcName) -> std::string {
+            auto ir = self.getIR(funcName);
+            if (!ir)
+              throw std::runtime_error(llvm::toString(ir.takeError()));
+            return *ir;
+          },
+          py::arg("func_name"))
       .def(
           "get_kernel_by_name",
           [](cast::CPUKernelManager& self, const std::string& funcName) {

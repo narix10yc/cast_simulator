@@ -253,6 +253,13 @@ class CPUKernelManager:
     graph_name should be unique for every circuit graph given to this method.
     """
     ...
+    
+  def get_ir(self, func_name: str) -> str:
+    """
+    Returns the LLVM IR of the function with the given name.
+    Notice that we cannot retrive the IR once JIT is requested.
+    """
+    ...
   
   def init_jit(self,
                num_threads: int = 1,
