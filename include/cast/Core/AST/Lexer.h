@@ -1,7 +1,8 @@
 #ifndef NEW_PARSER_LEXER_H
 #define NEW_PARSER_LEXER_H
 
-#include "cast/Core/AST/SourceManager.h"
+#include "cast/Core/AST/LocationSpan.h"
+
 #include <cassert>
 #include <string>
 
@@ -81,7 +82,7 @@ public:
   Token(TokenKind kind, const char* memRefBegin, const char* memRefEnd)
       : kind(kind), loc(memRefBegin, memRefEnd) {}
 
-  std::ostream& print(std::ostream& = std::cerr) const;
+  std::ostream& print(std::ostream& os) const;
 
   bool is(TokenKind k) const { return kind == k; }
   bool isNot(TokenKind k) const { return kind != k; }

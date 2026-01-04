@@ -1,7 +1,6 @@
-#include "cast/Core/AST/Parser.h"
+#include "cast/Core/AST/AST.h"
+
 #include "utils/PrintSpan.h"
-#include "utils/iocolor.h"
-#include "utils/utils.h"
 
 #include <llvm/Support/Casting.h>
 
@@ -37,7 +36,7 @@ using namespace cast::ast;
     _NK_Expr_End,
   NK_Root
 */
-std::string Node::_getKindName(Node::NodeKind k) {
+std::string Node::getKindName(Node::NodeKind k) {
   switch (k) {
   case NK_Stmt_GateApply:
     return "GateApplyStmt";

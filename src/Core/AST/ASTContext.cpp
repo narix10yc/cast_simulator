@@ -1,5 +1,7 @@
 #include "cast/Core/AST/ASTContext.h"
 
+#include "utils/iocolor.h"
+
 using namespace cast::ast;
 
 std::ostream& ASTContext::displayLineTable(std::ostream& os) const {

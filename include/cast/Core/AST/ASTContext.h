@@ -5,7 +5,6 @@
 #include "cast/Core/AST/SourceManager.h"
 
 #include <cassert>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>

@@ -2,7 +2,7 @@
 #define CAST_DRAFT_SOURCE_MANAGER_H
 
 #include "cast/Core/AST/LocationSpan.h"
-#include "utils/iocolor.h"
+
 #include <iostream>
 #include <vector>
 

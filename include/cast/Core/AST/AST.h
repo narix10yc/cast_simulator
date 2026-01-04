@@ -3,19 +3,17 @@
 
 #include "cast/Core/AST/LocationSpan.h"
 #include "cast/Core/AST/PrettyPrinter.h"
-#include <iostream>
+
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/ErrorOr.h>
+
+#include <iostream>
 #include <span>
 #include <string>
 
 #ifndef M_PI
 #define M_PI (3.141592653589)
 #endif
-
-namespace cast::legacy {
-class CircuitGraph;
-} // namespace cast::legacy
 
 namespace cast {
 namespace ast {
@@ -59,15 +57,15 @@ public:
   // clang-format on
 
 private:
-  NodeKind _kind;
-  static std::string _getKindName(NodeKind k);
+  NodeKind kind_;
+  static std::string getKindName(NodeKind k);
 
 public:
-  explicit Node(NodeKind kind) : _kind(kind) {}
+  explicit Node(NodeKind kind) : kind_(kind) {}
 
-  NodeKind getKind() const { return _kind; }
+  NodeKind getKind() const { return kind_; }
 
-  virtual std::string getKindName() const { return _getKindName(_kind); }
+  virtual std::string getKindName() const { return getKindName(kind_); }
 
   virtual ~Node() = default;
 
