@@ -59,7 +59,7 @@ add_library(cast INTERFACE)
 if (CAST_USE_CUDA)
   file(GLOB_RECURSE SRC_FILES "CUDA/*.cpp" "CUDA/*.cu")
   add_library(cast_cuda STATIC ${SRC_FILES})
-  target_link_libraries(cast_cuda cuda CUDA::cudart cast_core)
+  target_link_libraries(cast_cuda PRIVATE cuda CUDA::cudart cast_core)
   target_compile_options(cast_cuda PRIVATE ${COMPILE_FLAGS})
   target_link_libraries(cast INTERFACE cast_cuda)
 
