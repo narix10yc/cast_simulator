@@ -68,8 +68,7 @@ public:
   /// @brief Normalize the statevector.
   void normalize(int nThreads = 0);
 
-  /// @brief Uniform randomize statevector (by the Haar-measure on sphere).
-  /// nThreads parameter does work here.
+  /// @brief Uniformly randomize statevector (by the Haar-measure on sphere).
   void randomize(int nThreads = 0);
 
   ScalarType& real(size_t idx) {

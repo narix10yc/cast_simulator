@@ -6,14 +6,22 @@ handle_llvm_dep()
 
 ##### User Options ######
 message("### User Options ###")
+
 option(CAST_USE_LLVM_COMPILER "Use LLVM Clang/Clang++ as compilers" OFF)
 message(STATUS "CAST_USE_LLVM_COMPILER: ${CAST_USE_LLVM_COMPILER}")
+
 option(CAST_USE_LLVM_LIBCXX "Use LLVM libc++ as the standard C++ library" OFF)
 message(STATUS "CAST_USE_LLVM_LIBCXX: ${CAST_USE_LLVM_LIBCXX}")
+
 option(CAST_USE_CUDA "Use LLVM NVPTX Backend for CUDA Support" OFF)
 message(STATUS "CAST_USE_CUDA: ${CAST_USE_CUDA}")
+
+option(CAST_USE_NCCL "Use NCCL for multi-GPU communication" OFF)
+message(STATUS "CAST_USE_NCCL: ${CAST_USE_NCCL}")
+
 option(CAST_PYTHON_BIND "Bind Python" OFF)
 message(STATUS "CAST_PYTHON_BIND: ${CAST_PYTHON_BIND}")
+
 message("#######################")
 
 ##### Compiler Setup ######
@@ -27,15 +35,13 @@ message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 ##### Project Setup ######
 project(cast_simulator LANGUAGES C CXX)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
 
 if(CAST_USE_LLVM_LIBCXX)
   use_llvm_libcxx()
-endif()
-
-if(CAST_USE_CUDA)
-  add_compile_definitions(CAST_USE_CUDA)
 endif()
 
 # Find LLVM
@@ -58,9 +64,19 @@ if(CAST_USE_CUDA AND NOT "NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
     "but LLVM build does not support NVPTX backend.")
 endif()
 
+include_directories(${LLVM_INCLUDE_DIRS} include)
+message(STATUS "LLVM_LIBRARY_DIRS: ${LLVM_LIBRARY_DIRS}")
+link_directories(${LLVM_LIBRARY_DIRS})
+separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+add_definitions(${LLVM_DEFINITIONS_LIST})
+
 ###### CUDA Setup ######
 
-# Find CUDAToolkit (if CAST_USE_CUDA is defined)
+# USE_NCCL implies USE_CUDA
+if(NOT CAST_USE_CUDA AND CAST_USE_NCCL)
+  message(WARNING "NCCL requires CUDA. Enabling CAST_USE_CUDA.")
+  set(CAST_USE_CUDA ON)
+endif()
 if(CAST_USE_CUDA)
   set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
   find_package(CUDAToolkit REQUIRED)
@@ -71,7 +87,7 @@ if(CAST_USE_CUDA)
 
   # FindCUDAToolkit.cmake does not automatically adjust include and link
   # directories. For safely we append it before other include paths.
-  # Otherwise, enviroment managers such as conda may interfere with the
+  # Otherwise, environment managers such as conda may interfere with the
   # selected CUDAToolkit version.
   include_directories(BEFORE ${CUDAToolkit_INCLUDE_DIR})
   include_directories(BEFORE ${CUDAToolkit_INCLUDE_DIRS})
@@ -94,17 +110,32 @@ if(CAST_USE_CUDA)
   enable_language(CUDA)
 endif() # if(CAST_USE_CUDA)
 
-# show colored diagnostics in the terminal
-add_compile_options("-fdiagnostics-color=always")
+if(CAST_USE_NCCL)
+  if(NOT DEFINED NCCL_ROOT)
+    message(WARNING "NCCL_ROOT is not specified. Will try to find NCCL in "
+                    "system paths.")
+  endif()
 
+  find_package(NCCL REQUIRED)
+  message(STATUS "NCCL_INCLUDE_DIRS: ${NCCL_INCLUDE_DIRS}")
+  message(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
+  include_directories(${NCCL_INCLUDE_DIRS})
+  link_libraries(${NCCL_LIBRARIES})
+endif()
+
+# General compile options
+# more specific ones will be added in each subdirectory
+add_compile_options("-fdiagnostics-color=always")
 if(CMAKE_BUILD_TYPE_UPPER STREQUAL "DEBUG")
   add_compile_options("-Wall")
 endif()
-include_directories(${LLVM_INCLUDE_DIRS} include)
-message(STATUS "LLVM_LIBRARY_DIRS: ${LLVM_LIBRARY_DIRS}")
-link_directories(${LLVM_LIBRARY_DIRS})
-separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
-add_definitions(${LLVM_DEFINITIONS_LIST})
+
+if(CAST_USE_CUDA)
+  add_compile_definitions(CAST_USE_CUDA)
+endif()
+if(CAST_USE_NCCL)
+  add_compile_definitions(CAST_USE_NCCL)
+endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 # Enable PIC for all targets

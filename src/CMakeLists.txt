@@ -1,8 +1,11 @@
-if (CAST_USE_CUDA OR CAST_PYTHON_BIND)
-  set(RTTI "-frtti")
-else()
-  set(RTTI "-fno-rtti")
-endif()
+# if (CAST_USE_CUDA OR CAST_PYTHON_BIND)
+#   set(RTTI "-frtti")
+# else()
+#   set(RTTI "-fno-rtti")
+# endif()
+
+# just use RTTI... Performance impact is negligible.
+set(RTTI "-frtti")
 
 file(GLOB_RECURSE SRC_FILES "Timeit/*.cpp")
 add_library(timeit STATIC ${SRC_FILES})
@@ -36,26 +39,33 @@ endif()
 llvm_map_components_to_libnames(LLVM_LIBS ${LLVM_COMPONENTS})
 target_link_libraries(cast_core PUBLIC ${LLVM_LIBS})
 
-
+# cast_cpu
 file(GLOB_RECURSE SRC_FILES "CPU/*.cpp")
 add_library(cast_cpu STATIC ${SRC_FILES})
 target_compile_options(cast_cpu PRIVATE ${COMPILE_FLAGS})
 target_link_libraries(cast_cpu PUBLIC cast_core)
 
+# cast_fpga
 file(GLOB_RECURSE SRC_FILES "FPGA/*.cpp")
 add_library(cast_fpga STATIC ${SRC_FILES})
 target_compile_options(cast_fpga PRIVATE ${COMPILE_FLAGS})
 target_link_libraries(cast_fpga PUBLIC cast_core)
 
 
+# cast (interface library)
 add_library(cast INTERFACE)
 
+# cast_cuda (if enabled)
 if (CAST_USE_CUDA)
   file(GLOB_RECURSE SRC_FILES "CUDA/*.cpp" "CUDA/*.cu")
   add_library(cast_cuda STATIC ${SRC_FILES})
   target_link_libraries(cast_cuda cuda CUDA::cudart cast_core)
   target_compile_options(cast_cuda PRIVATE ${COMPILE_FLAGS})
   target_link_libraries(cast INTERFACE cast_cuda)
+
+  if(CAST_USE_NCCL)
+    target_link_libraries(cast_cuda PRIVATE ${NCCL_LIBRARIES})
+  endif()
 endif()
 
 target_link_libraries(cast INTERFACE cast_cpu cast_fpga)
