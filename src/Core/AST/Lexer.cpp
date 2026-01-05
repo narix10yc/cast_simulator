@@ -1,7 +1,8 @@
 #include "cast/Core/AST/Lexer.h"
 #include "utils/iocolor.h"
+
 #include <cassert>
-#include <fstream>
+#include <iostream>
 
 using namespace cast::ast;
 

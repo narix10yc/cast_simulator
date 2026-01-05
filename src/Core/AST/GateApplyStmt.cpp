@@ -68,7 +68,7 @@ std::ostream& GateApplyStmt::print(std::ostream& os) const {
 
 void GateApplyStmt::prettyPrint(PrettyPrinter& p, int indent) const {
   p.write(indent) << getKindName() << "(" << name << "): " << qubits.size()
-                  << " qubits\n";
+                  << "-qubit\n";
   p.setState(indent, qubits.size());
   for (size_t i = 0; i < qubits.size(); ++i)
     qubits[i]->prettyPrint(p, indent + 1);

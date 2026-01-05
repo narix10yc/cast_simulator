@@ -1,5 +1,7 @@
 #include "cast/Transform/Transform.h"
 
+#include "utils/iocolor.h"
+
 using namespace cast;
 
 GateMatrixPtr transform::cvtAstGateToGateMatrix(ast::GateApplyStmt* astGate,

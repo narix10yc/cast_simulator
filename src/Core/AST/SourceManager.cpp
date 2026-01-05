@@ -1,5 +1,7 @@
 #include "cast/Core/AST/SourceManager.h"
 
+#include "utils/iocolor.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
