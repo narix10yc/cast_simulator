@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e # exit on error
+set -e
 
 # arguments
 ARG_BUILD_CLANG=0
@@ -14,9 +14,27 @@ INFO='\033[0;36m[Info]\033[0m'
 WARN='\033[0;33m[Warning]\033[0m'
 ERR='\033[0;31m[Error]\033[0m'
 
+usage() {
+  cat <<EOF
+Usage: $0 <llvm-src-dir> [options]
+
+Options:
+  -build-clang       Build Clang, LLD, and LLDB
+  -build-libc++      Build libc++ and libc++abi
+  -release-only      Only build the release version
+  -native-only       Only build for the native target
+  -minimal           Minimal build, only release version with native target
+  -h, --help         Show this help message
+EOF
+}
+
 # Argument parsing loop
 while [[ $# -gt 0 ]]; do
   case "$1" in 
+  -h|--help)
+    usage
+    exit 0
+    ;;
   -build-clang)
     ARG_BUILD_CLANG=1
     shift
@@ -38,13 +56,8 @@ while [[ $# -gt 0 ]]; do
     shift
     ;;
   -*)
-    echo "Unknown option: $1. Available options are:"
-    echo "  -build-clang       Build Clang, LLD, and LLDB"
-    echo "  -build-libc++      Build libc++ and libc++abi"
-    echo "  -release-only      Only build the release version"
-    echo "  -native-only       Only build for the native target"
-    echo "  -minimal           Minimal build, only release version with native target"
-    echo "  -h, --help         Show this help message"
+    echo "Unknown option: $1"
+    usage
     exit 1
     ;;
   *)
@@ -74,8 +87,7 @@ if [[ $ARG_MINIMAL -eq 1 ]]; then
 fi
 
 if [[ -z "$ARG_LLVM_SRC_DIR" ]]; then
-  echo "Usage: $0 <llvm-src-dir> [-build-libc++] [-build-clang] " \
-       "[-release-only] [-native-only]"
+  usage
   exit 1
 fi
 
@@ -84,7 +96,20 @@ if [[ ! -d "$ARG_LLVM_SRC_DIR" ]]; then
   exit 1
 fi
 
-LLVM_ROOT=$(dirname "$ARG_LLVM_SRC_DIR")
+# Accept either llvm-project root or llvm-project/llvm.
+LLVM_SRC_DIR=""
+if [[ -f "${ARG_LLVM_SRC_DIR}/llvm/CMakeLists.txt" ]]; then
+  LLVM_SRC_DIR="${ARG_LLVM_SRC_DIR}/llvm"
+  LLVM_ROOT="${ARG_LLVM_SRC_DIR}"
+elif [[ -f "${ARG_LLVM_SRC_DIR}/CMakeLists.txt" ]]; then
+  LLVM_SRC_DIR="${ARG_LLVM_SRC_DIR}"
+  LLVM_ROOT="$(dirname "${ARG_LLVM_SRC_DIR}")"
+else
+  echo -e "${ERR} Could not find llvm source at '${ARG_LLVM_SRC_DIR}'."
+  echo -e "${ERR} Expected llvm/CMakeLists.txt or CMakeLists.txt."
+  exit 1
+fi
+
 RELEASE_INSTALL_ROOT="${LLVM_ROOT}/release-install"
 RELEASE_BUILD_ROOT="${LLVM_ROOT}/release-build"
 DEBUG_INSTALL_ROOT="${LLVM_ROOT}/debug-install"
@@ -94,9 +119,17 @@ DEBUG_BUILD_ROOT="${LLVM_ROOT}/debug-build"
 # Get paths to cmake and ninja
 CMAKE_PATH="$(command -v cmake)"
 NINJA_PATH="$(command -v ninja)"
+if [[ -z "${CMAKE_PATH}" ]]; then
+  echo -e "${ERR} cmake not found in PATH."
+  exit 1
+fi
+if [[ -z "${NINJA_PATH}" ]]; then
+  echo -e "${ERR} ninja not found in PATH."
+  exit 1
+fi
 echo -e "$INFO using cmake in $CMAKE_PATH"
 echo -e "$INFO using ninja in $NINJA_PATH"
-echo -e "$INFO LLVM source is $ARG_LLVM_SRC_DIR"
+echo -e "$INFO LLVM source is $LLVM_SRC_DIR"
 echo -e "$INFO LLVM_ROOT is $LLVM_ROOT"
 echo -e "$INFO build-clang is set to $ARG_BUILD_CLANG"
 echo -e "$INFO build-libc++ is set to $ARG_BUILD_LIBCXX"
@@ -114,13 +147,15 @@ else
 fi
 
 # build clang, lld, and lldb if requested
-ARG_LLVM_ENABLE_PROJECTS=""
+ARG_LLVM_ENABLE_PROJECTS=()
 if [[ $ARG_BUILD_CLANG -eq 1 ]]; then
-  ARG_LLVM_ENABLE_PROJECTS="-DLLVM_ENABLE_PROJECTS=clang;lld;lldb"
+  ARG_LLVM_ENABLE_PROJECTS=(
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb"
+  )
 fi
 
 # build libc++ and libc++abi if requested
-ARG_LLVM_ENABLE_RUNTIMES=""
+ARG_LLVM_ENABLE_RUNTIMES=()
 if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
   ARG_LLVM_ENABLE_RUNTIMES=(
     -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind"
@@ -132,7 +167,7 @@ fi
 
 # release build
 
-cmake -S "${ARG_LLVM_SRC_DIR}/llvm" -G Ninja \
+cmake -S "${LLVM_SRC_DIR}" -G Ninja \
   -B "${RELEASE_BUILD_ROOT}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_ENABLE_RTTI=ON \
@@ -156,7 +191,7 @@ fi
 echo -e "${INFO} LLVM release-version installed successfully. "\
           "Continuing with debug build..."
 
-ARG_SET_USE_CLANG=""
+ARG_SET_USE_CLANG=()
 if [[ $ARG_BUILD_CLANG -eq 1 ]]; then
   ARG_SET_USE_CLANG=(
     "-DCMAKE_C_COMPILER=${RELEASE_INSTALL_ROOT}/bin/clang"
@@ -165,7 +200,7 @@ if [[ $ARG_BUILD_CLANG -eq 1 ]]; then
   )
 fi
 
-ARG_SET_USE_LIBCXX=""
+ARG_SET_USE_LIBCXX=()
 if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
   ARG_SET_USE_LIBCXX=(
     -DCMAKE_CXX_FLAGS="-stdlib=libc++ -I${RELEASE_INSTALL_ROOT}/include/c++/v1"
@@ -177,7 +212,7 @@ if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
   # It seems that libc++ is not always installed in release-install/lib. 
   # It might be in release-install/lib/x86_64-unknown-linux-gnu or similar.
   # We will try to find it and set the path accordingly.
-  LIBCXX_DIR=$(find "${LLVM_ROOT}/lib" \
+  LIBCXX_DIR=$(find "${RELEASE_INSTALL_ROOT}/lib" \
                -type f \( -name "libc++*.so*" -o -name "libc++*.dylib*" \)
                -exec dirname {} \; | head -n 1)
   if [[ -n "$LIBCXX_DIR" ]]; then
@@ -205,7 +240,7 @@ fi
 
 # debug build
 
-cmake -S "${ARG_LLVM_SRC_DIR}/llvm" -G Ninja \
+cmake -S "${LLVM_SRC_DIR}" -G Ninja \
   -B "${DEBUG_BUILD_ROOT}" \
   -DCMAKE_BUILD_TYPE=Debug \
   -DLLVM_ENABLE_RTTI=ON \
