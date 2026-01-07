@@ -709,7 +709,8 @@ Value* buildOffset(IRBuilder<>& B,
   return offset;
 }
 
-static Value* warpBroadcastFP32(IRBuilder<>& B, Value* valFP32, Value* srcLane) {
+static Value*
+warpBroadcastFP32(IRBuilder<>& B, Value* valFP32, Value* srcLane) {
   auto& C = B.getContext();
   Value* mask = ConstantInt::get(Type::getInt32Ty(C), -1);
 

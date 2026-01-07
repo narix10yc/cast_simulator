@@ -110,11 +110,17 @@ void bind_cudaKernelManager(py::module_& m) {
           [](cast::CUDAKernelManager& self,
              const cast::CUDAKernelGenConfig& config,
              const cast::QuantumGatePtr& gate,
-             const std::string& func_name) {
+             const std::string& func_name) -> cast::CUDAKernelInfo* {
             if (auto e = self.genGate(config, gate, func_name)) {
               throw std::runtime_error("Failed to generate gate: " +
                                        llvm::toString(std::move(e)));
             }
+            const auto& items = self.getDefaultPool().items();
+            if (items.empty()) {
+              // should not happen -- just a safe guard
+              return nullptr;
+            }
+            return items.back().kernel.get();
           },
           py::arg("config"),
           py::arg("gate"),

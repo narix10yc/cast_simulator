@@ -150,7 +150,7 @@ fi
 ARG_LLVM_ENABLE_PROJECTS=()
 if [[ $ARG_BUILD_CLANG -eq 1 ]]; then
   ARG_LLVM_ENABLE_PROJECTS=(
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb"
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra"
   )
 fi
 
