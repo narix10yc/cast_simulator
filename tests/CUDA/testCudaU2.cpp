@@ -36,7 +36,7 @@ template <int nQubits> void runU2qTest() {
 
   CUDAKernelGenConfig cgCfg;
   cgCfg.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
-  for (std::size_t i = 0; i < gates.size(); ++i) {
+  for (size_t i = 0; i < gates.size(); ++i) {
     llvm::cantFail(
         km.genGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i)));
   }

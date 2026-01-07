@@ -84,7 +84,7 @@ inline std::vector<std::string_view> split_csv(std::string_view line) {
   std::vector<std::string_view> result;
   // Reserve: number of fields is commas + 1.
   result.reserve(
-      1 + static_cast<std::size_t>(std::count(line.begin(), line.end(), ',')));
+      1 + static_cast<size_t>(std::count(line.begin(), line.end(), ',')));
   size_t start = 0;
   size_t end = 0;
 
@@ -97,7 +97,7 @@ inline std::vector<std::string_view> split_csv(std::string_view line) {
 }
 
 // -------------------- Tuple Iteration --------------------
-template <typename Tuple, typename Func, std::size_t... Is>
+template <typename Tuple, typename Func, size_t... Is>
 void for_each(Tuple&& t, Func&& f, std::index_sequence<Is...>) {
   (f(std::get<Is>(t), Is), ...); // Fold expression
 }
@@ -116,7 +116,7 @@ template <typename Derived> struct CSVParsable {
     assert(tokens.size() == Derived::num_fields);
 
     auto fields = static_cast<Derived*>(this)->tie_fields();
-    for_each(fields, [&](auto& field, std::size_t i) {
+    for_each(fields, [&](auto& field, size_t i) {
       using FieldType = std::decay_t<decltype(field)>;
       static_assert(
           CSVFieldConcept<FieldType>,
@@ -129,7 +129,7 @@ template <typename Derived> struct CSVParsable {
   void write(std::ostream& os) const {
     auto fields = static_cast<const Derived*>(this)->tie_fields();
     bool first = true;
-    for_each(fields, [&](const auto& field, std::size_t) {
+    for_each(fields, [&](const auto& field, size_t) {
       if (!first) {
         os << ",";
       }
@@ -151,8 +151,8 @@ consteval bool is_space(char c) { return c == ' ' || c == '\t'; }
 
 // Trim the leading and trailing spaces and tabs from a string_view
 consteval std::string_view trim(std::string_view str) {
-  std::size_t start = 0;
-  std::size_t end = str.size();
+  size_t start = 0;
+  size_t end = str.size();
 
   while (start < end && is_space(str[start]))
     ++start;
@@ -163,13 +163,13 @@ consteval std::string_view trim(std::string_view str) {
 }
 
 // Main consteval function to clean CSV title
-template <std::size_t N>
+template <size_t N>
 consteval auto clean_csv_title(const char (&input)[N]) {
   std::array<char, N> out{};
-  std::size_t out_i = 0;
+  size_t out_i = 0;
 
-  std::size_t token_start = 0;
-  for (std::size_t i = 0; i < N; ++i) {
+  size_t token_start = 0;
+  for (size_t i = 0; i < N; ++i) {
     if (input[i] == ',' || input[i] == '\0') {
       auto token = trim(std::string_view(&input[token_start], i - token_start));
       for (char c : token)

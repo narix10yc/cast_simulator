@@ -150,7 +150,7 @@ private:
   struct TransparentHash {
     using is_transparent = void;
 
-    std::size_t operator()(const QuantumGatePtr& gate) const noexcept {
+    size_t operator()(const QuantumGatePtr& gate) const noexcept {
       return std::hash<QuantumGate*>()(gate.get());
     }
 

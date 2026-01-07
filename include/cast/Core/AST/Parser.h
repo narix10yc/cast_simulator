@@ -16,7 +16,7 @@ namespace ast {
 class Scope {
 private:
   struct IdentifierHash {
-    std::size_t operator()(const ast::Identifier& id) const {
+    size_t operator()(const ast::Identifier& id) const {
       return std::hash<std::string_view>()(id.str);
     }
   }; // struct IdentifierHash

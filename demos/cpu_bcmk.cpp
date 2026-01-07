@@ -23,7 +23,7 @@ constexpr int NUM_QUBITS = 28;
 int NUM_THREADS = cast::get_cpu_num_threads();
 CPUSimdWidth SIMD_WIDTH = cast::get_cpu_simd_width();
 
-static double computeGiBps(std::size_t memoryInBytes, double timeInSeconds) {
+static double computeGiBps(size_t memoryInBytes, double timeInSeconds) {
   return static_cast<double>(memoryInBytes) /
          (timeInSeconds * 1024 * 1024 * 1024);
 }

@@ -11,14 +11,14 @@
 
 namespace cast {
 
-/// @brief \c ComplexSquareMatrix implements basic arithmatics to complex square
-/// matrices with double precision.
+/// `ComplexSquareMatrix` implements basic arithmatics to complex square
+/// matrices. All real numbers are stored with *double* precision.
 class ComplexSquareMatrix {
-  // constexpr static size_t AlignSize = 64;
 private:
   size_t edgeSize_;
   std::unique_ptr<double[]> data_;
 
+  // Must be called after edgeSize_ is set.
   void allocData() {
     assert(edgeSize_ > 0);
     data_ = std::make_unique<double[]>(edgeSize_ * edgeSize_ * 2);

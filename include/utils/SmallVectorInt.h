@@ -1,10 +1,10 @@
 #ifndef CAST_ADT_SMALL_VECTOR_INT
 #define CAST_ADT_SMALL_VECTOR_INT
 
-template <std::size_t NumInline> class SmallVectorInt {
-  static_assert(sizeof(int) * NumInline >= 2 * sizeof(std::size_t));
+template <size_t NumInline> class SmallVectorInt {
+  static_assert(sizeof(int) * NumInline >= 2 * sizeof(size_t));
   alignas(std::max_align_t) std::byte _data[sizeof(int) * NumInline];
-  std::size_t _size;
+  size_t _size;
 
   int* inlineData() { return reinterpret_cast<int*>(_data); }
 
@@ -20,7 +20,7 @@ public:
       std::free(heapData());
   }
 
-  int& operator[](std::size_t index) {
+  int& operator[](size_t index) {
     assert(index < _size && "Index out of bounds");
     return (isInline() ? inlineData() : heapData())[index];
   }
@@ -33,7 +33,7 @@ public:
 
     // dynamically allocated memory
     int** dataPtr = reinterpret_cast<int**>(_data);
-    std::size_t curCapacity = capacity();
+    size_t curCapacity = capacity();
     if (_size == curCapacity) {
       // double the capacity
       int* newPtr =
@@ -42,19 +42,19 @@ public:
       if (_size > NumInline)
         std::free(*dataPtr);
       *dataPtr = newPtr;
-      std::size_t* capacityPtr =
-          reinterpret_cast<std::size_t*>(_data + sizeof(std::size_t));
+      size_t* capacityPtr =
+          reinterpret_cast<size_t*>(_data + sizeof(size_t));
       *capacityPtr = 2 * curCapacity;
     }
     (*dataPtr)[_size++] = v;
   }
 
-  std::size_t size() const { return _size; }
+  size_t size() const { return _size; }
 
-  std::size_t capacity() const {
+  size_t capacity() const {
     return isInline() ? NumInline
-                      : *reinterpret_cast<const std::size_t*>(
-                            _data + sizeof(std::size_t));
+                      : *reinterpret_cast<const size_t*>(
+                            _data + sizeof(size_t));
   }
 };
 

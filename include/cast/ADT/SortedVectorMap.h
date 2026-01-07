@@ -5,8 +5,6 @@
 
 #include <algorithm>
 #include <initializer_list>
-#include <stdexcept>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -21,7 +19,7 @@ public:
   using key_type = Key;
   using mapped_type = T;
   using value_type = std::pair<Key, T>;
-  using size_type = std::size_t;
+  using size_type = size_t;
   using difference_type = std::ptrdiff_t;
   using key_compare = Compare;
   using allocator_type = Alloc;
@@ -110,7 +108,7 @@ public:
   void shrink_to_fit() { data_.shrink_to_fit(); }
 
   // ——— element access ———
-  
+
   // operator[] inserts default-constructed value if missing
   T& operator[](const Key& k) {
     auto it = lower_bound_impl(k);
