@@ -6,7 +6,10 @@
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
+
 #include "utils/InfoLogger.h"
+#include "utils/ThreadPool.h"
+
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/Passes/OptimizationLevel.h>
 #include <llvm/Support/TargetSelect.h>
@@ -104,6 +107,8 @@ struct CPUKernelGenConfig {
 };
 
 class CPUKernelManager : public KernelManager<CPUKernelInfo> {
+  utils::ThreadPool<> tPool;
+
   std::unique_ptr<llvm::orc::LLJIT> llvmJIT = nullptr;
 
   // We decide to use LLJIT than LLLazyJIT because multi-threading compilation
@@ -112,6 +117,7 @@ class CPUKernelManager : public KernelManager<CPUKernelInfo> {
   // function.
   // This is a helper function that creates a LLJIT (stored to llvmJIT). If
   // llvmJIT already exists, this function does nothing.
+  // llvmJIT will use the same number of threads as in tPool.
   llvm::Error initLLVMJIT_();
 
   // Add a task to compile the given llvmModule. The llvmModule will be
@@ -139,12 +145,11 @@ class CPUKernelManager : public KernelManager<CPUKernelInfo> {
                           Pool& pool);
 
 public:
-  CPUKernelManager(int nWorkerThreads = 0)
-      : KernelManager<CPUKernelInfo>(nWorkerThreads) {
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmParser();
-    llvm::InitializeNativeTargetAsmPrinter();
+  CPUKernelManager() : tPool(cast::get_cpu_num_threads()) {
+    llvm::cantFail(initLLVMJIT_());
+  }
 
+  CPUKernelManager(int nWorkerThreads) : tPool(nWorkerThreads) {
     llvm::cantFail(initLLVMJIT_());
   }
 

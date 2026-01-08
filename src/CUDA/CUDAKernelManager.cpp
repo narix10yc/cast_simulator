@@ -65,7 +65,7 @@ void CUDAKernelInfo::displayInfo(utils::InfoLogger logger) const {
 }
 
 void CUDAKernelManager::displayInfo(utils::InfoLogger logger) const {
-  logger.put("Num Worker Threads", dispatcher.getNumWorkers())
+  logger.put("Num Worker Threads", tPool.getNumWorkers())
       .put("CU Device         ", cuDevice)
       .put("Primary CU Context", primaryCuCtx)
       .put("Primary CU Stream ", primaryCuStream);
@@ -134,15 +134,15 @@ void CUDAKernelManager::ExecutionResult::displayInfo(
       });
 }
 
-CUDAKernelManager::CUDAKernelManager(int nWorkerThreads, int deviceOrdinal)
-    : KernelManager<CUDAKernelInfo>(nWorkerThreads) {
+void CUDAKernelManager::init() {
   LLVMInitializeNVPTXTarget();
   LLVMInitializeNVPTXTargetInfo();
   LLVMInitializeNVPTXTargetMC();
   LLVMInitializeNVPTXAsmPrinter();
 
   CU_CHECK(cuInit(0));
-  CU_CHECK(cuDeviceGet(&cuDevice, deviceOrdinal));
+  // Always use device 0 for now
+  CU_CHECK(cuDeviceGet(&cuDevice, 0));
   CU_CHECK(cuDevicePrimaryCtxRetain(&primaryCuCtx, cuDevice));
   CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
   CU_CHECK(cuStreamCreate(&primaryCuStream, CU_STREAM_DEFAULT));
@@ -205,7 +205,7 @@ static inline llvm::OptimizationLevel wrapLLVMOptLevel(int llvmOptLevel) {
   return llvm::OptimizationLevel::O3;
 }
 
-// TODO: Current each call to this function creates a new set of analysis
+// TODO: Currently each call to this function creates a new set of analysis
 // managers. We could try to make these things thread-local for better
 // performance
 static llvm::Error optimizeLLVMIR_work(int llvmOptLevel,
@@ -591,11 +591,11 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
   auto* semaphore = initialLaunches_.push(kernel, er);
 
   // add compilation task to the dispatcher
-  dispatcher.enqueueMayErr([kernel, er, semaphore, this]() -> llvm::Error {
+  tPool.enqueueMayErr([kernel, er, semaphore, this]() -> llvm::Error {
     CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
     assert(semaphore != nullptr);
 
-    er->t_cubinPrepareStart = ExecutionResult::clock_t::now();
+    er->t_cubinPrepareStart = clock_t::now();
     {
       std::unique_lock lk(semaphore->mtx);
       auto ilStatus = semaphore->status;
@@ -604,7 +604,7 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
         semaphore->status = KernelSemaphore::Compiling;
         LLVM_DEBUG({
           std::lock_guard lk(execMtx_);
-          std::cerr << "Loading thread " << dispatcher.getWorkerID()
+          std::cerr << "Loading thread " << tPool.getWorkerID()
                     << " is preparing kernel " << kernel->getName() << "\n";
         });
         // unlock while doing the compilation
@@ -635,7 +635,7 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
         // some other thread is compiling the same kernel
         LLVM_DEBUG({
           std::lock_guard lk(execMtx_);
-          std::cerr << "Loading thread " << dispatcher.getWorkerID()
+          std::cerr << "Loading thread " << tPool.getWorkerID()
                     << " is waiting for kernel " << kernel->getName()
                     << " to be prepared\n";
         });
@@ -646,7 +646,7 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
       assert(semaphore->status == KernelSemaphore::Prepared);
     }
 
-    er->t_cubinPrepareFinish = ExecutionResult::clock_t::now();
+    er->t_cubinPrepareFinish = clock_t::now();
 
     // notify the exec thread that it may try to launch kernels
     er->status.store(ExecutionResult::ReadyToLaunch);
@@ -663,7 +663,7 @@ void CUDAKernelManager::syncKernelExecution(bool progressBar) {
   // blocks until all compilation tasks finish
   if (progressBar)
     std::cerr << "Waiting for all compilation tasks to finish...\n";
-  dispatcher.sync(progressBar);
+  tPool.sync(progressBar);
 
   {
     std::unique_lock lk(execMtx_);

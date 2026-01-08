@@ -1321,7 +1321,6 @@ llvm::Error CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
     } else {
       return expectedF.takeError();
     }
-
   } else {
     // super op gates are treated as normal gates with twice the number of
     // qubits

@@ -1,9 +1,8 @@
 #ifndef CAST_CORE_KERNEL_MANAGER_H
 #define CAST_CORE_KERNEL_MANAGER_H
 
-#include "cast/CPU/Config.h" // for cast::get_cpu_num_threads()
-#include "utils/TaskDispatcher.h"
 #include <llvm/IR/Module.h>
+
 #include <map>
 #include <ranges>
 
@@ -17,18 +16,8 @@ std::string mangleGraphName(const std::string& graphName);
 std::string demangleGraphName(const std::string& mangledName);
 } // namespace internal
 
-class KernelManagerBase {
-protected:
-  utils::TaskDispatcher dispatcher;
-
-  explicit KernelManagerBase(int nWorkerThreads)
-      : dispatcher(nWorkerThreads > 0 ? nWorkerThreads
-                                      : cast::get_cpu_num_threads()) {}
-};
-
-// A CRTP class for kernel managers.
-template <typename KernelInfoType>
-class KernelManager : public KernelManagerBase {
+// Base class for KernelManager. Manages kernel pools
+template <typename KernelInfoType> class KernelManager {
 protected:
   using KernelInfoPtr = std::unique_ptr<KernelInfoType>;
 
@@ -79,10 +68,7 @@ protected:
 
   /* --- iterator ---*/
 public:
-  explicit KernelManager(int nWorkerThreads)
-      : KernelManagerBase(nWorkerThreads) {
-    kernelPools_.insert({DEFAULT_POOL_NAME, Pool()});
-  }
+  explicit KernelManager() { kernelPools_.insert({DEFAULT_POOL_NAME, Pool()}); }
 
   KernelPools& pools() { return kernelPools_; }
   const KernelPools& pools() const { return kernelPools_; }

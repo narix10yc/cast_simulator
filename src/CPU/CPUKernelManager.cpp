@@ -1,6 +1,6 @@
 #include "cast/CPU/CPUKernelManager.h"
 #include "utils/Formats.h"
-#include "utils/TaskDispatcher.h"
+#include "utils/ThreadPool.h"
 
 #include <llvm/IR/Verifier.h>
 #include <llvm/Passes/PassBuilder.h>
@@ -56,7 +56,7 @@ void CPUKernelManager::displayInfo(utils::InfoLogger logger) const {
   for (const auto& [_, poolValue] : kernelPools_)
     nKernels += poolValue.size();
   logger.put("CPU Kernel Manager")
-      .put("Num of Threads", dispatcher.getNumWorkers())
+      .put("Num of Threads", tPool.getNumWorkers())
       .put("Num of Kernels", nKernels);
 }
 
@@ -131,12 +131,16 @@ llvm::Error CPUKernelManager::compileItem(PoolItem& item,
 }
 
 llvm::Error CPUKernelManager::initLLVMJIT_() {
+  llvm::InitializeNativeTarget();
+  llvm::InitializeNativeTargetAsmParser();
+  llvm::InitializeNativeTargetAsmPrinter();
+
   if (llvmJIT != nullptr)
     return llvm::Error::success();
 
   // eager JIT engine
   orc::LLJITBuilder eagerJitBuilder;
-  eagerJitBuilder.setNumCompileThreads(dispatcher.getNumWorkers());
+  eagerJitBuilder.setNumCompileThreads(tPool.getNumWorkers());
   auto tmp = eagerJitBuilder.create();
   if (!tmp) {
     return llvm::joinErrors(llvm::createStringError("Failed to create LLJIT"),
@@ -156,15 +160,15 @@ llvm::Error CPUKernelManager::compilePool(const std::string& poolName,
     return llvm::createStringError("Pool " + poolName + " not found");
 
   for (auto& item : it->second) {
-    dispatcher.enqueueMayErr([this, &item, optLevel]() -> llvm::Error {
+    tPool.enqueueMayErr([this, &item, optLevel]() -> llvm::Error {
       if (item.kernel->executable)
         return llvm::Error::success();
       return compileItem(item, optLevel);
     });
   }
 
-  dispatcher.sync(progressBar);
-  return dispatcher.takeError();
+  tPool.sync(progressBar);
+  return tPool.takeError();
 }
 
 llvm::Error CPUKernelManager::compileAllPools(OptimizationLevel optLevel,

@@ -4,17 +4,21 @@
 #ifndef CAST_CUDA_CUDAKERNELMANAGER_H
 #define CAST_CUDA_CUDAKERNELMANAGER_H
 
+#include "cast/CPU/Config.h"
 #include "cast/CUDA/CUDAStatevector.h"
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 
 #include "utils/InfoLogger.h"
+#include "utils/ThreadPool.h"
 
 #include <llvm/Support/Error.h>
 
+#include <atomic>
+#include <chrono>
+
 #include <cuda.h>
-#include <map>
 
 namespace cast {
 
@@ -60,9 +64,18 @@ struct CUDAKernelGenConfig {
 };
 
 class CUDAKernelManager : public KernelManager<CUDAKernelInfo> {
+  using clock_t = std::chrono::steady_clock;
+  using time_point_t = clock_t::time_point;
+
+private:
+  utils::ThreadPool<> tPool;
+
   CUdevice cuDevice;
   CUcontext primaryCuCtx = nullptr;
   CUstream primaryCuStream = nullptr;
+
+  // The initializer
+  void init();
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
@@ -73,10 +86,13 @@ class CUDAKernelManager : public KernelManager<CUDAKernelInfo> {
        const std::string& funcName,
        llvm::Module& llvmModule);
 
-  // Generate a CUDA kernel for the given gate. This function will wraps around
-  // when gate is a StandardQuantumGate (with or without noise) or
-  // SuperopQuantumGate, and call gen_ with a corresponding ComplexSquareMatrix.
-  // The generated kernel will be put into the given pool.
+  /// An internal function to generate a CUDA kernel and put the kerne in the
+  /// specified pool. This function wraps whether gate is a StandardQuantumGate
+  /// (with or without noise) or SuperopQuantumGate, and call `gen_` with a
+  /// corresponding ComplexSquareMatrix. The generated kernel will be put into
+  /// the given pool.
+  /// @param funcName: must be unique in the pool as should be guaranteed by the
+  /// caller.
   llvm::Error genCUDAGate_(const CUDAKernelGenConfig& config,
                            ConstQuantumGatePtr gate,
                            const std::string& funcName,
@@ -85,10 +101,6 @@ class CUDAKernelManager : public KernelManager<CUDAKernelInfo> {
   /* Kernel Execution Result */
 public:
   struct ExecutionResult {
-    using clock_t = std::chrono::steady_clock;
-    using time_point_t = clock_t::time_point;
-
-    // llvm::Error err = llvm::Error::success();
     std::string kernelName;
 
     // when the loading thread starts preparing the kernel
@@ -126,8 +138,12 @@ public:
       return t.count();
     }
 
-    // Get the kernel time in seconds (from CUevent)
-    float getKernelTime() const { return kernelTime_ms * 1e-3f; }
+    // Get the kernel time in seconds. Returns 0.0f if timing is not enabled.
+    float getKernelTime() const {
+      if (kernelTime_ms <= 0.0f)
+        return 0.0f;
+      return kernelTime_ms * 1e-3f;
+    }
   };
 
 private:
@@ -238,7 +254,9 @@ private:
   void execTh_work_();
 
 public:
-  CUDAKernelManager(int nWorkerThreads = 0, int deviceOrdinal = 0);
+  CUDAKernelManager() : tPool(cast::get_cpu_num_threads()) { init(); }
+
+  CUDAKernelManager(int nWorkerThreads) : tPool(nWorkerThreads) { init(); }
 
   CUDAKernelManager(const CUDAKernelManager&) = delete;
   CUDAKernelManager(CUDAKernelManager&&) = delete;
@@ -254,7 +272,7 @@ public:
   // provided, it must be unique among all kernels in the default pool.
   llvm::Error genGate(const CUDAKernelGenConfig& config,
                       ConstQuantumGatePtr gate,
-                      const std::string& funcName);
+                      const std::string& funcName = "");
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is
@@ -309,10 +327,10 @@ public:
     // Setting launch config with ongoing kernel launches is not allowed.
     // Potential inconsistency between when posing launch requests and actual
     // kernel execution
-    assert(dispatcher.isIdle());
+    assert(tPool.isIdle());
 
     // For compatibility (python api), we sync here
-    dispatcher.sync();
+    tPool.sync();
 
     launchConfig_.devicePtr = dData;
     launchConfig_.nQubitsSV = nQubitsSV;
@@ -352,12 +370,11 @@ public:
 
   /// Enqueue a kernel for launch. This is a non-blocking function and should
   /// only be called by the main thread. The order of kernel execution will
-  /// align with the order of calling this function. Use \c
-  /// syncKernelExecution() to wait for all kernels to finish running.
-  /// The returned object is read-only, and should only be accessed after
-  /// syncKernelExecution(). The returned object is invalidated upon the
-  /// destruction of this kernel manager or upon calling
-  /// clearExecutionResults().
+  /// align with the order of calling this function. Use `syncKernelExecution()`
+  /// to wait for all kernels to finish running. The returned object is
+  /// read-only, and should only be accessed after `syncKernelExecution()`. The
+  /// returned object is invalidated upon the destruction of this kernel manager
+  /// or upon calling `clearExecutionResults()`.
   /// @remark: We do not embed the ExecutionResult inside CUDAKernelInfo
   /// because users are allowed to launch the same kernel multiple times (for
   /// example, in benchmarking).
