@@ -20,7 +20,7 @@ function(handle_llvm_dep)
     # already set / cached
   elseif(DEFINED ENV{CAST_LLVM_ROOT})
     set(CAST_LLVM_ROOT "$ENV{CAST_LLVM_ROOT}" CACHE PATH
-      "Path to the LLVM release install prefix" FORCE)
+      "Path to the LLVM release install prefix")
   endif()
 
   # --- Optional dev/debug roots (preferred: CMake -D..., fallback: env) ---
@@ -31,17 +31,17 @@ function(handle_llvm_dep)
   elseif(DEFINED CAST_DEV_LLVM_ROOT)
     if(NOT DEFINED CAST_LLVM_ROOT)
       set(CAST_LLVM_ROOT "${CAST_DEV_LLVM_ROOT}/release-install" CACHE PATH
-        "Path to the LLVM release install prefix" FORCE)
+        "Path to the LLVM release install prefix")
     endif()
     set(CAST_LLVM_DEBUG_ROOT "${CAST_DEV_LLVM_ROOT}/debug-install" CACHE PATH
-      "Path to the llvm debug-install directory" FORCE)
+      "Path to the llvm debug-install directory")
   elseif(DEFINED ENV{CAST_DEV_LLVM_ROOT})
     if(NOT DEFINED CAST_LLVM_ROOT)
       set(CAST_LLVM_ROOT "$ENV{CAST_DEV_LLVM_ROOT}/release-install" CACHE PATH
-        "Path to the LLVM release install prefix" FORCE)
+        "Path to the LLVM release install prefix")
     endif()
     set(CAST_LLVM_DEBUG_ROOT "$ENV{CAST_DEV_LLVM_ROOT}/debug-install" CACHE PATH
-      "Path to the llvm debug-install directory" FORCE)
+      "Path to the llvm debug-install directory")
   endif()
 
   # --- Validation ---

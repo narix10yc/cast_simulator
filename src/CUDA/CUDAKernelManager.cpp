@@ -209,64 +209,28 @@ static inline llvm::OptimizationLevel wrapLLVMOptLevel(int llvmOptLevel) {
 // managers. We could try to make these things thread-local for better
 // performance
 static llvm::Error optimizeLLVMIR_work(int llvmOptLevel,
-                                       CUDAKernelInfo& kernel) {
+                                       CUDAKernelInfo& kernel,
+                                       CUDAJitTls& jitTls) {
   auto optLevel = wrapLLVMOptLevel(llvmOptLevel);
-
-  // --- Analysis managers (must be constructed in this order) ---
-  LoopAnalysisManager LAM;
-  FunctionAnalysisManager FAM;
-  CGSCCAnalysisManager CGAM;
-  ModuleAnalysisManager MAM;
-
-  // TODO: pass an explicit TargetMachine
-  PassBuilder PB(/*TM=*/nullptr);
-
-  // Register analyses and cross-proxies.
-  PB.registerLoopAnalyses(LAM);
-  PB.registerFunctionAnalyses(FAM);
-  PB.registerCGSCCAnalyses(CGAM);
-  PB.registerModuleAnalyses(MAM);
-  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
-
-  // Wrap default pipeline with verifiers (pre & post).
-  ModulePassManager MPM;
-  MPM.addPass(PB.buildPerModuleDefaultPipeline(optLevel));
-
-  // Run the pipeline for this module.
-  MPM.run(*kernel.llvmFunc->getParent(), MAM);
+  auto* llvmModule = kernel.llvmFunc->getParent();
+  jitTls.runOnModule(*llvmModule, optLevel);
 
   std::string errLog;
   llvm::raw_string_ostream rso(errLog);
-  if (llvm::verifyModule(*kernel.llvmFunc->getParent(), &rso))
+  if (llvm::verifyModule(*llvmModule, &rso))
     return llvm::createStringError("Module verification failed: " + errLog);
 
   return llvm::Error::success();
 }
 
 // TODO: use TLS to avoid creating target machine every time
-static llvm::Error compileLLVMIRToPTX_work(CUDAKernelInfo& kernel) {
-  std::string tripleStr = "nvptx64-nvidia-cuda";
-  std::string err;
-  const auto* target = TargetRegistry::lookupTarget(tripleStr, err);
-  if (!target) {
-    return llvm::createStringError("Failed to lookup target: " + err);
-  }
-
-  int major = 0, minor = 0;
-  cast::getCudaComputeCapability(major, minor);
-  std::ostringstream archOss;
-  archOss << "sm_" << major << minor;
-  std::string archString = archOss.str();
-
-  const auto createTargetMachine = [&]() -> TargetMachine* {
-    return target->createTargetMachine(
-        tripleStr, archString, "", {}, std::nullopt);
-  };
+static llvm::Error compileLLVMIRToPTX_work(CUDAKernelInfo& kernel,
+                                           CUDAJitTls& jitTls) {
+  auto& TM = jitTls.getTargetMachine();
 
   auto* llvmModule = kernel.llvmFunc->getParent();
-  Triple triple(tripleStr);
-  llvmModule->setTargetTriple(triple);
-  llvmModule->setDataLayout(createTargetMachine()->createDataLayout());
+  llvmModule->setTargetTriple(TM.getTargetTriple());
+  llvmModule->setDataLayout(TM.createDataLayout());
   std::string errorStr;
   llvm::raw_string_ostream sstream(errorStr);
   if (llvm::verifyModule(*llvmModule, &sstream))
@@ -275,7 +239,7 @@ static llvm::Error compileLLVMIRToPTX_work(CUDAKernelInfo& kernel) {
   raw_pwrite_vector_ostream vecStream(kernel.ptxString);
   legacy::PassManager PM;
   // this function returns false on success
-  auto r = createTargetMachine()->addPassesToEmitFile(
+  auto r = TM.addPassesToEmitFile(
       PM, vecStream, nullptr, CodeGenFileType::AssemblyFile);
   if (r)
     return llvm::createStringError("LLVM target machine can't emit PTX");
@@ -611,11 +575,12 @@ CUDAKernelManager::enqueueKernelLaunch(CUDAKernelInfo& kernel_) {
         lk.unlock();
         assert(kernel != nullptr);
         if (kernel->cubinData.empty()) {
+          auto& jitTls = tPool.getTLS();
           // If PTX is not available, we optimize LLVM IR and generate PTX
           if (kernel->ptxString.empty()) {
-            auto e = optimizeLLVMIR_work(1, *kernel);
+            auto e = optimizeLLVMIR_work(1, *kernel, jitTls);
             e = llvm::joinErrors(std::move(e),
-                                 compileLLVMIRToPTX_work(*kernel));
+                                 compileLLVMIRToPTX_work(*kernel, jitTls));
             if (e) {
               return llvm::joinErrors(
                   llvm::createStringError(

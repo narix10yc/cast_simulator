@@ -5,6 +5,7 @@
 #define CAST_CUDA_CUDAKERNELMANAGER_H
 
 #include "cast/CPU/Config.h"
+#include "cast/CUDA/CUDAJitTls.h"
 #include "cast/CUDA/CUDAStatevector.h"
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
@@ -68,7 +69,7 @@ class CUDAKernelManager : public KernelManager<CUDAKernelInfo> {
   using time_point_t = clock_t::time_point;
 
 private:
-  utils::ThreadPool<> tPool;
+  utils::ThreadPool<CUDAJitTls> tPool;
 
   CUdevice cuDevice;
   CUcontext primaryCuCtx = nullptr;

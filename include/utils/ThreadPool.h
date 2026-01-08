@@ -163,9 +163,11 @@ public:
     nTotalTasks = 0;
   }
 
-  static TLS& tls() {
-    if constexpr (std::is_void_v<TLS>)
-      return nullptr;
+  [[nodiscard]]
+  // Get the thread-local storage instance for the current worker thread.
+  // @note This method should only be called inside worker threads.
+  static TLS& getTLS() {
+    static_assert(hasTLS);
     return tls_local_instance_;
   }
 
