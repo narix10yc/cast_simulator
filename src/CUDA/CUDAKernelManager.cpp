@@ -15,6 +15,8 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/TargetParser/Host.h>
 
+#include <nvJitLink.h>
+
 #define DEBUG_TYPE "kernel-mgr-cuda"
 #include <llvm/Support/Debug.h>
 
@@ -249,66 +251,37 @@ static llvm::Error compileLLVMIRToPTX_work(CUDAKernelInfo& kernel,
   return llvm::Error::success();
 }
 
-// Must call cuCtxSetCurrent before calling this function
 static void compileToCubin_work(int cuOptLevel, CUDAKernelInfo& kernel) {
   assert(!kernel.ptxString.empty());
 
-  // JIT/link options
-  constexpr size_t LOG_SZ = 1 << 15;
-  std::vector<char> info(LOG_SZ, 0), err(LOG_SZ, 0);
-  float wallTime = 0.0f;
+  std::vector<const char*> options;
+  int major, minor;
+  cast::getCudaComputeCapability(major, minor);
+  std::string archOption = "-arch=sm_" + std::to_string(10 * major + minor);
+  options.push_back(archOption.c_str());
 
-  unsigned int fastCompile = 1;
-  unsigned int targetFromCtx = 1;
+  nvJitLinkHandle handle;
+  NVJITLINK_CHECK(handle,
+                  nvJitLinkCreate(&handle, options.size(), options.data()));
 
-  CUjit_option options[] = {CU_JIT_OPTIMIZATION_LEVEL,
-                            CU_JIT_FAST_COMPILE,
-                            CU_JIT_TARGET_FROM_CUCONTEXT,
-                            CU_JIT_INFO_LOG_BUFFER,
-                            CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
-                            CU_JIT_ERROR_LOG_BUFFER,
-                            CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
-                            CU_JIT_WALL_TIME,
-                            CU_JIT_LOG_VERBOSE};
+  NVJITLINK_CHECK(handle,
+                  nvJitLinkAddData(handle,
+                                   NVJITLINK_INPUT_PTX,
+                                   kernel.ptxString.data(),
+                                   kernel.ptxString.size(),
+                                   nullptr));
 
-  void* optionVals[] = {(void*)(uintptr_t)cuOptLevel,
-                        (void*)(uintptr_t)fastCompile,
-                        (void*)(uintptr_t)targetFromCtx,
-                        info.data(),
-                        (void*)(uintptr_t)LOG_SZ,
-                        err.data(),
-                        (void*)(uintptr_t)LOG_SZ,
-                        &wallTime,
-                        (void*)(uintptr_t)1};
-
-  CUlinkState linkState = nullptr;
-
-  CU_CHECK(cuLinkCreate((unsigned int)(sizeof(options) / sizeof(options[0])),
-                        options,
-                        optionVals,
-                        &linkState));
-
-  // PTX MUST be NUL-terminated
-  CU_CHECK(cuLinkAddData(linkState,
-                         CU_JIT_INPUT_PTX,
-                         (void*)kernel.ptxString.c_str(),
-                         kernel.ptxString.size() + 1,
-                         kernel.getName().data(),
-                         0,
-                         nullptr,
-                         nullptr));
-
-  void* cubinOut = nullptr;
+  NVJITLINK_CHECK(handle, nvJitLinkComplete(handle));
   size_t cubinSize = 0;
-  CU_CHECK(cuLinkComplete(linkState, &cubinOut, &cubinSize));
+  NVJITLINK_CHECK(handle, nvJitLinkGetLinkedCubinSize(handle, &cubinSize));
+  void* cubinOut = malloc(cubinSize);
+  NVJITLINK_CHECK(handle, nvJitLinkGetLinkedCubin(handle, cubinOut));
 
-  // copy cubinOut to the kernel info
-  // cubinOut is owned by the link state, so will be invalidated after
-  // calling cuLinkDestroy
   kernel.cubinData.assign(static_cast<uint8_t*>(cubinOut),
                           static_cast<uint8_t*>(cubinOut) + cubinSize);
 
-  CU_CHECK(cuLinkDestroy(linkState));
+  free(cubinOut);
+  NVJITLINK_CHECK(handle, nvJitLinkDestroy(&handle));
 }
 
 namespace {

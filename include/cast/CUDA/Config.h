@@ -30,11 +30,11 @@
 // Runtime API error checking, abort on non-success values
 #define CUDA_CHECK(CALL)                                                       \
   do {                                                                         \
-    cudaError_t logerr = CALL;                                                 \
-    if (logerr != cudaSuccess) {                                               \
+    cudaError_t e = CALL;                                                      \
+    if (e != cudaSuccess) {                                                    \
       std::cerr << "\033[31m[CUDA Runtime Error]\033[0m "                      \
-                << cudaGetErrorString(logerr) << " (at " << __FILE__ << ":"    \
-                << __LINE__ << ")" << " in CALL: " << #CALL << "\n";           \
+                << cudaGetErrorString(e) << " (at " << __FILE__ << ":"         \
+                << __LINE__ << ")" << " in CALL: " << #CALL << '\n';           \
       std::abort();                                                            \
     }                                                                          \
   } while (0)
@@ -42,14 +42,33 @@
 // Driver API error checking, abort on non-success values
 #define CU_CHECK(CALL)                                                         \
   do {                                                                         \
-    CUresult logerr = CALL;                                                    \
-    if (logerr != CUDA_SUCCESS) {                                              \
+    CUresult e = CALL;                                                         \
+    if (e != CUDA_SUCCESS) {                                                   \
       const char* errStr;                                                      \
-      cuGetErrorString(logerr, &errStr);                                       \
+      cuGetErrorString(e, &errStr);                                            \
       std::cerr << "\033[31m[CUDA Driver Error]\033[0m " << errStr             \
-                << " (code " << logerr << ")" << " at " << __FILE__ << ":"     \
-                << __LINE__ << " in CALL: " << #CALL << "\n";                  \
+                << " (code " << e << ")" << " at " << __FILE__ << ":"          \
+                << __LINE__ << " in CALL: " << #CALL << '\n';                  \
       std::abort();                                                            \
+    }                                                                          \
+  } while (0)
+
+#define NVJITLINK_CHECK(HANDLE, CALL)                                          \
+  do {                                                                         \
+    nvJitLinkResult result = CALL;                                             \
+    if (result != NVJITLINK_SUCCESS) {                                         \
+      std::cerr << "\033[31m[NVJITLink Error]\033[0m " #CALL                   \
+                   " failed with error "                                       \
+                << result << ": ";                                             \
+      size_t lsize;                                                            \
+      result = nvJitLinkGetErrorLogSize(HANDLE, &lsize);                       \
+      if (result == NVJITLINK_SUCCESS && lsize > 0) {                          \
+        char* log = (char*)malloc(lsize);                                      \
+        if (nvJitLinkGetErrorLog(HANDLE, log) == NVJITLINK_SUCCESS)            \
+          std::cerr << log << '\n';                                            \
+        free(log);                                                             \
+      }                                                                        \
+      exit(1);                                                                 \
     }                                                                          \
   } while (0)
 
@@ -77,10 +96,10 @@
 // Runtime API error checking
 #define CUDA_CHECK(CALL)                                                       \
   do {                                                                         \
-    cudaError_t logerr = CALL;                                                 \
-    if (logerr != cudaSuccess) {                                               \
+    cudaError_t e = CALL;                                                      \
+    if (e != cudaSuccess) {                                                    \
       std::cerr << "\033[31m[CUDA Runtime Error]\033[0m "                      \
-                << cudaGetErrorString(logerr) << " (at " << __FILE__ << ":"    \
+                << cudaGetErrorString(e) << " (at " << __FILE__ << ":"         \
                 << __LINE__ << ")" << " in CALL: " << #CALL << "\n";           \
     }                                                                          \
   } while (0)
@@ -88,12 +107,12 @@
 // Driver API error checking
 #define CU_CHECK(CALL)                                                         \
   do {                                                                         \
-    CUresult logerr = CALL;                                                    \
-    if (logerr != CUDA_SUCCESS) {                                              \
+    CUresult e = CALL;                                                         \
+    if (e != CUDA_SUCCESS) {                                                   \
       const char* errStr;                                                      \
-      cuGetErrorString(logerr, &errStr);                                       \
+      cuGetErrorString(e, &errStr);                                            \
       std::cerr << "\033[31m[CUDA Driver Error]\033[0m " << errStr             \
-                << " (code " << logerr << ")" << " at " << __FILE__ << ":"     \
+                << " (code " << e << ")" << " at " << __FILE__ << ":"          \
                 << __LINE__ << " in CALL: " << #CALL << "\n";                  \
     }                                                                          \
   } while (0)
