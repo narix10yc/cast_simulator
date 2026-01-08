@@ -171,6 +171,18 @@ void bind_cudaKernelManager(py::module_& m) {
           py::arg("pool_name"),
           py::return_value_policy::reference_internal)
       .def(
+          "get_ptx",
+          [](cast::CUDAKernelManager& self,
+             cast::CUDAKernelInfo& kernel) -> std::string {
+            auto ptx = self.getPTX(kernel);
+            if (!ptx) {
+              throw std::runtime_error("Failed to get PTX: " +
+                                       llvm::toString(ptx.takeError()));
+            }
+            return *ptx;
+          },
+          py::arg("kernel"))
+      .def(
           "launch_kernel_fp32",
           [](cast::CUDAKernelManager& self,
              cast::CUDAStatevectorFP32& sv,

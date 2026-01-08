@@ -661,15 +661,21 @@ CUDAKernelManager::getKernelByName(const std::string& llvmFuncName) const {
   return nullptr;
 }
 
-void CUDAKernelManager::dumpPTX(std::ostream& os,
-                                const std::string& llvmFuncName) const {
-  const auto* kernelInfo = getKernelByName(llvmFuncName);
-  if (!kernelInfo) {
-    os << RED("[Error] ") << "Kernel with name '" << llvmFuncName
-       << "' not found.\n";
-    return;
-  }
-  os << kernelInfo->ptxString << "\n";
+llvm::Expected<std::string> CUDAKernelManager::getPTX(CUDAKernelInfo& kernel) {
+  // If PTX is already available, return it directly
+  if (!kernel.ptxString.empty())
+    return kernel.ptxString;
+
+  // Otherwise, we need to compile the LLVM IR to PTX
+  CU_CHECK(cuCtxSetCurrent(primaryCuCtx));
+  auto& jitTls = tPool.getTLS();
+  auto e1 = optimizeLLVMIR_work(1, kernel, jitTls);
+  auto e2 = compileLLVMIRToPTX_work(kernel, jitTls);
+  if (auto e = llvm::joinErrors(std::move(e1), std::move(e2)))
+    return std::move(e);
+
+  assert(!kernel.ptxString.empty());
+  return kernel.ptxString;
 }
 
 #undef DEBUG_TYPE

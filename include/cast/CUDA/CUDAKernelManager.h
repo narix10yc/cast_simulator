@@ -283,7 +283,9 @@ public:
                             const ir::CircuitGraphNode& graph,
                             const std::string& poolName);
 
-  void dumpPTX(std::ostream& os, const std::string& kernelName) const;
+  /// Get the PTX string of a kernel. This will trigger a blocking JIT
+  /// compilation if the PTX is not ready yet.
+  llvm::Expected<std::string> getPTX(CUDAKernelInfo& kernel);
 
   void clearPTX() {
     for (auto& kernel : all_kernels())
