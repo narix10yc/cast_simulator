@@ -1,4 +1,4 @@
-#include "cast/ADT/PatternMatrix.h"
+#include "cast/Core/PatternMatrix.h"
 #include "cast/ADT/ComplexSquareMatrix.h"
 
 using namespace cast;

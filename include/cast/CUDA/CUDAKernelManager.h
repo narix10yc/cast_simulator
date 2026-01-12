@@ -7,21 +7,27 @@
 #include "cast/CPU/Config.h"
 #include "cast/CUDA/CUDAJitTls.h"
 #include "cast/CUDA/CUDAStatevector.h"
+#include "cast/CUDA/Config.h"
 #include "cast/Core/IRNode.h"
 #include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 
 #include "utils/InfoLogger.h"
 #include "utils/ThreadPool.h"
+#include "llvm/IR/LLVMContext.h"
 
+#include <condition_variable>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/TargetSelect.h>
 
-#include <atomic>
 #include <chrono>
 
 #include <cuda.h>
+#include <mutex>
 
 namespace cast {
+
+class CUDAKernelManager;
 
 enum class CUDAMatrixLoadMode {
   UseMatImmValues,
@@ -29,34 +35,52 @@ enum class CUDAMatrixLoadMode {
   LoadInConstMemSpace
 };
 
-struct CUDAKernelInfo {
-  std::string ptxString;
-  std::vector<uint8_t> cubinData;
-  ConstQuantumGatePtr gate = nullptr;
-  Precision precision = Precision::Unknown;
+struct CudaKernel {
+  std::mutex mtx;
+  std::condition_variable cv;
+
+  // LLVMContext is not thread-safe -- for ease of parallel JIT compilation,
+  // each kernel has its own LLVM context and module. Each module contains only
+  // one function.
+  std::unique_ptr<llvm::LLVMContext> llvmContext = nullptr;
+  std::unique_ptr<llvm::Module> llvmModule = nullptr;
   llvm::Function* llvmFunc = nullptr;
 
-  void update(ConstQuantumGatePtr gate,
-              Precision precision,
-              llvm::Function* llvmFunc) {
-    this->gate = gate;
-    this->precision = precision;
-    this->llvmFunc = llvmFunc;
+  // necessary info about this kernel
+  ConstQuantumGatePtr gate = nullptr;
+  Precision precision = Precision::Unknown;
+
+  // JIT session data
+  std::string ptxString;
+  std::vector<uint8_t> cubinData;
+
+  // status for lock-free access
+  enum Status {
+    // not yet generated
+    Empty,
+    // enqueued for compilation
+    Pending,
+    // being compiled
+    Compiling,
+    // finished compilation
+    Ready,
+  };
+  std::atomic<Status> status = Status::Empty;
+
+  /// Note: the caller must ensure the uniqueness of name in the pool
+  explicit CudaKernel(const std::string& name) {
+    llvmContext = std::make_unique<llvm::LLVMContext>();
+    llvmModule = std::make_unique<llvm::Module>(name + "_module", *llvmContext);
   }
 
-  void clearPTX() { ptxString.clear(); }
-  void clearCubin() { cubinData.clear(); }
-
-  std::string_view getName() const { return llvmFunc->getName(); }
-
   void displayInfo(utils::InfoLogger logger) const;
+
 }; // struct CUDAKernelInfo
 
 struct CUDAKernelGenConfig {
   Precision precision;
   double zeroTol = 1e-8;
   double oneTol = 1e-8;
-
   CUDAMatrixLoadMode matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
 
   explicit CUDAKernelGenConfig(Precision p = Precision::FP64) : precision(p) {}
@@ -64,19 +88,47 @@ struct CUDAKernelGenConfig {
   void displayInfo(utils::InfoLogger logger) const;
 };
 
-class CUDAKernelManager : public KernelManager<CUDAKernelInfo> {
+class CUDAKernelHandler {
+  CUDAKernelManager& km;
+  CudaKernel* kernel;
+
+public:
+  CUDAKernelHandler(CUDAKernelManager& km, CudaKernel* kernel)
+      : km(km), kernel(kernel) {}
+
+  void displayInfo(utils::InfoLogger logger) const {
+    kernel->displayInfo(logger);
+  }
+};
+
+/// Manages cuda-related stuff: devices, contexts, streams, modules, etc.
+struct CudaCtxManager {
+
+  CudaCtxManager() { CU_CHECK(cuInit(0)); }
+};
+
+class CUDAKernelManager {
   using clock_t = std::chrono::steady_clock;
   using time_point_t = clock_t::time_point;
 
 private:
   utils::ThreadPool<CUDAJitTls> tPool;
+  CudaCtxManager cuMgr;
 
-  CUdevice cuDevice;
-  CUcontext primaryCuCtx = nullptr;
-  CUstream primaryCuStream = nullptr;
+  using KernelInfoPtr = std::unique_ptr<CudaKernel>;
+  using Pool = std::vector<KernelInfoPtr>;
 
-  // The initializer
-  void init();
+  std::map<std::string, Pool> kernelPools_;
+  constexpr static const char* DEFAULT_POOL_NAME = "_default_";
+
+  void init() {
+    LLVMInitializeNVPTXTarget();
+    LLVMInitializeNVPTXTargetInfo();
+    LLVMInitializeNVPTXTargetMC();
+    LLVMInitializeNVPTXAsmPrinter();
+
+    kernelPools_.insert({DEFAULT_POOL_NAME, Pool()});
+  }
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
   // target qubits. This function contains the core logics to emit LLVM IR.
@@ -87,172 +139,20 @@ private:
        const std::string& funcName,
        llvm::Module& llvmModule);
 
-  /// An internal function to generate a CUDA kernel and put the kerne in the
+  /// An internal function to generate a CUDA kernel and put the kernel in the
   /// specified pool. This function wraps whether gate is a StandardQuantumGate
   /// (with or without noise) or SuperopQuantumGate, and call `gen_` with a
   /// corresponding ComplexSquareMatrix. The generated kernel will be put into
   /// the given pool.
   /// @param funcName: must be unique in the pool as should be guaranteed by the
   /// caller.
-  llvm::Error genCUDAGate_(const CUDAKernelGenConfig& config,
-                           ConstQuantumGatePtr gate,
-                           const std::string& funcName,
-                           Pool& pool);
+  /// @return: the generated CudaKernel.
+  llvm::Expected<CudaKernel*> genCUDAGate_(const CUDAKernelGenConfig& config,
+                                           ConstQuantumGatePtr gate,
+                                           const std::string& funcName,
+                                           Pool& pool);
 
-  /* Kernel Execution Result */
-public:
-  struct ExecutionResult {
-    std::string kernelName;
-
-    // when the loading thread starts preparing the kernel
-    time_point_t t_cubinPrepareStart;
-    // when the loading thread finishes preparing the kernel
-    time_point_t t_cubinPrepareFinish;
-
-    // kernel execution time in milliseconds
-    // Negative values indicate timing not enabled
-    float kernelTime_ms = -1.0f;
-
-    enum Status {
-      // The initial launch status
-      Pending,
-      // Marked by loading threads after cubin is ready
-      ReadyToLaunch,
-      // Marked by the exec thread after cuLaunchKernel
-      Running,
-      // Marked by the cuda callback thread after kernel finishes
-      Finished,
-      // Marked by the exec thread after unloading the module
-      CleanedUp
-    };
-
-    std::atomic<Status> status = Pending;
-
-    ExecutionResult() = default;
-
-    void displayInfo(utils::InfoLogger logger) const;
-
-    // Get the compilation time in seconds
-    float getCompileTime() const {
-      std::chrono::duration<float> t(t_cubinPrepareFinish -
-                                     t_cubinPrepareStart);
-      return t.count();
-    }
-
-    // Get the kernel time in seconds. Returns 0.0f if timing is not enabled.
-    float getKernelTime() const {
-      if (kernelTime_ms <= 0.0f)
-        return 0.0f;
-      return kernelTime_ms * 1e-3f;
-    }
-  };
-
-private:
-  std::deque<ExecutionResult> execResults_;
-
-  /* Launch Task Management */
-private:
-  struct InitialLaunch {
-    CUDAKernelInfo* kernel;
-    ExecutionResult* er;
-  }; // struct InitialLaunch
-
-  struct KernelSemaphore {
-    std::mutex mtx{};
-    std::condition_variable cv{};
-    enum Status { Pending, Compiling, Prepared };
-    Status status = Pending;
-    KernelSemaphore() = default;
-  };
-
-  struct InitialLaunchQueue {
-  private:
-    std::mutex mtx_;
-    std::deque<InitialLaunch> queue_;
-    // There should be a reason we don't use shared_ptr here (can't remember)
-    struct Semaphore {
-      std::unique_ptr<KernelSemaphore> semaphore;
-      int refCount;
-    };
-    std::map<CUDAKernelInfo*, Semaphore> semaphores_;
-
-  public:
-    KernelSemaphore* push(CUDAKernelInfo* kernel, ExecutionResult* er) {
-      std::lock_guard lock(mtx_);
-      queue_.emplace_back(kernel, er);
-      if (semaphores_.find(kernel) == semaphores_.end())
-        semaphores_[kernel] = {std::make_unique<KernelSemaphore>(), 1};
-      else
-        semaphores_[kernel].refCount += 1;
-      return semaphores_[kernel].semaphore.get();
-    }
-
-    void pop(CUDAKernelInfo*& outKernel, ExecutionResult*& outEr) {
-      std::lock_guard lock(mtx_);
-      assert(!queue_.empty());
-      outKernel = queue_.front().kernel;
-      outEr = queue_.front().er;
-      queue_.pop_front();
-      auto spIt = semaphores_.find(outKernel);
-      assert(spIt != semaphores_.end());
-      spIt->second.refCount -= 1;
-      if (spIt->second.refCount == 0)
-        semaphores_.erase(spIt);
-    }
-
-    bool hasReadyToLaunch() {
-      std::lock_guard lock(mtx_);
-      if (queue_.empty())
-        return false;
-      return queue_.front().er->status.load() == ExecutionResult::ReadyToLaunch;
-    }
-
-    bool empty() {
-      std::lock_guard lock(mtx_);
-      return queue_.empty();
-    }
-
-    size_t size() {
-      std::lock_guard lock(mtx_);
-      return queue_.size();
-    }
-
-    void clear() {
-      std::lock_guard lock(mtx_);
-      queue_.clear();
-    }
-  };
-
-  InitialLaunchQueue initialLaunches_;
-
-  // execution thread
-  std::thread execTh_;
-  bool execStopFlag_ = false;
-  std::mutex execMtx_;
-
-  std::condition_variable execCV_;
-  std::condition_variable syncCV_;
-
-  enum SyncStatus { NotSyncing, RequestSyncing, Synced };
-  // To load and store under execMtx_
-  SyncStatus syncFlag_ = NotSyncing;
-
-  // We need launch config because it is shared between the thread that poses
-  // launch requests and the execution threads that actually launches the
-  // kernels.
-  struct LaunchConfig {
-    CUdeviceptr devicePtr = 0;
-    int nQubitsSV = 0;
-    unsigned blockSize = 0;
-  };
-
-  LaunchConfig launchConfig_;
-
-  // timing enabled by default
-  bool timingEnabled_ = true;
-
-  // execution thread work
-  void execTh_work_();
+  void enqueueForCompilation(CudaKernel* kernel);
 
 public:
   CUDAKernelManager() : tPool(cast::get_cpu_num_threads()) { init(); }
@@ -264,16 +164,21 @@ public:
   CUDAKernelManager& operator=(const CUDAKernelManager&) = delete;
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
-  ~CUDAKernelManager();
+  ~CUDAKernelManager() = default;
 
   void displayInfo(utils::InfoLogger logger) const;
 
-  // Generate a kernel for a single gate into the default kernel pool.
-  // \c funcName: if empty, a default name "k_<index>" will be assigned. If
-  // provided, it must be unique among all kernels in the default pool.
-  llvm::Error genGate(const CUDAKernelGenConfig& config,
-                      ConstQuantumGatePtr gate,
-                      const std::string& funcName = "");
+  Pool& getDefaultPool() { return kernelPools_.at(DEFAULT_POOL_NAME); }
+
+  /// Generate a kernel for a single gate into the default kernel pool.
+  /// @param funcName: if empty, a default name "k_<index>" will be assigned. If
+  /// provided, it must be unique among all kernels in the default pool.
+  /// Unlike `CPUKernelManager`, here the generated kernel will be enqueued into
+  /// JIT compilation session. So the returned kernel handler may not be ready
+  /// for inspection immediately.
+  llvm::Expected<CUDAKernelHandler> genGate(const CUDAKernelGenConfig& config,
+                                            ConstQuantumGatePtr gate,
+                                            const std::string& funcName = "");
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is
@@ -283,142 +188,23 @@ public:
                             const ir::CircuitGraphNode& graph,
                             const std::string& poolName);
 
-  /// Get the PTX string of a kernel. This will trigger a blocking JIT
-  /// compilation if the PTX is not ready yet.
-  llvm::Expected<std::string> getPTX(CUDAKernelInfo& kernel);
+  /* JIT Session */
+private:
+  static constexpr size_t BUFFER_SIZE = 4;
+  struct RingBuffer {
+    std::array<CudaKernel*, BUFFER_SIZE> data;
 
-  void clearPTX() {
-    for (auto& kernel : all_kernels())
-      kernel->clearPTX();
-  }
+    CudaKernel*& operator[](size_t idx) { return data[idx % BUFFER_SIZE]; }
+  };
 
-  void clearCubin() {
-    for (auto& kernel : all_kernels())
-      kernel->clearCubin();
-  }
+  RingBuffer buffer_;
 
-  CUcontext getPrimaryCUContext() const { return primaryCuCtx; }
-  CUstream getPrimaryCUStream() const { return primaryCuStream; }
+public:
+  /// Wait for all enqueued kernel compilations to finish.
+  void syncCompilation();
 
-  /* Get Kernels */
+  void syncKernelExecution();
 
-  unsigned numKernels() {
-    unsigned count = 0;
-    for (const auto& [name, items] : kernelPools_)
-      count += items.size();
-    return count;
-  }
-
-  void clearGraphKernels(const std::string& graphName) {
-    auto it = kernelPools_.find(graphName);
-    if (it != kernelPools_.end())
-      kernelPools_.erase(it);
-  }
-
-  // Get kernel by name. Return nullptr if not found.
-  CUDAKernelInfo* getKernelByName(const std::string& llvmFuncName);
-
-  // Get kernel by name. Return nullptr if not found.
-  const CUDAKernelInfo* getKernelByName(const std::string& llvmFuncName) const;
-
-  /* --- Kernel Launch --- */
-
-  // No lock/atomic needed because this is only called by the main thread.
-  // launchConfig_ is only accessed after calling setLaunchConfig().
-  void
-  setLaunchConfig(CUdeviceptr dData, int nQubitsSV, unsigned blockSize = 64) {
-    // Setting launch config with ongoing kernel launches is not allowed.
-    // Potential inconsistency between when posing launch requests and actual
-    // kernel execution
-    assert(tPool.isIdle());
-
-    // For compatibility (python api), we sync here
-    tPool.sync();
-
-    launchConfig_.devicePtr = dData;
-    launchConfig_.nQubitsSV = nQubitsSV;
-    launchConfig_.blockSize = blockSize;
-  }
-
-  bool isLaunchConfigValid() const {
-    if (launchConfig_.devicePtr == 0)
-      return false;
-    if (launchConfig_.nQubitsSV <= 0)
-      return false;
-
-    switch (launchConfig_.blockSize) {
-    case 32:
-    case 64:
-    case 128:
-    case 256:
-    case 512:
-    case 1024:
-      return true;
-    default:
-      return false;
-    }
-  }
-
-  void setLaunchConfig(CUDAStatevectorFP32& sv, unsigned blockSize = 64) {
-    setLaunchConfig(sv.getDevicePtr(), sv.nQubits(), blockSize);
-  }
-
-  void setLaunchConfig(CUDAStatevectorFP64& sv, unsigned blockSize = 64) {
-    setLaunchConfig(sv.getDevicePtr(), sv.nQubits(), blockSize);
-  }
-
-  void enableTiming(bool enable = true) { timingEnabled_ = enable; }
-
-  void clearExecutionResults() { execResults_.clear(); }
-
-  /// Enqueue a kernel for launch. This is a non-blocking function and should
-  /// only be called by the main thread. The order of kernel execution will
-  /// align with the order of calling this function. Use `syncKernelExecution()`
-  /// to wait for all kernels to finish running. The returned object is
-  /// read-only, and should only be accessed after `syncKernelExecution()`. The
-  /// returned object is invalidated upon the destruction of this kernel manager
-  /// or upon calling `clearExecutionResults()`.
-  /// @remark: We do not embed the ExecutionResult inside CUDAKernelInfo
-  /// because users are allowed to launch the same kernel multiple times (for
-  /// example, in benchmarking).
-  const ExecutionResult* enqueueKernelLaunch(CUDAKernelInfo& kernel);
-
-  float getTotalExecTime() const {
-    float total = 0.0f;
-    for (const auto& er : execResults_)
-      total += er.getKernelTime();
-    return total;
-  }
-
-  std::vector<const ExecutionResult*>
-  enqueueKernelLaunchesFromGraph(const std::string& graphName) {
-    auto it = kernelPools_.find(graphName);
-    if (it == kernelPools_.end())
-      return {}; // empty vector
-
-    std::vector<const ExecutionResult*> results;
-    results.reserve(it->second.size());
-
-    for (auto& item : it->second) {
-      const auto* res = enqueueKernelLaunch(*item.kernel);
-      if (res != nullptr)
-        results.push_back(res);
-    }
-    return results;
-  }
-
-  /// A blocking method that waits for all enqueued kernels to finish
-  /// execution. This should only be called by the main thread.
-  void syncKernelExecution(bool progressBar = false);
-
-  // TODO: not implemented yet
-  void launchCUDAKernelParam(void* dData,
-                             int nQubits,
-                             const CUDAKernelInfo& kernelInfo,
-                             void* dMatPtr,
-                             int blockDim = 64) {
-    assert(false && "Not implemented yet");
-  }
 }; // class CUDAKernelManager
 
 } // namespace cast
