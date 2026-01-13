@@ -5,12 +5,14 @@
 #include <cmath>
 #include <complex>
 #include <cstring> // for std::memcpy
+#include <iostream>
+
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <iostream>
 
 namespace cast {
 namespace internal {
+/// A helper class that relies on CUDA Runtime API to handle device data.
 template <typename ScalarType> struct HelperCUDAKernels {
   static void
   multiplyByConstant(ScalarType* dArr, ScalarType constant, size_t size);
@@ -29,12 +31,16 @@ extern template struct HelperCUDAKernels<float>;
 extern template struct HelperCUDAKernels<double>;
 } // namespace internal
 
-/// @brief A helper class that relies on CUDA Runtime API to handle device data.
-/// Notice that if using \c CUDAKernelManager, \c CUDAKernelManager instances
-/// must appear *before* any \c CUDAStatevector instances, due to the order they
-/// are destructed.
-/// @tparam ScalarType
-template <typename ScalarType> class CUDAStatevector {
+class CUDAStatevectorBase {
+public:
+  virtual int nQubits() const = 0;
+  virtual CUdeviceptr getDevicePtr() const = 0;
+
+  virtual ~CUDAStatevectorBase() = default;
+};
+
+template <typename ScalarType>
+class CUDAStatevector : public CUDAStatevectorBase {
 private:
 public:
   int nQubits_;
@@ -83,10 +89,10 @@ public:
   CUDAStatevector& operator=(const CUDAStatevector&);
   CUDAStatevector& operator=(CUDAStatevector&&);
 
-  int nQubits() const { return nQubits_; }
+  int nQubits() const override { return nQubits_; }
   ScalarType* dData() const { return dData_; }
 
-  CUdeviceptr getDevicePtr() const {
+  CUdeviceptr getDevicePtr() const override {
     return reinterpret_cast<CUdeviceptr>(dData_);
   }
 

@@ -1,10 +1,14 @@
 #ifndef CAST_UTILS_INFOLOGGER_H
 #define CAST_UTILS_INFOLOGGER_H
 
+#include <concepts>
 #include <functional>
 #include <ostream>
 #include <span>
 #include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 
 // To provide an specialization for cast::Precision
 #include "cast/Core/Precision.h"
@@ -13,6 +17,21 @@ namespace utils {
 
 class InfoLogger {
   std::ostream& os_;
+
+  template <typename Label> static std::string label_to_string_(Label&& label) {
+    if constexpr (std::is_same_v<std::decay_t<Label>, std::string>) {
+      return label;
+    } else if constexpr (std::is_convertible_v<Label, std::string_view>) {
+      return std::string(std::string_view(label));
+    } else {
+      return std::string(std::forward<Label>(label));
+    }
+  }
+
+  template <typename Label>
+  static constexpr bool is_label_v =
+      std::is_convertible_v<Label, std::string_view> ||
+      std::constructible_from<std::string, Label>;
 
   template <typename T> void put_format_(std::ostream& os) {
     if constexpr (std::is_floating_point_v<T>) {
@@ -33,26 +52,35 @@ public:
   // Get the raw ostream attached to this InfoLogger.
   std::ostream& raw() { return os_; }
 
-  InfoLogger& put(const char* label) {
-    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << "\n";
+  template <typename Label>
+    requires is_label_v<Label>
+  InfoLogger& put(Label&& label) {
+    auto labelStr = label_to_string_(std::forward<Label>(label));
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << labelStr << "\n";
     return *this;
   }
 
   // Specialization for bool to print True/False
-  InfoLogger& put(const char* label, bool value, int requireVerbose = 1) {
+  template <typename Label>
+    requires is_label_v<Label>
+  InfoLogger& put(Label&& label, bool value, int requireVerbose = 1) {
     if (verbose < requireVerbose)
       return *this;
-    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : "
+    auto labelStr = label_to_string_(std::forward<Label>(label));
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << labelStr << " : "
         << (value ? "True" : "False") << "\n";
     return *this;
   }
 
   // Specialization for cast::Precision
-  InfoLogger&
-  put(const char* label, cast::Precision p, int requireVerbose = 1) {
+  template <typename Label>
+    requires is_label_v<Label>
+  InfoLogger& put(Label&& label, cast::Precision p, int requireVerbose = 1) {
     if (verbose < requireVerbose)
       return *this;
-    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : ";
+    auto labelStr = label_to_string_(std::forward<Label>(label));
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << labelStr
+        << " : ";
     switch (p) {
     case cast::Precision::FP32:
       os_ << "FP32";
@@ -69,25 +97,30 @@ public:
   }
 
   // Custom printing function
-  template <typename Func>
-    requires std::invocable<Func, std::ostream&>
-  InfoLogger& put(const char* label, Func&& func, int requireVerbose = 1) {
+  template <typename Label, typename Func>
+    requires is_label_v<Label> && std::invocable<Func, std::ostream&>
+  InfoLogger& put(Label&& label, Func&& func, int requireVerbose = 1) {
     if (verbose < requireVerbose)
       return *this;
-    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : ";
+    auto labelStr = label_to_string_(std::forward<Label>(label));
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << labelStr
+        << " : ";
     std::invoke(std::forward<Func>(func), os_);
     os_ << "\n";
     return *this;
   }
 
   // For span of elements
-  template <typename T>
+  template <typename Label, typename T>
+    requires is_label_v<Label>
   InfoLogger&
-  put(const char* label, std::span<const T> span, int requireVerbose = 1) {
+  put(Label&& label, std::span<const T> span, int requireVerbose = 1) {
     if (verbose < requireVerbose)
       return *this;
     put_format_<T>(os_);
-    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : ";
+    auto labelStr = label_to_string_(std::forward<Label>(label));
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << labelStr
+        << " : ";
     os_ << "[";
     for (const auto& v : span)
       os_ << v << ", ";
@@ -96,27 +129,43 @@ public:
   }
 
   // General types: call operator<<(std::ostream&, const T&)
-  template <typename T>
-  InfoLogger& put(const char* label, const T& value, int requireVerbose = 1) {
+  template <typename Label, typename T>
+    requires is_label_v<Label> &&
+             requires(std::ostream& os, const T& value) { os << value; }
+  InfoLogger& put(Label&& label, const T& value, int requireVerbose = 1) {
     if (verbose < requireVerbose)
       return *this;
     put_format_<T>(os_);
-    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << label << " : "
+    auto labelStr = label_to_string_(std::forward<Label>(label));
+    os_ << std::string(depth * INDENT_SPACES, ' ') << " - " << labelStr << " : "
         << value << "\n";
     return *this;
   }
 
   /// Log with indentation, using the same verbosity level
-  InfoLogger& indent(std::function<void(InfoLogger&)> f) {
+  template <typename Func>
+    requires std::invocable<Func&, InfoLogger&>
+  InfoLogger& indent(Func&& f) {
     InfoLogger logger(os_, this->verbose, depth + 1);
-    f(logger);
+    std::invoke(std::forward<Func>(f), logger);
     return *this;
   }
 
   /// Log with indentation and a different verbosity level
-  InfoLogger& indent(int verbose, std::function<void(InfoLogger&)> f) {
-    InfoLogger logger(os_, verbose, depth + 1);
-    f(logger);
+  template <typename Func>
+    requires std::invocable<Func&, InfoLogger&>
+  InfoLogger& indent(int verboseLevel, Func&& f) {
+    InfoLogger logger(os_, verboseLevel, depth + 1);
+    std::invoke(std::forward<Func>(f), logger);
+    return *this;
+  }
+
+  /// Log with custom indentation depth delta.
+  template <typename Func>
+    requires std::invocable<Func&, InfoLogger&>
+  InfoLogger& indentBy(int depthDelta, Func&& f) {
+    InfoLogger logger(os_, this->verbose, depth + depthDelta);
+    std::invoke(std::forward<Func>(f), logger);
     return *this;
   }
 };

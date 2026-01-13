@@ -9,21 +9,23 @@
 #include "cast/CUDA/CUDAStatevector.h"
 #include "cast/CUDA/Config.h"
 #include "cast/Core/IRNode.h"
-#include "cast/Core/KernelManager.h"
 #include "cast/Core/QuantumGate.h"
 
 #include "utils/InfoLogger.h"
 #include "utils/ThreadPool.h"
-#include "llvm/IR/LLVMContext.h"
 
-#include <condition_variable>
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/TargetSelect.h>
 
+#include <condition_variable>
+#include <cstddef>
+
 #include <chrono>
+#include <map>
+#include <mutex>
 
 #include <cuda.h>
-#include <mutex>
 
 namespace cast {
 
@@ -36,8 +38,8 @@ enum class CUDAMatrixLoadMode {
 };
 
 struct CudaKernel {
-  std::mutex mtx;
-  std::condition_variable cv;
+  static std::atomic_size_t globalIdCounter;
+  size_t id;
 
   // LLVMContext is not thread-safe -- for ease of parallel JIT compilation,
   // each kernel has its own LLVM context and module. Each module contains only
@@ -62,20 +64,102 @@ struct CudaKernel {
     Pending,
     // being compiled
     Compiling,
-    // finished compilation
+    // ready to be launched
     Ready,
+    // failures
+    Failed,
   };
   std::atomic<Status> status = Status::Empty;
 
   /// Note: the caller must ensure the uniqueness of name in the pool
   explicit CudaKernel(const std::string& name) {
+    id = globalIdCounter.fetch_add(1, std::memory_order_relaxed);
     llvmContext = std::make_unique<llvm::LLVMContext>();
     llvmModule = std::make_unique<llvm::Module>(name + "_module", *llvmContext);
+
+    assert(llvmModule != nullptr);
+  }
+
+  void setStatus(Status s) {
+    status.store(s, std::memory_order_release);
+    status.notify_all();
   }
 
   void displayInfo(utils::InfoLogger logger) const;
 
 }; // struct CUDAKernelInfo
+
+struct LaunchTask {
+  static std::atomic_size_t globalCounter_;
+  size_t id;
+
+  CudaKernel* kernel = nullptr;
+
+  CUmodule cuModule = nullptr;
+  CUfunction cuFunction = nullptr;
+  CUevent startEvent = nullptr;
+  CUevent stopEvent = nullptr;
+  float kernelTimeMs = 0.0f;
+
+  struct OnFinishUserData {
+    std::atomic<bool>* finishedFlag = nullptr;
+    std::atomic<unsigned>* ongoings = nullptr;
+    CUevent* startEvent = nullptr;
+    CUevent* stopEvent = nullptr;
+    float* kernelTimeMs = nullptr;
+  } onFinishUserData;
+
+  CUdeviceptr argSvPtr = 0;
+  CUdeviceptr argMatPtr = 0;
+  size_t argCombosPtr = 0;
+  std::array<void*, 3> args;
+
+  std::atomic<bool> finished = true;
+
+  explicit LaunchTask(std::atomic<unsigned>* ongoingsPtr) {
+    id = globalCounter_.fetch_add(1, std::memory_order_relaxed);
+    onFinishUserData.finishedFlag = &finished;
+    onFinishUserData.ongoings = ongoingsPtr;
+    onFinishUserData.startEvent = &startEvent;
+    onFinishUserData.stopEvent = &stopEvent;
+    onFinishUserData.kernelTimeMs = &kernelTimeMs;
+  }
+
+  void setArgs(CUdeviceptr sv, CUdeviceptr mat, size_t combos) {
+    argSvPtr = sv;
+    argMatPtr = mat;
+    argCombosPtr = combos;
+
+    args[0] = &argSvPtr;
+    args[1] = &argMatPtr;
+    args[2] = &argCombosPtr;
+  }
+
+  void** getArgs() { return args.data(); }
+
+  // userData should be a pointer to a LaunchTask
+  // sets the finished flag to true and notifies the exec thread
+  static void CUDART_CB setFinishedCallback(void* ptr) {
+    auto* userData = static_cast<OnFinishUserData*>(ptr);
+    userData->finishedFlag->store(true, std::memory_order_release);
+    userData->finishedFlag->notify_one();
+
+    if (userData->kernelTimeMs != nullptr && userData->startEvent != nullptr &&
+        userData->stopEvent != nullptr && *userData->startEvent != nullptr &&
+        *userData->stopEvent != nullptr) {
+      float ms = 0.0f;
+      if (cuEventElapsedTime(&ms,
+                             *userData->startEvent,
+                             *userData->stopEvent) == CUDA_SUCCESS) {
+        *userData->kernelTimeMs = ms;
+      } else {
+        *userData->kernelTimeMs = 0.0f;
+      }
+    }
+    userData->ongoings->fetch_sub(1, std::memory_order_acq_rel);
+    userData->ongoings->notify_all();
+  }
+};
 
 struct CUDAKernelGenConfig {
   Precision precision;
@@ -96,6 +180,10 @@ public:
   CUDAKernelHandler(CUDAKernelManager& km, CudaKernel* kernel)
       : km(km), kernel(kernel) {}
 
+  // Get the underlying CudaKernel pointer. Returns nullptr if the kernel
+  // manager has changed its state.
+  CudaKernel* get() const { return kernel; }
+
   void displayInfo(utils::InfoLogger logger) const {
     kernel->displayInfo(logger);
   }
@@ -103,8 +191,26 @@ public:
 
 /// Manages cuda-related stuff: devices, contexts, streams, modules, etc.
 struct CudaCtxManager {
+  std::unique_ptr<CUDAStatevectorBase> sv;
 
-  CudaCtxManager() { CU_CHECK(cuInit(0)); }
+  CUdevice device;
+  CUcontext context;
+
+  CudaCtxManager() : sv() {
+    CU_CHECK(cuInit(0));
+    // for now always use device with ordinal 0
+    CU_CHECK(cuDeviceGet(&device, 0));
+    CU_CHECK(cuDevicePrimaryCtxRetain(&context, device));
+
+    CU_CHECK(cuCtxSetCurrent(context));
+  }
+
+  CudaCtxManager(const CudaCtxManager&) = delete;
+  CudaCtxManager(CudaCtxManager&&) = delete;
+  CudaCtxManager& operator=(const CudaCtxManager&) = delete;
+  CudaCtxManager& operator=(CudaCtxManager&&) = delete;
+
+  ~CudaCtxManager() { CU_CHECK(cuDevicePrimaryCtxRelease(device)); };
 };
 
 class CUDAKernelManager {
@@ -115,8 +221,7 @@ private:
   utils::ThreadPool<CUDAJitTls> tPool;
   CudaCtxManager cuMgr;
 
-  using KernelInfoPtr = std::unique_ptr<CudaKernel>;
-  using Pool = std::vector<KernelInfoPtr>;
+  using Pool = std::vector<std::unique_ptr<CudaKernel>>;
 
   std::map<std::string, Pool> kernelPools_;
   constexpr static const char* DEFAULT_POOL_NAME = "_default_";
@@ -128,6 +233,7 @@ private:
     LLVMInitializeNVPTXAsmPrinter();
 
     kernelPools_.insert({DEFAULT_POOL_NAME, Pool()});
+    startExecThread_();
   }
 
   // Both gate-sv and superop-dm simulation will boil down to a matrix with
@@ -140,12 +246,12 @@ private:
        llvm::Module& llvmModule);
 
   /// An internal function to generate a CUDA kernel and put the kernel in the
-  /// specified pool. This function wraps whether gate is a StandardQuantumGate
-  /// (with or without noise) or SuperopQuantumGate, and call `gen_` with a
-  /// corresponding ComplexSquareMatrix. The generated kernel will be put into
-  /// the given pool.
-  /// @param funcName: must be unique in the pool as should be guaranteed by the
-  /// caller.
+  /// specified pool. This function wraps whether gate is a
+  /// StandardQuantumGate (with or without noise) or SuperopQuantumGate, and
+  /// call `gen_` with a corresponding ComplexSquareMatrix. The generated
+  /// kernel will be put into the given pool.
+  /// @param funcName: must be unique in the pool as should be guaranteed by
+  /// the caller.
   /// @return: the generated CudaKernel.
   llvm::Expected<CudaKernel*> genCUDAGate_(const CUDAKernelGenConfig& config,
                                            ConstQuantumGatePtr gate,
@@ -156,7 +262,6 @@ private:
 
 public:
   CUDAKernelManager() : tPool(cast::get_cpu_num_threads()) { init(); }
-
   CUDAKernelManager(int nWorkerThreads) : tPool(nWorkerThreads) { init(); }
 
   CUDAKernelManager(const CUDAKernelManager&) = delete;
@@ -164,18 +269,21 @@ public:
   CUDAKernelManager& operator=(const CUDAKernelManager&) = delete;
   CUDAKernelManager& operator=(CUDAKernelManager&&) = delete;
 
-  ~CUDAKernelManager() = default;
+  ~CUDAKernelManager() { stopExecThread_(); }
 
   void displayInfo(utils::InfoLogger logger) const;
 
   Pool& getDefaultPool() { return kernelPools_.at(DEFAULT_POOL_NAME); }
+  const Pool& getDefaultPool() const {
+    return kernelPools_.at(DEFAULT_POOL_NAME);
+  }
 
   /// Generate a kernel for a single gate into the default kernel pool.
-  /// @param funcName: if empty, a default name "k_<index>" will be assigned. If
-  /// provided, it must be unique among all kernels in the default pool.
-  /// Unlike `CPUKernelManager`, here the generated kernel will be enqueued into
-  /// JIT compilation session. So the returned kernel handler may not be ready
-  /// for inspection immediately.
+  /// @param funcName: if empty, a default name "k_<index>" will be assigned.
+  /// If provided, it must be unique among all kernels in the default pool.
+  /// Unlike `CPUKernelManager`, here the generated kernel will be enqueued
+  /// into JIT compilation session. So the returned kernel handler may not be
+  /// ready for inspection immediately.
   llvm::Expected<CUDAKernelHandler> genGate(const CUDAKernelGenConfig& config,
                                             ConstQuantumGatePtr gate,
                                             const std::string& funcName = "");
@@ -190,20 +298,165 @@ public:
 
   /* JIT Session */
 private:
-  static constexpr size_t BUFFER_SIZE = 4;
-  struct RingBuffer {
-    std::array<CudaKernel*, BUFFER_SIZE> data;
+  static constexpr size_t LAUNCH_WINDOW_SIZE = 4;
+  /// Number of ongoing kernel executions. This counter increments upon
+  /// `enqueueKernelExecution` and decrements in the onFinish callback.
+  std::atomic<unsigned> ongoings = 0;
+  std::atomic<bool> timingEnabled = false;
 
-    CudaKernel*& operator[](size_t idx) { return data[idx % BUFFER_SIZE]; }
-  };
+  // Thread-safe lookup table. Each `LaunchTask` is created by
+  // `enqueueKernelExecution` and owned by this `LaunchHistory`.
+  struct LaunchHistory {
+  private:
+    struct Comparator {
+      using is_transparent = void;
 
-  RingBuffer buffer_;
+      bool operator()(const std::unique_ptr<LaunchTask>& a,
+                      const std::unique_ptr<LaunchTask>& b) const noexcept {
+        return a->id < b->id;
+      }
+
+      bool operator()(const std::unique_ptr<LaunchTask>& a,
+                      const LaunchTask* b) const noexcept {
+        return a->id < b->id;
+      }
+
+      bool operator()(const LaunchTask* a,
+                      const std::unique_ptr<LaunchTask>& b) const noexcept {
+        return a->id < b->id;
+      }
+
+      bool operator()(const std::unique_ptr<LaunchTask>& a,
+                      size_t id) const noexcept {
+        return a->id < id;
+      }
+
+      bool operator()(size_t id,
+                      const std::unique_ptr<LaunchTask>& b) const noexcept {
+        return id < b->id;
+      }
+    };
+
+    std::set<std::unique_ptr<LaunchTask>, Comparator> data;
+    std::mutex mtx;
+
+  public:
+    // Insert under the lock
+    void insert(std::unique_ptr<LaunchTask> task) {
+      std::lock_guard lk(mtx);
+      data.insert(std::move(task));
+    }
+
+    // Lookup under the lock
+    template <typename T> LaunchTask* lookup(const T& key) {
+      std::lock_guard lk(mtx);
+      auto it = data.find(key);
+      if (it != data.end())
+        return it->get();
+      return nullptr;
+    }
+  } launchHistory_;
+
+  /// A fixed-size window of launch tasks for overlapping kernel launches
+  /// and resource cleanup. Fixed window size to avoid loading all tasks at
+  /// once.
+  /// `LaunchWindow` does not own the `LaunchTask`s.
+  struct LaunchWindow {
+  private:
+    std::array<LaunchTask*, LAUNCH_WINDOW_SIZE> sessions{};
+
+  public:
+    LaunchWindow() = default;
+
+    LaunchTask*& operator[](size_t idx) {
+      return sessions[idx % LAUNCH_WINDOW_SIZE];
+    }
+
+    const LaunchTask* operator[](size_t idx) const {
+      return sessions[idx % LAUNCH_WINDOW_SIZE];
+    }
+  } launchWindow_;
+
+  /// A queue with mutex and condition variable for launch tasks
+  /// `LaunchQueue` does not own the `LaunchTask`s.
+  struct LaunchQueue {
+    // Need mtx + cv here because both the main thread and exec thread will
+    // access this queue.
+    std::mutex mtx;
+    std::condition_variable cv;
+    std::deque<LaunchTask*> data;
+  } launchQueue_;
+
+  std::thread execTh_;
+  std::atomic<bool> execThreadStopFlag = false;
+  void execThreadFunc_();
+
+  void startExecThread_() {
+    execTh_ = std::thread(&CUDAKernelManager::execThreadFunc_, this);
+  }
+
+  void stopExecThread_() {
+    execThreadStopFlag.store(true, std::memory_order_release);
+    launchQueue_.cv.notify_one();
+    if (execTh_.joinable())
+      execTh_.join();
+  }
 
 public:
   /// Wait for all enqueued kernel compilations to finish.
-  void syncCompilation();
+  llvm::Error syncCompilation();
 
-  void syncKernelExecution();
+  struct LaunchTaskHandler {
+  private:
+    CUDAKernelManager& km;
+    LaunchTask* ptr;
+
+    LaunchTask* get() const { return km.launchHistory_.lookup(ptr); }
+
+  public:
+    explicit LaunchTaskHandler(CUDAKernelManager& km, LaunchTask* ptr)
+        : km(km), ptr(ptr) {}
+
+    float getKernelTimeMs() const {
+      auto* task = get();
+      return task ? task->kernelTimeMs : 0.0f;
+    }
+
+    void displayInfo(utils::InfoLogger logger) const;
+  };
+
+  void attachStatevector(std::unique_ptr<CUDAStatevectorBase> sv) {
+    cuMgr.sv = std::move(sv);
+  }
+
+  void enableTiming(bool enable = true) {
+    timingEnabled.store(enable, std::memory_order_release);
+  }
+
+  /// Enqueue a kernel for execution. Internally this function creates a
+  /// `LaunchTask` that will then be moved into this manager's `launchHistory_`
+  /// for memory management. During the entire launch and execution process, the
+  /// launch task instance will only be referenced.
+  llvm::Expected<LaunchTaskHandler>
+  enqueueKernelExecution(CUDAKernelHandler kernelH) {
+    auto* kernel = kernelH.get();
+    if (kernel == nullptr)
+      return llvm::createStringError("The kernel is no longer valid.");
+
+    auto task = std::make_unique<LaunchTask>(&ongoings);
+    auto* taskPtr = task.get();
+    task->kernel = kernel;
+    launchHistory_.insert(std::move(task));
+    {
+      std::lock_guard lk(launchQueue_.mtx);
+      launchQueue_.data.push_back(taskPtr);
+      launchQueue_.cv.notify_one();
+    }
+    ongoings.fetch_add(1, std::memory_order_acq_rel);
+    return LaunchTaskHandler(*this, taskPtr);
+  }
+
+  llvm::Error syncKernelExecution();
 
 }; // class CUDAKernelManager
 

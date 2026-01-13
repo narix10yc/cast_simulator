@@ -196,31 +196,20 @@ Function* getFunctionDeclarationCUDA(IRBuilder<>& B,
                                      const std::string& funcName,
                                      const CUDAKernelGenConfig& config,
                                      IRArgsCUDA& args) {
-  const bool needsMatArg =
-      (config.matrixLoadMode == CUDAMatrixLoadMode::LoadInDefaultMemSpace);
-
-  SmallVector<Type*, 3> params;
-  params.push_back(B.getPtrTy()); // p.sv
-  if (needsMatArg)
-    params.push_back(B.getPtrTy()); // p.mat
-  params.push_back(B.getInt64Ty()); // p.combos
-  FunctionType* fty = FunctionType::get(B.getVoidTy(), params, false);
-
+  std::array<Type*, 3> params{
+      B.getPtrTy(),  // sv
+      B.getPtrTy(),  // mat
+      B.getInt64Ty() // combos
+  };
+  auto* fty = FunctionType::get(B.getVoidTy(), params, false);
   auto* func = Function::Create(fty, Function::ExternalLinkage, funcName, M);
 
   args.pSvArg = func->getArg(0);
   args.pSvArg->setName("p.sv");
-
-  if (needsMatArg) {
-    args.pMatArg = func->getArg(1);
-    args.pMatArg->setName("p.mat");
-    args.pCombos = func->getArg(2);
-    args.pCombos->setName("p.combos");
-  } else {
-    args.pMatArg = nullptr;
-    args.pCombos = func->getArg(1);
-    args.pCombos->setName("p.combos");
-  }
+  args.pMatArg = func->getArg(1);
+  args.pMatArg->setName("p.mat");
+  args.pCombos = func->getArg(2);
+  args.pCombos->setName("p.combos");
 
   // mark as kernel
   auto* mdString = MDString::get(M.getContext(), "kernel");
@@ -229,30 +218,6 @@ Function* getFunctionDeclarationCUDA(IRBuilder<>& B,
                          {ValueAsMetadata::get(func), mdString, mdOne});
   M.getOrInsertNamedMetadata("nvvm.annotations")->addOperand(md);
   return func;
-}
-
-[[maybe_unused]]
-Value* getGlobalTid(IRBuilder<>& B) {
-  // thread index
-  auto* tidV = B.CreateIntrinsic(
-      B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_tid_x, {}, nullptr, "tid");
-  // gridSize (number of threads in each block)
-  auto* gridSizeV = B.CreateIntrinsic(B.getInt32Ty(),
-                                      Intrinsic::nvvm_read_ptx_sreg_ntid_x,
-                                      {},
-                                      nullptr,
-                                      "blockSize");
-  // block index
-  auto* bidV = B.CreateIntrinsic(B.getInt32Ty(),
-                                 Intrinsic::nvvm_read_ptx_sreg_ctaid_x,
-                                 {},
-                                 nullptr,
-                                 "bid");
-  // global tid = grid size * block index + thread index
-  auto* globalTidV = B.CreateMul(bidV, gridSizeV);
-  globalTidV = B.CreateAdd(globalTidV, tidV, "counter.i32");
-  globalTidV = B.CreateIntCast(globalTidV, B.getInt64Ty(), true, "global.tid");
-  return globalTidV;
 }
 
 void attachNoUnrollMetadata(IRBuilder<>& B, BasicBlock* latchBB) {
@@ -1291,6 +1256,7 @@ CUDAKernelManager::genGate(const CUDAKernelGenConfig& config,
         eKernel.takeError());
   }
 
+  // enqueue for compilation
   enqueueForCompilation(*eKernel);
   return CUDAKernelHandler(*this, *eKernel);
 }
@@ -1315,13 +1281,14 @@ llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,
                 std::to_string(graph.gateId(gate));
 
     // genCUDAGate_ will put the new kernel into pool
-    if (auto eKernel = genCUDAGate_(config, gate, name, pool)) {
-      enqueueForCompilation(*eKernel);
-    } else {
+    auto eKernel = genCUDAGate_(config, gate, name, pool);
+    if (!eKernel) {
       return llvm::joinErrors(
           llvm::createStringError("Failed to generate kernel for gate " + name),
           eKernel.takeError());
     }
+
+    enqueueForCompilation(*eKernel);
   }
   return llvm::Error::success();
 }

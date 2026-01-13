@@ -14,6 +14,9 @@
 
 #include <cstddef>
 #include <cuda.h>
+#include <iostream>
+#include <memory>
+#include <vector>
 
 #include <llvm/Support/CommandLine.h>
 
@@ -39,8 +42,8 @@ static cl::opt<int> ArgWarmup("warmup", cl::cat(Category),
    cl::init(2));
 
 static cl::opt<int> ArgVerbose("verbose", cl::cat(Category),
-   cl::desc("Log verbosity level (default: 0)"),
-   cl::init(0));
+   cl::desc("Log verbosity level (default: 1)"),
+   cl::init(1));
 
 // clang-format on
 
@@ -60,6 +63,27 @@ static llvm::Error checkClArgs() {
 #pragma endregion
 
 static std::ostream& logerr() { return std::cerr << BOLDRED("[Err] "); }
+
+static void printBwMatrix(const char* title,
+                          const std::vector<double>& data,
+                          int ndev) {
+  std::cerr << title << "\n";
+  std::cerr << "    ";
+  for (int j = 0; j < ndev; ++j)
+    std::cerr << "GPU:" << j << " ";
+  std::cerr << "\n";
+  for (int i = 0; i < ndev; ++i) {
+    std::cerr << "GPU:" << i << " ";
+    for (int j = 0; j < ndev; ++j) {
+      if (i == j) {
+        std::cerr << "  -  ";
+      } else {
+        std::cerr << " " << utils::fmt_mem(data[i * ndev + j]) << " ";
+      }
+    }
+    std::cerr << "\n";
+  }
+}
 
 class BWMatrix {
 
@@ -236,6 +260,10 @@ int main(int argc, char** argv) {
   // number of devices
   int ndev = 0;
   CU_CHECK(cuDeviceGetCount(&ndev));
+  if (ndev <= 0) {
+    logerr() << "No CUDA devices found.\n";
+    return 1;
+  }
   std::vector<CUdevice> devices(ndev);
   std::vector<CUcontext> contexts(ndev);
   for (int i = 0; i < ndev; ++i) {
@@ -286,7 +314,6 @@ int main(int argc, char** argv) {
   }
 
   const size_t bytes = ArgSize * 1024 * 1024; // Convert MiB to bytes
-  const size_t N = bytes / sizeof(float);
 
   // GPU receive & send ptrs
   std::vector<CUdeviceptr> dRecvPtrs(ndev);
@@ -299,10 +326,6 @@ int main(int argc, char** argv) {
     CU_CHECK(cuMemAlloc(&d, bytes));
     dSendPtrs[i] = d;
   }
-
-  // Host buffers
-  auto hRecv = std::make_unique<float[]>(N);
-  auto hSend = std::make_unique<float[]>(N);
 
   BWMatrix bwmat(ndev);
 
@@ -343,6 +366,9 @@ int main(int argc, char** argv) {
     CU_CHECK(cuMemFree(dSendPtrs[i]));
     CU_CHECK(cuCtxDestroy(contexts[i]));
   }
+
+  printBwMatrix("Uni-directional D2D Bandwidth Matrix:", bwmat.d2d_uni, ndev);
+  printBwMatrix("Bi-directional D2D Bandwidth Matrix:", bwmat.d2d_bi, ndev);
 
   return 0;
 }

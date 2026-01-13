@@ -3,6 +3,8 @@
 #include "cast/CUDA/CUDAStatevector.h"
 #include "tests/TestKit.h"
 
+#include <memory>
+
 using namespace cast;
 using namespace cast::test;
 
@@ -13,16 +15,18 @@ template <int nQubits> void runU2qTest() {
 
   // we have to use W0 here to allow direct memcpy between host and device
   cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
-  cast::CUDAStatevector<double> svCUDA(nQubits);
+  auto svCUDA = std::make_unique<cast::CUDAStatevector<double>>(nQubits);
+  auto* svCUDAPtr = svCUDA.get();
 
   // use 2 worker threads
   CUDAKernelManager km(2);
+  km.attachStatevector(std::move(svCUDA));
 
   const auto randomizeSV = [&]() {
-    svCUDA.randomize();
+    svCUDAPtr->randomize();
     cudaMemcpy(svCPU.data(),
-               svCUDA.dData(),
-               svCUDA.sizeInBytes(),
+               svCUDAPtr->dData(),
+               svCUDAPtr->sizeInBytes(),
                cudaMemcpyDeviceToHost);
   };
 
@@ -40,31 +44,33 @@ template <int nQubits> void runU2qTest() {
     llvm::cantFail(
         km.genGate(cgCfg, gates[i], "gateImm_2q_" + std::to_string(i)));
   }
+  (void)llvm::cantFail(km.syncCompilation());
 
   // Main test loop: check per-qubit prob match after each gate
   auto& pool = km.getDefaultPool();
 
   for (const auto& item : pool) {
     randomizeSV();
-    ConstQuantumGatePtr gate = item.kernel->gate;
+    auto* kernel = item.get();
+    ConstQuantumGatePtr gate = kernel->gate;
+    CUDAKernelHandler handler(km, kernel);
 
     /* apply gate on GPU */
-    km.setLaunchConfig(svCUDA.getDevicePtr(), svCUDA.nQubits());
-    km.enqueueKernelLaunch(*item.kernel);
-    km.syncKernelExecution();
+    (void)llvm::cantFail(km.enqueueKernelExecution(handler));
+    (void)llvm::cantFail(km.syncKernelExecution());
 
     // check norm
     suite.assertCloseFP64(
-        svCUDA.norm(), 1.0, "CUDA SV norm equals 1", GET_INFO());
+        svCUDAPtr->norm(), 1.0, "CUDA SV norm equals 1", GET_INFO());
 
     svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gate.get()));
 
     // compare per-qubit probabilities
     for (int q : gate->qubits()) {
-      suite.assertCloseFP64(svCUDA.prob(q),
-                           svCPU.prob(q),
-                           "CUDA vs CPU probability match for qubit " +
-                               std::to_string(q),
+      suite.assertCloseFP64(svCUDAPtr->prob(q),
+                            svCPU.prob(q),
+                            "CUDA vs CPU probability match for qubit " +
+                                std::to_string(q),
                            GET_INFO());
     }
   }

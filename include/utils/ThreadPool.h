@@ -140,7 +140,8 @@ public:
   }
 
   bool isIdle() const {
-    return nTotalTasks.load() == 0 && nActiveWorkers.load() == 0;
+    return nTotalTasks.load(std::memory_order_acquire) == 0 &&
+           nActiveWorkers.load(std::memory_order_acquire) == 0;
   }
 
   /// @brief A blocking method that waits until all tasks are finished.

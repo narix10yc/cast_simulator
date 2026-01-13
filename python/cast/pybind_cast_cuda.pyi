@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List
-
-from .pybind_cast import CircuitGraph, OptimizerBase, Precision, QuantumGate
+from .pybind_cast import CircuitGraph, Precision, QuantumGate
 
 
 class CUDAStatevectorFP32:
@@ -121,25 +119,10 @@ class CUDAKernelGenConfig:
         ...
 
 
-class CUDAKernelInfo:
+class CudaKernelHandler:
     """
-    Metadata for a generated CUDA kernel.
+    Handle to a generated CUDA kernel.
     """
-
-    gate: QuantumGate
-    precision: Precision
-
-    def has_ptx(self) -> bool:
-        """Whether this kernel has PTX attached."""
-        ...
-
-    def has_cubin(self) -> bool:
-        """Whether this kernel has a CUBIN attached."""
-        ...
-
-    def get_ptx(self) -> str:
-        """Return PTX text for the kernel (if available)."""
-        ...
 
     def print_info(self, verbose: int = 1) -> None:
         """
@@ -153,31 +136,11 @@ class CUDAKernelInfo:
         ...
 
 
-class CUDAKernelExecutionResult:
+class LaunchTaskHandler:
     """
-    Result metadata for a CUDA kernel execution.
+    Handle to an enqueued CUDA kernel execution.
     """
-
-    kernel_name: str
-
-    def print_info(self, verbose: int = 1) -> None:
-        """
-        Print diagnostic information about this execution result.
-
-        Parameters
-        ----------
-        verbose:
-            Verbosity level (higher means more detail).
-        """
-        ...
-
-    def get_compile_time(self) -> float:
-        """Return kernel compile time (implementation-defined units; typically seconds)."""
-        ...
-
-    def get_kernel_time(self) -> float:
-        """Return kernel execution time (implementation-defined units; typically seconds)."""
-        ...
+    ...
 
 
 class CUDAKernelManager:
@@ -196,9 +159,32 @@ class CUDAKernelManager:
         config: CUDAKernelGenConfig,
         gate: QuantumGate,
         func_name: str = "",
-    ) -> None:
+    ) -> CudaKernelHandler:
         """
         Generate a CUDA kernel for a single gate.
+
+        Parameters
+        ----------
+        config:
+            Kernel generation configuration.
+        gate:
+            Quantum gate to compile.
+        func_name:
+            Optional kernel name.
+        """
+        ...
+
+    def enqueue_kernel_execution(
+        self,
+        kernel: CudaKernelHandler,
+    ) -> LaunchTaskHandler:
+        """
+        Enqueue a kernel for execution.
+
+        Parameters
+        ----------
+        kernel:
+            Kernel handler returned by `gen_gate`.
         """
         ...
 
@@ -213,73 +199,14 @@ class CUDAKernelManager:
         """
         ...
 
-    def set_launch_config(
-        self,
-        device_ptr: int,
-        num_qubits: int,
-        block_size: int = 64,
-    ) -> None:
+    def sync_compilation(self) -> None:
         """
-        Configure launch parameters for subsequent kernel launches.
+        Block until all enqueued kernel compilations finish.
         """
         ...
 
-    def get_kernels_in_pool(self, pool_name: str) -> List[CUDAKernelInfo]:
-        """
-        List kernels currently stored in a named pool.
-        """
-        ...
-
-    def launch_kernel_fp32(
-        self,
-        sv: CUDAStatevectorFP32,
-        kernel: CUDAKernelInfo,
-    ) -> CUDAKernelExecutionResult:
-        """
-        Enqueue an FP32 kernel launch for the given statevector.
-        """
-        ...
-
-    def launch_kernel_fp64(
-        self,
-        sv: CUDAStatevectorFP64,
-        kernel: CUDAKernelInfo,
-    ) -> CUDAKernelExecutionResult:
-        """
-        Enqueue an FP64 kernel launch for the given statevector.
-        """
-        ...
-
-    def sync_kernel_execution(self, progress_bar: bool = False) -> None:
+    def sync_kernel_execution(self) -> None:
         """
         Synchronize pending kernel executions.
         """
-        ...
-
-
-class CUDAOptimizer(OptimizerBase):
-    """
-    CUDA-specific optimizer for circuit graph transformations.
-    """
-
-    def __init__(self) -> None: ...
-
-    def print_info(self, verbose: int = 1) -> None:
-        """Print diagnostic information about this optimizer."""
-        ...
-
-    def enable_fusion(self, enable: bool = True) -> None:
-        """Enable or disable fusion passes."""
-        ...
-
-    def enable_canonicalization(self, enable: bool = True) -> None:
-        """Enable or disable canonicalization passes."""
-        ...
-
-    def enable_cfo(self, enable: bool = True) -> None:
-        """Enable or disable CFO passes."""
-        ...
-
-    def set_sizeonly_fusion_config(self, size: int) -> None:
-        """Set fusion configuration based on size thresholds."""
         ...

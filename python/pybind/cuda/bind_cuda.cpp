@@ -5,6 +5,8 @@
 #include <pybind11/iostream.h>
 #include <pybind11/pybind11.h>
 
+#include <stdexcept>
+
 namespace py = pybind11;
 
 namespace {
@@ -64,6 +66,12 @@ void bind_cudaKernelManager(py::module_& m) {
           },
           py::arg("verbose") = 1);
 
+  py::class_<cast::CUDAKernelManager::LaunchTaskHandler>(m, "LaunchTaskHandler")
+      .def("get_exec_time",
+           [](const cast::CUDAKernelManager::LaunchTaskHandler& self) {
+             return static_cast<double>(self.getKernelTimeMs()) * 1e-3;
+           });
+
   py::class_<cast::CUDAKernelManager>(m, "CUDAKernelManager")
       .def(py::init<>())
       .def(
@@ -90,20 +98,47 @@ void bind_cudaKernelManager(py::module_& m) {
           py::arg("config"),
           py::arg("gate"),
           py::arg("func_name") = "")
-      .def("gen_graph_gates",
-           [](cast::CUDAKernelManager& self,
-              const cast::CUDAKernelGenConfig& config,
-              const cast::ir::CircuitGraphNode& graph,
-              const std::string& pool_name) {
-             if (auto e = self.genGraphGates(config, graph, pool_name)) {
-               throw std::runtime_error(
-                   "Failed to generate CUDA gates from graph: " +
-                   llvm::toString(std::move(e)));
+      .def(
+          "enqueue_kernel_execution",
+          [](cast::CUDAKernelManager& self,
+             const cast::CUDAKernelHandler& kernel)
+              -> cast::CUDAKernelManager::LaunchTaskHandler {
+            auto eTask = self.enqueueKernelExecution(kernel);
+            if (!eTask) {
+              throw std::runtime_error("Failed to enqueue kernel execution: " +
+                                       llvm::toString(eTask.takeError()));
+            }
+            return *eTask;
+          },
+          py::arg("kernel"))
+      .def(
+          "gen_graph_gates",
+          [](cast::CUDAKernelManager& self,
+             const cast::CUDAKernelGenConfig& config,
+             const cast::ir::CircuitGraphNode& graph,
+             const std::string& pool_name) {
+            if (auto e = self.genGraphGates(config, graph, pool_name)) {
+              throw std::runtime_error(
+                  "Failed to generate CUDA gates from graph: " +
+                  llvm::toString(std::move(e)));
+            }
+          },
+          py::arg("config"),
+          py::arg("graph"),
+          py::arg("pool_name"))
+      .def("sync_compilation",
+           [](cast::CUDAKernelManager& self) {
+             if (auto e = self.syncCompilation()) {
+               throw std::runtime_error("CUDA compilation error: " +
+                                        llvm::toString(std::move(e)));
              }
            })
-      .def("sync_compilation", &cast::CUDAKernelManager::syncCompilation)
-      .def("sync_kernel_execution",
-           &cast::CUDAKernelManager::syncKernelExecution);
+      .def("sync_kernel_execution", [](cast::CUDAKernelManager& self) {
+        if (auto e = self.syncKernelExecution()) {
+          throw std::runtime_error("CUDA execution error: " +
+                                   llvm::toString(std::move(e)));
+        }
+      });
 }
 
 // void bind_cudaOptimizer(py::module_& m) {

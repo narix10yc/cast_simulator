@@ -6,6 +6,7 @@
 #include "utils/iocolor.h"
 
 #include <atomic>
+#include <iostream>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
@@ -25,6 +26,9 @@
 
 using namespace cast;
 using namespace llvm;
+
+std::atomic_size_t CudaKernel::globalIdCounter = 0;
+std::atomic_size_t LaunchTask::globalCounter_ = 0;
 
 void CUDAKernelGenConfig::displayInfo(utils::InfoLogger logger) const {
   logger.put("Precision", precision)
@@ -60,6 +64,9 @@ void CudaKernel::displayInfo(utils::InfoLogger logger) const {
   case Status::Compiling:
     logger.put("Status", "Compiling");
     return;
+  case Status::Failed:
+    logger.put("Status", "Failed");
+    return;
   case Status::Ready:
     logger.put("Status", "Ready");
     break; // continue to display more info
@@ -71,7 +78,54 @@ void CudaKernel::displayInfo(utils::InfoLogger logger) const {
 }
 
 void CUDAKernelManager::displayInfo(utils::InfoLogger logger) const {
+  logger.put("CUDA Kernel Manager Info:");
   logger.put("Num Worker Threads", tPool.getNumWorkers());
+
+  auto ongoings = this->ongoings.load(std::memory_order_acquire);
+  if (ongoings > 0) {
+    logger.put("Ongoing Kernel Executions", ongoings);
+    return;
+  }
+
+  // no ongoing tasks, display full info
+  logger.put("Pools", kernelPools_.size()).indent(2, [this](auto& l) {
+    // default
+    auto& defaultPool = getDefaultPool();
+    l.put(DEFAULT_POOL_NAME, std::to_string(defaultPool.size()) + " kernels");
+
+    // non-default
+    for (const auto& [poolName, pool] : kernelPools_) {
+      if (poolName == DEFAULT_POOL_NAME)
+        continue;
+      l.put(poolName, std::to_string(pool.size()) + " kernels");
+    }
+  });
+
+  int nReadyKernels = 0;
+  int nNotReadyKernels = 0;
+  size_t ptxBytes = 0;
+  size_t cubinBytes = 0;
+  for (const auto& [poolName, pool] : kernelPools_) {
+    for (const auto& kernel : pool) {
+      if (kernel->status.load(std::memory_order_acquire) ==
+          CudaKernel::Status::Ready) {
+        nReadyKernels++;
+        ptxBytes += kernel->ptxString.size();
+        cubinBytes += kernel->cubinData.size();
+      } else {
+        nNotReadyKernels++;
+      }
+    }
+  }
+  logger.put("Kernels", [=](auto& os) {
+    os << (nReadyKernels + nNotReadyKernels);
+    if (nNotReadyKernels > 0)
+      os << " (" << nNotReadyKernels << " not ready)";
+  });
+  if (nReadyKernels > 0) {
+    logger.put("Total PTX Size", utils::fmt_mem(ptxBytes))
+        .put("Total Cubin Size", utils::fmt_mem(cubinBytes));
+  }
 }
 
 namespace {
@@ -111,15 +165,15 @@ static inline llvm::OptimizationLevel wrapLLVMOptLevel(int llvmOptLevel) {
 
 static llvm::Error
 optimizeLLVMIR_work(int llvmOptLevel, CudaKernel& kernel, CUDAJitTls& jitTls) {
-  if (kernel.llvmModule == nullptr)
-    return llvm::createStringError("LLVM module is null");
+  assert(kernel.llvmModule != nullptr);
+  auto& llvmModule = *kernel.llvmModule;
 
   auto optLevel = wrapLLVMOptLevel(llvmOptLevel);
-  jitTls.runOnModule(*kernel.llvmModule, optLevel);
+  jitTls.runOnModule(llvmModule, optLevel);
 
   std::string errLog;
   llvm::raw_string_ostream rso(errLog);
-  if (llvm::verifyModule(*kernel.llvmModule, &rso))
+  if (llvm::verifyModule(llvmModule, &rso))
     return llvm::createStringError("Module verification failed: " + errLog);
 
   return llvm::Error::success();
@@ -127,16 +181,16 @@ optimizeLLVMIR_work(int llvmOptLevel, CudaKernel& kernel, CUDAJitTls& jitTls) {
 
 static llvm::Error compileLLVMIRToPTX_work(CudaKernel& kernel,
                                            CUDAJitTls& jitTls) {
-  if (kernel.llvmModule == nullptr)
-    return llvm::createStringError("LLVM module is null");
+  assert(kernel.llvmModule != nullptr);
+  auto& llvmModule = *kernel.llvmModule;
 
   auto& TM = jitTls.getTargetMachine();
 
-  kernel.llvmModule->setTargetTriple(TM.getTargetTriple());
-  kernel.llvmModule->setDataLayout(TM.createDataLayout());
+  llvmModule.setTargetTriple(TM.getTargetTriple());
+  llvmModule.setDataLayout(TM.createDataLayout());
   std::string errorStr;
   llvm::raw_string_ostream sstream(errorStr);
-  if (llvm::verifyModule(*kernel.llvmModule, &sstream))
+  if (llvm::verifyModule(llvmModule, &sstream))
     return llvm::createStringError("Module verification failed: " + errorStr);
 
   raw_pwrite_vector_ostream vecStream(kernel.ptxString);
@@ -147,7 +201,7 @@ static llvm::Error compileLLVMIRToPTX_work(CudaKernel& kernel,
     return llvm::createStringError("LLVM target machine can't emit PTX");
   }
 
-  PM.run(*kernel.llvmModule);
+  PM.run(llvmModule);
 
   return llvm::Error::success();
 }
@@ -189,14 +243,16 @@ static llvm::Error compileToCubin_work(int cuOptLevel, CudaKernel& kernel) {
 }
 
 void CUDAKernelManager::enqueueForCompilation(CudaKernel* kernel) {
+  assert(kernel->llvmModule != nullptr);
   using Status = CudaKernel::Status;
   kernel->status.store(Status::Pending, std::memory_order_release);
 
   tPool.enqueueMayErr([this, kernel]() -> llvm::Error {
+    assert(kernel->llvmModule != nullptr);
     auto& tls = tPool.getTLS();
     llvm::Error err = llvm::Error::success();
 
-    kernel->status.store(Status::Compiling, std::memory_order_release);
+    kernel->setStatus(Status::Compiling);
 
     err =
         llvm::joinErrors(optimizeLLVMIR_work(1, *kernel, tls), std::move(err));
@@ -204,13 +260,142 @@ void CUDAKernelManager::enqueueForCompilation(CudaKernel* kernel) {
         llvm::joinErrors(compileLLVMIRToPTX_work(*kernel, tls), std::move(err));
     err = llvm::joinErrors(compileToCubin_work(1, *kernel), std::move(err));
 
-    kernel->status.store(Status::Ready, std::memory_order_release);
+    kernel->setStatus(Status::Ready);
+
     return err;
   });
 }
 
-void CUDAKernelManager::syncCompilation() { tPool.sync(); }
+void CUDAKernelManager::execThreadFunc_() {
+  unsigned idx = 0;
+  CU_CHECK(cuCtxSetCurrent(cuMgr.context));
 
-void CUDAKernelManager::syncKernelExecution() { tPool.sync(); }
+  while (true) {
+    LaunchTask* task = nullptr;
+    {
+      std::unique_lock lk(launchQueue_.mtx);
+      launchQueue_.cv.wait(lk, [this]() {
+        return execThreadStopFlag.load(std::memory_order_acquire) ||
+               !launchQueue_.data.empty();
+      });
+      if (execThreadStopFlag.load(std::memory_order_acquire))
+        break;
+
+      assert(!launchQueue_.data.empty());
+      task = launchQueue_.data.front();
+      launchQueue_.data.pop_front();
+    }
+    assert(task != nullptr);
+    auto* kernel = task->kernel;
+    assert(kernel != nullptr);
+
+    LLVM_DEBUG(std::cerr << "[Exec Thread] Picked up kernel "
+                         << kernel->llvmFunc->getName().str() << " @ "
+                         << (void*)kernel << " for launch\n";);
+
+    // launch the kernel
+    // wait for the kernel to be ready
+    for (;;) {
+      auto s = kernel->status.load(std::memory_order_acquire);
+      if (s == CudaKernel::Status::Ready)
+        break;
+      kernel->status.wait(s);
+      LLVM_DEBUG(std::cerr << "[Exec Thread] Waiting for kernel "
+                           << kernel->llvmFunc->getName().str() << " @ "
+                           << (void*)kernel << " to be ready\n";);
+    }
+
+    LLVM_DEBUG(std::cerr << "Kernel " << kernel->llvmFunc->getName().str()
+                         << " @ " << (void*)kernel
+                         << " is ready for launch\n";);
+
+    // Launch the kernel into this slot
+    auto*& slot = launchWindow_[idx++];
+    if (slot != nullptr) {
+      // wait for the launch slot to be finished
+      slot->finished.wait(false);
+
+      // free resources in the launch slot
+      if (slot->cuModule != nullptr) {
+        cuModuleUnload(slot->cuModule);
+        slot->cuModule = nullptr;
+      }
+      if (slot->startEvent != nullptr) {
+        cuEventDestroy(slot->startEvent);
+        slot->startEvent = nullptr;
+      }
+      if (slot->stopEvent != nullptr) {
+        cuEventDestroy(slot->stopEvent);
+        slot->stopEvent = nullptr;
+      }
+      slot->cuFunction = nullptr;
+    }
+
+    // launch the given kernel into that slot
+    slot = task;
+    slot->kernelTimeMs = 0.0f;
+    CU_CHECK(cuModuleLoadDataEx(
+        &slot->cuModule, kernel->cubinData.data(), 0, nullptr, nullptr));
+
+    LLVM_DEBUG(std::cerr << "[Exec Thread] Loaded kernel "
+                         << kernel->llvmFunc->getName().str()
+                         << " with cubin of size "
+                         << utils::fmt_mem(kernel->cubinData.size()) << "\n";);
+    CU_CHECK(cuModuleGetFunction(&slot->cuFunction,
+                                 slot->cuModule,
+                                 kernel->llvmFunc->getName().str().c_str()));
+
+    auto nCombos = 1ULL << (cuMgr.sv->nQubits() - kernel->gate->nQubits());
+    slot->setArgs(cuMgr.sv->getDevicePtr(), 0, nCombos);
+    slot->finished.store(false, std::memory_order_release);
+
+    if (timingEnabled.load(std::memory_order_acquire)) {
+      if (slot->startEvent == nullptr)
+        CU_CHECK(cuEventCreate(&slot->startEvent, CU_EVENT_DEFAULT));
+      if (slot->stopEvent == nullptr)
+        CU_CHECK(cuEventCreate(&slot->stopEvent, CU_EVENT_DEFAULT));
+      CU_CHECK(cuEventRecord(slot->startEvent, 0));
+    }
+    CU_CHECK(cuLaunchKernel(slot->cuFunction,
+                            1,
+                            1,
+                            1, // grid dim
+                            32,
+                            1,
+                            1, // block dim
+                            0, // shared mem
+                            0, // stream
+                            slot->getArgs(),
+                            nullptr));
+    if (timingEnabled.load(std::memory_order_acquire)) {
+      CU_CHECK(cuEventRecord(slot->stopEvent, 0));
+    }
+    LLVM_DEBUG(std::cerr << "[Exec Thread] Launched kernel "
+                         << kernel->llvmFunc->getName().str() << " in slot "
+                         << idx - 1 << "\n";);
+    CU_CHECK(cuLaunchHostFunc(
+        0, LaunchTask::setFinishedCallback, &slot->onFinishUserData));
+  } // while (true)
+}
+
+llvm::Error CUDAKernelManager::syncCompilation() {
+  tPool.sync();
+  return tPool.takeError();
+}
+
+llvm::Error CUDAKernelManager::syncKernelExecution() {
+  tPool.sync();
+  auto err = tPool.takeError();
+
+  // wait for all launch tasks to finish
+  for (;;) {
+    auto cur = ongoings.load(std::memory_order_acquire);
+    if (cur == 0)
+      break;
+    ongoings.wait(cur, std::memory_order_acquire);
+  }
+
+  return err;
+}
 
 #undef DEBUG_TYPE
