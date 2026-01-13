@@ -135,12 +135,22 @@ class CudaKernelHandler:
         """
         ...
 
+    def get_ptx(self) -> str:
+        """
+        Return PTX text for the kernel, if available.
+        """
+        ...
+
 
 class LaunchTaskHandler:
     """
     Handle to an enqueued CUDA kernel execution.
     """
-    ...
+    def get_exec_time(self) -> float:
+        """
+        Return the execution time in seconds, if timing is enabled.
+        """
+        ...
 
 
 class CUDAKernelManager:

@@ -1,7 +1,7 @@
-#include "cast/CUDA/CUDAKernelManager.h"
-
 #include "cast/Core/PatternMatrix.h"
 #include "cast/Core/ScalarKind.h"
+
+#include "cast/CUDA/CUDAKernelManager.h"
 
 #include "utils/Formats.h"
 
@@ -1232,7 +1232,7 @@ CUDAKernelManager::genCUDAGate_(const CUDAKernelGenConfig& config,
   return pool.back().get();
 }
 
-llvm::Expected<CUDAKernelHandler>
+llvm::Expected<CudaKernel*>
 CUDAKernelManager::genGate(const CUDAKernelGenConfig& config,
                            ConstQuantumGatePtr gate,
                            const std::string& funcName_) {
@@ -1258,7 +1258,7 @@ CUDAKernelManager::genGate(const CUDAKernelGenConfig& config,
 
   // enqueue for compilation
   enqueueForCompilation(*eKernel);
-  return CUDAKernelHandler(*this, *eKernel);
+  return *eKernel;
 }
 
 llvm::Error CUDAKernelManager::genGraphGates(const CUDAKernelGenConfig& config,

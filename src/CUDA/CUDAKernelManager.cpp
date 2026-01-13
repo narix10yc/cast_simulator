@@ -3,19 +3,13 @@
 
 #include "utils/Formats.h"
 #include "utils/InfoLogger.h"
-#include "utils/iocolor.h"
 
 #include <atomic>
 #include <iostream>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
-#include <llvm/MC/TargetRegistry.h>
-#include <llvm/Passes/PassBuilder.h>
-#include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/Error.h>
-#include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
-#include <llvm/TargetParser/Host.h>
 
 #include <nvJitLink.h>
 
@@ -29,6 +23,13 @@ using namespace llvm;
 
 std::atomic_size_t CudaKernel::globalIdCounter = 0;
 std::atomic_size_t LaunchTask::globalCounter_ = 0;
+
+LaunchTask* LaunchTaskHandler::get() const { return km.lookupLaunchTask(ptr); }
+
+float LaunchTaskHandler::getKernelTimeMs() const {
+  auto* task = get();
+  return task ? task->kernelTimeMs : 0.0f;
+}
 
 void CUDAKernelGenConfig::displayInfo(utils::InfoLogger logger) const {
   logger.put("Precision", precision)
@@ -310,53 +311,41 @@ void CUDAKernelManager::execThreadFunc_() {
                          << " is ready for launch\n";);
 
     // Launch the kernel into this slot
-    auto*& slot = launchWindow_[idx++];
-    if (slot != nullptr) {
+    auto& slot = launchWindow_[idx++];
+    if (!slot.finished.load(std::memory_order_acquire)) {
       // wait for the launch slot to be finished
-      slot->finished.wait(false);
-
+      slot.finished.wait(false);
+    }
+    if (slot.task != nullptr) {
       // free resources in the launch slot
-      if (slot->cuModule != nullptr) {
-        cuModuleUnload(slot->cuModule);
-        slot->cuModule = nullptr;
-      }
-      if (slot->startEvent != nullptr) {
-        cuEventDestroy(slot->startEvent);
-        slot->startEvent = nullptr;
-      }
-      if (slot->stopEvent != nullptr) {
-        cuEventDestroy(slot->stopEvent);
-        slot->stopEvent = nullptr;
-      }
-      slot->cuFunction = nullptr;
+      slot.resetResources();
     }
 
     // launch the given kernel into that slot
-    slot = task;
-    slot->kernelTimeMs = 0.0f;
+    slot.attachTask(task, &ongoings);
     CU_CHECK(cuModuleLoadDataEx(
-        &slot->cuModule, kernel->cubinData.data(), 0, nullptr, nullptr));
+        &slot.cuModule, kernel->cubinData.data(), 0, nullptr, nullptr));
 
     LLVM_DEBUG(std::cerr << "[Exec Thread] Loaded kernel "
                          << kernel->llvmFunc->getName().str()
                          << " with cubin of size "
                          << utils::fmt_mem(kernel->cubinData.size()) << "\n";);
-    CU_CHECK(cuModuleGetFunction(&slot->cuFunction,
-                                 slot->cuModule,
+    CU_CHECK(cuModuleGetFunction(&slot.cuFunction,
+                                 slot.cuModule,
                                  kernel->llvmFunc->getName().str().c_str()));
 
     auto nCombos = 1ULL << (cuMgr.sv->nQubits() - kernel->gate->nQubits());
-    slot->setArgs(cuMgr.sv->getDevicePtr(), 0, nCombos);
-    slot->finished.store(false, std::memory_order_release);
+    slot.setArgs(cuMgr.sv->getDevicePtr(), 0, nCombos);
+    slot.finished.store(false, std::memory_order_release);
 
     if (timingEnabled.load(std::memory_order_acquire)) {
-      if (slot->startEvent == nullptr)
-        CU_CHECK(cuEventCreate(&slot->startEvent, CU_EVENT_DEFAULT));
-      if (slot->stopEvent == nullptr)
-        CU_CHECK(cuEventCreate(&slot->stopEvent, CU_EVENT_DEFAULT));
-      CU_CHECK(cuEventRecord(slot->startEvent, 0));
+      if (slot.startEvent == nullptr)
+        CU_CHECK(cuEventCreate(&slot.startEvent, CU_EVENT_DEFAULT));
+      if (slot.stopEvent == nullptr)
+        CU_CHECK(cuEventCreate(&slot.stopEvent, CU_EVENT_DEFAULT));
+      CU_CHECK(cuEventRecord(slot.startEvent, 0));
     }
-    CU_CHECK(cuLaunchKernel(slot->cuFunction,
+    CU_CHECK(cuLaunchKernel(slot.cuFunction,
                             1,
                             1,
                             1, // grid dim
@@ -365,22 +354,51 @@ void CUDAKernelManager::execThreadFunc_() {
                             1, // block dim
                             0, // shared mem
                             0, // stream
-                            slot->getArgs(),
+                            slot.getArgs(),
                             nullptr));
     if (timingEnabled.load(std::memory_order_acquire)) {
-      CU_CHECK(cuEventRecord(slot->stopEvent, 0));
+      CU_CHECK(cuEventRecord(slot.stopEvent, 0));
     }
     LLVM_DEBUG(std::cerr << "[Exec Thread] Launched kernel "
                          << kernel->llvmFunc->getName().str() << " in slot "
                          << idx - 1 << "\n";);
-    CU_CHECK(cuLaunchHostFunc(
-        0, LaunchTask::setFinishedCallback, &slot->onFinishUserData));
+    CU_CHECK(
+        cuLaunchHostFunc(0,
+                         CUDAKernelManager::LaunchSlot::setFinishedCallback,
+                         &slot.onFinishUserData));
   } // while (true)
+}
+
+LaunchTask* CUDAKernelManager::lookupLaunchTask(LaunchTask* ptr) {
+  return launchHistory_.lookup(ptr);
 }
 
 llvm::Error CUDAKernelManager::syncCompilation() {
   tPool.sync();
   return tPool.takeError();
+}
+
+llvm::Expected<LaunchTaskHandler>
+CUDAKernelManager::enqueueKernelExecution(CudaKernel* kernel) {
+  if (kernel == nullptr)
+    return llvm::createStringError("Kernel pointer is null.");
+
+  if (cuMgr.sv == nullptr) {
+    return llvm::createStringError(
+        "No statevector is attached to the kernel manager.");
+  }
+
+  auto task = std::make_unique<LaunchTask>();
+  auto* taskPtr = task.get();
+  task->kernel = kernel;
+  launchHistory_.insert(std::move(task));
+  {
+    std::lock_guard lk(launchQueue_.mtx);
+    launchQueue_.data.push_back(taskPtr);
+    launchQueue_.cv.notify_one();
+  }
+  ongoings.fetch_add(1, std::memory_order_acq_rel);
+  return LaunchTaskHandler(*this, taskPtr);
 }
 
 llvm::Error CUDAKernelManager::syncKernelExecution() {

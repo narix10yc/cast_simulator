@@ -4,12 +4,14 @@
 #ifndef CAST_CUDA_CUDAKERNELMANAGER_H
 #define CAST_CUDA_CUDAKERNELMANAGER_H
 
-#include "cast/CPU/Config.h"
+#include "cast/Core/IRNode.h"
+#include "cast/Core/QuantumGate.h"
+
+#include "cast/CPU/Config.h" // for get_cpu_num_threads
+
 #include "cast/CUDA/CUDAJitTls.h"
 #include "cast/CUDA/CUDAStatevector.h"
 #include "cast/CUDA/Config.h"
-#include "cast/Core/IRNode.h"
-#include "cast/Core/QuantumGate.h"
 
 #include "utils/InfoLogger.h"
 #include "utils/ThreadPool.h"
@@ -18,18 +20,14 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/TargetSelect.h>
 
-#include <condition_variable>
-#include <cstddef>
-
-#include <chrono>
 #include <map>
-#include <mutex>
 
 #include <cuda.h>
 
 namespace cast {
 
 class CUDAKernelManager;
+class LaunchTaskHandler;
 
 enum class CUDAMatrixLoadMode {
   UseMatImmValues,
@@ -94,71 +92,24 @@ struct LaunchTask {
   size_t id;
 
   CudaKernel* kernel = nullptr;
-
-  CUmodule cuModule = nullptr;
-  CUfunction cuFunction = nullptr;
-  CUevent startEvent = nullptr;
-  CUevent stopEvent = nullptr;
   float kernelTimeMs = 0.0f;
 
-  struct OnFinishUserData {
-    std::atomic<bool>* finishedFlag = nullptr;
-    std::atomic<unsigned>* ongoings = nullptr;
-    CUevent* startEvent = nullptr;
-    CUevent* stopEvent = nullptr;
-    float* kernelTimeMs = nullptr;
-  } onFinishUserData;
+  LaunchTask() { id = globalCounter_.fetch_add(1, std::memory_order_relaxed); }
+};
 
-  CUdeviceptr argSvPtr = 0;
-  CUdeviceptr argMatPtr = 0;
-  size_t argCombosPtr = 0;
-  std::array<void*, 3> args;
+class LaunchTaskHandler {
+  CUDAKernelManager& km;
+  LaunchTask* ptr;
 
-  std::atomic<bool> finished = true;
+  LaunchTask* get() const;
 
-  explicit LaunchTask(std::atomic<unsigned>* ongoingsPtr) {
-    id = globalCounter_.fetch_add(1, std::memory_order_relaxed);
-    onFinishUserData.finishedFlag = &finished;
-    onFinishUserData.ongoings = ongoingsPtr;
-    onFinishUserData.startEvent = &startEvent;
-    onFinishUserData.stopEvent = &stopEvent;
-    onFinishUserData.kernelTimeMs = &kernelTimeMs;
-  }
+public:
+  explicit LaunchTaskHandler(CUDAKernelManager& km, LaunchTask* ptr)
+      : km(km), ptr(ptr) {}
 
-  void setArgs(CUdeviceptr sv, CUdeviceptr mat, size_t combos) {
-    argSvPtr = sv;
-    argMatPtr = mat;
-    argCombosPtr = combos;
+  float getKernelTimeMs() const;
 
-    args[0] = &argSvPtr;
-    args[1] = &argMatPtr;
-    args[2] = &argCombosPtr;
-  }
-
-  void** getArgs() { return args.data(); }
-
-  // userData should be a pointer to a LaunchTask
-  // sets the finished flag to true and notifies the exec thread
-  static void CUDART_CB setFinishedCallback(void* ptr) {
-    auto* userData = static_cast<OnFinishUserData*>(ptr);
-    userData->finishedFlag->store(true, std::memory_order_release);
-    userData->finishedFlag->notify_one();
-
-    if (userData->kernelTimeMs != nullptr && userData->startEvent != nullptr &&
-        userData->stopEvent != nullptr && *userData->startEvent != nullptr &&
-        *userData->stopEvent != nullptr) {
-      float ms = 0.0f;
-      if (cuEventElapsedTime(&ms,
-                             *userData->startEvent,
-                             *userData->stopEvent) == CUDA_SUCCESS) {
-        *userData->kernelTimeMs = ms;
-      } else {
-        *userData->kernelTimeMs = 0.0f;
-      }
-    }
-    userData->ongoings->fetch_sub(1, std::memory_order_acq_rel);
-    userData->ongoings->notify_all();
-  }
+  void displayInfo(utils::InfoLogger logger) const;
 };
 
 struct CUDAKernelGenConfig {
@@ -170,23 +121,6 @@ struct CUDAKernelGenConfig {
   explicit CUDAKernelGenConfig(Precision p = Precision::FP64) : precision(p) {}
 
   void displayInfo(utils::InfoLogger logger) const;
-};
-
-class CUDAKernelHandler {
-  CUDAKernelManager& km;
-  CudaKernel* kernel;
-
-public:
-  CUDAKernelHandler(CUDAKernelManager& km, CudaKernel* kernel)
-      : km(km), kernel(kernel) {}
-
-  // Get the underlying CudaKernel pointer. Returns nullptr if the kernel
-  // manager has changed its state.
-  CudaKernel* get() const { return kernel; }
-
-  void displayInfo(utils::InfoLogger logger) const {
-    kernel->displayInfo(logger);
-  }
 };
 
 /// Manages cuda-related stuff: devices, contexts, streams, modules, etc.
@@ -218,6 +152,7 @@ class CUDAKernelManager {
   using time_point_t = clock_t::time_point;
 
 private:
+  friend class LaunchTaskHandler;
   utils::ThreadPool<CUDAJitTls> tPool;
   CudaCtxManager cuMgr;
 
@@ -284,9 +219,9 @@ public:
   /// Unlike `CPUKernelManager`, here the generated kernel will be enqueued
   /// into JIT compilation session. So the returned kernel handler may not be
   /// ready for inspection immediately.
-  llvm::Expected<CUDAKernelHandler> genGate(const CUDAKernelGenConfig& config,
-                                            ConstQuantumGatePtr gate,
-                                            const std::string& funcName = "");
+  llvm::Expected<CudaKernel*> genGate(const CUDAKernelGenConfig& config,
+                                      ConstQuantumGatePtr gate,
+                                      const std::string& funcName = "");
 
   /// Generate kernels for all gates in the given circuit graph. The generated
   /// kernels will be named as <graphName>_<order>_<gateId>, where order is
@@ -357,22 +292,109 @@ private:
     }
   } launchHistory_;
 
-  /// A fixed-size window of launch tasks for overlapping kernel launches
-  /// and resource cleanup. Fixed window size to avoid loading all tasks at
-  /// once.
-  /// `LaunchWindow` does not own the `LaunchTask`s.
+  LaunchTask* lookupLaunchTask(LaunchTask* ptr);
+
+  struct LaunchSlot {
+    LaunchTask* task = nullptr;
+
+    CUmodule cuModule = nullptr;
+    CUfunction cuFunction = nullptr;
+    CUevent startEvent = nullptr;
+    CUevent stopEvent = nullptr;
+
+    CUdeviceptr argSvPtr = 0;
+    CUdeviceptr argMatPtr = 0;
+    size_t argCombosPtr = 0;
+    std::array<void*, 3> args{};
+
+    std::atomic<bool> finished = true;
+
+    struct OnFinishUserData {
+      std::atomic<bool>* finishedFlag = nullptr;
+      std::atomic<unsigned>* ongoings = nullptr;
+      CUevent* startEvent = nullptr;
+      CUevent* stopEvent = nullptr;
+      float* kernelTimeMs = nullptr;
+    } onFinishUserData;
+
+    LaunchSlot() {
+      args[0] = &argSvPtr;
+      args[1] = &argMatPtr;
+      args[2] = &argCombosPtr;
+      onFinishUserData.finishedFlag = &finished;
+      onFinishUserData.startEvent = &startEvent;
+      onFinishUserData.stopEvent = &stopEvent;
+    }
+
+    void resetResources() {
+      if (cuModule != nullptr) {
+        CU_CHECK(cuModuleUnload(cuModule));
+        cuModule = nullptr;
+      }
+      if (startEvent != nullptr) {
+        CU_CHECK(cuEventDestroy(startEvent));
+        startEvent = nullptr;
+      }
+      if (stopEvent != nullptr) {
+        CU_CHECK(cuEventDestroy(stopEvent));
+        stopEvent = nullptr;
+      }
+      cuFunction = nullptr;
+      task = nullptr;
+    }
+
+    void setArgs(CUdeviceptr sv, CUdeviceptr mat, size_t combos) {
+      argSvPtr = sv;
+      argMatPtr = mat;
+      argCombosPtr = combos;
+    }
+
+    void** getArgs() { return args.data(); }
+
+    void attachTask(LaunchTask* taskPtr, std::atomic<unsigned>* ongoingsPtr) {
+      task = taskPtr;
+      if (task != nullptr)
+        task->kernelTimeMs = 0.0f;
+      onFinishUserData.ongoings = ongoingsPtr;
+      onFinishUserData.kernelTimeMs =
+          task != nullptr ? &task->kernelTimeMs : nullptr;
+    }
+
+    static void CUDART_CB setFinishedCallback(void* ptr) {
+      auto* userData = static_cast<OnFinishUserData*>(ptr);
+      userData->finishedFlag->store(true, std::memory_order_release);
+      userData->finishedFlag->notify_one();
+
+      if (userData->kernelTimeMs != nullptr &&
+          userData->startEvent != nullptr && userData->stopEvent != nullptr &&
+          *userData->startEvent != nullptr && *userData->stopEvent != nullptr) {
+        float ms = 0.0f;
+        if (cuEventElapsedTime(&ms,
+                               *userData->startEvent,
+                               *userData->stopEvent) == CUDA_SUCCESS) {
+          *userData->kernelTimeMs = ms;
+        } else {
+          *userData->kernelTimeMs = 0.0f;
+        }
+      }
+      userData->ongoings->fetch_sub(1, std::memory_order_acq_rel);
+      userData->ongoings->notify_all();
+    }
+  };
+
+  /// A fixed-size window of launch slots for overlapping kernel launches.
   struct LaunchWindow {
   private:
-    std::array<LaunchTask*, LAUNCH_WINDOW_SIZE> sessions{};
+    std::array<LaunchSlot, LAUNCH_WINDOW_SIZE> sessions{};
 
   public:
     LaunchWindow() = default;
 
-    LaunchTask*& operator[](size_t idx) {
+    LaunchSlot& operator[](size_t idx) {
       return sessions[idx % LAUNCH_WINDOW_SIZE];
     }
 
-    const LaunchTask* operator[](size_t idx) const {
+    const LaunchSlot& operator[](size_t idx) const {
       return sessions[idx % LAUNCH_WINDOW_SIZE];
     }
   } launchWindow_;
@@ -406,25 +428,6 @@ public:
   /// Wait for all enqueued kernel compilations to finish.
   llvm::Error syncCompilation();
 
-  struct LaunchTaskHandler {
-  private:
-    CUDAKernelManager& km;
-    LaunchTask* ptr;
-
-    LaunchTask* get() const { return km.launchHistory_.lookup(ptr); }
-
-  public:
-    explicit LaunchTaskHandler(CUDAKernelManager& km, LaunchTask* ptr)
-        : km(km), ptr(ptr) {}
-
-    float getKernelTimeMs() const {
-      auto* task = get();
-      return task ? task->kernelTimeMs : 0.0f;
-    }
-
-    void displayInfo(utils::InfoLogger logger) const;
-  };
-
   void attachStatevector(std::unique_ptr<CUDAStatevectorBase> sv) {
     cuMgr.sv = std::move(sv);
   }
@@ -437,24 +440,7 @@ public:
   /// `LaunchTask` that will then be moved into this manager's `launchHistory_`
   /// for memory management. During the entire launch and execution process, the
   /// launch task instance will only be referenced.
-  llvm::Expected<LaunchTaskHandler>
-  enqueueKernelExecution(CUDAKernelHandler kernelH) {
-    auto* kernel = kernelH.get();
-    if (kernel == nullptr)
-      return llvm::createStringError("The kernel is no longer valid.");
-
-    auto task = std::make_unique<LaunchTask>(&ongoings);
-    auto* taskPtr = task.get();
-    task->kernel = kernel;
-    launchHistory_.insert(std::move(task));
-    {
-      std::lock_guard lk(launchQueue_.mtx);
-      launchQueue_.data.push_back(taskPtr);
-      launchQueue_.cv.notify_one();
-    }
-    ongoings.fetch_add(1, std::memory_order_acq_rel);
-    return LaunchTaskHandler(*this, taskPtr);
-  }
+  llvm::Expected<LaunchTaskHandler> enqueueKernelExecution(CudaKernel* kernel);
 
   llvm::Error syncKernelExecution();
 

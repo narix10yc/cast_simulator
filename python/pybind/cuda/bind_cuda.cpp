@@ -11,6 +11,10 @@ namespace py = pybind11;
 
 namespace {
 
+struct PyCudaKernelHandle {
+  cast::CudaKernel* kernel = nullptr;
+};
+
 template <typename SVType>
 void bind_cudaStatevector(py::module_& m, const char* pyName) {
   py::class_<SVType>(m, pyName)
@@ -56,21 +60,23 @@ void bind_cudaKernelManager(py::module_& m) {
           },
           py::arg("verbose") = 1);
 
-  py::class_<cast::CUDAKernelHandler>(m, "CudaKernelHandler")
+  py::class_<PyCudaKernelHandle>(m, "CudaKernelHandler")
       .def(
           "print_info",
-          [](const cast::CUDAKernelHandler& self, int verbose) -> void {
+          [](const PyCudaKernelHandle& self, int verbose) -> void {
+            if (self.kernel == nullptr) {
+              throw std::runtime_error("Kernel handle is null.");
+            }
             py::gil_scoped_acquire gil;
             py::scoped_ostream_redirect redirect(std::cout);
-            self.displayInfo({std::cout, verbose});
+            self.kernel->displayInfo({std::cout, verbose});
           },
           py::arg("verbose") = 1);
 
-  py::class_<cast::CUDAKernelManager::LaunchTaskHandler>(m, "LaunchTaskHandler")
-      .def("get_exec_time",
-           [](const cast::CUDAKernelManager::LaunchTaskHandler& self) {
-             return static_cast<double>(self.getKernelTimeMs()) * 1e-3;
-           });
+  py::class_<cast::LaunchTaskHandler>(m, "LaunchTaskHandler")
+      .def("get_exec_time", [](const cast::LaunchTaskHandler& self) {
+        return static_cast<double>(self.getKernelTimeMs()) * 1e-3;
+      });
 
   py::class_<cast::CUDAKernelManager>(m, "CUDAKernelManager")
       .def(py::init<>())
@@ -87,13 +93,13 @@ void bind_cudaKernelManager(py::module_& m) {
           [](cast::CUDAKernelManager& self,
              const cast::CUDAKernelGenConfig& config,
              const cast::QuantumGatePtr& gate,
-             const std::string& func_name) -> cast::CUDAKernelHandler {
+             const std::string& func_name) -> PyCudaKernelHandle {
             auto eHandler = self.genGate(config, gate, func_name);
             if (!eHandler) {
               throw std::runtime_error("Failed to generate gate: " +
                                        llvm::toString(eHandler.takeError()));
             }
-            return *eHandler;
+            return PyCudaKernelHandle{*eHandler};
           },
           py::arg("config"),
           py::arg("gate"),
@@ -101,9 +107,8 @@ void bind_cudaKernelManager(py::module_& m) {
       .def(
           "enqueue_kernel_execution",
           [](cast::CUDAKernelManager& self,
-             const cast::CUDAKernelHandler& kernel)
-              -> cast::CUDAKernelManager::LaunchTaskHandler {
-            auto eTask = self.enqueueKernelExecution(kernel);
+             const PyCudaKernelHandle& kernel) -> cast::LaunchTaskHandler {
+            auto eTask = self.enqueueKernelExecution(kernel.kernel);
             if (!eTask) {
               throw std::runtime_error("Failed to enqueue kernel execution: " +
                                        llvm::toString(eTask.takeError()));

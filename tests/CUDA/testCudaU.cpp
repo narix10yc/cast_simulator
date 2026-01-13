@@ -38,15 +38,15 @@ template <int nQubits> static void f() {
   cfg.matrixLoadMode = CUDAMatrixLoadMode::UseMatImmValues;
   cfg.precision = Precision::FP64;
 
-  std::vector<CUDAKernelHandler> handlers;
-  handlers.reserve(nQubits);
+  std::vector<CudaKernel*> kernels;
+  kernels.reserve(nQubits);
   for (int q = 0; q < nQubits; q++) {
     auto eKernel = km.genGate(cfg, gates[q], "gateImm_" + std::to_string(q));
     if (!eKernel) {
       suite.check(eKernel.takeError(), "genGate", GET_INFO());
       return;
     }
-    handlers.push_back(*eKernel);
+    kernels.push_back(*eKernel);
   }
   CHECK(suite, km.syncCompilation());
 
@@ -65,7 +65,7 @@ template <int nQubits> static void f() {
     svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gates[q].get()));
 
     // Apply CUDA gate
-    auto eTask = km.enqueueKernelExecution(handlers[q]);
+    auto eTask = km.enqueueKernelExecution(kernels[q]);
     if (!eTask) {
       suite.check(eTask.takeError(), "enqueueKernelExecution", GET_INFO());
       return;

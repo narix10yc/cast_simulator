@@ -50,9 +50,8 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
   int i = 0;
   for (auto& kernelPtr : pool) {
     auto* kernel = kernelPtr.get();
-    CUDAKernelHandler handler(km, kernel);
 
-    if (auto eTask = km.enqueueKernelExecution(handler); !eTask) {
+    if (auto eTask = km.enqueueKernelExecution(kernel); !eTask) {
       return llvm::joinErrors(
           llvm::createStringError("Warm-up kernel launch failed"),
           eTask.takeError());
@@ -63,7 +62,7 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
           std::move(e));
     }
 
-    auto eTask = km.enqueueKernelExecution(handler);
+    auto eTask = km.enqueueKernelExecution(kernel);
     if (!eTask) {
       return llvm::joinErrors(
           llvm::createStringError("Kernel launch failed"),
@@ -176,10 +175,9 @@ CUDAPerformanceCache::runExperiments(const CUDAKernelGenConfig& kernelConfig,
   constexpr int nReplications = 3;
   for (auto& kernelPtr : km.getDefaultPool()) {
     auto* kernel = kernelPtr.get();
-    CUDAKernelHandler handler(km, kernel);
     float t = 1e6f;
     for (int rep = 0; rep < nReplications; ++rep) {
-      auto eTask = km.enqueueKernelExecution(handler);
+      auto eTask = km.enqueueKernelExecution(kernel);
       if (!eTask)
         return eTask.takeError();
       if (auto e = km.syncKernelExecution())

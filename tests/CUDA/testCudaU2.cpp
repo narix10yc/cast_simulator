@@ -53,10 +53,9 @@ template <int nQubits> void runU2qTest() {
     randomizeSV();
     auto* kernel = item.get();
     ConstQuantumGatePtr gate = kernel->gate;
-    CUDAKernelHandler handler(km, kernel);
 
     /* apply gate on GPU */
-    (void)llvm::cantFail(km.enqueueKernelExecution(handler));
+    (void)llvm::cantFail(km.enqueueKernelExecution(kernel));
     (void)llvm::cantFail(km.syncKernelExecution());
 
     // check norm
