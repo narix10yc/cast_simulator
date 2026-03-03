@@ -68,8 +68,9 @@ unwrapArguments(int& nQubits, int& nThreads, CPUSimdWidth& simdWidth) {
   else if (ArgSimdWidth == 0)
     simdWidth = get_cpu_simd_width();
   else {
-    logerr() << "Invalid SIMD width specified: " << ArgSimdWidth
-             << ". Valid values are 64, 128, 256, 512, or 0 for auto-detection.\n";
+    logerr()
+        << "Invalid SIMD width specified: " << ArgSimdWidth
+        << ". Valid values are 64, 128, 256, 512, or 0 for auto-detection.\n";
     std::exit(1);
   }
 }

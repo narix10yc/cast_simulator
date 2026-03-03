@@ -16,9 +16,6 @@ message(STATUS "CAST_USE_LLVM_LIBCXX: ${CAST_USE_LLVM_LIBCXX}")
 option(CAST_USE_CUDA "Use LLVM NVPTX Backend for CUDA Support" OFF)
 message(STATUS "CAST_USE_CUDA: ${CAST_USE_CUDA}")
 
-option(CAST_USE_NCCL "Use NCCL for multi-GPU communication" OFF)
-message(STATUS "CAST_USE_NCCL: ${CAST_USE_NCCL}")
-
 option(CAST_PYTHON_BIND "Bind Python" OFF)
 message(STATUS "CAST_PYTHON_BIND: ${CAST_PYTHON_BIND}")
 
@@ -34,8 +31,11 @@ message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
 
 ##### Project Setup ######
 project(cast_simulator LANGUAGES C CXX)
+include(CTest)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED on)
@@ -72,11 +72,6 @@ add_definitions(${LLVM_DEFINITIONS_LIST})
 
 ###### CUDA Setup ######
 
-# USE_NCCL implies USE_CUDA
-if(NOT CAST_USE_CUDA AND CAST_USE_NCCL)
-  message(WARNING "NCCL requires CUDA. Enabling CAST_USE_CUDA.")
-  set(CAST_USE_CUDA ON)
-endif()
 if(CAST_USE_CUDA)
   set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
   find_package(CUDAToolkit REQUIRED)
@@ -110,19 +105,6 @@ if(CAST_USE_CUDA)
   enable_language(CUDA)
 endif() # if(CAST_USE_CUDA)
 
-if(CAST_USE_NCCL)
-  if(NOT DEFINED NCCL_ROOT)
-    message(WARNING "NCCL_ROOT is not specified. Will try to find NCCL in "
-                    "system paths.")
-  endif()
-
-  find_package(NCCL REQUIRED)
-  message(STATUS "NCCL_INCLUDE_DIRS: ${NCCL_INCLUDE_DIRS}")
-  message(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
-  include_directories(${NCCL_INCLUDE_DIRS})
-  link_libraries(${NCCL_LIBRARIES})
-endif()
-
 # General compile options
 # more specific ones will be added in each subdirectory
 add_compile_options("-fdiagnostics-color=always")
@@ -132,9 +114,6 @@ endif()
 
 if(CAST_USE_CUDA)
   add_compile_definitions(CAST_USE_CUDA)
-endif()
-if(CAST_USE_NCCL)
-  add_compile_definitions(CAST_USE_NCCL)
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

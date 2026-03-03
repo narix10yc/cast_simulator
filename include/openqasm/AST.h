@@ -68,7 +68,8 @@ public:
   virtual ExpressionValue getExprValue() const { return false; }
 
   static bool classof(const Node* node) {
-    return node->getKind() >= NK_Expression && node->getKind() < NK_ExpressionEnd;
+    return node->getKind() >= NK_Expression &&
+           node->getKind() < NK_ExpressionEnd;
   }
 };
 

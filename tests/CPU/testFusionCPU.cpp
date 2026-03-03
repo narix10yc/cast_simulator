@@ -11,9 +11,9 @@ namespace fs = std::filesystem;
 
 using namespace cast;
 
-template <CPUSimdWidth SimdWidth> static void f() {
-  cast::test::TestSuite suite("Fusion CPU (s = " + std::to_string(SimdWidth) +
-                              ")");
+template <CPUSimdWidth SimdWidth> static bool f() {
+  cast::test::TestSuite suite(
+      "CPU fusion equivalence (SIMD=" + std::to_string(SimdWidth) + ")");
 
   cast::CPUKernelManager km;
   cast::CPUKernelGenConfig genCfg(SimdWidth, cast::Precision::FP64);
@@ -24,8 +24,8 @@ template <CPUSimdWidth SimdWidth> static void f() {
   std::cerr << "Test Dir: " << TEST_DIR << "\n";
   fs::path circuitDir = fs::path(TEST_DIR) / "circuits";
   if (!fs::exists(circuitDir) || !fs::is_directory(circuitDir)) {
-    std::cerr << BOLDRED("Error: ") << "No circuit directory found\n";
-    return;
+    suite.assertFalse("Test circuit directory exists", GET_INFO());
+    return suite.displayResult();
   }
   for (const auto& p : fs::directory_iterator(circuitDir)) {
     if (!p.is_regular_file())
@@ -62,24 +62,28 @@ template <CPUSimdWidth SimdWidth> static void f() {
               sv1.data(), sv1.nQubits(), "graphAfterFusion"));
 
     suite.assertCloseFP64(sv0.norm(),
-                         1.0,
-                         p.path().filename().string() + " no-fuse norm",
-                         GET_INFO());
+                          1.0,
+                          p.path().filename().string() +
+                              ": no-fusion execution preserves norm",
+                          GET_INFO());
     suite.assertCloseFP64(sv1.norm(),
-                         1.0,
-                         p.path().filename().string() + " fuse norm",
-                         GET_INFO());
+                          1.0,
+                          p.path().filename().string() +
+                              ": fused execution preserves norm",
+                          GET_INFO());
 
     suite.assertCloseFP64(cast::fidelity(sv0, sv1),
-                         1.0,
-                         p.path().filename().string() + " fidelity",
-                         GET_INFO());
+                          1.0,
+                          p.path().filename().string() +
+                              ": fused and unfused executions are equivalent",
+                          GET_INFO());
   }
 
-  suite.displayResult();
+  return suite.displayResult();
 }
 
-void cast::test::test_fusionCPU() {
-  f<W128>();
-  f<W256>();
+bool cast::test::test_fusionCPU() {
+  const bool ok128 = f<W128>();
+  const bool ok256 = f<W256>();
+  return ok128 && ok256;
 }

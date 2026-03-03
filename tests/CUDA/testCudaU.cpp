@@ -8,8 +8,9 @@
 using namespace cast;
 using namespace cast::test;
 
-template <int nQubits> static void f() {
-  test::TestSuite suite("Gate U1q (" + std::to_string(nQubits) + " qubits)");
+template <int nQubits> static bool f() {
+  test::TestSuite suite("CUDA U1q kernel parity (" + std::to_string(nQubits) +
+                        " qubits)");
 
   // we have to use W0 here to allow memcpy from cuda sv to cpu sv
   cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
@@ -44,7 +45,7 @@ template <int nQubits> static void f() {
     auto eKernel = km.genGate(cfg, gates[q], "gateImm_" + std::to_string(q));
     if (!eKernel) {
       suite.check(eKernel.takeError(), "genGate", GET_INFO());
-      return;
+      return suite.displayResult();
     }
     kernels.push_back(*eKernel);
   }
@@ -53,12 +54,13 @@ template <int nQubits> static void f() {
   for (int q = 0; q < nQubits; q++) {
     std::stringstream ss;
     assert(q == gates[q]->qubits()[0]);
-    ss << "Apply U1q at " << q << ": ";
+    ss << "Apply random U1q on qubit " << q << ": ";
 
     randomizeSV();
     suite.assertCloseFP64(svCUDAPtr->prob(q),
                           svCPU.prob(q),
-                          ss.str() + "Prob match before applying gate",
+                          ss.str() +
+                              "GPU/CPU probabilities match before kernel",
                           GET_INFO());
 
     // Apply CPU gate
@@ -68,25 +70,25 @@ template <int nQubits> static void f() {
     auto eTask = km.enqueueKernelExecution(kernels[q]);
     if (!eTask) {
       suite.check(eTask.takeError(), "enqueueKernelExecution", GET_INFO());
-      return;
+      return suite.displayResult();
     }
     CHECK(suite, km.syncKernelExecution());
 
-    suite.assertCloseFP64(
-        svCUDAPtr->norm(),
-        1.0,
-        ss.str() + "CUDA SV norm equals to 1",
-        GET_INFO());
+    suite.assertCloseFP64(svCUDAPtr->norm(),
+                          1.0,
+                          ss.str() + "CUDA state preserves norm",
+                          GET_INFO());
     suite.assertCloseFP64(svCUDAPtr->prob(q),
                           svCPU.prob(q),
-                          ss.str() + "Prob match after applying gate",
+                          ss.str() + "GPU kernel result matches CPU reference",
                           GET_INFO());
   }
-  suite.displayResult();
+  return suite.displayResult();
 }
 
-void test::test_cudaU() {
-  f<4>();
-  f<8>();
-  f<12>();
+bool test::test_cudaU() {
+  const bool ok4 = f<4>();
+  const bool ok8 = f<8>();
+  const bool ok12 = f<12>();
+  return ok4 && ok8 && ok12;
 }

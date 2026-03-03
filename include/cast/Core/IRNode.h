@@ -2,9 +2,9 @@
 #define CAST_CORE_IRNODE_H
 
 #include "cast/Core/QuantumGate.h"
-#include <llvm/Support/Error.h>
 #include <iostream>
 #include <list>
+#include <llvm/Support/Error.h>
 #include <unordered_map>
 
 namespace cast::ir {

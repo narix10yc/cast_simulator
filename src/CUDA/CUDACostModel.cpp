@@ -64,9 +64,8 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
 
     auto eTask = km.enqueueKernelExecution(kernel);
     if (!eTask) {
-      return llvm::joinErrors(
-          llvm::createStringError("Kernel launch failed"),
-          eTask.takeError());
+      return llvm::joinErrors(llvm::createStringError("Kernel launch failed"),
+                              eTask.takeError());
     }
     if (auto e = km.syncKernelExecution()) {
       return llvm::joinErrors(
@@ -76,8 +75,8 @@ runPreliminaryExperiments(const CUDAKernelGenConfig& kernelConfig,
   }
 
   for (int k = 1; k <= 5; ++k) {
-    std::cerr << k << "-qubit dense gate takes "
-              << utils::fmt_time(tarr[k - 1]) << "\n";
+    std::cerr << k << "-qubit dense gate takes " << utils::fmt_time(tarr[k - 1])
+              << "\n";
   }
 
   impl::computeGateWeights(tarr, weights);

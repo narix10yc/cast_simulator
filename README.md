@@ -6,7 +6,7 @@ Code refactoring in process. Python binding in progress. Check the yl5619-dev br
 
 For the main branch, CPU part does work. To test out, disable `CAST_USE_CUDA` and run
 ```
-ninja unit_test && ./unit_test
+ninja unit_test && ctest --output-on-failure
 ```
 Some demos also run
 ```
@@ -125,7 +125,8 @@ cmake -GNinja \
 -DCUDAToolkit_ROOT=/usr/local/cuda-12.3
 ```
 
-Then run `ninja unit_test && ./unit_test` to run some unit tests, and confirm it compiles and runs correctly.
+Then run `ninja unit_test && ctest --output-on-failure` to run unit tests, and
+confirm it compiles and runs correctly.
 
 ## Running Demos
 We provide several demos for testing purposes.

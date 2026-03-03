@@ -27,10 +27,10 @@ void TestSuite::assertFalse(const std::string& title, const std::string& info) {
 }
 
 void TestSuite::assertCloseFP32(float a,
-                               float b,
-                               const std::string& title,
-                               const std::string& info,
-                               float tol) {
+                                float b,
+                                const std::string& title,
+                                const std::string& info,
+                                float tol) {
   ++nTests;
   float diff = std::abs(a - b);
   if (diff <= tol)
@@ -43,10 +43,10 @@ void TestSuite::assertCloseFP32(float a,
 }
 
 void TestSuite::assertCloseFP64(double a,
-                               double b,
-                               const std::string& title,
-                               const std::string& info,
-                               double tol) {
+                                double b,
+                                const std::string& title,
+                                const std::string& info,
+                                double tol) {
   ++nTests;
   double diff = std::abs(a - b);
   if (diff <= tol)

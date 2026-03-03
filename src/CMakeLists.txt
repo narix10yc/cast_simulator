@@ -66,10 +66,6 @@ if (CAST_USE_CUDA)
     cast_core)
   target_compile_options(cast_cuda PRIVATE ${COMPILE_FLAGS})
   target_link_libraries(cast INTERFACE cast_cuda)
-
-  if(CAST_USE_NCCL)
-    target_link_libraries(cast_cuda PRIVATE ${NCCL_LIBRARIES})
-  endif()
 endif()
 
 target_link_libraries(cast INTERFACE cast_cpu cast_fpga)

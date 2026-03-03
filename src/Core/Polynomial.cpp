@@ -295,8 +295,8 @@ Monomial::simplify(const std::vector<std::pair<int, double>>& varValues) {
     while (true) {
       if (it->first == E.var) {
         coef_ *= std::complex<double>(std::cos(it->second),
-                                     (E.isPlus) ? std::sin(it->second)
-                                                : -std::sin(it->second));
+                                      (E.isPlus) ? std::sin(it->second)
+                                                 : -std::sin(it->second));
         return true;
       }
       if (++it == varValues.cend())

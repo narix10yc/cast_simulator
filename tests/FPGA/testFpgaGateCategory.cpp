@@ -4,45 +4,45 @@
 
 using namespace cast;
 
-void test::test_fpgaGateCategory() {
-  TestSuite suite("FPGA Gate Category Test");
+bool test::test_fpgaGateCategory() {
+  TestSuite suite("FPGA gate categorization rules");
 
   auto hCate = fpga::getFPGAGateCategory(StandardQuantumGate::H(0).get());
   suite.assertEqual(hCate.is(fpga::FPGAGateCategory::SingleQubit),
                     true,
-                    "Hadamard Gate is single-qubit",
+                    "Hadamard is classified as SingleQubit",
                     GET_INFO());
   suite.assertEqual(hCate.is(fpga::FPGAGateCategory::UnitaryPerm),
                     false,
-                    "Hadamard Gate is not Unitary Perm",
+                    "Hadamard is not classified as UnitaryPerm",
                     GET_INFO());
   suite.assertEqual(hCate.is(fpga::FPGAGateCategory::NonComp),
                     false,
-                    "Hadamard Gate is not Non-Computational",
+                    "Hadamard is not classified as NonComp",
                     GET_INFO());
   suite.assertEqual(hCate.is(fpga::FPGAGateCategory::RealOnly),
                     true,
-                    "Hadamard Gate is Real Only",
+                    "Hadamard is classified as RealOnly",
                     GET_INFO());
 
   auto i1Cate = fpga::getFPGAGateCategory(StandardQuantumGate::I1(0).get());
   suite.assertEqual(i1Cate.is(fpga::FPGAGateCategory::SingleQubit),
                     true,
-                    "Identity Gate is single-qubit",
+                    "Identity is classified as SingleQubit",
                     GET_INFO());
   suite.assertEqual(i1Cate.is(fpga::FPGAGateCategory::UnitaryPerm),
                     true,
-                    "Identity Gate is Unitary Perm",
+                    "Identity is classified as UnitaryPerm",
                     GET_INFO());
   suite.assertEqual(i1Cate.is(fpga::FPGAGateCategory::NonComp),
                     true,
-                    "Identity Gate is Non-Computational",
+                    "Identity is classified as NonComp",
                     GET_INFO());
   suite.assertEqual(i1Cate.is(fpga::FPGAGateCategory::RealOnly),
                     true,
-                    "Identity Gate is Real Only",
+                    "Identity is classified as RealOnly",
                     GET_INFO());
 
   // Display results
-  suite.displayResult();
+  return suite.displayResult();
 }

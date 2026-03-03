@@ -42,8 +42,7 @@ public:
       if (_size > NumInline)
         std::free(*dataPtr);
       *dataPtr = newPtr;
-      size_t* capacityPtr =
-          reinterpret_cast<size_t*>(_data + sizeof(size_t));
+      size_t* capacityPtr = reinterpret_cast<size_t*>(_data + sizeof(size_t));
       *capacityPtr = 2 * curCapacity;
     }
     (*dataPtr)[_size++] = v;
@@ -52,9 +51,9 @@ public:
   size_t size() const { return _size; }
 
   size_t capacity() const {
-    return isInline() ? NumInline
-                      : *reinterpret_cast<const size_t*>(
-                            _data + sizeof(size_t));
+    return isInline()
+               ? NumInline
+               : *reinterpret_cast<const size_t*>(_data + sizeof(size_t));
   }
 };
 
