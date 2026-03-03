@@ -16,7 +16,6 @@ namespace internal {
 /// @return Speed in gigabytes per second (GiBps)
 double calculateMemUpdateSpeed(int nQubits, Precision precision, double t);
 
-
 // Take the scalar gate matrix representation of the gate and randomly zero
 // out some of the elements with probability p. The final matrix is not
 // guaranteed to remain unitary. This method is only intended to be used for

@@ -5,9 +5,9 @@
 
 using namespace cast::test;
 
-template <int nQubits> static void f() {
-  cast::test::TestSuite suite("CUDAStatevector with " +
-                              std::to_string(nQubits) + " qubits");
+template <int nQubits> static bool f() {
+  cast::test::TestSuite suite("CUDAStatevector CPU/GPU consistency (" +
+                              std::to_string(nQubits) + " qubits)");
   cast::CUDAStatevector<float> svCudaFP32(nQubits);
   cast::CUDAStatevector<double> svCudaFP64(nQubits);
 
@@ -17,19 +17,23 @@ template <int nQubits> static void f() {
 
   svCudaFP32.initialize();
   svCudaFP64.initialize();
-  suite.assertCloseFP32(
-      svCudaFP32.norm(), 1.0f, "initialize norm FP32", GET_INFO());
+  suite.assertCloseFP32(svCudaFP32.norm(),
+                        1.0f,
+                        "FP32 initialization preserves norm",
+                        GET_INFO());
   suite.assertCloseFP64(
-      svCudaFP64.norm(), 1.0, "initialize norm FP64", GET_INFO());
+      svCudaFP64.norm(), 1.0, "FP64 initialization preserves norm", GET_INFO());
   for (int q = 0; q < nQubits; ++q) {
     suite.assertCloseFP32(svCudaFP32.prob(q),
-                         0.0f,
-                         "Init SV FP32: Prob of qubit " + std::to_string(q),
-                         GET_INFO());
+                          0.0f,
+                          "FP32 init: qubit-" + std::to_string(q) +
+                              " marginal probability is zero",
+                          GET_INFO());
     suite.assertCloseFP64(svCudaFP64.prob(q),
-                         0.0,
-                         "Init SV FP64: Prob of qubit " + std::to_string(q),
-                         GET_INFO());
+                          0.0,
+                          "FP64 init: qubit-" + std::to_string(q) +
+                              " marginal probability is zero",
+                          GET_INFO());
   }
 
   svCudaFP32.randomize();
@@ -43,25 +47,30 @@ template <int nQubits> static void f() {
              svCudaFP64.sizeInBytes(),
              cudaMemcpyDeviceToHost);
 
-  suite.assertCloseFP32(svCudaFP32.norm(), 1.0f, "Rand SV FP32: Norm", GET_INFO());
-  suite.assertCloseFP64(svCudaFP64.norm(), 1.0, "Rand SV FP64: Norm", GET_INFO());
+  suite.assertCloseFP32(
+      svCudaFP32.norm(), 1.0f, "FP32 random state preserves norm", GET_INFO());
+  suite.assertCloseFP64(
+      svCudaFP64.norm(), 1.0, "FP64 random state preserves norm", GET_INFO());
 
   for (int q = 0; q < nQubits; ++q) {
     suite.assertCloseFP32(static_cast<float>(svCudaFP32.prob(q)),
-                         svCpuFP32.prob(q),
-                         "Rand SV FP32: Prob of qubit " + std::to_string(q),
-                         GET_INFO());
+                          svCpuFP32.prob(q),
+                          "FP32 random state: GPU/CPU qubit-" +
+                              std::to_string(q) + " probability matches",
+                          GET_INFO());
     suite.assertCloseFP64(static_cast<double>(svCudaFP64.prob(q)),
-                         svCpuFP64.prob(q),
-                         "Rand SV FP64: Prob of qubit " + std::to_string(q),
-                         GET_INFO());
+                          svCpuFP64.prob(q),
+                          "FP64 random state: GPU/CPU qubit-" +
+                              std::to_string(q) + " probability matches",
+                          GET_INFO());
   }
 
-  suite.displayResult();
+  return suite.displayResult();
 }
 
-void cast::test::test_statevectorCUDA() {
-  f<8>();
-  f<12>();
-  f<16>();
+bool cast::test::test_statevectorCUDA() {
+  const bool ok8 = f<8>();
+  const bool ok12 = f<12>();
+  const bool ok16 = f<16>();
+  return ok8 && ok12 && ok16;
 }

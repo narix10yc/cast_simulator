@@ -3,8 +3,8 @@
 
 using namespace cast;
 
-void test::test_complexSquareMatrix() {
-  test::TestSuite suite("Complex Square Matrix Test");
+bool test::test_complexSquareMatrix() {
+  test::TestSuite suite("ComplexSquareMatrix algebra and inversion");
 
   auto matI = ComplexSquareMatrix::I1();
   auto matX = ComplexSquareMatrix::X();
@@ -13,32 +13,36 @@ void test::test_complexSquareMatrix() {
   auto matResult = ComplexSquareMatrix(2);
 
   cast::matmul(matX, matX, matResult);
-  suite.assertCloseFP64(maximum_norm(matResult, matI), 0.0, "XX == I", GET_INFO());
+  suite.assertCloseFP64(
+      maximum_norm(matResult, matI), 0.0, "X * X equals identity", GET_INFO());
 
   cast::matmul(matY, matY, matResult);
-  suite.assertCloseFP64(maximum_norm(matResult, matI), 0.0, "YY == I", GET_INFO());
+  suite.assertCloseFP64(
+      maximum_norm(matResult, matI), 0.0, "Y * Y equals identity", GET_INFO());
 
   cast::matmul(matZ, matZ, matResult);
-  suite.assertCloseFP64(maximum_norm(matResult, matI), 0.0, "ZZ == I", GET_INFO());
+  suite.assertCloseFP64(
+      maximum_norm(matResult, matI), 0.0, "Z * Z equals identity", GET_INFO());
 
   auto mat_iZ = matZ * std::complex<double>(0, 1);
   cast::matmul(matX, matY, matResult);
   suite.assertCloseFP64(
-      maximum_norm(matResult, mat_iZ), 0.0, "XY == iZ", GET_INFO());
+      maximum_norm(matResult, mat_iZ), 0.0, "X * Y equals iZ", GET_INFO());
 
   auto matA = ComplexSquareMatrix::RandomUnitary(4);
   ComplexSquareMatrix matAInv;
   auto rst = cast::matinv(matA, matAInv);
   if (!rst) {
-    suite.assertEqual(1, 0, "Matrix inversion failed", GET_INFO());
+    suite.assertEqual(
+        1, 0, "Matrix inversion succeeds for random unitary", GET_INFO());
   } else {
     ComplexSquareMatrix matAAInv;
     cast::matmul(matA, matAInv, matAAInv);
     suite.assertCloseFP64(maximum_norm(matAAInv, ComplexSquareMatrix::eye(4)),
-                      0.0,
-                      "A * AInv == I",
-                      GET_INFO());
+                          0.0,
+                          "A * inverse(A) equals identity",
+                          GET_INFO());
   }
 
-  suite.displayResult();
+  return suite.displayResult();
 }

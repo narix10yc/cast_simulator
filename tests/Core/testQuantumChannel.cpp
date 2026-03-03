@@ -26,8 +26,8 @@ static SuperopQuantumGatePtr getSOGateForSPC(double p, int q) {
   return SuperopQuantumGate::Create(scalarGM, {q});
 }
 
-void cast::test::test_quantumChannel() {
-  test::TestSuite suite("QuantumChannel Test Suite");
+bool cast::test::test_quantumChannel() {
+  test::TestSuite suite("QuantumChannel SPC superoperator mapping");
 
   auto gate = StandardQuantumGate::I1(0);
   gate->setNoiseSPC(0.1);
@@ -35,10 +35,10 @@ void cast::test::test_quantumChannel() {
 
   auto targetSOGate = getSOGateForSPC(0.1, 0);
   suite.assertCloseFP64(cast::maximum_norm(soGate->getMatrix()->matrix(),
-                                          targetSOGate->getMatrix()->matrix()),
-                       0.0,
-                       "Superop gate SPC test",
-                       GET_INFO());
+                                           targetSOGate->getMatrix()->matrix()),
+                        0.0,
+                        "SPC superoperator matches analytic reference",
+                        GET_INFO());
 
-  suite.displayResult();
+  return suite.displayResult();
 }

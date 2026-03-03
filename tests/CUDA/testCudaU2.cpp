@@ -10,8 +10,9 @@ using namespace cast::test;
 
 namespace {
 
-template <int nQubits> void runU2qTest() {
-  TestSuite suite("Gate U2q (" + std::to_string(nQubits) + " qubits)");
+template <int nQubits> bool runU2qTest() {
+  TestSuite suite("CUDA U2q kernel parity (" + std::to_string(nQubits) +
+                  " qubits)");
 
   // we have to use W0 here to allow direct memcpy between host and device
   cast::CPUStatevector<double> svCPU(nQubits, cast::CPUSimdWidth::W0);
@@ -60,7 +61,7 @@ template <int nQubits> void runU2qTest() {
 
     // check norm
     suite.assertCloseFP64(
-        svCUDAPtr->norm(), 1.0, "CUDA SV norm equals 1", GET_INFO());
+        svCUDAPtr->norm(), 1.0, "CUDA state preserves norm", GET_INFO());
 
     svCPU.applyGate(*llvm::dyn_cast<StandardQuantumGate>(gate.get()));
 
@@ -68,18 +69,19 @@ template <int nQubits> void runU2qTest() {
     for (int q : gate->qubits()) {
       suite.assertCloseFP64(svCUDAPtr->prob(q),
                             svCPU.prob(q),
-                            "CUDA vs CPU probability match for qubit " +
+                            "GPU kernel matches CPU reference for qubit " +
                                 std::to_string(q),
-                           GET_INFO());
+                            GET_INFO());
     }
   }
-  suite.displayResult();
+  return suite.displayResult();
 }
 
 } // anonymous namespace
 
-void test::test_cudaU2() {
-  runU2qTest<2>();
-  runU2qTest<6>();
-  runU2qTest<12>();
+bool test::test_cudaU2() {
+  const bool ok2 = runU2qTest<2>();
+  const bool ok6 = runU2qTest<6>();
+  const bool ok12 = runU2qTest<12>();
+  return ok2 && ok6 && ok12;
 }

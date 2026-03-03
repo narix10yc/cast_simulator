@@ -127,9 +127,7 @@ public:
   GateInst(GInstKind gKind)
       : gKind(gKind), gate(nullptr), blockKind(FPGAGateCategory::General) {}
 
-  GateInst(GInstKind gKind,
-           QuantumGatePtr gate,
-           FPGAGateCategory blockKind)
+  GateInst(GInstKind gKind, QuantumGatePtr gate, FPGAGateCategory blockKind)
       : gKind(gKind), gate(gate), blockKind(blockKind) {}
 
   virtual ~GateInst() = default;

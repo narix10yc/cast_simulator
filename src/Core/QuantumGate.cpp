@@ -2,9 +2,9 @@
 #include "cast/ADT/ComplexSquareMatrix.h"
 #include "cast/ADT/GateMatrix.h"
 #include "utils/utils.h"
-#include <llvm/Support/Casting.h>
 #include <cassert>
 #include <iostream>
+#include <llvm/Support/Casting.h>
 
 // FIXME: bugs in fast path implementation. Does not pass unit tests.
 #define DISABLE_GATE_MATMUL_FASTPATH
@@ -330,7 +330,7 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
   assert(aScalarGM && bScalarGM &&
          "Both gate matrices must be ScalarGateMatrix for now");
 
-         #ifndef DISABLE_GATE_MATMUL_FASTPATH
+#ifndef DISABLE_GATE_MATMUL_FASTPATH
   // fast path: same target qubits
   if (aStdQuGate->qubits() == bStdQuGate->qubits()) {
     // cScalarGM can be nullptr when nQubits() is large
@@ -377,7 +377,7 @@ QuantumGatePtr cast::matmul(const QuantumGate* gateA,
     }
   }
 
-  #endif // DISABLE_GATE_MATMUL_FASTPATH
+#endif // DISABLE_GATE_MATMUL_FASTPATH
 
   // general case
   // C = AB

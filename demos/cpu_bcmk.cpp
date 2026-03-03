@@ -82,8 +82,8 @@ template <typename ScalarType> static void benchmark() {
       logerr() << "In kernel gen: " << llvm::toString(std::move(e)) << "\n";
       std::exit(EXIT_FAILURE);
     }
-    if (auto e = km.genGate(
-            kernelGenConfig, sGate, "s_gate_" + std::to_string(k))) {
+    if (auto e =
+            km.genGate(kernelGenConfig, sGate, "s_gate_" + std::to_string(k))) {
       logerr() << "In kernel gen: " << llvm::toString(std::move(e)) << "\n";
       std::exit(EXIT_FAILURE);
     }

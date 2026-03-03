@@ -64,9 +64,8 @@ static llvm::Error checkClArgs() {
 
 static std::ostream& logerr() { return std::cerr << BOLDRED("[Err] "); }
 
-static void printBwMatrix(const char* title,
-                          const std::vector<double>& data,
-                          int ndev) {
+static void
+printBwMatrix(const char* title, const std::vector<double>& data, int ndev) {
   std::cerr << title << "\n";
   std::cerr << "    ";
   for (int j = 0; j < ndev; ++j)

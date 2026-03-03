@@ -163,8 +163,7 @@ consteval std::string_view trim(std::string_view str) {
 }
 
 // Main consteval function to clean CSV title
-template <size_t N>
-consteval auto clean_csv_title(const char (&input)[N]) {
+template <size_t N> consteval auto clean_csv_title(const char (&input)[N]) {
   std::array<char, N> out{};
   size_t out_i = 0;
 

@@ -48,16 +48,16 @@ public:
   void assertFalse(const std::string& title, const std::string& info);
 
   void assertCloseFP32(float a,
-                      float b,
-                      const std::string& title,
-                      const std::string& info,
-                      float tol = 1e-4);
+                       float b,
+                       const std::string& title,
+                       const std::string& info,
+                       float tol = 1e-4);
 
   void assertCloseFP64(double a,
-                      double b,
-                      const std::string& title,
-                      const std::string& info,
-                      double tol = 1e-8);
+                       double b,
+                       const std::string& title,
+                       const std::string& info,
+                       double tol = 1e-8);
 
   void assertAllClose(const std::vector<double>& aVec,
                       const std::vector<double>& bVec,
@@ -93,23 +93,23 @@ public:
   }
 };
 
-void test_complexSquareMatrix();
+bool test_complexSquareMatrix();
 
-void test_quantumGate();
-void test_quantumChannel();
+bool test_quantumGate();
+bool test_quantumChannel();
 
-void test_cpuH();
-void test_cpuU();
+bool test_cpuH();
+bool test_cpuU();
 
-void test_fpgaGateCategory();
+bool test_fpgaGateCategory();
 
 // void test_cpuRz_param();
 
-void test_fusionCPU();
+bool test_fusionCPU();
 
-void test_statevectorCUDA();
-void test_cudaU();
-void test_cudaU2();
+bool test_statevectorCUDA();
+bool test_cudaU();
+bool test_cudaU2();
 void test_cuda_gate_var();
 // void test_cudaRz_param();
 

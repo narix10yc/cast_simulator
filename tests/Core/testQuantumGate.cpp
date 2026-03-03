@@ -5,8 +5,8 @@
 using namespace cast;
 using namespace cast::test;
 
-void cast::test::test_quantumGate() {
-  TestSuite suite("QuantumGate Test Suite");
+bool cast::test::test_quantumGate() {
+  TestSuite suite("QuantumGate matrix composition and tensor layout");
 
   StandardQuantumGatePtr gate0, gate1, gate;
   const auto check = [&gate0, &gate1, &gate, &suite](const std::string& title,
@@ -19,16 +19,16 @@ void cast::test::test_quantumGate() {
     assert(gate1->getScalarGM() != nullptr);
     assert(gate->getScalarGM() != nullptr);
     suite.assertCloseFP64(cast::maximum_norm(stdQuGate->getScalarGM()->matrix(),
-                                         gate->getScalarGM()->matrix()),
-                      0.0,
-                      title,
-                      info);
+                                             gate->getScalarGM()->matrix()),
+                          0.0,
+                          title,
+                          info);
   };
 
   gate0 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {0});
   gate1 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {1});
   gate = StandardQuantumGate::Create(ScalarGateMatrix::I2(), nullptr, {0, 1});
-  check("I1 * I1 = I2", GET_INFO());
+  check("I(0) tensor I(1) equals 2-qubit identity", GET_INFO());
 
   gate0 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {0});
   gate1 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {1});
@@ -68,11 +68,11 @@ void cast::test::test_quantumGate() {
   // clang-format on
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(matHI), nullptr, {0, 1});
-  check("H(1) otimes I1(1) = H(1)I1(0)", GET_INFO());
+  check("Tensor layout: I(0) tensor H(1)", GET_INFO());
 
   gate0 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {2});
   gate1 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {3});
-  check("H(3) otimes I1(2) = H(3)I1(2)", GET_INFO());
+  check("Tensor layout: I(2) tensor H(3)", GET_INFO());
 
   gate0 = StandardQuantumGate::Create(ScalarGateMatrix::H(), nullptr, {0});
   gate1 = StandardQuantumGate::Create(ScalarGateMatrix::I1(), nullptr, {1});
@@ -80,7 +80,7 @@ void cast::test::test_quantumGate() {
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(matIH), nullptr, {0, 1});
 
-  check("I1 otimes H = IH", GET_INFO());
+  check("Tensor layout: H(0) tensor I(1)", GET_INFO());
 
   // clang-format off
   ComplexSquareMatrix mat0{
@@ -117,12 +117,12 @@ void cast::test::test_quantumGate() {
   gate1 = gate0;
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat00), nullptr, {0});
-  check("Arbitrary matrix example", GET_INFO());
+  check("Real matrix self-product matches reference", GET_INFO());
   gate1 = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat0), nullptr, {1});
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat0_otimes_0), nullptr, {0, 1});
-  check("Arbitrary matrix example with 2 qubits", GET_INFO());
+  check("Real matrix tensor product matches reference", GET_INFO());
 
   ComplexSquareMatrix mat1{// real
                            {0.0, 0.0, 0.0, 0.0},
@@ -138,13 +138,13 @@ void cast::test::test_quantumGate() {
   gate1 = gate0;
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat11), nullptr, {0});
-  check("Arbitrary matrix example 2", GET_INFO());
+  check("Imaginary matrix self-product matches reference", GET_INFO());
 
   gate1 = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat1), nullptr, {1});
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat1_otimes_1), nullptr, {0, 1});
-  check("Arbitrary matrix example 2 with 2 qubits", GET_INFO());
+  check("Imaginary matrix tensor product matches reference", GET_INFO());
 
   ComplexSquareMatrix mat2{// real
                            {1.0, 2.0, 3.0, 4.0},
@@ -182,12 +182,12 @@ void cast::test::test_quantumGate() {
   gate1 = gate0;
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat22), nullptr, {0});
-  check("Arbitrary matrix example 3", GET_INFO());
+  check("Complex matrix self-product matches reference", GET_INFO());
   gate1 = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat2), nullptr, {1});
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat2_otimes_2), nullptr, {0, 1});
-  check("Arbitrary matrix example 3 with 2 qubits", GET_INFO());
+  check("Complex matrix tensor product matches reference", GET_INFO());
 
-  suite.displayResult();
+  return suite.displayResult();
 }
