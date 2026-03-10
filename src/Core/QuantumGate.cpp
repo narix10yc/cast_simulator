@@ -671,3 +671,68 @@ bool cast::isCommuting(const QuantumGate* gateA,
   auto diff = cast::maximum_norm(scalarGM_AB->matrix(), scalarGM_BA->matrix());
   return diff <= tol;
 }
+
+StandardQuantumGatePtr cast::random_unitary(std::span<int> qubits,
+                                            std::random_device& rd) {
+  auto qubitsCopy = QuantumGate::TargetQubitsType(qubits.begin(), qubits.end());
+  std::ranges::sort(qubitsCopy);
+  assert(std::adjacent_find(qubitsCopy.begin(), qubitsCopy.end()) ==
+             qubitsCopy.end() &&
+         "Qubits must be unique");
+
+  const auto edgeSize = 1ULL << qubitsCopy.size();
+  auto mat = ComplexSquareMatrix(edgeSize);
+
+  std::mt19937 gen(rd());
+  std::normal_distribution<double> dist(0.0, 1.0);
+
+  const auto normalizeRow = [&mat, edgeSize](size_t row) {
+    double norm = 0.0;
+    for (size_t c = 0; c < edgeSize; ++c)
+      norm += mat.real(row, c) * mat.real(row, c);
+    for (size_t c = 0; c < edgeSize; ++c)
+      norm += mat.imag(row, c) * mat.imag(row, c);
+    norm = std::sqrt(norm);
+    if (norm == 0.0)
+      return;
+    const auto invNorm = 1.0 / norm;
+    for (size_t c = 0; c < edgeSize; ++c)
+      mat.real(row, c) *= invNorm;
+    for (size_t c = 0; c < edgeSize; ++c)
+      mat.imag(row, c) *= invNorm;
+  };
+
+  for (size_t row = 0; row < edgeSize; ++row) {
+    // Draw a random complex row.
+    for (size_t col = 0; col < edgeSize; ++col)
+      mat.setRC(row, col, dist(gen), dist(gen));
+
+    // Gram-Schmidt projection against previous rows.
+    for (size_t prev = 0; prev < row; ++prev) {
+      double coefRe = 0.0;
+      double coefIm = 0.0;
+      for (size_t col = 0; col < edgeSize; ++col) {
+        // (row)^* dot (prev)
+        coefRe += mat.real(row, col) * mat.real(prev, col) +
+                  mat.imag(row, col) * mat.imag(prev, col);
+        coefIm += mat.real(row, col) * mat.imag(prev, col) -
+                  mat.imag(row, col) * mat.real(prev, col);
+      }
+
+      for (size_t col = 0; col < edgeSize; ++col) {
+        const auto newRe = mat.real(row, col) - (coefRe * mat.real(prev, col) +
+                                                 coefIm * mat.imag(prev, col));
+        const auto newIm = mat.imag(row, col) - (coefRe * mat.imag(prev, col) -
+                                                 coefIm * mat.real(prev, col));
+        mat.setRC(row, col, newRe, newIm);
+      }
+    }
+
+    normalizeRow(row);
+  }
+
+  return StandardQuantumGate::Create(
+      std::make_shared<ScalarGateMatrix>(std::move(mat)),
+      nullptr, // no noise
+      qubitsCopy);
+}

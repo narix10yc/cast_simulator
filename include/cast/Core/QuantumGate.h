@@ -6,6 +6,8 @@
 #include "utils/InfoLogger.h"
 #include <algorithm>
 #include <cassert>
+#include <random>
+#include <span>
 #include <vector>
 
 namespace cast {
@@ -229,6 +231,19 @@ bool isCommuting(const QuantumGate* gateA,
                  const QuantumGate* gateB,
                  double tol = 1e-8);
 
+StandardQuantumGatePtr random_unitary(std::span<int> qubits,
+                                      std::random_device& rd);
+
+inline StandardQuantumGatePtr random_unitary(std::span<int> qubits) {
+  std::random_device rd;
+  return random_unitary(qubits, rd);
+}
+
+template <typename... Ints>
+inline StandardQuantumGatePtr random_unitary(Ints... qubits) {
+  static_assert((std::is_integral_v<Ints> && ...));
+  return random_unitary({static_cast<int>(qubits)...});
+}
 }; // namespace cast
 
 #endif // CAST_CORE_QUANTUM_GATE_H
