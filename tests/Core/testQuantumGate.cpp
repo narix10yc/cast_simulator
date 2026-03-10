@@ -1,6 +1,7 @@
 #include "cast/Core/QuantumGate.h"
 #include "tests/TestKit.h"
 #include <llvm/Support/Casting.h>
+#include <array>
 
 using namespace cast;
 using namespace cast::test;
@@ -188,6 +189,37 @@ bool cast::test::test_quantumGate() {
   gate = StandardQuantumGate::Create(
       std::make_shared<ScalarGateMatrix>(mat2_otimes_2), nullptr, {0, 1});
   check("Complex matrix tensor product matches reference", GET_INFO());
+
+  // free helper API
+  {
+    std::random_device rd;
+    std::array<int, 2> targetQubits{3, 1};
+    auto rndGate = cast::random_unitary(std::span<int>(targetQubits), rd);
+    auto scalarGM = rndGate->getScalarGM();
+    suite.assertEqual(rndGate->qubits()[0],
+                      1,
+                      "random_unitary sorts target qubits",
+                      GET_INFO());
+    suite.assertEqual(rndGate->qubits()[1],
+                      3,
+                      "random_unitary preserves sorted qubit set",
+                      GET_INFO());
+
+    ComplexSquareMatrix inv(4);
+    if (!cast::matinv(scalarGM->matrix(), inv)) {
+      suite.assertEqual(1,
+                        0,
+                        "random_unitary output must be invertible",
+                        GET_INFO());
+    } else {
+      ComplexSquareMatrix prod(4);
+      cast::matmul(scalarGM->matrix(), inv, prod);
+      suite.assertCloseFP64(maximum_norm(prod, ComplexSquareMatrix::eye(4)),
+                            0.0,
+                            "random_unitary matrix times inverse is identity",
+                            GET_INFO());
+    }
+  }
 
   return suite.displayResult();
 }

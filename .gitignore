@@ -23,3 +23,4 @@ python/cast/__pycache__/*
 
 # others
 .cache/*
+CMakePresets.json
