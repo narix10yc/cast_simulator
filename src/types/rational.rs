@@ -2,6 +2,10 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+/// An exact rational number stored in fully reduced form with a positive denominator.
+///
+/// All arithmetic operations reduce the result automatically.
+/// Intermediate computations use `i64` to avoid overflow before reduction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Rational {
     pub numerator: i32,
@@ -9,20 +13,29 @@ pub struct Rational {
 }
 
 impl Rational {
+    /// The additive identity `0/1`.
     pub const ZERO: Self = Self {
         numerator: 0,
         denominator: 1,
     };
 
+    /// The multiplicative identity `1/1`.
     pub const ONE: Self = Self {
         numerator: 1,
         denominator: 1,
     };
 
+    /// Creates a new `Rational` from `i32` numerator and denominator, reduced to lowest terms.
+    ///
+    /// # Panics
+    /// Panics if `denominator` is zero.
     pub fn new(numerator: i32, denominator: i32) -> Self {
         Self::from_i64(numerator as i64, denominator as i64)
     }
 
+    /// Internal constructor that normalises sign, reduces by GCD, and fits back into `i32`.
+    ///
+    /// Using `i64` intermediates prevents overflow during cross-multiplication.
     fn from_i64(numerator: i64, denominator: i64) -> Self {
         assert_ne!(denominator, 0, "Denominator cannot be zero");
 
@@ -49,19 +62,27 @@ impl Rational {
         }
     }
 
+    /// Creates a `Rational` equal to the given integer.
     pub fn from_integer(value: i32) -> Self {
         Self::new(value, 1)
     }
 
+    /// Returns `denominator / numerator` (the multiplicative inverse).
+    ///
+    /// # Panics
+    /// Panics if `self` is zero.
     pub fn reciprocal(self) -> Self {
         assert_ne!(self.numerator, 0, "Cannot take reciprocal of zero");
         Self::from_i64(self.denominator as i64, self.numerator as i64)
     }
 
+    /// Converts to `f64`. The result is an approximation for denominators that are
+    /// not exactly representable in floating point.
     pub fn to_f64(self) -> f64 {
         (self.numerator as f64) / (self.denominator as f64)
     }
 
+    /// Euclidean GCD on absolute values of `i64` operands.
     fn gcd_i64(mut a: i64, mut b: i64) -> i64 {
         a = a.abs();
         b = b.abs();
