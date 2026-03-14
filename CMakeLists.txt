@@ -1,13 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
 
-option(CAST_ENFORCE_NINJA_GENERATOR
-  "Require Ninja generator for consistent local builds" ON)
-if(CAST_ENFORCE_NINJA_GENERATOR AND NOT CMAKE_GENERATOR MATCHES "Ninja")
-  message(FATAL_ERROR
-    "CAST is configured to use Ninja for build consistency.\n"
-    "Please reconfigure with: cmake -S . -B <build-dir> -G Ninja")
-endif()
-
 ##### Handle LLVM Dependency ######
 include(scripts/Utils.cmake)
 handle_llvm_dep()
