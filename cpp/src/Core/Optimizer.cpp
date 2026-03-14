@@ -1,5 +1,5 @@
 #include "cast/Core/Optimizer.h"
-#include "cast/Core/ImplOptimize.h"
+#include "cast/Detail/ImplOptimize.h"
 
 #include "timeit/timeit.h"
 #include "utils/Formats.h"

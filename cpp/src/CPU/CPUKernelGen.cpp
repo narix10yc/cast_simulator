@@ -1,7 +1,7 @@
 #include <llvm/IR/IntrinsicsX86.h>
 
 #include "cast/CPU/CPUKernelManager.h"
-#include "cast/Core/KernelGenInternal.h"
+#include "cast/Detail/KernelGenInternal.h"
 
 #include "utils/Formats.h"
 #include "utils/iocolor.h"

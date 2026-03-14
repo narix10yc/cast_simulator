@@ -1,4 +1,4 @@
-#include "cast/Core/KernelGenInternal.h"
+#include "cast/Detail/KernelGenInternal.h"
 
 using namespace cast;
 using namespace llvm;
