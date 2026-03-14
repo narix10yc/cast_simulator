@@ -6,6 +6,8 @@ pub mod fusion;
 
 pub mod openqasm;
 
+pub mod cpu;
+
 pub use circuit::{CircuitGraph, CircuitRow, GateId};
 
 pub fn project_layout() -> &'static str {
