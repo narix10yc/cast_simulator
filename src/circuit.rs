@@ -5,9 +5,9 @@
 //! qubits are packed into the same row. The grid can be constructed directly
 //! or loaded from an [`openqasm::Circuit`] via [`CircuitGraph::from_qasm_circuit`].
 
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 use std::ops::{Index, IndexMut};
-use std::collections::{HashMap, HashSet};
 
 use crate::{
     openqasm,
@@ -184,7 +184,9 @@ impl CircuitGraph {
         for (row_idx, row) in self.rows.iter().enumerate() {
             for gate_id in row.gate_ids() {
                 let Some(gate) = self.gate(gate_id) else {
-                    return Err(format!("row {row_idx} references dead or invalid gate id {gate_id}"));
+                    return Err(format!(
+                        "row {row_idx} references dead or invalid gate id {gate_id}"
+                    ));
                 };
 
                 if let Some(previous_row) = seen_gate_rows.insert(gate_id, row_idx) {
@@ -230,7 +232,9 @@ impl CircuitGraph {
                     return Err(format!("live gate id {gate_id} is not placed in any row"));
                 }
                 None if seen_gate_ids.contains(&gate_id) => {
-                    return Err(format!("dead gate id {gate_id} is still referenced by a row"));
+                    return Err(format!(
+                        "dead gate id {gate_id} is still referenced by a row"
+                    ));
                 }
                 _ => {}
             }
