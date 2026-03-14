@@ -1,4 +1,4 @@
-/* cast/Internal/PerfCacheHelper.h
+/* cast/Detail/PerfCacheHelper.h
  *
  * Contains a bunch of utility functions to be used in generating performance
  * cache and cost model

@@ -1,6 +1,6 @@
 #include "cast/CUDA/CUDACostModel.h"
 #include "cast/CUDA/CUDAStatevector.h"
-#include "cast/Internal/PerfCacheHelper.h"
+#include "cast/Detail/PerfCacheHelper.h"
 
 #include "utils/Formats.h"
 #include "utils/utils.h"

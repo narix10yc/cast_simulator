@@ -1,7 +1,7 @@
 #include "cast/CPU/CPUCostModel.h"
 #include "cast/CPU/CPUKernelManager.h"
 #include "cast/CPU/CPUStatevector.h"
-#include "cast/Internal/PerfCacheHelper.h"
+#include "cast/Detail/PerfCacheHelper.h"
 
 #include "timeit/timeit.h"
 #include "utils/Formats.h"

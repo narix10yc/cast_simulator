@@ -1,4 +1,4 @@
-#include "cast/Core/ImplOptimize.h"
+#include "cast/Detail/ImplOptimize.h"
 
 #include "utils/PrintSpan.h"
 

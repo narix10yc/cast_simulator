@@ -2,7 +2,7 @@
 .idea/*
 .DS_Store
 _deps/*
-drafts/*
+cpp/drafts/*
 *.so
 *.dylib
 
@@ -11,6 +11,7 @@ build/*
 build.debug/*
 build.release/*
 compile_commands.json
+target/*
 
 # analysis files
 tmp/*
@@ -19,7 +20,7 @@ analysis/*
 
 # python-related
 *.ipynb
-python/cast/__pycache__/*
+cpp/python/cast/__pycache__/*
 
 # others
 .cache/*

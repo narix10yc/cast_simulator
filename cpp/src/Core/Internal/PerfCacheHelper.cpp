@@ -1,4 +1,4 @@
-#include "cast/Internal/PerfCacheHelper.h"
+#include "cast/Detail/PerfCacheHelper.h"
 #include <llvm/Support/Casting.h>
 #include <random>
 

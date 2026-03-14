@@ -1,8 +1,8 @@
 #ifndef CAST_QUANTUM_CHANNEL_H
 #define CAST_QUANTUM_CHANNEL_H
 
-#include "cast/Internal/ChoiRep.h"
-#include "cast/Internal/KrausRep.h"
+#include "cast/Detail/ChoiRep.h"
+#include "cast/Detail/KrausRep.h"
 #include "utils/InfoLogger.h"
 
 namespace cast {
