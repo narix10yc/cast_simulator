@@ -11,6 +11,7 @@ fn main() {
         "src/cpp/cpu_gen.cpp",
         "src/cpp/cpu_jit.h",
         "src/cpp/cpu_jit.cpp",
+        "src/cpp/cpu_util.h",
     ] {
         println!("cargo:rerun-if-changed={path}");
     }

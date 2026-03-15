@@ -1,5 +1,7 @@
 #include "cpu_jit.h"
 
+#include "cpu_util.h"
+
 #include <llvm/IR/Verifier.h>
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/Passes/StandardInstrumentations.h>
@@ -17,34 +19,6 @@ struct CastCpuLaunchArgs {
   uint64_t ctr_end;
   void* p_mat;
 };
-
-unsigned get_simd_s(cast_cpu_simd_width_t simd_width,
-                    cast_cpu_precision_t precision) {
-  if (precision == CAST_CPU_PRECISION_F32) {
-    switch (simd_width) {
-    case CAST_CPU_SIMD_WIDTH_W128:
-      return 2;
-    case CAST_CPU_SIMD_WIDTH_W256:
-      return 3;
-    case CAST_CPU_SIMD_WIDTH_W512:
-      return 4;
-    default:
-      break;
-    }
-  }
-
-  switch (simd_width) {
-  case CAST_CPU_SIMD_WIDTH_W128:
-    return 1;
-  case CAST_CPU_SIMD_WIDTH_W256:
-    return 2;
-  case CAST_CPU_SIMD_WIDTH_W512:
-    return 3;
-  default:
-    break;
-  }
-  return 0;
-}
 
 int default_num_threads() {
   int n_threads = static_cast<int>(std::thread::hardware_concurrency());
@@ -119,6 +93,9 @@ llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT& jit,
     si.registerCallbacks(pic, &mam);
 
     llvm::PipelineTuningOptions pto;
+    // Pass nullptr for the TargetMachine: the kernels are already explicitly
+    // vectorized via SIMD shuffle/splat in the IR, so target-specific
+    // auto-vectorization passes are not needed here.
     llvm::PassBuilder pb(nullptr, pto, std::nullopt, &pic);
 
     pb.registerLoopAnalyses(lam);
@@ -171,8 +148,8 @@ llvm::Error cast_cpu_jit_apply_kernel(const CastCpuJittedKernel& kernel,
         "statevector SIMD width does not match kernel");
   }
 
-  const unsigned simd_s =
-      get_simd_s(kernel.metadata.simd_width, kernel.metadata.precision);
+  const unsigned simd_s = cast_cpu_detail::get_simd_s(kernel.metadata.simd_width,
+                                                       kernel.metadata.precision);
   const int tmp = static_cast<int>(n_qubits_sv) -
                   static_cast<int>(kernel.metadata.n_gate_qubits) -
                   static_cast<int>(simd_s);
@@ -184,13 +161,17 @@ llvm::Error cast_cpu_jit_apply_kernel(const CastCpuJittedKernel& kernel,
   if (n_threads <= 0) {
     n_threads = default_num_threads();
   }
+
+  const uint64_t n_tasks = uint64_t(1) << tmp;
+  // Clamp thread count so every thread gets at least one task.
+  // Without this, when n_threads > n_tasks, all work falls to the last thread.
+  if (static_cast<uint64_t>(n_threads) > n_tasks) {
+    n_threads = static_cast<int>(n_tasks);
+  }
   if (n_threads <= 0) {
     n_threads = 1;
   }
-
-  const uint64_t n_tasks = uint64_t(1) << tmp;
-  const uint64_t n_tasks_per_thread =
-      (n_threads > 0) ? (n_tasks / uint64_t(n_threads)) : n_tasks;
+  const uint64_t n_tasks_per_thread = n_tasks / static_cast<uint64_t>(n_threads);
   void* p_mat = malloc_matrix_buffer(kernel);
   if (kernel.metadata.mode == CAST_CPU_MATRIX_LOAD_STACK_LOAD &&
       p_mat == nullptr) {

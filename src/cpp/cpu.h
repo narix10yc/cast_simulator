@@ -66,6 +66,11 @@ int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t* generator,
                                        char* err_buf,
                                        size_t err_buf_len);
 
+// Compiles all kernels previously registered with cast_cpu_kernel_generator_generate
+// and produces a JIT session.  On success, returns 0, writes the session into
+// *out_session, and DELETES the generator (ownership is transferred; the caller
+// must not use or free the generator pointer afterwards).  On failure, returns
+// non-zero and leaves the generator intact.
 int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t* generator,
                                      cast_cpu_jit_session_t** out_session,
                                      char* err_buf,

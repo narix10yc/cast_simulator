@@ -111,6 +111,35 @@ impl QuantumGate {
         self.qubits.len()
     }
 
+    /// Arithmetic intensity of the gate: `scalar_nnz(M) / edge_size(M)`.
+    ///
+    /// Real and imaginary parts of each matrix entry are tested against `ztol`
+    /// independently, because the kernel generator emits separate SIMD
+    /// instructions for each nonzero scalar component.  Each such component
+    /// contributes exactly 2 real FLOPs (1 multiply + 1 accumulate) to one
+    /// output amplitude:
+    ///
+    /// ```text
+    /// out_re += M_re * in_re  (if M_re > ztol)
+    /// out_re -= M_im * in_im  (if M_im > ztol)
+    /// out_im += M_re * in_im  (if M_re > ztol)
+    /// out_im += M_im * in_re  (if M_im > ztol)
+    ///
+    /// FLOPs = opcount × |ψ| × 2
+    /// ```
+    ///
+    /// Using complex-entry nnz with a fixed ×8 factor would overcount by 2×
+    /// for purely real matrices (X, CX, H, …) where `M_im = 0` throughout.
+    pub fn opcount(&self, ztol: f64) -> f64 {
+        let scalar_nnz = self
+            .matrix
+            .data()
+            .iter()
+            .map(|z| (z.re.abs() > ztol) as usize + (z.im.abs() > ztol) as usize)
+            .sum::<usize>();
+        scalar_nnz as f64 / self.matrix.edge_size() as f64
+    }
+
     /// Returns the product `self * other`, expanding both gates to act on the union
     /// of their qubit sets before multiplying.
     ///
@@ -355,136 +384,98 @@ mod tests {
     use super::QuantumGate;
     use crate::types::ComplexSquareMatrix;
 
-    // --- construction ---
+    fn x() -> QuantumGate {
+        QuantumGate::from_reals(vec![0], &[0.0, 1.0, 1.0, 0.0])
+    }
+
+    // ── construction ─────────────────────────────────────────────────────────
 
     #[test]
-    fn new_canonicalizes_qubit_order() {
-        // Supplying qubits as [1, 0] with X⊗I written in that wire order
-        // must produce the same gate as supplying [0, 1] with I⊗X.
-        let x_on_first_input_wire = QuantumGate::from_reals(
+    fn canonicalizes_qubit_order() {
+        // X⊗I supplied as qubits=[1,0] must equal I⊗X supplied as qubits=[0,1].
+        let got = QuantumGate::from_reals(
             vec![1, 0],
             &[
-                0.0, 1.0, 0.0, 0.0, //
-                1.0, 0.0, 0.0, 0.0, //
-                0.0, 0.0, 0.0, 1.0, //
-                0.0, 0.0, 1.0, 0.0, //
+                0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0,
             ],
         );
         let expected = QuantumGate::from_reals(
             vec![0, 1],
             &[
-                0.0, 0.0, 1.0, 0.0, //
-                0.0, 0.0, 0.0, 1.0, //
-                1.0, 0.0, 0.0, 0.0, //
-                0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
             ],
         );
-        assert_eq!(x_on_first_input_wire, expected);
+        assert_eq!(got, expected);
     }
 
     #[test]
     #[should_panic(expected = "gate qubits must be distinct")]
-    fn new_rejects_duplicate_qubits() {
+    fn rejects_duplicate_qubits() {
         QuantumGate::new(ComplexSquareMatrix::eye(4), vec![0, 0]);
     }
 
     #[test]
     #[should_panic(expected = "matrix dimension does not match number of target qubits")]
-    fn new_rejects_wrong_matrix_size() {
-        // 2×2 matrix supplied for 2 qubits (needs 4×4).
+    fn rejects_wrong_matrix_size() {
         QuantumGate::new(ComplexSquareMatrix::eye(2), vec![0, 1]);
     }
 
-    // --- matmul ---
+    // ── matmul ───────────────────────────────────────────────────────────────
 
     #[test]
-    fn matmul_same_qubits() {
+    fn matmul_involution() {
         // X² = I
-        let x = QuantumGate::from_reals(vec![0], &[0.0, 1.0, 1.0, 0.0]);
-        let product = x.matmul(&x);
-
-        assert_eq!(product.qubits(), &[0]);
+        let product = x().matmul(&x());
         assert_eq!(product.matrix(), &ComplexSquareMatrix::eye(2));
     }
 
     #[test]
     fn matmul_disjoint_qubits() {
-        // X on q0 followed by X on q1 = X⊗X on qubits [0,1], which flips both bits.
-        let x_q0 = QuantumGate::from_reals(vec![0], &[0.0, 1.0, 1.0, 0.0]);
-        let x_q1 = QuantumGate::from_reals(vec![1], &[0.0, 1.0, 1.0, 0.0]);
-
-        let product = x_q1.matmul(&x_q0);
+        // X(q0) · X(q1) = X⊗X, flips both bits.
+        let product = QuantumGate::from_reals(vec![1], &[0.0, 1.0, 1.0, 0.0]).matmul(&x());
         let expected = QuantumGate::from_reals(
             vec![0, 1],
             &[
-                0.0, 0.0, 0.0, 1.0, //
-                0.0, 0.0, 1.0, 0.0, //
-                0.0, 1.0, 0.0, 0.0, //
-                1.0, 0.0, 0.0, 0.0, //
+                0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
             ],
         );
-
-        assert_eq!(product.qubits(), &[0, 1]);
         assert_eq!(product, expected);
     }
 
     #[test]
     fn matmul_non_adjacent_qubits() {
-        // X on q0 and X on q2 (skipping q1) must expand to qubits [0, 2].
-        let x_q0 = QuantumGate::from_reals(vec![0], &[0.0, 1.0, 1.0, 0.0]);
+        // X(q0) · X(q2) expands to qubits [0,2], flips both bits.
         let x_q2 = QuantumGate::from_reals(vec![2], &[0.0, 1.0, 1.0, 0.0]);
-
-        let product = x_q0.matmul(&x_q2);
-        // X⊗X with bit 0 = qubit 0, bit 1 = qubit 2 — flips both bits.
+        let product = x().matmul(&x_q2);
         let expected = QuantumGate::from_reals(
             vec![0, 2],
             &[
-                0.0, 0.0, 0.0, 1.0, //
-                0.0, 0.0, 1.0, 0.0, //
-                0.0, 1.0, 0.0, 0.0, //
-                1.0, 0.0, 0.0, 0.0, //
+                0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
             ],
         );
-
-        assert_eq!(product.qubits(), &[0, 2]);
         assert_eq!(product, expected);
     }
 
     #[test]
     fn matmul_overlapping_qubits() {
-        // X on q1 composed with I on {q0,q1} should equal X on q1 expanded to {q0,q1}.
+        // X(q1) · I(q0,q1) = X on q1 expanded to {q0,q1}.
         let x_q1 = QuantumGate::from_reals(vec![1], &[0.0, 1.0, 1.0, 0.0]);
-        let identity_q0q1 = QuantumGate::new(ComplexSquareMatrix::eye(4), vec![0, 1]);
-
-        let product = x_q1.matmul(&identity_q0q1);
+        let product = x_q1.matmul(&QuantumGate::new(ComplexSquareMatrix::eye(4), vec![0, 1]));
         let expected = QuantumGate::from_reals(
             vec![0, 1],
             &[
-                0.0, 0.0, 1.0, 0.0, //
-                0.0, 0.0, 0.0, 1.0, //
-                1.0, 0.0, 0.0, 0.0, //
-                0.0, 1.0, 0.0, 0.0, //
+                0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
             ],
         );
-
         assert_eq!(product, expected);
     }
 
     #[test]
-    fn matmul_with_identity_unchanged() {
-        // G * I (same qubits) == G.
-        let h = QuantumGate::from_reals(
-            vec![0],
-            &[
-                std::f64::consts::FRAC_1_SQRT_2,
-                std::f64::consts::FRAC_1_SQRT_2,
-                std::f64::consts::FRAC_1_SQRT_2,
-                -std::f64::consts::FRAC_1_SQRT_2,
-            ],
-        );
-        let identity = QuantumGate::new(ComplexSquareMatrix::eye(2), vec![0]);
-
-        assert_eq!(h.matmul(&identity), h);
-        assert_eq!(identity.matmul(&h), h);
+    fn matmul_identity_neutral() {
+        // G · I == G and I · G == G.
+        let h = QuantumGate::h(0);
+        let eye = QuantumGate::new(ComplexSquareMatrix::eye(2), vec![0]);
+        assert_eq!(h.matmul(&eye), h);
+        assert_eq!(eye.matmul(&h), h);
     }
 }

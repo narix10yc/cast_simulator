@@ -1,5 +1,7 @@
 #include "cpu_gen.h"
 
+#include "cpu_util.h"
+
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>
@@ -8,6 +10,7 @@
 #include <llvm/Support/Error.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -48,58 +51,8 @@ struct IRMatData {
   ScalarKind im_flag = SK_Unknown;
 };
 
-bool is_valid_precision(cast_cpu_precision_t precision) {
-  return precision == CAST_CPU_PRECISION_F32 ||
-         precision == CAST_CPU_PRECISION_F64;
-}
-
-bool is_valid_simd_width(cast_cpu_simd_width_t simd_width) {
-  return simd_width == CAST_CPU_SIMD_WIDTH_W128 ||
-         simd_width == CAST_CPU_SIMD_WIDTH_W256 ||
-         simd_width == CAST_CPU_SIMD_WIDTH_W512;
-}
-
-bool is_valid_mode(cast_cpu_matrix_load_mode_t mode) {
-  return mode == CAST_CPU_MATRIX_LOAD_IMM_VALUE ||
-         mode == CAST_CPU_MATRIX_LOAD_STACK_LOAD;
-}
-
-unsigned get_simd_s(cast_cpu_simd_width_t simd_width,
-                    cast_cpu_precision_t precision) {
-  if (precision == CAST_CPU_PRECISION_F32) {
-    switch (simd_width) {
-    case CAST_CPU_SIMD_WIDTH_W128:
-      return 2;
-    case CAST_CPU_SIMD_WIDTH_W256:
-      return 3;
-    case CAST_CPU_SIMD_WIDTH_W512:
-      return 4;
-    default:
-      break;
-    }
-  }
-
-  switch (simd_width) {
-  case CAST_CPU_SIMD_WIDTH_W128:
-    return 1;
-  case CAST_CPU_SIMD_WIDTH_W256:
-    return 2;
-  case CAST_CPU_SIMD_WIDTH_W512:
-    return 3;
-  default:
-    break;
-  }
-  return 0;
-}
-
-bool expected_matrix_len(size_t n_qubits, size_t* out_len) {
-  constexpr size_t kBits = sizeof(size_t) * 8;
-  if (n_qubits > (kBits / 2)) {
-    return false;
-  }
-  *out_len = static_cast<size_t>(1) << (2 * n_qubits);
-  return true;
-}
+// Validation and simd_s helpers live in cpu_util.h; use them via the
+// cast_cpu_detail namespace.
 
 uint32_t pdep32(uint32_t src, uint32_t mask, unsigned nbits = 32) {
   uint32_t out = 0;
@@ -241,13 +194,13 @@ cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t& spec,
                             size_t n_qubits,
                             llvm::StringRef func_name,
                             llvm::Module& module) {
-  if (!is_valid_precision(spec.precision)) {
+  if (!cast_cpu_detail::is_valid_precision(spec.precision)) {
     return llvm::createStringError("invalid precision");
   }
-  if (!is_valid_simd_width(spec.simd_width)) {
+  if (!cast_cpu_detail::is_valid_simd_width(spec.simd_width)) {
     return llvm::createStringError("invalid SIMD width");
   }
-  if (!is_valid_mode(spec.mode)) {
+  if (!cast_cpu_detail::is_valid_mode(spec.mode)) {
     return llvm::createStringError("invalid matrix load mode");
   }
   if (spec.ztol < 0.0 || spec.otol < 0.0) {
@@ -266,13 +219,17 @@ cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t& spec,
   }
 
   size_t expected_len = 0;
-  if (!expected_matrix_len(n_qubits, &expected_len) ||
+  if (!cast_cpu_detail::expected_matrix_len(n_qubits, &expected_len) ||
       expected_len != matrix_len) {
     return llvm::createStringError(
         "matrix length does not match the target qubit count");
   }
 
-  const unsigned simd_s = get_simd_s(spec.simd_width, spec.precision);
+  const unsigned simd_s =
+      cast_cpu_detail::get_simd_s(spec.simd_width, spec.precision);
+  // simd_s is in [1,4] for all valid (precision, simd_width) pairs;
+  // the validation above guarantees we never reach here with simd_s == 0.
+  assert(simd_s > 0 && simd_s <= 4);
   const unsigned s = 1u << simd_s;
   const unsigned k = static_cast<unsigned>(n_qubits);
   const unsigned K = 1u << k;
@@ -339,6 +296,11 @@ cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t& spec,
     while (qi < n_qubits) {
       hi_bits.push_back(qubits[qi++]);
     }
+    // The SIMD layout inserts a zero bit at position simd_s (via
+    // insert_zero_to_bit), so every qubit index at or above simd_s is shifted
+    // up by one in the flat scalar buffer.  Adjust all collected bit positions
+    // accordingly before they are used to construct GEP offsets and shuffle
+    // masks.
     for (auto& bit : lo_bits) {
       if (bit >= simd_s) {
         ++bit;
