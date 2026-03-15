@@ -10,6 +10,7 @@
 use crate::types::{Complex, QuantumGate};
 use rand::thread_rng;
 use rand_distr::{Distribution, StandardNormal};
+use std::alloc::{self, Layout};
 use std::ffi::c_char;
 use std::ffi::c_void;
 use std::fmt;
@@ -119,6 +120,114 @@ impl CpuScalar for f64 {
     }
 }
 
+// ── AlignedVec ────────────────────────────────────────────────────────────────
+
+/// A heap-allocated buffer with a guaranteed minimum alignment.
+///
+/// `Vec<T>` only guarantees `align_of::<T>()` alignment. `AlignedVec<T>` lets
+/// callers request SIMD-register-width alignment (e.g. 64 bytes for AVX-512)
+/// so JIT-compiled kernels can use aligned load/store instructions.
+struct AlignedVec<T> {
+    ptr: NonNull<T>,
+    len: usize,
+    layout: Layout,
+}
+
+// SAFETY: same reasoning as Vec<T> — the buffer is uniquely owned.
+unsafe impl<T: Send> Send for AlignedVec<T> {}
+unsafe impl<T: Sync> Sync for AlignedVec<T> {}
+
+impl<T> AlignedVec<T> {
+    /// Allocates `len` zero-initialized `T` values with `align`-byte alignment.
+    /// `align` must be a power of two and ≥ `align_of::<T>()`.
+    fn zeroed(len: usize, align: usize) -> Self {
+        assert!(align.is_power_of_two());
+        assert!(align >= std::mem::align_of::<T>());
+        if len == 0 {
+            return Self {
+                ptr: NonNull::dangling(),
+                len: 0,
+                layout: Layout::from_size_align(0, align).unwrap(),
+            };
+        }
+        let layout = Layout::from_size_align(len * std::mem::size_of::<T>(), align)
+            .expect("AlignedVec: invalid layout");
+        let ptr = unsafe { alloc::alloc_zeroed(layout) }.cast::<T>();
+        let ptr = NonNull::new(ptr).expect("AlignedVec: allocation failed");
+        Self { ptr, len, layout }
+    }
+}
+
+impl<T> std::ops::Deref for AlignedVec<T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
+    }
+}
+
+impl<T> std::ops::DerefMut for AlignedVec<T> {
+    fn deref_mut(&mut self) -> &mut [T] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
+    }
+}
+
+impl<T: Clone> Clone for AlignedVec<T> {
+    fn clone(&self) -> Self {
+        let align = self.layout.align();
+        if self.len == 0 {
+            return Self {
+                ptr: NonNull::dangling(),
+                len: 0,
+                layout: Layout::from_size_align(0, align).unwrap(),
+            };
+        }
+        let layout = Layout::from_size_align(self.len * std::mem::size_of::<T>(), align)
+            .expect("AlignedVec: invalid layout");
+        let ptr = unsafe { alloc::alloc(layout) }.cast::<T>();
+        let ptr = NonNull::new(ptr).expect("AlignedVec: allocation failed");
+        for (i, item) in self.iter().enumerate() {
+            unsafe { ptr.as_ptr().add(i).write(item.clone()) };
+        }
+        Self { ptr, len: self.len, layout }
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for AlignedVec<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a AlignedVec<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut AlignedVec<T> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+impl<T> Drop for AlignedVec<T> {
+    fn drop(&mut self) {
+        if self.len == 0 {
+            return;
+        }
+        unsafe {
+            for i in 0..self.len {
+                self.ptr.as_ptr().add(i).drop_in_place();
+            }
+            alloc::dealloc(self.ptr.as_ptr().cast::<u8>(), self.layout);
+        }
+    }
+}
+
 // ── Statevector ───────────────────────────────────────────────────────────────
 
 /// Inner typed storage for a statevector.
@@ -131,7 +240,8 @@ impl CpuScalar for f64 {
 /// reals followed by `2^simd_s` imaginaries so a single SIMD load captures a full register.
 #[derive(Clone, Debug)]
 struct CPUStatevectorData<T> {
-    data: Vec<T>,
+    /// Buffer aligned to `simd_width / 8` bytes so JIT kernels can use aligned SIMD moves.
+    data: AlignedVec<T>,
     n_qubits: usize,
     simd_width: SimdWidth,
     /// `simd_s = log2(simd_register_size / scalar_size)`. Determines the memory layout.
@@ -164,15 +274,17 @@ impl CPUStatevector {
         let simd_s = get_simd_s(simd_width, precision);
         // scalar_len accounts for simd_s so imaginary parts never go out of bounds.
         let scalar_len = scalar_len_for(n_qubits, simd_s);
+        // Align to the SIMD register width so JIT kernels can use aligned moves.
+        let align = simd_width as usize / 8;
         let inner = match precision {
             Precision::F32 => CPUStatevectorInner::F32(CPUStatevectorData {
-                data: vec![0.0; scalar_len],
+                data: AlignedVec::zeroed(scalar_len, align),
                 n_qubits,
                 simd_width,
                 simd_s,
             }),
             Precision::F64 => CPUStatevectorInner::F64(CPUStatevectorData {
-                data: vec![0.0; scalar_len],
+                data: AlignedVec::zeroed(scalar_len, align),
                 n_qubits,
                 simd_width,
                 simd_s,

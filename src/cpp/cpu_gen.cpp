@@ -240,6 +240,11 @@ cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t& spec,
   auto* scalar_ty = (spec.precision == CAST_CPU_PRECISION_F32)
                         ? builder.getFloatTy()
                         : builder.getDoubleTy();
+  // The statevector buffer is allocated with SIMD-register alignment on the
+  // Rust side (simd_width / 8 bytes). Declaring the same alignment here lets
+  // LLVM emit aligned loads/stores (e.g. vmovdqa64 on AVX-512) which are
+  // generally faster than their unaligned counterparts.
+  const unsigned simd_width_bytes = static_cast<unsigned>(spec.simd_width) / 8u;
 
   auto* launch_ty = llvm::StructType::get(builder.getPtrTy(),
                                           builder.getInt64Ty(),
@@ -406,7 +411,8 @@ cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t& spec,
     idx_shift >>= sep_bit;
     p_svs[hi] = builder.CreateConstGEP1_64(
         vec_ty, ptr_sv_begin, idx_shift, "ptr.sv.hi");
-    auto* amp_full = builder.CreateLoad(vec_ty, p_svs[hi], "sv.full");
+    auto* amp_full = builder.CreateAlignedLoad(
+        vec_ty, p_svs[hi], llvm::Align(simd_width_bytes), "sv.full");
     for (unsigned li = 0; li < LK; ++li) {
       re_amps[hi * LK + li] = builder.CreateShuffleVector(
           amp_full,
@@ -564,7 +570,7 @@ cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t& spec,
 
     auto* merged = builder.CreateShuffleVector(
         updated_re_amps[0], updated_im_amps[0], reim_merge_mask, "amp.merged");
-    builder.CreateStore(merged, p_svs[hi]);
+    builder.CreateAlignedStore(merged, p_svs[hi], llvm::Align(simd_width_bytes));
   }
 
   auto* task_id_next =
