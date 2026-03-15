@@ -188,7 +188,11 @@ impl<T: Clone> Clone for AlignedVec<T> {
         for (i, item) in self.iter().enumerate() {
             unsafe { ptr.as_ptr().add(i).write(item.clone()) };
         }
-        Self { ptr, len: self.len, layout }
+        Self {
+            ptr,
+            len: self.len,
+            layout,
+        }
     }
 }
 
@@ -1112,14 +1116,18 @@ mod tests {
             .generate(&spec_imm, gate.matrix().data(), gate.qubits())
             .expect("generate imm kernel");
         let mut jit_imm = gen_imm.init_jit().expect("init jit");
-        jit_imm.apply(kid_imm, &mut sv_imm, Some(1)).expect("apply imm");
+        jit_imm
+            .apply(kid_imm, &mut sv_imm, Some(1))
+            .expect("apply imm");
 
         let mut gen_stack = CPUKernelGenerator::new().expect("create generator");
         let kid_stack = gen_stack
             .generate(&spec_stack, gate.matrix().data(), gate.qubits())
             .expect("generate stack kernel");
         let mut jit_stack = gen_stack.init_jit().expect("init jit");
-        jit_stack.apply(kid_stack, &mut sv_stack, Some(1)).expect("apply stack");
+        jit_stack
+            .apply(kid_stack, &mut sv_stack, Some(1))
+            .expect("apply stack");
 
         assert_statevectors_close(&sv_imm, &sv_stack, tol);
     }
@@ -1129,18 +1137,36 @@ mod tests {
     #[test]
     fn jit_swap_nonadjacent() {
         // SWAP(0,2): non-adjacent, exercises hi_bits path same as CX(0,2).
-        run_jit_and_compare(QuantumGate::swap(0, 2), 4, Precision::F64, SimdWidth::W128, 1e-10);
+        run_jit_and_compare(
+            QuantumGate::swap(0, 2),
+            4,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
     }
 
     #[test]
     fn jit_cz_nonadjacent() {
-        run_jit_and_compare(QuantumGate::cz(1, 3), 5, Precision::F64, SimdWidth::W128, 1e-10);
+        run_jit_and_compare(
+            QuantumGate::cz(1, 3),
+            5,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
     }
 
     #[test]
     fn jit_ccx_gate() {
         // 3-qubit Toffoli: exercises the multi-qubit hi_bits partitioning.
-        run_jit_and_compare(QuantumGate::ccx(0, 1, 2), 5, Precision::F64, SimdWidth::W128, 1e-10);
+        run_jit_and_compare(
+            QuantumGate::ccx(0, 1, 2),
+            5,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
     }
 
     // Rx has a dense, fully complex matrix — no zero or ±1 entries — so the

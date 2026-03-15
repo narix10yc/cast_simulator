@@ -179,5 +179,10 @@ fn bench_jit_compile_batch(c: &mut Criterion) {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-criterion_group!(benches, bench_ir_gen, bench_jit_compile, bench_jit_compile_batch);
+criterion_group!(
+    benches,
+    bench_ir_gen,
+    bench_jit_compile,
+    bench_jit_compile_batch
+);
 criterion_main!(benches);
