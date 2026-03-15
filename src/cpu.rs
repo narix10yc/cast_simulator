@@ -679,6 +679,25 @@ mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
+        /// Runs O1 on the kernel and returns its optimized IR text (two-call pattern).
+        /// Marks `kernel_id` for assembly capture during `init_jit`. Returns 0 on success.
+        pub fn cast_cpu_kernel_generator_request_asm(
+            generator: *mut CastCpuKernelGenerator,
+            kernel_id: KernelId,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+        /// Pass `out_ir = null` on the first call to get the required length via
+        /// `*out_ir_len`, then allocate and call again with the buffer.
+        pub fn cast_cpu_kernel_generator_emit_ir(
+            generator: *mut CastCpuKernelGenerator,
+            kernel_id: KernelId,
+            out_ir: *mut c_char,
+            ir_buf_len: usize,
+            out_ir_len: *mut usize,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
         /// Consumes the generator and produces a JIT session. Returns 0 on success.
         pub fn cast_cpu_kernel_generator_finish(
             generator: *mut CastCpuKernelGenerator,
@@ -694,6 +713,16 @@ mod ffi {
             sv_precision: Precision,
             sv_simd_width: SimdWidth,
             n_threads: i32,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+        /// Returns the native assembly text captured during JIT compilation (two-call pattern).
+        pub fn cast_cpu_jit_session_emit_asm(
+            session: *mut CastCpuJitSession,
+            kernel_id: KernelId,
+            out_asm: *mut c_char,
+            asm_buf_len: usize,
+            out_asm_len: *mut usize,
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
@@ -760,6 +789,74 @@ impl CPUKernelGenerator {
         }
     }
 
+    /// Returns the optimized LLVM IR for the kernel identified by `kernel_id`.
+    ///
+    /// Triggers the O1 pass pipeline on the plain `Module` if it hasn't run yet.
+    /// Must be called before [`init_jit`](Self::init_jit), which moves the module
+    /// into the JIT and makes it inaccessible.
+    pub fn emit_ir(&mut self, kernel_id: KernelId) -> anyhow::Result<String> {
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+
+        // First call: query the IR byte length (excluding the null terminator).
+        let mut ir_len: usize = 0;
+        let status = unsafe {
+            ffi::cast_cpu_kernel_generator_emit_ir(
+                self.raw.as_ptr(),
+                kernel_id,
+                std::ptr::null_mut(),
+                0,
+                &mut ir_len,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+
+        // Second call: write IR into a caller-owned buffer.
+        let mut ir_buf = vec![0u8; ir_len + 1];
+        let status = unsafe {
+            ffi::cast_cpu_kernel_generator_emit_ir(
+                self.raw.as_ptr(),
+                kernel_id,
+                ir_buf.as_mut_ptr().cast(),
+                ir_buf.len(),
+                std::ptr::null_mut(),
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+
+        ir_buf.truncate(ir_len);
+        String::from_utf8(ir_buf).map_err(|e| anyhow::anyhow!("IR is not valid UTF-8: {e}"))
+    }
+
+    /// Opts `kernel_id` into assembly capture during [`init_jit`](Self::init_jit).
+    ///
+    /// Must be called before `init_jit`; has no effect afterwards (the module
+    /// has already been consumed). Kernels that were not opted in will return an
+    /// error from [`JitSession::emit_asm`].
+    pub fn request_asm(&mut self, kernel_id: KernelId) -> anyhow::Result<()> {
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let status = unsafe {
+            ffi::cast_cpu_kernel_generator_request_asm(
+                self.raw.as_ptr(),
+                kernel_id,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+        }
+    }
+
     /// Compiles all generated kernels and returns a [`JitSession`], consuming `self`.
     ///
     /// The C++ side takes ownership of the generator's IR modules. On failure the generator
@@ -787,7 +884,7 @@ impl CPUKernelGenerator {
 
         // finish succeeded; the C++ object is now owned by the session.
         let raw = NonNull::new(raw_session)
-            .ok_or_else(|| anyhow::anyhow!("C++ finish returned a null JIT session"))?;
+            .ok_or_else(|| anyhow::anyhow!("C++ side returned a null JIT session"))?;
         Ok(JitSession { raw })
     }
 }
@@ -833,6 +930,53 @@ impl fmt::Debug for JitSession {
 }
 
 impl JitSession {
+    /// Returns the native assembly text that was emitted during JIT compilation.
+    ///
+    /// The assembly is captured once at compile time (before the module is consumed
+    /// by the JIT pipeline) and cached for the lifetime of the session. This method
+    /// just retrieves the cached text, so it is cheap to call repeatedly.
+    pub fn emit_asm(&self, kernel_id: KernelId) -> anyhow::Result<String> {
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+
+        // First call: query the assembly byte length (excluding null terminator).
+        let mut asm_len: usize = 0;
+        let status = unsafe {
+            ffi::cast_cpu_jit_session_emit_asm(
+                self.raw.as_ptr(),
+                kernel_id,
+                std::ptr::null_mut(),
+                0,
+                &mut asm_len,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+
+        // Second call: write the assembly into a caller-owned buffer.
+        let mut asm_buf = vec![0u8; asm_len + 1];
+        let status = unsafe {
+            ffi::cast_cpu_jit_session_emit_asm(
+                self.raw.as_ptr(),
+                kernel_id,
+                asm_buf.as_mut_ptr().cast(),
+                asm_buf.len(),
+                std::ptr::null_mut(),
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+
+        asm_buf.truncate(asm_len);
+        String::from_utf8(asm_buf)
+            .map_err(|e| anyhow::anyhow!("assembly is not valid UTF-8: {e}"))
+    }
+
     /// Applies the kernel identified by `kernel_id` to `statevector` in-place.
     ///
     /// `n_threads`: number of worker threads. `None` lets the C++ side choose based on
@@ -890,7 +1034,10 @@ fn error_from_buf(buf: &[c_char]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CPUKernelGenSpec, CPUKernelGenerator, CPUStatevector, Precision, SimdWidth};
+    use super::{
+        CPUKernelGenSpec, CPUKernelGenerator, CPUStatevector, JitSession, KernelId, Precision,
+        SimdWidth,
+    };
     use crate::types::{Complex, QuantumGate};
 
     /// Creates a normalized statevector with deterministic amplitudes.
@@ -1223,6 +1370,201 @@ mod tests {
 
         assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
         assert!((sv_jit.norm() - 1.0).abs() < 1e-10);
+    }
+
+    // ── emit_ir ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn emit_ir_returns_valid_llvm_ir() {
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                QuantumGate::h(0).matrix().data(),
+                QuantumGate::h(0).qubits(),
+            )
+            .expect("generate kernel");
+
+        let ir = gen.emit_ir(kid).expect("emit_ir");
+
+        // The IR must be a non-empty LLVM text module.
+        assert!(!ir.is_empty(), "IR should not be empty");
+        assert!(
+            ir.contains("define"),
+            "IR should contain a function definition"
+        );
+    }
+
+    #[test]
+    fn emit_ir_is_idempotent() {
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                QuantumGate::x(0).matrix().data(),
+                QuantumGate::x(0).qubits(),
+            )
+            .expect("generate kernel");
+
+        let ir_first = gen.emit_ir(kid).expect("first emit_ir");
+        let ir_second = gen.emit_ir(kid).expect("second emit_ir");
+
+        // The O1 pass runs only once; a second call returns the cached text.
+        assert_eq!(ir_first, ir_second, "emit_ir should be idempotent");
+    }
+
+    #[test]
+    fn emit_ir_before_init_jit_still_produces_correct_kernel() {
+        // emit_ir must not corrupt the module: the kernel compiled afterward
+        // must still produce results matching the scalar reference path.
+        let gate = QuantumGate::h(1);
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(&spec, gate.matrix().data(), gate.qubits())
+            .expect("generate kernel");
+
+        // Trigger optimization + IR snapshot before JIT compilation.
+        let ir = gen.emit_ir(kid).expect("emit_ir");
+        assert!(!ir.is_empty());
+
+        let mut jit = gen.init_jit().expect("init jit");
+
+        let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
+        let mut sv_ref = sv_jit.clone();
+        sv_ref.apply_gate(&gate);
+        jit.apply(kid, &mut sv_jit, Some(1)).expect("apply kernel");
+
+        assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
+    }
+
+    #[test]
+    fn emit_ir_per_kernel_independent() {
+        // Each kernel_id returns its own IR; they must differ (H ≠ CX).
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+        let h_gate = QuantumGate::h(0);
+        let cx_gate = QuantumGate::cx(0, 1);
+
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid_h = gen
+            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .expect("H kernel");
+        let kid_cx = gen
+            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .expect("CX kernel");
+
+        let ir_h = gen.emit_ir(kid_h).expect("H IR");
+        let ir_cx = gen.emit_ir(kid_cx).expect("CX IR");
+
+        assert_ne!(ir_h, ir_cx, "different gates must produce different IR");
+    }
+
+    #[test]
+    fn emit_ir_rejects_unknown_kernel_id() {
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let result = gen.emit_ir(9999);
+        assert!(result.is_err(), "unknown kernel_id should return an error");
+    }
+
+    // ── emit_asm ──────────────────────────────────────────────────────────────
+
+    fn compile_h_session_with_asm() -> (JitSession, KernelId) {
+        let gate = QuantumGate::h(0);
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(&default_spec(Precision::F64, SimdWidth::W128), gate.matrix().data(), gate.qubits())
+            .expect("generate kernel");
+        gen.request_asm(kid).expect("request_asm");
+        (gen.init_jit().expect("init jit"), kid)
+    }
+
+    #[test]
+    fn emit_asm_returns_nonempty_text() {
+        let (session, kid) = compile_h_session_with_asm();
+        let asm = session.emit_asm(kid).expect("emit_asm");
+        assert!(!asm.is_empty(), "assembly should not be empty");
+    }
+
+    #[test]
+    fn emit_asm_is_ascii() {
+        // Native assembly must be printable ASCII (no embedded binary).
+        let (session, kid) = compile_h_session_with_asm();
+        let asm = session.emit_asm(kid).expect("emit_asm");
+        assert!(asm.is_ascii(), "assembly should be ASCII text");
+    }
+
+    #[test]
+    fn emit_asm_is_idempotent() {
+        // The assembly is cached; repeated calls return the same text.
+        let (session, kid) = compile_h_session_with_asm();
+        let first  = session.emit_asm(kid).expect("first emit_asm");
+        let second = session.emit_asm(kid).expect("second emit_asm");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn emit_asm_per_kernel_independent() {
+        // H and CX are structurally different gates — their assembly must differ.
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+        let h_gate  = QuantumGate::h(0);
+        let cx_gate = QuantumGate::cx(0, 1);
+
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid_h  = gen.generate(&spec, h_gate.matrix().data(),  h_gate.qubits()).expect("H kernel");
+        let kid_cx = gen.generate(&spec, cx_gate.matrix().data(), cx_gate.qubits()).expect("CX kernel");
+        gen.request_asm(kid_h).expect("request H asm");
+        gen.request_asm(kid_cx).expect("request CX asm");
+        let session = gen.init_jit().expect("init jit");
+
+        let asm_h  = session.emit_asm(kid_h).expect("H asm");
+        let asm_cx = session.emit_asm(kid_cx).expect("CX asm");
+        assert_ne!(asm_h, asm_cx, "different gates must produce different assembly");
+    }
+
+    #[test]
+    fn emit_asm_consistent_with_emit_ir() {
+        // Both are available from the same compilation; neither should be empty
+        // and the IR text must not appear inside the assembly output.
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+        let gate = QuantumGate::h(0);
+
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen.generate(&spec, gate.matrix().data(), gate.qubits()).expect("generate");
+        let ir = gen.emit_ir(kid).expect("emit_ir");
+        gen.request_asm(kid).expect("request_asm");
+        let session = gen.init_jit().expect("init jit");
+        let asm = session.emit_asm(kid).expect("emit_asm");
+
+        assert!(!ir.is_empty());
+        assert!(!asm.is_empty());
+        // The IR uses `define` keyword; native asm must not contain it.
+        assert!(!asm.contains("define"), "assembly should not contain LLVM IR syntax");
+    }
+
+    #[test]
+    fn emit_asm_errors_without_request() {
+        // Kernels not opted in must return an error rather than silently empty text.
+        let gate = QuantumGate::h(0);
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(&default_spec(Precision::F64, SimdWidth::W128), gate.matrix().data(), gate.qubits())
+            .expect("generate kernel");
+        // Deliberately skip request_asm.
+        let session = gen.init_jit().expect("init jit");
+        assert!(session.emit_asm(kid).is_err(), "emit_asm should fail without request_asm");
+    }
+
+    #[test]
+    fn emit_asm_rejects_unknown_kernel_id() {
+        let (session, _) = compile_h_session_with_asm();
+        assert!(session.emit_asm(9999).is_err(), "unknown kernel_id should return an error");
+    }
+
+    #[test]
+    fn request_asm_rejects_unknown_kernel_id() {
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        assert!(gen.request_asm(9999).is_err(), "unknown kernel_id should return an error");
     }
 
     // ── Multithreaded apply ────────────────────────────────────────────────────

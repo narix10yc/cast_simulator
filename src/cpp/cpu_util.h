@@ -20,8 +20,7 @@ inline bool is_valid_simd_width(cast_cpu_simd_width_t w) {
 }
 
 inline bool is_valid_mode(cast_cpu_matrix_load_mode_t m) {
-  return m == CAST_CPU_MATRIX_LOAD_IMM_VALUE ||
-         m == CAST_CPU_MATRIX_LOAD_STACK_LOAD;
+  return m == CAST_CPU_MATRIX_LOAD_IMM_VALUE || m == CAST_CPU_MATRIX_LOAD_STACK_LOAD;
 }
 
 /// Returns simd_s = log2(register_scalars) for a given SIMD width and
@@ -55,7 +54,7 @@ inline unsigned get_simd_s(cast_cpu_simd_width_t w, cast_cpu_precision_t p) {
 
 /// Computes the expected flat matrix length (2^n_qubits)^2.
 /// Returns false if n_qubits is too large to represent in a size_t.
-inline bool expected_matrix_len(size_t n_qubits, size_t* out_len) {
+inline bool expected_matrix_len(size_t n_qubits, size_t *out_len) {
   constexpr size_t kBits = sizeof(size_t) * 8;
   if (n_qubits > kBits / 2) {
     return false;
