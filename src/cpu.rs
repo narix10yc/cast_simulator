@@ -920,16 +920,34 @@ mod tests {
         }
     }
 
-    /// Generates a JIT kernel for `gate`, applies it to a seeded statevector, and checks
-    /// that the result matches the scalar reference path.
-    fn run_jit_and_compare(
-        gate: QuantumGate,
+    /// Generates a JIT kernel for `gate` and checks the result against the scalar path.
+    /// `n_threads`: number of worker threads passed to `apply`.
+    fn run_jit_and_compare_full(
+        gate: &QuantumGate,
         n_qubits_sv: usize,
-        precision: Precision,
-        simd_width: SimdWidth,
+        spec: CPUKernelGenSpec,
+        n_threads: usize,
         tol: f64,
     ) {
-        let spec = CPUKernelGenSpec {
+        let mut generator = CPUKernelGenerator::new().expect("create generator");
+        let kernel_id = generator
+            .generate(&spec, gate.matrix().data(), gate.qubits())
+            .expect("generate kernel");
+        let mut jit = generator.init_jit().expect("init jit");
+
+        let mut sv_jit = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
+        let mut sv_ref = sv_jit.clone();
+
+        sv_ref.apply_gate(gate);
+        jit.apply(kernel_id, &mut sv_jit, Some(n_threads))
+            .expect("apply kernel");
+
+        assert_statevectors_close(&sv_jit, &sv_ref, tol);
+        assert!((sv_jit.norm() - 1.0).abs() < tol);
+    }
+
+    fn default_spec(precision: Precision, simd_width: SimdWidth) -> CPUKernelGenSpec {
+        CPUKernelGenSpec {
             precision,
             simd_width,
             mode: super::MatrixLoadMode::ImmValue,
@@ -941,23 +959,23 @@ mod tests {
                 Precision::F32 => 1e-6,
                 Precision::F64 => 1e-12,
             },
-        };
+        }
+    }
 
-        let mut generator = CPUKernelGenerator::new().expect("create generator");
-        let kernel_id = generator
-            .generate(&spec, gate.matrix().data(), gate.qubits())
-            .expect("generate kernel");
-        let mut jit = generator.init_jit().expect("init jit");
-
-        let mut sv_jit = seeded_statevector(n_qubits_sv, precision, simd_width);
-        let mut sv_ref = sv_jit.clone();
-
-        sv_ref.apply_gate(&gate);
-        jit.apply(kernel_id, &mut sv_jit, Some(1))
-            .expect("apply kernel");
-
-        assert_statevectors_close(&sv_jit, &sv_ref, tol);
-        assert!((sv_jit.norm() - 1.0).abs() < tol);
+    fn run_jit_and_compare(
+        gate: QuantumGate,
+        n_qubits_sv: usize,
+        precision: Precision,
+        simd_width: SimdWidth,
+        tol: f64,
+    ) {
+        run_jit_and_compare_full(
+            &gate,
+            n_qubits_sv,
+            default_spec(precision, simd_width),
+            1,
+            tol,
+        );
     }
 
     #[test]
@@ -1040,5 +1058,155 @@ mod tests {
     #[test]
     fn jit_matches_scalar_for_fp32_imm_mode() {
         run_jit_and_compare(QuantumGate::h(2), 4, Precision::F32, SimdWidth::W128, 5e-5);
+    }
+
+    // ── SIMD width coverage ────────────────────────────────────────────────────
+
+    // F64/W256: simd_s=2, needs ≥3 qubits for a 1-qubit gate.
+    #[test]
+    fn jit_f64_w256() {
+        run_jit_and_compare(QuantumGate::h(1), 4, Precision::F64, SimdWidth::W256, 1e-10);
+    }
+
+    // F64/W512: simd_s=3, needs ≥4 qubits for a 1-qubit gate.
+    #[test]
+    fn jit_f64_w512() {
+        run_jit_and_compare(QuantumGate::h(1), 5, Precision::F64, SimdWidth::W512, 1e-10);
+    }
+
+    // F32/W256: simd_s=3, needs ≥4 qubits for a 1-qubit gate.
+    #[test]
+    fn jit_f32_w256() {
+        run_jit_and_compare(QuantumGate::h(2), 5, Precision::F32, SimdWidth::W256, 5e-5);
+    }
+
+    // F32/W512: simd_s=4, needs ≥5 qubits for a 1-qubit gate.
+    #[test]
+    fn jit_f32_w512() {
+        run_jit_and_compare(QuantumGate::h(2), 6, Precision::F32, SimdWidth::W512, 5e-5);
+    }
+
+    // ── StackLoad mode ─────────────────────────────────────────────────────────
+
+    // StackLoad embeds a runtime matrix pointer rather than immediate constants;
+    // the numerical result must be identical to ImmValue for the same gate.
+    #[test]
+    fn jit_stack_load_matches_imm_value() {
+        let gate = QuantumGate::cx(0, 2);
+        let n_qubits_sv = 4;
+        let precision = Precision::F64;
+        let simd_width = SimdWidth::W128;
+        let tol = 1e-10;
+
+        let mut sv_imm = seeded_statevector(n_qubits_sv, precision, simd_width);
+        let mut sv_stack = sv_imm.clone();
+
+        let spec_imm = default_spec(precision, simd_width);
+        let spec_stack = CPUKernelGenSpec {
+            mode: super::MatrixLoadMode::StackLoad,
+            ..spec_imm
+        };
+
+        let mut gen_imm = CPUKernelGenerator::new().expect("create generator");
+        let kid_imm = gen_imm
+            .generate(&spec_imm, gate.matrix().data(), gate.qubits())
+            .expect("generate imm kernel");
+        let mut jit_imm = gen_imm.init_jit().expect("init jit");
+        jit_imm.apply(kid_imm, &mut sv_imm, Some(1)).expect("apply imm");
+
+        let mut gen_stack = CPUKernelGenerator::new().expect("create generator");
+        let kid_stack = gen_stack
+            .generate(&spec_stack, gate.matrix().data(), gate.qubits())
+            .expect("generate stack kernel");
+        let mut jit_stack = gen_stack.init_jit().expect("init jit");
+        jit_stack.apply(kid_stack, &mut sv_stack, Some(1)).expect("apply stack");
+
+        assert_statevectors_close(&sv_imm, &sv_stack, tol);
+    }
+
+    // ── Gate variety ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn jit_swap_nonadjacent() {
+        // SWAP(0,2): non-adjacent, exercises hi_bits path same as CX(0,2).
+        run_jit_and_compare(QuantumGate::swap(0, 2), 4, Precision::F64, SimdWidth::W128, 1e-10);
+    }
+
+    #[test]
+    fn jit_cz_nonadjacent() {
+        run_jit_and_compare(QuantumGate::cz(1, 3), 5, Precision::F64, SimdWidth::W128, 1e-10);
+    }
+
+    #[test]
+    fn jit_ccx_gate() {
+        // 3-qubit Toffoli: exercises the multi-qubit hi_bits partitioning.
+        run_jit_and_compare(QuantumGate::ccx(0, 1, 2), 5, Precision::F64, SimdWidth::W128, 1e-10);
+    }
+
+    // Rx has a dense, fully complex matrix — no zero or ±1 entries — so the
+    // kernel exercises FMA paths that sparse gates like CX skip.
+    #[test]
+    fn jit_rx_gate() {
+        run_jit_and_compare(
+            QuantumGate::rx(std::f64::consts::PI / 3.0, 1),
+            3,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn jit_rz_gate() {
+        run_jit_and_compare(
+            QuantumGate::rz(std::f64::consts::PI / 5.0, 0),
+            3,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    // ── Multi-kernel session ────────────────────────────────────────────────────
+
+    // Generates H and CX kernels in one session and applies them sequentially;
+    // verifies that the session correctly dispatches by kernel id.
+    #[test]
+    fn jit_multiple_kernels_in_one_session() {
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+        let h_gate = QuantumGate::h(0);
+        let cx_gate = QuantumGate::cx(0, 1);
+
+        let mut generator = CPUKernelGenerator::new().expect("create generator");
+        let kid_h = generator
+            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .expect("generate H kernel");
+        let kid_cx = generator
+            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .expect("generate CX kernel");
+        let mut jit = generator.init_jit().expect("init jit");
+
+        let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
+        let mut sv_ref = sv_jit.clone();
+
+        sv_ref.apply_gate(&h_gate);
+        sv_ref.apply_gate(&cx_gate);
+
+        jit.apply(kid_h, &mut sv_jit, Some(1)).expect("apply H");
+        jit.apply(kid_cx, &mut sv_jit, Some(1)).expect("apply CX");
+
+        assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
+        assert!((sv_jit.norm() - 1.0).abs() < 1e-10);
+    }
+
+    // ── Multithreaded apply ────────────────────────────────────────────────────
+
+    // Result must be identical to single-threaded regardless of how work is split.
+    #[test]
+    fn jit_multithreaded_matches_single_thread() {
+        let gate = QuantumGate::rx(std::f64::consts::PI / 7.0, 2);
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+
+        run_jit_and_compare_full(&gate, 6, spec, 4, 1e-10);
     }
 }
