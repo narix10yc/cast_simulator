@@ -2,6 +2,7 @@
 
 #include "cpu_gen.h"
 #include "cpu_jit.h"
+#include "cpu_util.h"
 
 #include <llvm/Support/Error.h>
 
@@ -11,26 +12,11 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace {
-
-bool is_valid_precision(cast_cpu_precision_t precision) {
-  return precision == CAST_CPU_PRECISION_F32 ||
-         precision == CAST_CPU_PRECISION_F64;
-}
-
-bool is_valid_simd_width(cast_cpu_simd_width_t simd_width) {
-  return simd_width == CAST_CPU_SIMD_WIDTH_W128 ||
-         simd_width == CAST_CPU_SIMD_WIDTH_W256 ||
-         simd_width == CAST_CPU_SIMD_WIDTH_W512;
-}
-
-bool is_valid_mode(cast_cpu_matrix_load_mode_t mode) {
-  return mode == CAST_CPU_MATRIX_LOAD_IMM_VALUE ||
-         mode == CAST_CPU_MATRIX_LOAD_STACK_LOAD;
-}
 
 void write_error(char* err_buf, size_t err_buf_len, const std::string& msg) {
   if (err_buf == nullptr || err_buf_len == 0) {
@@ -47,85 +33,6 @@ void clear_error(char* err_buf, size_t err_buf_len) {
   }
 }
 
-bool expected_matrix_len(size_t n_qubits, size_t* out_len) {
-  constexpr size_t kBits = sizeof(size_t) * 8;
-  if (n_qubits > (kBits / 2)) {
-    return false;
-  }
-  const size_t exponent = n_qubits * 2;
-  *out_len = static_cast<size_t>(1) << exponent;
-  return true;
-}
-
-int validate_generate_args(const cast_cpu_kernel_generator_t* generator,
-                           const cast_cpu_kernel_gen_spec_t* spec,
-                           const cast_cpu_complex64_t* matrix,
-                           size_t matrix_len,
-                           const uint32_t* qubits,
-                           size_t n_qubits,
-                           cast_cpu_kernel_id_t* out_kernel_id,
-                           char* err_buf,
-                           size_t err_buf_len) {
-  if (generator == nullptr) {
-    write_error(err_buf, err_buf_len, "generator must not be null");
-    return 1;
-  }
-  if (spec == nullptr) {
-    write_error(err_buf, err_buf_len, "spec must not be null");
-    return 1;
-  }
-  if (matrix == nullptr) {
-    write_error(err_buf, err_buf_len, "matrix must not be null");
-    return 1;
-  }
-  if (qubits == nullptr && n_qubits != 0) {
-    write_error(err_buf, err_buf_len, "qubits must not be null");
-    return 1;
-  }
-  if (out_kernel_id == nullptr) {
-    write_error(err_buf, err_buf_len, "out_kernel_id must not be null");
-    return 1;
-  }
-  if (!is_valid_precision(spec->precision)) {
-    write_error(err_buf, err_buf_len, "invalid precision");
-    return 1;
-  }
-  if (!is_valid_simd_width(spec->simd_width)) {
-    write_error(err_buf, err_buf_len, "invalid SIMD width");
-    return 1;
-  }
-  if (!is_valid_mode(spec->mode)) {
-    write_error(err_buf, err_buf_len, "invalid matrix load mode");
-    return 1;
-  }
-  if (spec->ztol < 0.0 || spec->otol < 0.0) {
-    write_error(err_buf, err_buf_len, "tolerances must be non-negative");
-    return 1;
-  }
-
-  size_t expected_len = 0;
-  if (!expected_matrix_len(n_qubits, &expected_len)) {
-    write_error(err_buf, err_buf_len, "too many qubits for dense matrix input");
-    return 1;
-  }
-  if (matrix_len != expected_len) {
-    write_error(err_buf,
-                err_buf_len,
-                "matrix length does not match the target qubit count");
-    return 1;
-  }
-
-  for (size_t i = 1; i < n_qubits; ++i) {
-    if (qubits[i - 1] >= qubits[i]) {
-      write_error(err_buf, err_buf_len, "qubits must be strictly ascending");
-      return 1;
-    }
-  }
-
-  clear_error(err_buf, err_buf_len);
-  return 0;
-}
-
 } // namespace
 
 struct cast_cpu_kernel_generator_t {
@@ -135,7 +42,8 @@ struct cast_cpu_kernel_generator_t {
 
 struct cast_cpu_jit_session_t {
   std::unique_ptr<llvm::orc::LLJIT> jit{};
-  std::vector<CastCpuJittedKernel> kernels{};
+  // Keyed by kernel_id for O(1) lookup.
+  std::unordered_map<cast_cpu_kernel_id_t, CastCpuJittedKernel> kernels{};
 };
 
 namespace {
@@ -145,12 +53,8 @@ const CastCpuJittedKernel* find_kernel(const cast_cpu_jit_session_t* session,
   if (session == nullptr) {
     return nullptr;
   }
-  for (const auto& kernel : session->kernels) {
-    if (kernel.metadata.kernel_id == kernel_id) {
-      return &kernel;
-    }
-  }
-  return nullptr;
+  auto it = session->kernels.find(kernel_id);
+  return (it != session->kernels.end()) ? &it->second : nullptr;
 }
 
 } // namespace
@@ -178,18 +82,25 @@ cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t* generator,
                                    cast_cpu_kernel_id_t* out_kernel_id,
                                    char* err_buf,
                                    size_t err_buf_len) {
-  if (validate_generate_args(generator,
-                             spec,
-                             matrix,
-                             matrix_len,
-                             qubits,
-                             n_qubits,
-                             out_kernel_id,
-                             err_buf,
-                             err_buf_len) != 0) {
+  // Null-pointer guards for arguments that cast_cpu_generate_kernel_ir cannot
+  // check on its own (it receives spec by reference and writes to out_kernel_id
+  // only after the call succeeds).
+  if (generator == nullptr) {
+    write_error(err_buf, err_buf_len, "generator must not be null");
+    return 1;
+  }
+  if (spec == nullptr) {
+    write_error(err_buf, err_buf_len, "spec must not be null");
+    return 1;
+  }
+  if (out_kernel_id == nullptr) {
+    write_error(err_buf, err_buf_len, "out_kernel_id must not be null");
     return 1;
   }
 
+  // All other validation (precision, simd_width, mode, tolerances, matrix
+  // pointer, qubits pointer, matrix length, qubit ordering) is performed
+  // inside cast_cpu_generate_kernel_ir.
   try {
     CastCpuGeneratedKernel kernel;
     kernel.metadata.kernel_id = generator->next_kernel_id++;
@@ -263,12 +174,13 @@ cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t* generator,
         delete session;
         return 1;
       }
-      session->kernels.push_back(std::move(kernel));
+      const auto kid = kernel.metadata.kernel_id;
+      session->kernels.emplace(kid, std::move(kernel));
     }
 
     *out_session = session;
     clear_error(err_buf, err_buf_len);
-    delete generator;
+    delete generator; // ownership transferred; caller must not use generator again
     return 0;
   } catch (const std::exception& ex) {
     write_error(err_buf, err_buf_len, ex.what());
