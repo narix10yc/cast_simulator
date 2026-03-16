@@ -973,8 +973,7 @@ impl JitSession {
         }
 
         asm_buf.truncate(asm_len);
-        String::from_utf8(asm_buf)
-            .map_err(|e| anyhow::anyhow!("assembly is not valid UTF-8: {e}"))
+        String::from_utf8(asm_buf).map_err(|e| anyhow::anyhow!("assembly is not valid UTF-8: {e}"))
     }
 
     /// Applies the kernel identified by `kernel_id` to `statevector` in-place.
@@ -1473,7 +1472,11 @@ mod tests {
         let gate = QuantumGate::h(0);
         let mut gen = CPUKernelGenerator::new().expect("create generator");
         let kid = gen
-            .generate(&default_spec(Precision::F64, SimdWidth::W128), gate.matrix().data(), gate.qubits())
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                gate.matrix().data(),
+                gate.qubits(),
+            )
             .expect("generate kernel");
         gen.request_asm(kid).expect("request_asm");
         (gen.init_jit().expect("init jit"), kid)
@@ -1498,7 +1501,7 @@ mod tests {
     fn emit_asm_is_idempotent() {
         // The assembly is cached; repeated calls return the same text.
         let (session, kid) = compile_h_session_with_asm();
-        let first  = session.emit_asm(kid).expect("first emit_asm");
+        let first = session.emit_asm(kid).expect("first emit_asm");
         let second = session.emit_asm(kid).expect("second emit_asm");
         assert_eq!(first, second);
     }
@@ -1507,19 +1510,26 @@ mod tests {
     fn emit_asm_per_kernel_independent() {
         // H and CX are structurally different gates — their assembly must differ.
         let spec = default_spec(Precision::F64, SimdWidth::W128);
-        let h_gate  = QuantumGate::h(0);
+        let h_gate = QuantumGate::h(0);
         let cx_gate = QuantumGate::cx(0, 1);
 
         let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid_h  = gen.generate(&spec, h_gate.matrix().data(),  h_gate.qubits()).expect("H kernel");
-        let kid_cx = gen.generate(&spec, cx_gate.matrix().data(), cx_gate.qubits()).expect("CX kernel");
+        let kid_h = gen
+            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .expect("H kernel");
+        let kid_cx = gen
+            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .expect("CX kernel");
         gen.request_asm(kid_h).expect("request H asm");
         gen.request_asm(kid_cx).expect("request CX asm");
         let session = gen.init_jit().expect("init jit");
 
-        let asm_h  = session.emit_asm(kid_h).expect("H asm");
+        let asm_h = session.emit_asm(kid_h).expect("H asm");
         let asm_cx = session.emit_asm(kid_cx).expect("CX asm");
-        assert_ne!(asm_h, asm_cx, "different gates must produce different assembly");
+        assert_ne!(
+            asm_h, asm_cx,
+            "different gates must produce different assembly"
+        );
     }
 
     #[test]
@@ -1530,7 +1540,9 @@ mod tests {
         let gate = QuantumGate::h(0);
 
         let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid = gen.generate(&spec, gate.matrix().data(), gate.qubits()).expect("generate");
+        let kid = gen
+            .generate(&spec, gate.matrix().data(), gate.qubits())
+            .expect("generate");
         let ir = gen.emit_ir(kid).expect("emit_ir");
         gen.request_asm(kid).expect("request_asm");
         let session = gen.init_jit().expect("init jit");
@@ -1539,7 +1551,10 @@ mod tests {
         assert!(!ir.is_empty());
         assert!(!asm.is_empty());
         // The IR uses `define` keyword; native asm must not contain it.
-        assert!(!asm.contains("define"), "assembly should not contain LLVM IR syntax");
+        assert!(
+            !asm.contains("define"),
+            "assembly should not contain LLVM IR syntax"
+        );
     }
 
     #[test]
@@ -1548,23 +1563,36 @@ mod tests {
         let gate = QuantumGate::h(0);
         let mut gen = CPUKernelGenerator::new().expect("create generator");
         let kid = gen
-            .generate(&default_spec(Precision::F64, SimdWidth::W128), gate.matrix().data(), gate.qubits())
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                gate.matrix().data(),
+                gate.qubits(),
+            )
             .expect("generate kernel");
         // Deliberately skip request_asm.
         let session = gen.init_jit().expect("init jit");
-        assert!(session.emit_asm(kid).is_err(), "emit_asm should fail without request_asm");
+        assert!(
+            session.emit_asm(kid).is_err(),
+            "emit_asm should fail without request_asm"
+        );
     }
 
     #[test]
     fn emit_asm_rejects_unknown_kernel_id() {
         let (session, _) = compile_h_session_with_asm();
-        assert!(session.emit_asm(9999).is_err(), "unknown kernel_id should return an error");
+        assert!(
+            session.emit_asm(9999).is_err(),
+            "unknown kernel_id should return an error"
+        );
     }
 
     #[test]
     fn request_asm_rejects_unknown_kernel_id() {
         let mut gen = CPUKernelGenerator::new().expect("create generator");
-        assert!(gen.request_asm(9999).is_err(), "unknown kernel_id should return an error");
+        assert!(
+            gen.request_asm(9999).is_err(),
+            "unknown kernel_id should return an error"
+        );
     }
 
     // ── Multithreaded apply ────────────────────────────────────────────────────

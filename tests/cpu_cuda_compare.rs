@@ -15,10 +15,12 @@
 #![cfg(feature = "cuda")]
 
 use cast::{
-    cpu::{CPUKernelGenSpec, CPUKernelGenerator, CPUStatevector, MatrixLoadMode, Precision,
-          SimdWidth},
-    cuda::{CudaExecSession, CudaKernelGenSpec, CudaKernelGenerator, CudaPrecision,
-           CudaStatevector},
+    cpu::{
+        CPUKernelGenSpec, CPUKernelGenerator, CPUStatevector, MatrixLoadMode, Precision, SimdWidth,
+    },
+    cuda::{
+        CudaExecSession, CudaKernelGenSpec, CudaKernelGenerator, CudaPrecision, CudaStatevector,
+    },
     types::{Complex, ComplexSquareMatrix, QuantumGate},
 };
 
@@ -113,12 +115,7 @@ fn apply_cuda(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let n_sv_qubits = init.len().trailing_zeros() as usize;
     let spec = cuda_spec();
 
-    let ffi_matrix: Vec<(f64, f64)> = gate
-        .matrix()
-        .data()
-        .iter()
-        .map(|c| (c.re, c.im))
-        .collect();
+    let ffi_matrix: Vec<(f64, f64)> = gate.matrix().data().iter().map(|c| (c.re, c.im)).collect();
 
     let mut gen = CudaKernelGenerator::new().expect("cuda: create generator");
     let kid = gen
@@ -127,9 +124,8 @@ fn apply_cuda(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let session = gen.compile().expect("cuda: compile");
     let exec = CudaExecSession::new(&session).expect("cuda: create exec session");
 
-    let mut sv =
-        CudaStatevector::new(n_sv_qubits as u32, CudaPrecision::F64)
-            .expect("cuda: alloc statevector");
+    let mut sv = CudaStatevector::new(n_sv_qubits as u32, CudaPrecision::F64)
+        .expect("cuda: alloc statevector");
     sv.upload(init).expect("cuda: upload");
     exec.apply(kid, &mut sv).expect("cuda: apply");
     sv.download().expect("cuda: download")
@@ -208,10 +204,7 @@ fn compare_t_gate() {
         Complex::new(0.0, 0.0),
         Complex::new(s, s), // e^{iπ/4}
     ];
-    let gate = QuantumGate::new(
-        ComplexSquareMatrix::from_vec(2, t_matrix),
-        vec![0],
-    );
+    let gate = QuantumGate::new(ComplexSquareMatrix::from_vec(2, t_matrix), vec![0]);
     compare(gate, 5, "T gate");
 }
 
@@ -253,20 +246,14 @@ fn compare_cx_reversed_qubit_order() {
 #[test]
 #[ignore = "requires CUDA device"]
 fn compare_haar_random_2qubit() {
-    let gate = QuantumGate::new(
-        ComplexSquareMatrix::random_unitary(4),
-        vec![0, 1],
-    );
+    let gate = QuantumGate::new(ComplexSquareMatrix::random_unitary(4), vec![0, 1]);
     compare(gate, 5, "Haar-2q on 5-qubit SV");
 }
 
 #[test]
 #[ignore = "requires CUDA device"]
 fn compare_haar_random_2qubit_non_adjacent() {
-    let gate = QuantumGate::new(
-        ComplexSquareMatrix::random_unitary(4),
-        vec![1, 4],
-    );
+    let gate = QuantumGate::new(ComplexSquareMatrix::random_unitary(4), vec![1, 4]);
     compare(gate, 6, "Haar-2q[1,4] on 6-qubit SV");
 }
 
@@ -287,10 +274,7 @@ fn compare_ccx_non_adjacent() {
 #[test]
 #[ignore = "requires CUDA device"]
 fn compare_haar_random_3qubit() {
-    let gate = QuantumGate::new(
-        ComplexSquareMatrix::random_unitary(8),
-        vec![0, 1, 2],
-    );
+    let gate = QuantumGate::new(ComplexSquareMatrix::random_unitary(8), vec![0, 1, 2]);
     compare(gate, 5, "Haar-3q on 5-qubit SV");
 }
 
@@ -336,12 +320,26 @@ fn compare_sequential_h_then_x() {
     }
     jit.apply(h_cpu, &mut cpu_sv, Some(1)).unwrap();
     jit.apply(x_cpu, &mut cpu_sv, Some(1)).unwrap();
-    let cpu_result: Vec<(f64, f64)> = cpu_sv.amplitudes().into_iter().map(|c| (c.re, c.im)).collect();
+    let cpu_result: Vec<(f64, f64)> = cpu_sv
+        .amplitudes()
+        .into_iter()
+        .map(|c| (c.re, c.im))
+        .collect();
 
     // CUDA: H then X on qubit 0.
     let c_spec = cuda_spec();
-    let h_mat: Vec<(f64, f64)> = QuantumGate::h(0).matrix().data().iter().map(|c| (c.re, c.im)).collect();
-    let x_mat: Vec<(f64, f64)> = QuantumGate::x(0).matrix().data().iter().map(|c| (c.re, c.im)).collect();
+    let h_mat: Vec<(f64, f64)> = QuantumGate::h(0)
+        .matrix()
+        .data()
+        .iter()
+        .map(|c| (c.re, c.im))
+        .collect();
+    let x_mat: Vec<(f64, f64)> = QuantumGate::x(0)
+        .matrix()
+        .data()
+        .iter()
+        .map(|c| (c.re, c.im))
+        .collect();
     let mut cuda_gen = CudaKernelGenerator::new().unwrap();
     let h_kid = cuda_gen.generate(&c_spec, &h_mat, &[0]).unwrap();
     let x_kid = cuda_gen.generate(&c_spec, &x_mat, &[0]).unwrap();
@@ -377,8 +375,11 @@ fn compare_h_squared_is_identity() {
     }
     jit.apply(kid, &mut cpu_sv, Some(1)).unwrap();
     jit.apply(kid, &mut cpu_sv, Some(1)).unwrap();
-    let cpu_result: Vec<(f64, f64)> =
-        cpu_sv.amplitudes().into_iter().map(|c| (c.re, c.im)).collect();
+    let cpu_result: Vec<(f64, f64)> = cpu_sv
+        .amplitudes()
+        .into_iter()
+        .map(|c| (c.re, c.im))
+        .collect();
 
     // CUDA: H^2
     let c_spec = cuda_spec();

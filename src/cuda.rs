@@ -359,7 +359,8 @@ impl Drop for CudaKernelGenerator {
 
 impl fmt::Debug for CudaKernelGenerator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CudaKernelGenerator").finish_non_exhaustive()
+        f.debug_struct("CudaKernelGenerator")
+            .finish_non_exhaustive()
     }
 }
 
@@ -380,7 +381,8 @@ impl Drop for CudaCompilationSession {
 
 impl fmt::Debug for CudaCompilationSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CudaCompilationSession").finish_non_exhaustive()
+        f.debug_struct("CudaCompilationSession")
+            .finish_non_exhaustive()
     }
 }
 
@@ -506,16 +508,14 @@ impl CudaStatevector {
     pub fn new(n_qubits: u32, precision: CudaPrecision) -> anyhow::Result<Self> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let raw = unsafe {
-            ffi::cast_cuda_statevector_new(
-                n_qubits,
-                precision,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
+            ffi::cast_cuda_statevector_new(n_qubits, precision, err_buf.as_mut_ptr(), err_buf.len())
         };
-        let raw = NonNull::new(raw)
-            .ok_or_else(|| anyhow::anyhow!(error_from_buf(&err_buf)))?;
-        Ok(Self { raw, n_qubits, precision })
+        let raw = NonNull::new(raw).ok_or_else(|| anyhow::anyhow!(error_from_buf(&err_buf)))?;
+        Ok(Self {
+            raw,
+            n_qubits,
+            precision,
+        })
     }
 
     pub fn n_qubits(&self) -> u32 {
@@ -535,11 +535,7 @@ impl CudaStatevector {
     pub fn zero(&mut self) -> anyhow::Result<()> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let status = unsafe {
-            ffi::cast_cuda_statevector_zero(
-                self.raw.as_ptr(),
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
+            ffi::cast_cuda_statevector_zero(self.raw.as_ptr(), err_buf.as_mut_ptr(), err_buf.len())
         };
         if status == 0 {
             Ok(())
@@ -636,8 +632,7 @@ impl CudaExecSession {
                 err_buf.len(),
             )
         };
-        let raw = NonNull::new(raw)
-            .ok_or_else(|| anyhow::anyhow!(error_from_buf(&err_buf)))?;
+        let raw = NonNull::new(raw).ok_or_else(|| anyhow::anyhow!(error_from_buf(&err_buf)))?;
         Ok(Self { raw })
     }
 
@@ -645,11 +640,7 @@ impl CudaExecSession {
     ///
     /// Synchronises the device before returning so the result is immediately
     /// visible on the host via [`CudaStatevector::download`].
-    pub fn apply(
-        &self,
-        kernel_id: CudaKernelId,
-        sv: &mut CudaStatevector,
-    ) -> anyhow::Result<()> {
+    pub fn apply(&self, kernel_id: CudaKernelId, sv: &mut CudaStatevector) -> anyhow::Result<()> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let status = unsafe {
             ffi::cast_cuda_exec_session_apply(
@@ -683,10 +674,22 @@ mod tests {
     /// CNOT gate matrix (4x4), row-major, as (re, im) pairs.
     fn cnot_matrix() -> Vec<(f64, f64)> {
         vec![
-            (1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0),
-            (0.0, 0.0), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0),
-            (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0),
-            (0.0, 0.0), (0.0, 0.0), (1.0, 0.0), (0.0, 0.0),
+            (1.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (0.0, 0.0),
         ]
     }
 
@@ -779,11 +782,7 @@ mod tests {
         let session = gen.compile().expect("compile");
         let cubin = session.emit_cubin(kid).expect("emit cubin");
         assert!(cubin.len() >= 4, "cubin should be non-empty");
-        assert_eq!(
-            &cubin[..4],
-            b"\x7fELF",
-            "cubin should start with ELF magic"
-        );
+        assert_eq!(&cubin[..4], b"\x7fELF", "cubin should start with ELF magic");
     }
 
     // ── GPU execution tests (require a CUDA device) ───────────────────────────
@@ -791,15 +790,17 @@ mod tests {
     #[test]
     #[ignore = "requires CUDA device"]
     fn test_statevector_zero_state() {
-        let mut sv = super::CudaStatevector::new(3, super::CudaPrecision::F64)
-            .expect("alloc statevector");
+        let mut sv =
+            super::CudaStatevector::new(3, super::CudaPrecision::F64).expect("alloc statevector");
         sv.zero().expect("zero");
         let amps = sv.download().expect("download");
         assert_eq!(amps.len(), 8);
         assert!((amps[0].0 - 1.0).abs() < 1e-14, "|0> re should be 1");
         for i in 1..8 {
-            assert!(amps[i].0.abs() < 1e-14 && amps[i].1.abs() < 1e-14,
-                "amp[{i}] should be 0");
+            assert!(
+                amps[i].0.abs() < 1e-14 && amps[i].1.abs() < 1e-14,
+                "amp[{i}] should be 0"
+            );
         }
     }
 
@@ -809,8 +810,8 @@ mod tests {
         let data: Vec<(f64, f64)> = (0..4u32)
             .map(|i| (i as f64 * 0.1, i as f64 * -0.05))
             .collect();
-        let mut sv = super::CudaStatevector::new(2, super::CudaPrecision::F64)
-            .expect("alloc statevector");
+        let mut sv =
+            super::CudaStatevector::new(2, super::CudaPrecision::F64).expect("alloc statevector");
         sv.upload(&data).expect("upload");
         let got = sv.download().expect("download");
         for (i, (&want, got)) in data.iter().zip(got.iter()).enumerate() {
@@ -831,27 +832,24 @@ mod tests {
         let session = gen.compile().expect("compile");
         let exec = super::CudaExecSession::new(&session).expect("create exec session");
 
-        let mut sv = super::CudaStatevector::new(1, super::CudaPrecision::F64)
-            .expect("alloc statevector");
+        let mut sv =
+            super::CudaStatevector::new(1, super::CudaPrecision::F64).expect("alloc statevector");
         sv.zero().expect("zero");
         exec.apply(kid, &mut sv).expect("apply H");
 
         let amps = sv.download().expect("download");
         let s = std::f64::consts::FRAC_1_SQRT_2;
         assert!((amps[0].0 - s).abs() < 1e-10, "amp[0].re ≈ 1/√2");
-        assert!(amps[0].1.abs() < 1e-10,         "amp[0].im ≈ 0");
+        assert!(amps[0].1.abs() < 1e-10, "amp[0].im ≈ 0");
         assert!((amps[1].0 - s).abs() < 1e-10, "amp[1].re ≈ 1/√2");
-        assert!(amps[1].1.abs() < 1e-10,         "amp[1].im ≈ 0");
+        assert!(amps[1].1.abs() < 1e-10, "amp[1].im ≈ 0");
     }
 
     #[test]
     #[ignore = "requires CUDA device"]
     fn test_x_gate_apply_to_zero_state() {
         // X|0⟩ = |1⟩
-        let x_matrix = vec![
-            (0.0, 0.0), (1.0, 0.0),
-            (1.0, 0.0), (0.0, 0.0),
-        ];
+        let x_matrix = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 0.0), (0.0, 0.0)];
         let spec = default_spec();
         let mut gen = super::CudaKernelGenerator::new().expect("create generator");
         let kid = gen
@@ -860,8 +858,8 @@ mod tests {
         let session = gen.compile().expect("compile");
         let exec = super::CudaExecSession::new(&session).expect("create exec session");
 
-        let mut sv = super::CudaStatevector::new(1, super::CudaPrecision::F64)
-            .expect("alloc statevector");
+        let mut sv =
+            super::CudaStatevector::new(1, super::CudaPrecision::F64).expect("alloc statevector");
         sv.zero().expect("zero");
         exec.apply(kid, &mut sv).expect("apply X");
 
@@ -883,8 +881,8 @@ mod tests {
         let session = gen.compile().expect("compile");
         let exec = super::CudaExecSession::new(&session).expect("create exec session");
 
-        let mut sv = super::CudaStatevector::new(4, super::CudaPrecision::F64)
-            .expect("alloc statevector");
+        let mut sv =
+            super::CudaStatevector::new(4, super::CudaPrecision::F64).expect("alloc statevector");
         sv.zero().expect("zero");
         exec.apply(kid, &mut sv).expect("apply H on 4-qubit SV");
 
@@ -893,8 +891,10 @@ mod tests {
         assert!((amps[0].0 - s).abs() < 1e-10, "amp[0] ≈ 1/√2");
         assert!((amps[1].0 - s).abs() < 1e-10, "amp[1] ≈ 1/√2");
         for i in 2..16 {
-            assert!(amps[i].0.abs() < 1e-10 && amps[i].1.abs() < 1e-10,
-                "amp[{i}] should be 0");
+            assert!(
+                amps[i].0.abs() < 1e-10 && amps[i].1.abs() < 1e-10,
+                "amp[{i}] should be 0"
+            );
         }
     }
 }
