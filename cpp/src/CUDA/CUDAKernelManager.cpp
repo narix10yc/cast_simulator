@@ -187,7 +187,7 @@ static llvm::Error compileLLVMIRToPTX_work(CudaKernel& kernel,
 
   auto& TM = jitTls.getTargetMachine();
 
-  llvmModule.setTargetTriple(TM.getTargetTriple());
+  llvmModule.setTargetTriple(TM.getTargetTriple().str());
   llvmModule.setDataLayout(TM.createDataLayout());
   std::string errorStr;
   llvm::raw_string_ostream sstream(errorStr);

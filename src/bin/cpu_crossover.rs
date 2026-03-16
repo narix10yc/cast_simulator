@@ -26,9 +26,9 @@
 //! ## Usage
 //!
 //! ```sh
-//! cargo run --bin balance --release
-//! cargo run --bin balance --release -- --n-qubits 30 --threads 10 --budget-secs 120
-//! cargo run --bin balance --release -- --help
+//! cargo run --bin cpu_crossover --release
+//! cargo run --bin cpu_crossover --release -- --n-qubits 30 --threads 10 --budget-secs 120
+//! cargo run --bin cpu_crossover --release -- --help
 //! ```
 
 use anyhow::Result;
@@ -104,7 +104,7 @@ impl Args {
                     };
                 }
                 "--help" | "-h" => {
-                    println!("Usage: balance [OPTIONS]");
+                    println!("Usage: cpu_crossover [OPTIONS]");
                     println!();
                     println!("  --n-qubits N      log2 of statevector length  (default: 20 → 16 MiB for f64)");
                     println!("  --threads N       worker threads; 0 = hardware_concurrency  (default: 1)");
