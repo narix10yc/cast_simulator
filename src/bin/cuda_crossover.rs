@@ -1,10 +1,11 @@
 //! Computation-memory balance analysis for CUDA NVPTX gate simulation kernels.
 //!
 //! Mirrors `cpu_crossover` exactly, substituting the CUDA execution backend for
-//! the CPU JIT backend.  Sweeps gate size and density (opcount) from purely
-//! memory-bound (sparse permutation gates, opcount = 1) to compute-bound
-//! (dense multi-qubit unitaries, opcount up to 32), reporting GiB/s, GFLOPs/s,
-//! and timing variance side-by-side so the roofline crossover is visible.
+//! the CPU JIT backend. Sweeps gate size and density (opcount) from purely
+//! memory-bound (random sparse gates with one nonzero scalar per row) to
+//! compute-bound (dense random real gates up to 5 qubits, opcount up to 32),
+//! reporting GiB/s, GFLOPs/s, and timing variance side-by-side so the roofline
+//! crossover is visible.
 //!
 //! ## Metrics
 //!
@@ -26,8 +27,8 @@
 
 use anyhow::Result;
 use cast::cuda::{
-    CudaCompilationSession, CudaExecSession, CudaKernelGenSpec, CudaKernelGenerator,
-    CudaKernelId, CudaPrecision, CudaStatevector,
+    CudaCompilationSession, CudaExecSession, CudaKernelGenSpec, CudaKernelGenerator, CudaKernelId,
+    CudaPrecision, CudaStatevector,
 };
 use cast::types::{Complex, ComplexSquareMatrix, QuantumGate};
 use rand::Rng;
@@ -152,95 +153,44 @@ impl Args {
 // ── Gate sweep ────────────────────────────────────────────────────────────────
 
 struct Case {
-    label: &'static str,
+    label: String,
     gate: QuantumGate,
 }
 
 fn gate_sweep() -> Vec<Case> {
-    vec![
-        // ── opcount = 1 ───────────────────────────────────────────────────────
-        Case {
-            label: "X           [1q dense,  op=1]",
-            gate: QuantumGate::x(0),
-        },
-        Case {
-            label: "CX          [2q perm,   op=1]",
-            gate: QuantumGate::cx(0, 1),
-        },
-        Case {
-            label: "CCX         [3q perm,   op=1]",
-            gate: QuantumGate::ccx(0, 1, 2),
-        },
-        Case {
-            label: "Sparse-4q   [4q sparse, op=1]",
-            gate: sparse(4, 1),
-        },
-        Case {
-            label: "Sparse-5q   [5q sparse, op=1]",
-            gate: sparse(5, 1),
-        },
-        // ── opcount = 2 ───────────────────────────────────────────────────────
-        Case {
-            label: "H           [1q dense,  op=2]",
-            gate: QuantumGate::h(0),
-        },
-        Case {
-            label: "Sparse-4q   [4q sparse, op=2]",
-            gate: sparse(4, 2),
-        },
-        Case {
-            label: "Sparse-5q   [5q sparse, op=2]",
-            gate: sparse(5, 2),
-        },
-        // ── opcount = 4 ───────────────────────────────────────────────────────
-        Case {
-            label: "Haar-2q     [2q dense,  op=4]",
-            gate: haar(2),
-        },
-        Case {
-            label: "Sparse-4q   [4q sparse, op=4]",
-            gate: sparse(4, 4),
-        },
-        Case {
-            label: "Sparse-5q   [5q sparse, op=4]",
-            gate: sparse(5, 4),
-        },
-        // ── opcount = 8 ───────────────────────────────────────────────────────
-        Case {
-            label: "Haar-3q     [3q dense,  op=8]",
-            gate: haar(3),
-        },
-        Case {
-            label: "Sparse-4q   [4q sparse, op=8]",
-            gate: sparse(4, 8),
-        },
-        Case {
-            label: "Sparse-5q   [5q sparse, op=8]",
-            gate: sparse(5, 8),
-        },
-        // ── opcount = 16 ──────────────────────────────────────────────────────
-        Case {
-            label: "Haar-4q     [4q dense, op=16]",
-            gate: haar(4),
-        },
-        Case {
-            label: "Sparse-5q   [5q sparse,op=16]",
-            gate: sparse(5, 16),
-        },
-        // ── opcount = 32 ──────────────────────────────────────────────────────
-        Case {
-            label: "Haar-5q     [5q dense, op=32]",
-            gate: haar(5),
-        },
-    ]
+    let mut cases = Vec::new();
+
+    for &s in &[1usize, 2, 4, 8] {
+        cases.push(Case {
+            label: format!("Sparse-4q   [rand sparse, s={s}]"),
+            gate: sparse_real(4, s),
+        });
+        cases.push(Case {
+            label: format!("Sparse-5q   [rand sparse, s={s}]"),
+            gate: sparse_real(5, s),
+        });
+    }
+
+    cases.push(Case {
+        label: "Sparse-5q   [rand sparse, s=16]".to_string(),
+        gate: sparse_real(5, 16),
+    });
+
+    for k in 1..=5 {
+        cases.push(Case {
+            label: format!("Dense-{k}q    [rand dense]"),
+            gate: dense_real(k),
+        });
+    }
+
+    cases
 }
 
-fn haar(k: usize) -> QuantumGate {
-    let qubits: Vec<u32> = (0..k as u32).collect();
-    QuantumGate::new(ComplexSquareMatrix::random_unitary(1 << k), qubits)
+fn dense_real(k: usize) -> QuantumGate {
+    sparse_real(k, 1usize << k)
 }
 
-fn sparse(k: usize, s: usize) -> QuantumGate {
+fn sparse_real(k: usize, s: usize) -> QuantumGate {
     let n = 1usize << k;
     assert!(s <= n, "s must be ≤ edge_size");
     let stride = n / s;
@@ -249,13 +199,20 @@ fn sparse(k: usize, s: usize) -> QuantumGate {
     for row in 0..n {
         for t in 0..s {
             let col = (row + n / 2 + t * stride) % n;
-            let re = rng.gen_range(-1.0_f64..1.0);
-            let im = rng.gen_range(-1.0_f64..1.0);
-            m.set(row, col, Complex::new(re, im));
+            m.set(row, col, Complex::new(sample_nonzero_real(&mut rng), 0.0));
         }
     }
     let qubits: Vec<u32> = (0..k as u32).collect();
     QuantumGate::new(m, qubits)
+}
+
+fn sample_nonzero_real<R: Rng + ?Sized>(rng: &mut R) -> f64 {
+    let mag = rng.gen_range(0.25_f64..1.0);
+    if rng.gen_bool(0.5) {
+        mag
+    } else {
+        -mag
+    }
 }
 
 // ── Adaptive timing ───────────────────────────────────────────────────────────
@@ -337,6 +294,40 @@ struct Row {
     gflops_s: f64,
 }
 
+struct OpcountBucket {
+    opcount: f64,
+    mean_gflops_s: f64,
+    max_k: usize,
+}
+
+fn opcount_buckets(rows: &[Row]) -> Vec<OpcountBucket> {
+    const OPCOUNT_EPS: f64 = 1e-9;
+
+    let mut buckets = Vec::new();
+    let mut i = 0;
+    while i < rows.len() {
+        let opcount = rows[i].opcount;
+        let mut sum_gflops = 0.0;
+        let mut count = 0usize;
+        let mut max_k = rows[i].k;
+
+        while i < rows.len() && (rows[i].opcount - opcount).abs() < OPCOUNT_EPS {
+            sum_gflops += rows[i].gflops_s;
+            count += 1;
+            max_k = max_k.max(rows[i].k);
+            i += 1;
+        }
+
+        buckets.push(OpcountBucket {
+            opcount,
+            mean_gflops_s: sum_gflops / count as f64,
+            max_k,
+        });
+    }
+
+    buckets
+}
+
 fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
     let spec = args.spec();
     let k = case.gate.n_qubits();
@@ -378,7 +369,7 @@ fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
     let gflops_s = opcount * (1usize << n_sv) as f64 * 2.0 / timing.mean_s / 1e9;
 
     Ok(Row {
-        label: case.label.to_string(),
+        label: case.label.clone(),
         k,
         nnz: scalar_nnz,
         opcount,
@@ -423,15 +414,9 @@ fn print_report(rows: &[Row], args: &Args) {
     );
     println!("  {line}");
 
-    let first = rows
-        .iter()
-        .min_by(|a, b| a.opcount.partial_cmp(&b.opcount).unwrap())
-        .unwrap();
-    let gflops_per_opcount = first.gflops_s / first.opcount;
-
-    let mut prev_regime = "";
-    let mut prev_opcount = 0.0_f64;
-    let mut crossover: Option<(f64, f64, usize)> = None;
+    let buckets = opcount_buckets(rows);
+    let first = buckets.first().unwrap();
+    let gflops_per_opcount = first.mean_gflops_s / first.opcount;
 
     for row in rows {
         let expected_linear = gflops_per_opcount * row.opcount;
@@ -440,10 +425,6 @@ fn print_report(rows: &[Row], args: &Args) {
         } else {
             "compute↑"
         };
-
-        if prev_regime == "mem-bound" && regime == "compute↑" && crossover.is_none() {
-            crossover = Some((prev_opcount, row.opcount, row.k));
-        }
 
         println!(
             "  {:<32}  {:>2}  {:>5}  {:>7.1}  {:>10.2}  {:>9.1}  {:>10.1}  {:>8}",
@@ -456,8 +437,6 @@ fn print_report(rows: &[Row], args: &Args) {
             row.gflops_s,
             regime,
         );
-        prev_regime = regime;
-        prev_opcount = row.opcount;
     }
 
     println!("  {line}");
@@ -490,6 +469,23 @@ fn print_report(rows: &[Row], args: &Args) {
     let peak_gib = rows.iter().map(|r| r.gib_s).fold(0.0_f64, f64::max);
     let peak_gflops = rows.iter().map(|r| r.gflops_s).fold(0.0_f64, f64::max);
     let knee = peak_gflops / gflops_per_opcount;
+
+    let mut prev_bucket_regime = "";
+    let mut prev_bucket_opcount = 0.0_f64;
+    let mut crossover: Option<(f64, f64, usize)> = None;
+    for bucket in &buckets {
+        let expected_linear = gflops_per_opcount * bucket.opcount;
+        let regime = if bucket.mean_gflops_s >= expected_linear * 0.85 {
+            "mem-bound"
+        } else {
+            "compute↑"
+        };
+        if prev_bucket_regime == "mem-bound" && regime == "compute↑" && crossover.is_none() {
+            crossover = Some((prev_bucket_opcount, bucket.opcount, bucket.max_k));
+        }
+        prev_bucket_regime = regime;
+        prev_bucket_opcount = bucket.opcount;
+    }
 
     println!();
     println!("  Peak memory bandwidth  : {peak_gib:.1} GiB/s");
@@ -543,7 +539,12 @@ fn main() -> Result<()> {
         rows.push(row);
     }
 
-    rows.sort_by(|a, b| a.opcount.partial_cmp(&b.opcount).unwrap());
+    rows.sort_by(|a, b| {
+        a.opcount
+            .total_cmp(&b.opcount)
+            .then_with(|| a.k.cmp(&b.k))
+            .then_with(|| a.label.cmp(&b.label))
+    });
     print_report(&rows, &args);
     Ok(())
 }

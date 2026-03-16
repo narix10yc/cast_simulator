@@ -103,16 +103,11 @@ fn cxx_stdlib_name() -> &'static str {
     }
 }
 
-/// Locates `llvm-config`, preferring `LLVM_CONFIG` env var then Homebrew then `PATH`.
+/// Locates `llvm-config` from the required `LLVM_CONFIG` environment variable.
 fn llvm_config_path() -> PathBuf {
-    if let Some(path) = env::var_os("LLVM_CONFIG") {
-        return PathBuf::from(path);
-    }
-    let homebrew = PathBuf::from("/opt/homebrew/opt/llvm/bin/llvm-config");
-    if homebrew.exists() {
-        return homebrew;
-    }
-    PathBuf::from("llvm-config")
+    env::var_os("LLVM_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| panic!("LLVM_CONFIG must be set to the path of the llvm-config binary"))
 }
 
 /// Runs `llvm-config` with `args` and returns the whitespace-split output tokens.
@@ -166,13 +161,7 @@ fn build_cuda_ffi(out_dir: &Path, llvm_config: &Path) {
     let llvm_ldflags = llvm_config_flags(llvm_config, &["--ldflags"]);
     let llvm_libs = llvm_config_flags(
         llvm_config,
-        &[
-            "--system-libs",
-            "--libs",
-            "core",
-            "nvptx",
-            "passes",
-        ],
+        &["--system-libs", "--libs", "core", "nvptx", "passes"],
     );
 
     let mut objects = Vec::new();
