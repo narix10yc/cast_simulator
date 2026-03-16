@@ -22,7 +22,7 @@ static std::unique_ptr<llvm::TargetMachine> createNVPTXTargetMachine() {
   std::string archString =
       "sm_" + std::to_string(major) + std::to_string(minor);
   return std::unique_ptr<llvm::TargetMachine>(
-      target->createTargetMachine(triple, archString, "", {}, std::nullopt));
+      target->createTargetMachine(triple.str(), archString, "", {}, std::nullopt));
 }
 
 CUDAJitTls::CUDAJitTls()
