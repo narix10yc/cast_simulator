@@ -7,6 +7,7 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
+#include <llvm/TargetParser/Host.h>
 #include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
@@ -140,7 +141,7 @@ llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedK
 
     llvm::TargetOptions options;
     auto tm = std::unique_ptr<llvm::TargetMachine>(
-        target->createTargetMachine(triple, "native", /*features=*/"", options, llvm::Reloc::PIC_));
+        target->createTargetMachine(triple, llvm::sys::getHostCPUName().str(), /*features=*/"", options, llvm::Reloc::PIC_));
     if (!tm)
       return llvm::createStringError("failed to create TargetMachine");
 
