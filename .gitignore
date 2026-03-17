@@ -1,27 +1,15 @@
 .vscode/*
 .idea/*
 .DS_Store
-_deps/*
-cpp/drafts/*
+
+target/
+
+analysis/
+tmp/
+*.csv
+*.ipynb
+
+.cache/
+_deps/
 *.so
 *.dylib
-
-# build artifacts
-build/*
-build.debug/*
-build.release/*
-compile_commands.json
-target/*
-
-# analysis files
-tmp/*
-analysis/*
-*.csv
-
-# python-related
-*.ipynb
-cpp/python/cast/__pycache__/*
-
-# others
-.cache/*
-CMakePresets.json
