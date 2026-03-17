@@ -1,0 +1,763 @@
+#[cfg(test)]
+mod tests {
+
+    use std::collections::HashSet;
+
+    use crate::cost_model::FusionConfig;
+    use crate::cpu::*;
+    use crate::fusion;
+    use crate::types::{Complex, Precision, QuantumGate};
+    use crate::CircuitGraph;
+
+    /// Creates a normalized statevector with deterministic amplitudes.
+    fn seeded_statevector(
+        n_qubits: usize,
+        precision: Precision,
+        simd_width: SimdWidth,
+    ) -> CPUStatevector {
+        let mut sv = CPUStatevector::new(n_qubits, precision, simd_width);
+        for idx in 0..sv.len() {
+            let re = (idx as f64) + 1.0;
+            let im = (idx as f64) * 0.5 - 0.25;
+            sv.set_amp(idx, Complex::new(re, im));
+        }
+        sv.normalize();
+        sv
+    }
+
+    fn assert_statevectors_close(lhs: &CPUStatevector, rhs: &CPUStatevector, tol: f64) {
+        assert_eq!(lhs.n_qubits(), rhs.n_qubits(), "statevector size mismatch");
+        for idx in 0..lhs.len() {
+            let diff = lhs.amp(idx) - rhs.amp(idx);
+            assert!(
+                diff.norm() < tol,
+                "statevectors differ at index {}: lhs={:?}, rhs={:?}, diff={:?}",
+                idx,
+                lhs.amp(idx),
+                rhs.amp(idx),
+                diff
+            );
+        }
+    }
+
+    /// Generates a JIT kernel for `gate` and checks the result against the scalar path.
+    /// `n_threads`: number of worker threads passed to `apply`.
+    fn run_jit_and_compare_full(
+        gate: &QuantumGate,
+        n_qubits_sv: usize,
+        spec: CPUKernelGenSpec,
+        n_threads: usize,
+        tol: f64,
+    ) {
+        let mut generator = CPUKernelGenerator::new().expect("create generator");
+        let kernel_id = generator
+            .generate(&spec, gate.matrix().data(), gate.qubits())
+            .expect("generate kernel");
+        let mut jit = generator.init_jit().expect("init jit");
+
+        let mut sv_jit = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
+        let mut sv_ref = sv_jit.clone();
+
+        sv_ref.apply_gate(gate);
+        jit.apply(kernel_id, &mut sv_jit, Some(n_threads))
+            .expect("apply kernel");
+
+        assert_statevectors_close(&sv_jit, &sv_ref, tol);
+        assert!((sv_jit.norm() - 1.0).abs() < tol);
+    }
+
+    fn default_spec(precision: Precision, simd_width: SimdWidth) -> CPUKernelGenSpec {
+        CPUKernelGenSpec {
+            precision,
+            simd_width,
+            mode: MatrixLoadMode::ImmValue,
+            ztol: match precision {
+                Precision::F32 => 1e-6,
+                Precision::F64 => 1e-12,
+            },
+            otol: match precision {
+                Precision::F32 => 1e-6,
+                Precision::F64 => 1e-12,
+            },
+        }
+    }
+
+    fn run_jit_and_compare(
+        gate: QuantumGate,
+        n_qubits_sv: usize,
+        precision: Precision,
+        simd_width: SimdWidth,
+        tol: f64,
+    ) {
+        run_jit_and_compare_full(
+            &gate,
+            n_qubits_sv,
+            default_spec(precision, simd_width),
+            1,
+            tol,
+        );
+    }
+
+    fn circuit_gates_in_row_order(graph: &CircuitGraph) -> Vec<QuantumGate> {
+        let mut gates = Vec::new();
+        let mut seen = HashSet::new();
+        for row in 0..graph.n_rows() {
+            for qubit in 0..graph.n_qubits() {
+                if let Some(gate_id) = graph.gate_id_at(row, qubit) {
+                    if seen.insert(gate_id) {
+                        gates.push(
+                            graph
+                                .gate(gate_id)
+                                .expect("live gate id should resolve")
+                                .clone(),
+                        );
+                    }
+                }
+            }
+        }
+        gates
+    }
+
+    fn run_circuit_scalar(
+        graph: &CircuitGraph,
+        n_qubits_sv: usize,
+        precision: Precision,
+        simd_width: SimdWidth,
+    ) -> CPUStatevector {
+        let mut sv = seeded_statevector(n_qubits_sv, precision, simd_width);
+        for gate in circuit_gates_in_row_order(graph) {
+            sv.apply_gate(&gate);
+        }
+        sv
+    }
+
+    fn run_circuit_jit(
+        graph: &CircuitGraph,
+        n_qubits_sv: usize,
+        spec: CPUKernelGenSpec,
+        n_threads: usize,
+    ) -> CPUStatevector {
+        let gates = circuit_gates_in_row_order(graph);
+        let mut generator = CPUKernelGenerator::new().expect("create generator");
+        let mut kernel_ids = Vec::with_capacity(gates.len());
+        for gate in &gates {
+            let kernel_id = generator
+                .generate(&spec, gate.matrix().data(), gate.qubits())
+                .expect("generate kernel");
+            kernel_ids.push(kernel_id);
+        }
+        let mut jit = generator.init_jit().expect("init jit");
+        let mut sv = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
+        for kernel_id in kernel_ids {
+            jit.apply(kernel_id, &mut sv, Some(n_threads))
+                .expect("apply circuit kernel");
+        }
+        sv
+    }
+
+    fn assert_fused_and_unfused_circuits_agree(
+        original: &CircuitGraph,
+        n_qubits_sv: usize,
+        spec: CPUKernelGenSpec,
+        tol: f64,
+    ) {
+        let scalar_ref = run_circuit_scalar(original, n_qubits_sv, spec.precision, spec.simd_width);
+        let unfused_jit = run_circuit_jit(original, n_qubits_sv, spec, 1);
+
+        let mut fused = original.clone();
+        fusion::optimize(&mut fused, &FusionConfig::balanced());
+        let fused_jit = run_circuit_jit(&fused, n_qubits_sv, spec, 1);
+
+        assert_statevectors_close(&unfused_jit, &scalar_ref, tol);
+        assert_statevectors_close(&fused_jit, &scalar_ref, tol);
+        assert_statevectors_close(&fused_jit, &unfused_jit, tol);
+        assert!((fused_jit.norm() - 1.0).abs() < tol);
+    }
+
+    #[test]
+    fn initializes_to_zero_state() {
+        let mut sv = CPUStatevector::new(3, Precision::F64, SimdWidth::W128);
+        sv.initialize();
+
+        assert_eq!(sv.amp(0), Complex::new(1.0, 0.0));
+        for idx in 1..sv.len() {
+            assert_eq!(sv.amp(idx), Complex::new(0.0, 0.0));
+        }
+        assert!((sv.norm() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn applies_single_qubit_gate() {
+        let mut sv = CPUStatevector::new(1, Precision::F64, SimdWidth::W128);
+        sv.initialize();
+        sv.apply_gate(&QuantumGate::h(0));
+
+        let expected = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((sv.amp(0) - Complex::new(expected, 0.0)).norm() < 1e-12);
+        assert!((sv.amp(1) - Complex::new(expected, 0.0)).norm() < 1e-12);
+        assert!((sv.norm() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn jit_applies_single_qubit_gate() {
+        let gate = QuantumGate::h(0);
+        let mut generator = CPUKernelGenerator::new().expect("create generator");
+        let kernel_id = generator
+            .generate(
+                &CPUKernelGenSpec::f64(),
+                gate.matrix().data(),
+                gate.qubits(),
+            )
+            .expect("generate kernel");
+        let mut jit = generator.init_jit().expect("init jit");
+
+        let mut sv = CPUStatevector::new(2, Precision::F64, SimdWidth::W128);
+        sv.initialize();
+        jit.apply(kernel_id, &mut sv, Some(1))
+            .expect("apply kernel");
+
+        let expected = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((sv.amp(0) - Complex::new(expected, 0.0)).norm() < 1e-10);
+        assert!((sv.amp(1) - Complex::new(expected, 0.0)).norm() < 1e-10);
+        assert!((sv.amp(2) - Complex::new(0.0, 0.0)).norm() < 1e-10);
+        assert!((sv.amp(3) - Complex::new(0.0, 0.0)).norm() < 1e-10);
+        assert!((sv.norm() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn jit_matches_scalar_for_x_gate_imm_mode() {
+        run_jit_and_compare(QuantumGate::x(1), 3, Precision::F64, SimdWidth::W128, 1e-10);
+    }
+
+    #[test]
+    fn jit_matches_scalar_for_cx_gate_imm_mode() {
+        run_jit_and_compare(
+            QuantumGate::cx(0, 1),
+            3,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn jit_matches_scalar_for_nonadjacent_gate_imm_mode() {
+        run_jit_and_compare(
+            QuantumGate::cx(0, 2),
+            4,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn jit_matches_scalar_for_fp32_imm_mode() {
+        run_jit_and_compare(QuantumGate::h(2), 4, Precision::F32, SimdWidth::W128, 5e-5);
+    }
+
+    // ── SIMD width coverage ────────────────────────────────────────────────────
+
+    // F64/W256: simd_s=2, needs ≥3 qubits for a 1-qubit gate.
+    #[test]
+    fn jit_f64_w256() {
+        run_jit_and_compare(QuantumGate::h(1), 4, Precision::F64, SimdWidth::W256, 1e-10);
+    }
+
+    // F64/W512: simd_s=3, needs ≥4 qubits for a 1-qubit gate.
+    #[test]
+    fn jit_f64_w512() {
+        run_jit_and_compare(QuantumGate::h(1), 5, Precision::F64, SimdWidth::W512, 1e-10);
+    }
+
+    // F32/W256: simd_s=3, needs ≥4 qubits for a 1-qubit gate.
+    #[test]
+    fn jit_f32_w256() {
+        run_jit_and_compare(QuantumGate::h(2), 5, Precision::F32, SimdWidth::W256, 5e-5);
+    }
+
+    // F32/W512: simd_s=4, needs ≥5 qubits for a 1-qubit gate.
+    #[test]
+    fn jit_f32_w512() {
+        run_jit_and_compare(QuantumGate::h(2), 6, Precision::F32, SimdWidth::W512, 5e-5);
+    }
+
+    // ── StackLoad mode ─────────────────────────────────────────────────────────
+
+    // StackLoad embeds a runtime matrix pointer rather than immediate constants;
+    // the numerical result must be identical to ImmValue for the same gate.
+    #[test]
+    fn jit_stack_load_matches_imm_value() {
+        let gate = QuantumGate::cx(0, 2);
+        let n_qubits_sv = 4;
+        let precision = Precision::F64;
+        let simd_width = SimdWidth::W128;
+        let tol = 1e-10;
+
+        let mut sv_imm = seeded_statevector(n_qubits_sv, precision, simd_width);
+        let mut sv_stack = sv_imm.clone();
+
+        let spec_imm = default_spec(precision, simd_width);
+        let spec_stack = CPUKernelGenSpec {
+            mode: MatrixLoadMode::StackLoad,
+            ..spec_imm
+        };
+
+        let mut gen_imm = CPUKernelGenerator::new().expect("create generator");
+        let kid_imm = gen_imm
+            .generate(&spec_imm, gate.matrix().data(), gate.qubits())
+            .expect("generate imm kernel");
+        let mut jit_imm = gen_imm.init_jit().expect("init jit");
+        jit_imm
+            .apply(kid_imm, &mut sv_imm, Some(1))
+            .expect("apply imm");
+
+        let mut gen_stack = CPUKernelGenerator::new().expect("create generator");
+        let kid_stack = gen_stack
+            .generate(&spec_stack, gate.matrix().data(), gate.qubits())
+            .expect("generate stack kernel");
+        let mut jit_stack = gen_stack.init_jit().expect("init jit");
+        jit_stack
+            .apply(kid_stack, &mut sv_stack, Some(1))
+            .expect("apply stack");
+
+        assert_statevectors_close(&sv_imm, &sv_stack, tol);
+    }
+
+    // ── Gate variety ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn jit_swap_nonadjacent() {
+        // SWAP(0,2): non-adjacent, exercises hi_bits path same as CX(0,2).
+        run_jit_and_compare(
+            QuantumGate::swap(0, 2),
+            4,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn jit_cz_nonadjacent() {
+        run_jit_and_compare(
+            QuantumGate::cz(1, 3),
+            5,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn jit_ccx_gate() {
+        // 3-qubit Toffoli: exercises the multi-qubit hi_bits partitioning.
+        run_jit_and_compare(
+            QuantumGate::ccx(0, 1, 2),
+            5,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    // Rx has a dense, fully complex matrix — no zero or ±1 entries — so the
+    // kernel exercises FMA paths that sparse gates like CX skip.
+    #[test]
+    fn jit_rx_gate() {
+        run_jit_and_compare(
+            QuantumGate::rx(std::f64::consts::PI / 3.0, 1),
+            3,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn jit_rz_gate() {
+        run_jit_and_compare(
+            QuantumGate::rz(std::f64::consts::PI / 5.0, 0),
+            3,
+            Precision::F64,
+            SimdWidth::W128,
+            1e-10,
+        );
+    }
+
+    // ── Multi-kernel session ────────────────────────────────────────────────────
+
+    // Generates H and CX kernels in one session and applies them sequentially;
+    // verifies that the session correctly dispatches by kernel id.
+    #[test]
+    fn jit_multiple_kernels_in_one_session() {
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+        let h_gate = QuantumGate::h(0);
+        let cx_gate = QuantumGate::cx(0, 1);
+
+        let mut generator = CPUKernelGenerator::new().expect("create generator");
+        let kid_h = generator
+            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .expect("generate H kernel");
+        let kid_cx = generator
+            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .expect("generate CX kernel");
+        let mut jit = generator.init_jit().expect("init jit");
+
+        let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
+        let mut sv_ref = sv_jit.clone();
+
+        sv_ref.apply_gate(&h_gate);
+        sv_ref.apply_gate(&cx_gate);
+
+        jit.apply(kid_h, &mut sv_jit, Some(1)).expect("apply H");
+        jit.apply(kid_cx, &mut sv_jit, Some(1)).expect("apply CX");
+
+        assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
+        assert!((sv_jit.norm() - 1.0).abs() < 1e-10);
+    }
+
+    // ── emit_ir ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn emit_ir_returns_valid_llvm_ir() {
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                QuantumGate::h(0).matrix().data(),
+                QuantumGate::h(0).qubits(),
+            )
+            .expect("generate kernel");
+
+        let ir = gen.emit_ir(kid).expect("emit_ir");
+
+        // The IR must be a non-empty LLVM text module.
+        assert!(!ir.is_empty(), "IR should not be empty");
+        assert!(
+            ir.contains("define"),
+            "IR should contain a function definition"
+        );
+    }
+
+    #[test]
+    fn emit_ir_is_idempotent() {
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                QuantumGate::x(0).matrix().data(),
+                QuantumGate::x(0).qubits(),
+            )
+            .expect("generate kernel");
+
+        let ir_first = gen.emit_ir(kid).expect("first emit_ir");
+        let ir_second = gen.emit_ir(kid).expect("second emit_ir");
+
+        // The O1 pass runs only once; a second call returns the cached text.
+        assert_eq!(ir_first, ir_second, "emit_ir should be idempotent");
+    }
+
+    #[test]
+    fn emit_ir_before_init_jit_still_produces_correct_kernel() {
+        // emit_ir must not corrupt the module: the kernel compiled afterward
+        // must still produce results matching the scalar reference path.
+        let gate = QuantumGate::h(1);
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(&spec, gate.matrix().data(), gate.qubits())
+            .expect("generate kernel");
+
+        // Trigger optimization + IR snapshot before JIT compilation.
+        let ir = gen.emit_ir(kid).expect("emit_ir");
+        assert!(!ir.is_empty());
+
+        let mut jit = gen.init_jit().expect("init jit");
+
+        let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
+        let mut sv_ref = sv_jit.clone();
+        sv_ref.apply_gate(&gate);
+        jit.apply(kid, &mut sv_jit, Some(1)).expect("apply kernel");
+
+        assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
+    }
+
+    #[test]
+    fn emit_ir_per_kernel_independent() {
+        // Each kernel_id returns its own IR; they must differ (H ≠ CX).
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+        let h_gate = QuantumGate::h(0);
+        let cx_gate = QuantumGate::cx(0, 1);
+
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid_h = gen
+            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .expect("H kernel");
+        let kid_cx = gen
+            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .expect("CX kernel");
+
+        let ir_h = gen.emit_ir(kid_h).expect("H IR");
+        let ir_cx = gen.emit_ir(kid_cx).expect("CX IR");
+
+        assert_ne!(ir_h, ir_cx, "different gates must produce different IR");
+    }
+
+    #[test]
+    fn emit_ir_rejects_unknown_kernel_id() {
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let result = gen.emit_ir(9999);
+        assert!(result.is_err(), "unknown kernel_id should return an error");
+    }
+
+    // ── emit_asm ──────────────────────────────────────────────────────────────
+
+    fn compile_h_session_with_asm() -> (JitSession, KernelId) {
+        let gate = QuantumGate::h(0);
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                gate.matrix().data(),
+                gate.qubits(),
+            )
+            .expect("generate kernel");
+        gen.request_asm(kid).expect("request_asm");
+        (gen.init_jit().expect("init jit"), kid)
+    }
+
+    #[test]
+    fn emit_asm_returns_nonempty_text() {
+        let (session, kid) = compile_h_session_with_asm();
+        let asm = session.emit_asm(kid).expect("emit_asm");
+        assert!(!asm.is_empty(), "assembly should not be empty");
+    }
+
+    #[test]
+    fn emit_asm_is_ascii() {
+        // Native assembly must be printable ASCII (no embedded binary).
+        let (session, kid) = compile_h_session_with_asm();
+        let asm = session.emit_asm(kid).expect("emit_asm");
+        assert!(asm.is_ascii(), "assembly should be ASCII text");
+    }
+
+    #[test]
+    fn emit_asm_is_idempotent() {
+        // The assembly is cached; repeated calls return the same text.
+        let (session, kid) = compile_h_session_with_asm();
+        let first = session.emit_asm(kid).expect("first emit_asm");
+        let second = session.emit_asm(kid).expect("second emit_asm");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn emit_asm_per_kernel_independent() {
+        // H and CX are structurally different gates — their assembly must differ.
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+        let h_gate = QuantumGate::h(0);
+        let cx_gate = QuantumGate::cx(0, 1);
+
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid_h = gen
+            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .expect("H kernel");
+        let kid_cx = gen
+            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .expect("CX kernel");
+        gen.request_asm(kid_h).expect("request H asm");
+        gen.request_asm(kid_cx).expect("request CX asm");
+        let session = gen.init_jit().expect("init jit");
+
+        let asm_h = session.emit_asm(kid_h).expect("H asm");
+        let asm_cx = session.emit_asm(kid_cx).expect("CX asm");
+        assert_ne!(
+            asm_h, asm_cx,
+            "different gates must produce different assembly"
+        );
+    }
+
+    #[test]
+    fn emit_asm_consistent_with_emit_ir() {
+        // Both are available from the same compilation; neither should be empty
+        // and the IR text must not appear inside the assembly output.
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+        let gate = QuantumGate::h(0);
+
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(&spec, gate.matrix().data(), gate.qubits())
+            .expect("generate");
+        let ir = gen.emit_ir(kid).expect("emit_ir");
+        gen.request_asm(kid).expect("request_asm");
+        let session = gen.init_jit().expect("init jit");
+        let asm = session.emit_asm(kid).expect("emit_asm");
+
+        assert!(!ir.is_empty());
+        assert!(!asm.is_empty());
+        // The IR uses `define` keyword; native asm must not contain it.
+        assert!(
+            !asm.contains("define"),
+            "assembly should not contain LLVM IR syntax"
+        );
+    }
+
+    #[test]
+    fn emit_asm_errors_without_request() {
+        // Kernels not opted in must return an error rather than silently empty text.
+        let gate = QuantumGate::h(0);
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        let kid = gen
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                gate.matrix().data(),
+                gate.qubits(),
+            )
+            .expect("generate kernel");
+        // Deliberately skip request_asm.
+        let session = gen.init_jit().expect("init jit");
+        assert!(
+            session.emit_asm(kid).is_err(),
+            "emit_asm should fail without request_asm"
+        );
+    }
+
+    #[test]
+    fn emit_asm_rejects_unknown_kernel_id() {
+        let (session, _) = compile_h_session_with_asm();
+        assert!(
+            session.emit_asm(9999).is_err(),
+            "unknown kernel_id should return an error"
+        );
+    }
+
+    #[test]
+    fn request_asm_rejects_unknown_kernel_id() {
+        let mut gen = CPUKernelGenerator::new().expect("create generator");
+        assert!(
+            gen.request_asm(9999).is_err(),
+            "unknown kernel_id should return an error"
+        );
+    }
+
+    // ── Multithreaded apply ────────────────────────────────────────────────────
+
+    // Result must be identical to single-threaded regardless of how work is split.
+    #[test]
+    fn jit_multithreaded_matches_single_thread() {
+        let gate = QuantumGate::rx(std::f64::consts::PI / 7.0, 2);
+        let spec = default_spec(Precision::F64, SimdWidth::W128);
+
+        run_jit_and_compare_full(&gate, 6, spec, 4, 1e-10);
+    }
+
+    // ── End-to-end circuits with and without fusion ─────────────────────────
+
+    #[test]
+    fn e2e_bell_style_circuit_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::rz(0.3, 1));
+        graph.insert_gate(QuantumGate::cx(1, 2));
+        graph.insert_gate(QuantumGate::h(2));
+
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            5,
+            default_spec(Precision::F64, SimdWidth::W128),
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn e2e_mixed_parametric_circuit_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::u3(0.7, 0.2, -0.4, 0));
+        graph.insert_gate(QuantumGate::rx(0.5, 2));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::swap(1, 2));
+        graph.insert_gate(QuantumGate::rz(-0.9, 0));
+        graph.insert_gate(QuantumGate::ccx(0, 2, 3));
+        graph.insert_gate(QuantumGate::ry(0.25, 1));
+
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            6,
+            default_spec(Precision::F64, SimdWidth::W128),
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn e2e_brick_wall_circuit_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::cx(2, 3));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+        graph.insert_gate(QuantumGate::cx(1, 2));
+        graph.insert_gate(QuantumGate::cx(3, 4));
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::rz(0.2, 5));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::cx(2, 3));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            7,
+            default_spec(Precision::F64, SimdWidth::W128),
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn e2e_mixed_parametric_circuit_w512_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::u3(0.7, 0.2, -0.4, 0));
+        graph.insert_gate(QuantumGate::rx(0.5, 2));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::swap(1, 2));
+        graph.insert_gate(QuantumGate::rz(-0.9, 0));
+        graph.insert_gate(QuantumGate::ccx(0, 2, 3));
+        graph.insert_gate(QuantumGate::ry(0.25, 1));
+        graph.insert_gate(QuantumGate::cx(3, 4));
+        graph.insert_gate(QuantumGate::h(5));
+
+        // W512/F64 uses simd_s=3, so give the fused path extra headroom.
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            9,
+            default_spec(Precision::F64, SimdWidth::W512),
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn e2e_brick_wall_circuit_w512_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::cx(2, 3));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+        graph.insert_gate(QuantumGate::cx(6, 7));
+        graph.insert_gate(QuantumGate::cx(1, 2));
+        graph.insert_gate(QuantumGate::cx(3, 4));
+        graph.insert_gate(QuantumGate::cx(5, 6));
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::rz(0.2, 7));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::cx(2, 3));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+        graph.insert_gate(QuantumGate::cx(6, 7));
+
+        // Use a larger circuit and statevector so W512 exercises fused kernels
+        // that need more than the minimal W128-style headroom.
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            10,
+            default_spec(Precision::F64, SimdWidth::W512),
+            1e-10,
+        );
+    }
+}
