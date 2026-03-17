@@ -407,13 +407,10 @@ impl JitSession {
         &mut self,
         kernel_id: KernelId,
         statevector: &mut CPUStatevector,
-        n_threads: Option<usize>,
+        n_threads: u32,
     ) -> anyhow::Result<()> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
-        let n_threads = n_threads
-            .map(|threads| i32::try_from(threads).expect("thread count exceeds i32"))
-            .unwrap_or(0); // 0 → C++ picks based on hardware_concurrency
-        let n_qubits = u32::try_from(statevector.n_qubits()).expect("qubit count exceeds u32");
+        let n_qubits = statevector.n_qubits();
         let status = unsafe {
             ffi::cast_cpu_jit_session_apply(
                 self.raw.as_ptr(),
@@ -422,7 +419,7 @@ impl JitSession {
                 n_qubits,
                 statevector.precision(),
                 statevector.simd_width(),
-                n_threads,
+                n_threads as i32,
                 err_buf.as_mut_ptr(),
                 err_buf.len(),
             )

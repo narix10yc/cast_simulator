@@ -68,6 +68,23 @@ impl<T> AlignedVec<T> {
         let ptr = NonNull::new(ptr).expect("AlignedVec: allocation failed");
         Self { ptr, len, layout }
     }
+
+    unsafe fn uninit(len: usize, align: usize) -> Self {
+        assert!(align.is_power_of_two());
+        assert!(align >= std::mem::align_of::<T>());
+        if len == 0 {
+            return Self {
+                ptr: NonNull::dangling(),
+                len: 0,
+                layout: Layout::from_size_align(0, align).unwrap(),
+            };
+        }
+        let layout = Layout::from_size_align(len * std::mem::size_of::<T>(), align)
+            .expect("AlignedVec: invalid layout");
+        let ptr = unsafe { alloc::alloc(layout) }.cast::<T>();
+        let ptr = NonNull::new(ptr).expect("AlignedVec: allocation failed");
+        Self { ptr, len, layout }
+    }
 }
 
 impl<T> std::ops::Deref for AlignedVec<T> {
@@ -158,10 +175,10 @@ impl<T> Drop for AlignedVec<T> {
 struct CPUStatevectorData<T> {
     /// Buffer aligned to `simd_width / 8` bytes so JIT kernels can use aligned SIMD moves.
     data: AlignedVec<T>,
-    n_qubits: usize,
+    n_qubits: u32,
     simd_width: super::SimdWidth,
     /// `simd_s = log2(simd_register_size / scalar_size)`. Determines the memory layout.
-    simd_s: usize,
+    simd_s: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -185,8 +202,7 @@ impl CPUStatevector {
     ///
     /// `simd_width` selects the SIMD memory layout; it must be compatible with the
     /// `simd_width` used when generating kernels that will be applied to this statevector.
-    pub fn new(n_qubits: usize, precision: Precision, simd_width: SimdWidth) -> Self {
-        assert!(n_qubits > 0, "statevector must have at least one qubit");
+    pub fn new(n_qubits: u32, precision: Precision, simd_width: SimdWidth) -> Self {
         let simd_s = get_simd_s(simd_width, precision);
         // scalar_len accounts for simd_s so imaginary parts never go out of bounds.
         let scalar_len = scalar_len_for(n_qubits, simd_s);
@@ -201,6 +217,27 @@ impl CPUStatevector {
             }),
             Precision::F64 => CPUStatevectorInner::F64(CPUStatevectorData {
                 data: AlignedVec::zeroed(scalar_len, align),
+                n_qubits,
+                simd_width,
+                simd_s,
+            }),
+        };
+        Self { inner }
+    }
+
+    pub unsafe fn uninit(n_qubits: u32, precision: Precision, simd_width: SimdWidth) -> Self {
+        let simd_s = get_simd_s(simd_width, precision);
+        let scalar_len = scalar_len_for(n_qubits, simd_s);
+        let align = simd_width as usize / 8;
+        let inner = match precision {
+            Precision::F32 => CPUStatevectorInner::F32(CPUStatevectorData {
+                data: unsafe { AlignedVec::uninit(scalar_len, align) },
+                n_qubits,
+                simd_width,
+                simd_s,
+            }),
+            Precision::F64 => CPUStatevectorInner::F64(CPUStatevectorData {
+                data: unsafe { AlignedVec::uninit(scalar_len, align) },
                 n_qubits,
                 simd_width,
                 simd_s,
@@ -224,14 +261,14 @@ impl CPUStatevector {
     }
 
     /// The `simd_s` exponent that governs the internal memory layout.
-    pub fn simd_s(&self) -> usize {
+    pub fn simd_s(&self) -> u32 {
         match &self.inner {
             CPUStatevectorInner::F32(data) => data.simd_s,
             CPUStatevectorInner::F64(data) => data.simd_s,
         }
     }
 
-    pub fn n_qubits(&self) -> usize {
+    pub fn n_qubits(&self) -> u32 {
         match &self.inner {
             CPUStatevectorInner::F32(data) => data.n_qubits,
             CPUStatevectorInner::F64(data) => data.n_qubits,
@@ -420,11 +457,11 @@ impl<T: CpuScalar> CPUStatevectorData<T> {
         assert!(
             gate.qubits()
                 .last()
-                .is_none_or(|&qubit| (qubit as usize) < self.n_qubits),
+                .is_none_or(|&qubit| qubit < self.n_qubits),
             "gate acts on a qubit outside the statevector"
         );
 
-        let k = gate.n_qubits();
+        let k = gate.n_qubits() as u32;
         let gate_dim = 1usize << k;
         assert_eq!(
             gate.matrix().edge_size(),
@@ -500,14 +537,14 @@ impl<T: CpuScalar> CPUStatevectorViewMut for CPUStatevectorData<T> {
 /// amplitude `i` lives at bit-offset `insert_zero_to_bit(i, simd_s) | (1 << simd_s)`,
 /// so the buffer must span `2^(max(n_qubits, simd_s) + 1)` slots — not merely
 /// `2^(n_qubits + 1)` — to avoid out-of-bounds access when `simd_s > n_qubits`.
-fn scalar_len_for(n_qubits: usize, simd_s: usize) -> usize {
+fn scalar_len_for(n_qubits: u32, simd_s: u32) -> usize {
     2usize
-        .checked_shl(n_qubits.max(simd_s) as u32)
+        .checked_shl(n_qubits.max(simd_s))
         .expect("too many qubits for CPU statevector")
 }
 
 /// Returns `simd_s = log2(simd_register_scalars)` for the given width and precision.
-pub(crate) fn get_simd_s(simd_width: SimdWidth, precision: Precision) -> usize {
+pub(crate) fn get_simd_s(simd_width: SimdWidth, precision: Precision) -> u32 {
     match precision {
         Precision::F32 => match simd_width {
             SimdWidth::W128 => 2,
@@ -525,7 +562,7 @@ pub(crate) fn get_simd_s(simd_width: SimdWidth, precision: Precision) -> usize {
 /// Inserts a zero bit at position `bit`, shifting higher bits left by one.
 ///
 /// Used to map an amplitude index to its real-part offset in the SIMD layout.
-fn insert_zero_to_bit(x: usize, bit: usize) -> usize {
+fn insert_zero_to_bit(x: usize, bit: u32) -> usize {
     let mask_lo = (1usize << bit) - 1;
     let mask_hi = !mask_lo;
     (x & mask_lo) + ((x & mask_hi) << 1)
