@@ -7,8 +7,8 @@ fn main() -> anyhow::Result<()> {
     let config = FusionConfig::hardware_adaptive(&profile, /*max_size=*/ 6);
 
     println!(
-        "Profile: knee_ai={:.6}, peak_bw_gib_s={:.6}",
-        profile.knee_ai, profile.peak_bw_gib_s
+        "Profile: crossover_ai={:.6}, peak_bw_gib_s={:.6}",
+        profile.crossover_ai, profile.peak_bw_gib_s
     );
     println!(
         "Config: size_max={}, benefit_margin={:.6}",

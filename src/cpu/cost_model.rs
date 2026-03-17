@@ -1,5 +1,3 @@
-// ── Hardware profiling ────────────────────────────────────────────────────────
-
 use std::time::Instant;
 
 use rand::{rngs::StdRng, SeedableRng};
@@ -14,21 +12,18 @@ const PROFILE_SEED: u64 = 7;
 /// Profiles the hardware by timing JIT gate kernels across a range of
 /// arithmetic intensities and fitting a roofline model.
 ///
-/// The resulting [`HardwareProfile`] encodes the knee arithmetic intensity — the boundary
-/// between memory-bound and compute-bound gate simulation — suitable for use
-/// with [`crate::cost_model::FusionConfig::hardware_adaptive`].
+/// Returns a [`HardwareProfile`] encoding the crossover point — the AI where
+/// simulation shifts from memory-bound to compute-bound — for use with
+/// [`crate::cost_model::FusionConfig::hardware_adaptive`].
 ///
-/// Thread count is read from `CAST_NUM_THREADS` (see [`get_num_threads`]).
-/// **Profile at the thread count you will simulate with**: the compute side of
-/// the roofline scales with threads while bandwidth does not, so the knee
-/// shifts accordingly.
+/// Thread count comes from `CAST_NUM_THREADS` (see [`get_num_threads`]).
+/// **Profile at the thread count you will simulate with**: compute scales with
+/// threads while DRAM bandwidth does not, so the crossover shifts.
 ///
-/// The sweep starts with 6 seed points at arithmetic intensity 1, 2, 4, 8, 16, 32. Up to
-/// two refinement rounds add at most 3 points each near the estimated knee
-/// until the roofline R² exceeds 0.95.
+/// The sweep starts with 6 seed points (AI 1–32) and adaptively refines near
+/// the estimated crossover until roofline R² ≥ 0.95 (up to 2 extra rounds of
+/// 3 points each).
 pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwareProfile> {
-    // A 20-qubit statevector is 16 MiB for f64 — large enough to stress DRAM
-    // on most systems (typical L3 cache is 8–36 MiB).
     const N_QUBITS_SV: u32 = 28;
     const N_WARMUP: u32 = 3;
     const N_ITERS: u32 = 3;
@@ -39,7 +34,7 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
     let n_threads = get_num_threads();
 
     let seed_ais: &[u32] = &[1, 2, 4, 8, 16, 32];
-    let mut sweep: Vec<(f64, f64, f64)> = Vec::new(); // (ai, gflops_s, gib_s)
+    let mut sweep: Vec<(f64, f64, f64)> = Vec::new();
     for &target_ai in seed_ais {
         sweep.push(probe_ai(
             target_ai,
@@ -53,19 +48,14 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
     sweep.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     for _ in 0..MAX_REFINEMENT_ROUNDS {
-        let (knee, c_slope) = fit_knee(&sweep);
-        if roofline_r2(&sweep, knee, c_slope) >= R2_THRESHOLD {
+        let (crossover, c_slope) = fit_crossover(&sweep);
+        if roofline_r2(&sweep, crossover, c_slope) >= R2_THRESHOLD {
             break;
         }
-        // Candidate arithmetic intensities bracketing [knee/2, knee*1.5]; skip duplicates.
-        let candidates: Vec<u32> = [knee * 0.5, knee, knee * 1.5]
+        let candidates: Vec<u32> = [crossover * 0.5, crossover, crossover * 1.5]
             .iter()
             .map(|&v| (v.round() as u32).max(1))
-            .filter(|&ai| {
-                !sweep
-                    .iter()
-                    .any(|(measured_ai, _, _)| (*measured_ai - ai as f64).abs() < 0.5)
-            })
+            .filter(|&ai| !sweep.iter().any(|(m, _, _)| (*m - ai as f64).abs() < 0.5))
             .take(MAX_NEW_POINTS_PER_ROUND)
             .collect();
         if candidates.is_empty() {
@@ -84,14 +74,12 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
         sweep.sort_by(|a, b| a.0.total_cmp(&b.0));
     }
 
-    let (knee_ai, _) = fit_knee(&sweep);
+    let (crossover_ai, _) = fit_crossover(&sweep);
     let peak_bw_gib_s = sweep.iter().map(|(_, _, g)| *g).fold(0.0_f64, f64::max);
-    Ok(HardwareProfile::from_fit(knee_ai, peak_bw_gib_s))
+    Ok(HardwareProfile::from_fit(crossover_ai, peak_bw_gib_s))
 }
 
-/// Times a JIT kernel for a synthetic gate with the given target arithmetic
-/// intensity.
-///
+/// Times a JIT kernel for a synthetic gate targeting the given AI.
 /// Returns `(actual_ai, gflops_s, gib_s)`.
 fn probe_ai(
     target_ai: u32,
@@ -108,8 +96,8 @@ fn probe_ai(
     let mut rng = StdRng::seed_from_u64(PROFILE_SEED ^ target_ai as u64);
     let gate = QuantumGate::random_sparse_with_rng(&qubits, sparsity, &mut rng);
     let actual_ai = gate.arithmatic_intensity(spec.ztol);
-    let n_qubits = n_qubits_sv
-        .max(gate.n_qubits() as u32 + super::get_simd_s(spec.simd_width, spec.precision) + 1);
+    let n_qubits =
+        n_qubits_sv.max(gate.n_qubits() as u32 + get_simd_s(spec.simd_width, spec.precision) + 1);
 
     let mut gen = CPUKernelGenerator::new()?;
     let kid = gen.generate(spec, gate.matrix().data(), gate.qubits())?;
@@ -132,34 +120,34 @@ fn probe_ai(
 }
 
 /// Minimum qubit count `k` such that a random sparse complex gate can reach
-/// the target arithmetic intensity with `sparsity <= 1`.
+/// `target_ai` with sparsity ≤ 1.
 fn k_for_target_ai(target_ai: u32) -> u32 {
-    let min_edge_size = ((target_ai as f64) / 2.0).ceil().max(4.0);
-    min_edge_size.log2().ceil() as u32
+    let min_edge = ((target_ai as f64) / 2.0).ceil().max(4.0);
+    min_edge.log2().ceil() as u32
 }
 
-/// Fits the roofline model to `(ai, gflops_s, gib_s)` data.
+/// Fits the two-segment roofline to `(ai, gflops_s, gib_s)` sweep data.
 ///
-/// Returns `(knee_ai, c_slope)` where `c_slope` is GFLOPs/s per unit of arithmetic intensity
-/// in the memory-bound regime (slope of the linear region).
-fn fit_knee(sweep: &[(f64, f64, f64)]) -> (f64, f64) {
+/// Returns `(crossover_ai, c_slope)` where `c_slope` is GFLOPs/s per AI unit
+/// in the memory-bound regime. The crossover is `peak_gflops / c_slope`.
+fn fit_crossover(sweep: &[(f64, f64, f64)]) -> (f64, f64) {
     let n = sweep.len();
     let lower = &sweep[..(n + 1) / 2];
     let mut ratios: Vec<f64> = lower.iter().map(|(ai, g, _)| g / ai).collect();
     ratios.sort_by(|a, b| a.total_cmp(b));
-    let c_slope = ratios[ratios.len() / 2];
+    let c_slope = ratios[ratios.len() / 2]; // median
     let peak_gflops = sweep.iter().map(|(_, g, _)| *g).fold(0.0_f64, f64::max);
-    let knee = if c_slope > 0.0 {
+    let crossover = if c_slope > 0.0 {
         peak_gflops / c_slope
     } else {
         f64::INFINITY
     };
-    (knee, c_slope)
+    (crossover, c_slope)
 }
 
-/// R² of the piecewise roofline fit `gflops_pred = min(c_slope*ai, c_slope*knee)`.
-fn roofline_r2(sweep: &[(f64, f64, f64)], knee: f64, c_slope: f64) -> f64 {
-    let peak = c_slope * knee;
+/// R² of the piecewise roofline fit.
+fn roofline_r2(sweep: &[(f64, f64, f64)], crossover: f64, c_slope: f64) -> f64 {
+    let peak = c_slope * crossover;
     let gflops: Vec<f64> = sweep.iter().map(|(_, g, _)| *g).collect();
     let mean = gflops.iter().sum::<f64>() / gflops.len() as f64;
     let ss_tot: f64 = gflops.iter().map(|g| (g - mean).powi(2)).sum();

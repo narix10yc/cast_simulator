@@ -455,7 +455,7 @@ fn print_report(rows: &[Row], args: &Args) {
     // ── Summary ───────────────────────────────────────────────────────────────
     let peak_gib = rows.iter().map(|r| r.gib_s).fold(0.0_f64, f64::max);
     let peak_gflops = rows.iter().map(|r| r.gflops_s).fold(0.0_f64, f64::max);
-    let knee_ai = peak_gflops / gflops_per_ai;
+    let crossover_ai = peak_gflops / gflops_per_ai;
 
     let mut prev_bucket_regime = "";
     let mut prev_bucket_ai = 0.0_f64;
@@ -477,7 +477,7 @@ fn print_report(rows: &[Row], args: &Args) {
     println!();
     println!("  Peak memory bandwidth  : {peak_gib:.1} GiB/s");
     println!("  Peak compute observed  : {peak_gflops:.1} GFLOPs/s");
-    println!("  Roofline knee (est.)   : ai ≈ {knee_ai:.1}");
+    println!("  Roofline crossover (est.) : ai ≈ {crossover_ai:.1}");
 
     if let Some((ai_before, ai_after, k)) = crossover {
         println!();
