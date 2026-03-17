@@ -1038,6 +1038,8 @@ mod tests {
         SimdWidth,
     };
     use crate::types::{Complex, QuantumGate};
+    use crate::{cost_model::FusionConfig, fusion::optimize, CircuitGraph};
+    use std::collections::HashSet;
 
     /// Creates a normalized statevector with deterministic amplitudes.
     fn seeded_statevector(
@@ -1126,6 +1128,82 @@ mod tests {
             1,
             tol,
         );
+    }
+
+    fn circuit_gates_in_row_order(graph: &CircuitGraph) -> Vec<QuantumGate> {
+        let mut gates = Vec::new();
+        let mut seen = HashSet::new();
+        for row in 0..graph.n_rows() {
+            for qubit in 0..graph.n_qubits() {
+                if let Some(gate_id) = graph.gate_id_at(row, qubit) {
+                    if seen.insert(gate_id) {
+                        gates.push(
+                            graph
+                                .gate(gate_id)
+                                .expect("live gate id should resolve")
+                                .clone(),
+                        );
+                    }
+                }
+            }
+        }
+        gates
+    }
+
+    fn run_circuit_scalar(
+        graph: &CircuitGraph,
+        n_qubits_sv: usize,
+        precision: Precision,
+        simd_width: SimdWidth,
+    ) -> CPUStatevector {
+        let mut sv = seeded_statevector(n_qubits_sv, precision, simd_width);
+        for gate in circuit_gates_in_row_order(graph) {
+            sv.apply_gate(&gate);
+        }
+        sv
+    }
+
+    fn run_circuit_jit(
+        graph: &CircuitGraph,
+        n_qubits_sv: usize,
+        spec: CPUKernelGenSpec,
+        n_threads: usize,
+    ) -> CPUStatevector {
+        let gates = circuit_gates_in_row_order(graph);
+        let mut generator = CPUKernelGenerator::new().expect("create generator");
+        let mut kernel_ids = Vec::with_capacity(gates.len());
+        for gate in &gates {
+            let kernel_id = generator
+                .generate(&spec, gate.matrix().data(), gate.qubits())
+                .expect("generate kernel");
+            kernel_ids.push(kernel_id);
+        }
+        let mut jit = generator.init_jit().expect("init jit");
+        let mut sv = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
+        for kernel_id in kernel_ids {
+            jit.apply(kernel_id, &mut sv, Some(n_threads))
+                .expect("apply circuit kernel");
+        }
+        sv
+    }
+
+    fn assert_fused_and_unfused_circuits_agree(
+        original: &CircuitGraph,
+        n_qubits_sv: usize,
+        spec: CPUKernelGenSpec,
+        tol: f64,
+    ) {
+        let scalar_ref = run_circuit_scalar(original, n_qubits_sv, spec.precision, spec.simd_width);
+        let unfused_jit = run_circuit_jit(original, n_qubits_sv, spec, 1);
+
+        let mut fused = original.clone();
+        optimize(&mut fused, &FusionConfig::balanced());
+        let fused_jit = run_circuit_jit(&fused, n_qubits_sv, spec, 1);
+
+        assert_statevectors_close(&unfused_jit, &scalar_ref, tol);
+        assert_statevectors_close(&fused_jit, &scalar_ref, tol);
+        assert_statevectors_close(&fused_jit, &unfused_jit, tol);
+        assert!((fused_jit.norm() - 1.0).abs() < tol);
     }
 
     #[test]
@@ -1604,5 +1682,65 @@ mod tests {
         let spec = default_spec(Precision::F64, SimdWidth::W128);
 
         run_jit_and_compare_full(&gate, 6, spec, 4, 1e-10);
+    }
+
+    // ── End-to-end circuits with and without fusion ─────────────────────────
+
+    #[test]
+    fn e2e_bell_style_circuit_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::rz(0.3, 1));
+        graph.insert_gate(QuantumGate::cx(1, 2));
+        graph.insert_gate(QuantumGate::h(2));
+
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            5,
+            default_spec(Precision::F64, SimdWidth::W128),
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn e2e_mixed_parametric_circuit_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::u3(0.7, 0.2, -0.4, 0));
+        graph.insert_gate(QuantumGate::rx(0.5, 2));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::swap(1, 2));
+        graph.insert_gate(QuantumGate::rz(-0.9, 0));
+        graph.insert_gate(QuantumGate::ccx(0, 2, 3));
+        graph.insert_gate(QuantumGate::ry(0.25, 1));
+
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            6,
+            default_spec(Precision::F64, SimdWidth::W128),
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn e2e_brick_wall_circuit_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::cx(2, 3));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+        graph.insert_gate(QuantumGate::cx(1, 2));
+        graph.insert_gate(QuantumGate::cx(3, 4));
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::rz(0.2, 5));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::cx(2, 3));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            7,
+            default_spec(Precision::F64, SimdWidth::W128),
+            1e-10,
+        );
     }
 }
