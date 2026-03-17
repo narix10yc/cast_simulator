@@ -33,11 +33,8 @@
 //! ```
 
 use anyhow::Result;
-use cast::cpu::{
-    CPUKernelGenSpec, CPUKernelGenerator, CPUStatevector, JitSession, KernelId, MatrixLoadMode,
-    Precision, SimdWidth,
-};
-use cast::types::{Complex, ComplexSquareMatrix, QuantumGate};
+use cast::cpu;
+use cast::types::{Complex, ComplexSquareMatrix, Precision, QuantumGate};
 use rand::Rng;
 use std::time::Instant;
 
@@ -48,7 +45,7 @@ struct Args {
     /// `None` → C++ picks `hardware_concurrency`.
     n_threads: Option<usize>,
     precision: Precision,
-    simd_width: SimdWidth,
+    simd_width: cpu::SimdWidth,
     /// Total wall-time budget for the entire sweep (seconds).
     budget_secs: f64,
     /// Minimum timed iterations per gate regardless of budget.
@@ -63,7 +60,7 @@ impl Default for Args {
             n_qubits: 20,
             n_threads: Some(1),
             precision: Precision::F64,
-            simd_width: SimdWidth::W128,
+            simd_width: cpu::SimdWidth::W128,
             budget_secs: 120.0,
             min_iters: 5,
             n_warmup: 3,
@@ -123,11 +120,11 @@ impl Args {
         Ok(a)
     }
 
-    fn spec(&self) -> CPUKernelGenSpec {
-        CPUKernelGenSpec {
+    fn spec(&self) -> cpu::CPUKernelGenSpec {
+        cpu::CPUKernelGenSpec {
             precision: self.precision,
             simd_width: self.simd_width,
-            mode: MatrixLoadMode::ImmValue,
+            mode: cpu::MatrixLoadMode::ImmValue,
             ztol: match self.precision {
                 Precision::F32 => 1e-6,
                 Precision::F64 => 1e-12,
@@ -136,17 +133,6 @@ impl Args {
                 Precision::F32 => 1e-6,
                 Precision::F64 => 1e-12,
             },
-        }
-    }
-
-    fn simd_s(&self) -> usize {
-        match (self.precision, self.simd_width) {
-            (Precision::F32, SimdWidth::W128) => 2,
-            (Precision::F32, SimdWidth::W256) => 3,
-            (Precision::F32, SimdWidth::W512) => 4,
-            (Precision::F64, SimdWidth::W128) => 1,
-            (Precision::F64, SimdWidth::W256) => 2,
-            (Precision::F64, SimdWidth::W512) => 3,
         }
     }
 
@@ -260,9 +246,9 @@ struct Timing {
 ///   2. Compute how many more iterations fit in the remaining budget.
 ///   3. Collect all probe + fill samples; compute statistics together.
 fn time_adaptive(
-    jit: &mut JitSession,
-    kid: KernelId,
-    sv: &mut CPUStatevector,
+    jit: &mut cpu::JitSession,
+    kid: cpu::KernelId,
+    sv: &mut cpu::CPUStatevector,
     n_threads: Option<usize>,
     n_warmup: usize,
     min_iters: usize,
@@ -365,13 +351,11 @@ fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
     // scalar_nnz = opcount × edge_size; recover as integer for display
     let scalar_nnz = (opcount * n as f64).round() as usize;
 
-    let n = args.n_qubits.max(k + args.simd_s());
-
-    let mut gen = CPUKernelGenerator::new()?;
+    let mut gen = cpu::CPUKernelGenerator::new()?;
     let kid = gen.generate(&spec, case.gate.matrix().data(), case.gate.qubits())?;
     let mut jit = gen.init_jit()?;
 
-    let mut sv = CPUStatevector::new(n, spec.precision, spec.simd_width);
+    let mut sv = cpu::CPUStatevector::new(n, spec.precision, spec.simd_width);
     sv.initialize();
 
     let timing = time_adaptive(

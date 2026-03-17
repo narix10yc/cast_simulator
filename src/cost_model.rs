@@ -79,13 +79,19 @@ impl HardwareProfile {
         } else {
             f64::INFINITY
         };
-        Self { knee_opcount: knee, peak_bw_gib_s }
+        Self {
+            knee_opcount: knee,
+            peak_bw_gib_s,
+        }
     }
 
     /// Constructs a profile directly from a pre-fitted knee and bandwidth.
     /// Intended for use by [`crate::cpu::measure_cpu_profile`].
     pub(crate) fn from_fit(knee_opcount: f64, peak_bw_gib_s: f64) -> Self {
-        Self { knee_opcount, peak_bw_gib_s }
+        Self {
+            knee_opcount,
+            peak_bw_gib_s,
+        }
     }
 }
 
@@ -109,7 +115,11 @@ pub struct HardwareAdaptiveCostModel {
 
 impl HardwareAdaptiveCostModel {
     pub fn new(profile: &HardwareProfile, max_size: usize) -> Self {
-        Self { knee_opcount: profile.knee_opcount, max_size, zero_tol: 1e-12 }
+        Self {
+            knee_opcount: profile.knee_opcount,
+            max_size,
+            zero_tol: 1e-12,
+        }
     }
 }
 
@@ -226,7 +236,8 @@ mod tests {
         peak_gflops_s: f64,
         max_size: usize,
     ) -> HardwareAdaptiveCostModel {
-        let profile = HardwareProfile::from_roofline(peak_bw_gib_s, peak_gflops_s, size_of::<f64>());
+        let profile =
+            HardwareProfile::from_roofline(peak_bw_gib_s, peak_gflops_s, size_of::<f64>());
         HardwareAdaptiveCostModel::new(&profile, max_size)
     }
 
@@ -236,7 +247,11 @@ mod tests {
         // C_slope = bw_bytes_s / (2 * 8 * 1e9) = 50*2^30 / 16e9 ≈ 3.355
         // knee = 200 / 3.355 ≈ 59.6
         let profile = HardwareProfile::from_roofline(50.0, 200.0, 8);
-        assert!((profile.knee_opcount - 59.6).abs() < 1.0, "knee = {}", profile.knee_opcount);
+        assert!(
+            (profile.knee_opcount - 59.6).abs() < 1.0,
+            "knee = {}",
+            profile.knee_opcount
+        );
     }
 
     #[test]

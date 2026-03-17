@@ -16,3 +16,6 @@ pub use matrix::ComplexSquareMatrix;
 
 mod gate;
 pub use gate::QuantumGate;
+
+mod precision;
+pub use precision::Precision;
