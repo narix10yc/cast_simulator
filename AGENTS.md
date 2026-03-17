@@ -1,7 +1,8 @@
 # Build Notes
 
 - Primary workflow is Cargo-based.
-- The Rust build still compiles the temporary C++ bridge in `src/cpp/` through `build.rs`.
+- The old standalone C++/CMake codebase has been removed.
+- The Rust build still compiles the C++ bridge in `src/cpp/` through `build.rs`.
 - `LLVM_CONFIG` selects the LLVM installation used for build flags and linking.
 - The C++ compiler is `CXX` if set, otherwise plain `c++`.
 

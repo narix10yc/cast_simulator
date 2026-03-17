@@ -4,20 +4,18 @@ CAST is a Rust-first quantum circuit simulator with CPU and optional CUDA backen
 
 ## Status
 
-The migration from the older C++-centric codebase to Rust is nearly complete.
+The old standalone C++/CMake codebase has been removed.
 
-- New features and extensions should be implemented in Rust.
-- The C++ sources under `src/cpp/` are a temporary bridge for the current JIT backends.
-- The legacy CMake/C++ development flow is being retired and will eventually be removed.
-
-Today, the main developer workflow is `cargo`-based.
+- Main development flow is `cargo`-based.
+- New simulator features should be implemented in Rust.
+- The C++ sources under `src/cpp/` remain as a bridge for the current LLVM/CUDA backends.
 
 ## Repository Layout
 
 - `src/`: Rust library code
 - `src/bin/`: Rust command-line tools and experiments
 - `tests/`: end-to-end Rust integration tests
-- `src/cpp/`: temporary C++ FFI/JIT layer used by the current Rust build
+- `src/cpp/`: C++ FFI/JIT layer used by the current Rust build
 - `scripts/build_llvm.sh`: helper for building a local LLVM install
 
 ## Requirements
@@ -86,7 +84,7 @@ scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src --verify-tar
 # Remove old release-build/ and debug-build/ directories after a successful install
 scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src --clean
 
-# Also build a debug LLVM install for legacy/debug CMake workflows
+# Also build a debug LLVM install
 scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src --with-debug
 
 # Include clang/lld/lldb in the release install
@@ -99,15 +97,6 @@ After a successful build, set:
 export LLVM_CONFIG=~/llvm/${version}/release-install/bin/llvm-config
 ```
 
-The helper also prints legacy CMake variables for the remaining transitional pieces:
-
-```sh
-export CAST_LLVM_ROOT=~/llvm/${version}/release-install
-export CAST_DEV_LLVM_ROOT=~/llvm/${version}
-```
-
-Only the old CMake-based flow still cares about `CAST_LLVM_ROOT` and `CAST_DEV_LLVM_ROOT`. The Rust build path uses `LLVM_CONFIG`.
-
 The helper supports two maintenance-oriented modes:
 
 - `--verify-targets` checks that `release-install/bin/llvm-config` exists and that the install contains the targets implied by your flags, such as `NVPTX` in the default mode.
@@ -116,7 +105,7 @@ The helper supports two maintenance-oriented modes:
 
 ## Build Process
 
-The current build is Cargo-driven, but it still compiles a temporary C++ bridge through [`build.rs`](build.rs):
+The current build is Cargo-driven, and it compiles the bridge layer through [`build.rs`](build.rs):
 
 1. Cargo starts the Rust build.
 2. [`build.rs`](build.rs) chooses the C++ compiler:
@@ -144,7 +133,7 @@ cargo check
 cargo test
 ```
 
-If you want to use a non-default C++ compiler for the temporary bridge layer:
+If you want to use a non-default C++ compiler for the bridge layer:
 
 ```sh
 source ~/.zshrc
@@ -161,12 +150,6 @@ Examples:
 ```sh
 cargo run --bin cpu_crossover --release -- --help
 cargo run --bin cpu_crossover --release -- --n-qubits 30 --threads 10 --budget-secs 120
-```
-
-There is also a small scratch binary in [`src/bin/scratch.rs`](src/bin/scratch.rs):
-
-```sh
-cargo run --bin scratch
 ```
 
 ## CUDA Build And Test
@@ -201,12 +184,6 @@ For the crossover binary, use `--sm`:
 ```sh
 cargo run --features cuda --bin cuda_crossover --release -- --sm 80
 ```
-
-## Transitional Notes
-
-- The old README sections about CMake demos, Python bindings, and C++-only developer flows are intentionally removed from the main path.
-- The remaining CMake variables and dual-install LLVM layout are kept only because some transitional code still expects them.
-- As the migration finishes, the expectation is that LLVM and backend integration remain, but new simulator functionality is added at the Rust layer only.
 
 ## Citing
 
