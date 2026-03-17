@@ -338,29 +338,108 @@ impl CircuitGraph {
     pub(crate) fn squeeze(&mut self) {
         let live_gate_ids = self.live_gate_ids_in_row_order();
         let mut new_rows: Vec<CircuitRow> = Vec::new();
+        // Tracks the last new-row index in which each qubit was placed.
+        // A gate on qubits Q must be placed in a row strictly after all of Q's
+        // last-placed rows, so that causal ordering (time order from the
+        // original layout) is preserved.
+        let mut last_qubit_row: Vec<Option<usize>> = vec![None; self.n_qubits];
 
         for gate_id in live_gate_ids {
             let gate = self
                 .gate(gate_id)
                 .expect("live gate id should refer to an existing gate");
 
-            let mut row_index = None;
-            for idx in 0..new_rows.len() {
-                if new_rows[idx].is_vacant(gate.qubits()) {
-                    row_index = Some(idx);
-                    break;
-                }
+            // The earliest row this gate may occupy: one past the last row
+            // on which any of its qubits was already placed.
+            let min_row = gate
+                .qubits()
+                .iter()
+                .filter_map(|&q| last_qubit_row[q as usize])
+                .max()
+                .map(|r| r + 1)
+                .unwrap_or(0);
+
+            let row_index = (min_row..new_rows.len())
+                .find(|&r| new_rows[r].is_vacant(gate.qubits()))
+                .unwrap_or_else(|| {
+                    new_rows.push(CircuitRow::new(self.n_qubits));
+                    new_rows.len() - 1
+                });
+
+            new_rows[row_index].place_gate(gate_id, gate.qubits());
+            for &q in gate.qubits() {
+                last_qubit_row[q as usize] = Some(row_index);
             }
-
-            let idx = row_index.unwrap_or_else(|| {
-                new_rows.push(CircuitRow::new(self.n_qubits));
-                new_rows.len() - 1
-            });
-
-            new_rows[idx].place_gate(gate_id, gate.qubits());
         }
 
         self.rows = new_rows;
+    }
+
+    /// Fuses two gates in the same row into a single gate placed back in that row.
+    ///
+    /// `qa` and `qb` are qubit indices used to locate each gate; they must
+    /// belong to different gates. The fused gate is `gate_a ⊗ gate_b` (tensor
+    /// product — gates in the same row act on non-overlapping qubits, so the
+    /// product is order-independent). Returns the new [`GateId`], or `None` if
+    /// either cell is empty or both indices resolve to the same gate.
+    pub(crate) fn fuse_gates_in_same_row(
+        &mut self,
+        row: usize,
+        qa: usize,
+        qb: usize,
+    ) -> Option<GateId> {
+        let gate_id_a = self.gate_id_at(row, qa)?;
+        let gate_id_b = self.gate_id_at(row, qb)?;
+        if gate_id_a == gate_id_b {
+            return None;
+        }
+        let gate_a = self.gate(gate_id_a)?.clone();
+        let gate_b = self.gate(gate_id_b)?.clone();
+        self.remove_gate_at(row, qa);
+        self.remove_gate_at(row, qb);
+        let fused = gate_a.matmul(&gate_b);
+        Some(self.insert_gate_at_row(row, fused))
+    }
+
+    /// Fuses a gate at `(row_a, qa)` with a gate at `(row_b, qb)` where
+    /// `row_b == row_a + 1`. The combined gate `gate_b · gate_a` (gate_b
+    /// applied after gate_a) is placed following the original C++ semantics:
+    /// try `row_b` first, then `row_a`, otherwise insert a new row between
+    /// them and place the fused gate there.
+    ///
+    /// Returns `(new_gate_id, placed_row)`, or `None` if either cell is empty.
+    pub(crate) fn fuse_gates_across_rows(
+        &mut self,
+        row_a: usize,
+        qa: usize,
+        row_b: usize,
+        qb: usize,
+    ) -> Option<(GateId, usize)> {
+        assert_eq!(
+            row_b,
+            row_a + 1,
+            "cross-row fusion requires consecutive rows"
+        );
+        let gate_id_a = self.gate_id_at(row_a, qa)?;
+        let gate_id_b = self.gate_id_at(row_b, qb)?;
+        let gate_a = self.gate(gate_id_a)?.clone();
+        let gate_b = self.gate(gate_id_b)?.clone();
+        self.remove_gate_at(row_a, qa);
+        self.remove_gate_at(row_b, qb);
+        let fused = gate_b.matmul(&gate_a);
+        // Match C++ `replaceGatesOnConsecutiveRowsWith`: try the later row,
+        // then the earlier row, otherwise insert a fresh row immediately
+        // before the later row.
+        let target_row = if self.is_row_vacant(row_b, fused.qubits()) {
+            row_b
+        } else if self.is_row_vacant(row_a, fused.qubits()) {
+            row_a
+        } else {
+            self.rows.insert(row_b, CircuitRow::new(self.n_qubits));
+            row_b
+        };
+        let new_id = self.insert_gate_at_row(target_row, fused);
+        Some((new_id, target_row))
     }
 
     /// Returns the index of the first row where `gate` can be placed, creating
