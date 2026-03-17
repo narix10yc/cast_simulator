@@ -541,7 +541,7 @@ mod tests {
             benefit_margin: f64::MAX,
             cost_model: Box::new(SizeOnlyCostModel {
                 max_size: 6,
-                max_op: usize::MAX,
+                max_ai: usize::MAX,
                 zero_tol: 0.0,
             }),
         };
@@ -876,7 +876,7 @@ mod tests {
             benefit_margin: f64::MAX,
             cost_model: Box::new(SizeOnlyCostModel {
                 max_size: 6,
-                max_op: usize::MAX,
+                max_ai: usize::MAX,
                 zero_tol: 0.0,
             }),
         };
@@ -896,7 +896,7 @@ mod tests {
             benefit_margin: f64::MAX,
             cost_model: Box::new(SizeOnlyCostModel {
                 max_size: 6,
-                max_op: usize::MAX,
+                max_ai: usize::MAX,
                 zero_tol: 0.0,
             }),
         };
