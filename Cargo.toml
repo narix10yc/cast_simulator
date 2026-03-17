@@ -12,6 +12,7 @@ cuda = []
 [dependencies]
 anyhow = "1.0.102"
 num-complex = "0.4.6"
+num_cpus = "1"
 rand = "0.8.5"
 rand_distr = "0.4.3"
 
