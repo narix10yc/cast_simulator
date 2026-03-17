@@ -1,259 +1,517 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-# arguments
-ARG_BUILD_CLANG=0
-ARG_BUILD_LIBCXX=0
-ARG_RELEASE_ONLY=0
-ARG_NATIVE_ONLY=0
-ARG_MINIMAL=0
-ARG_LLVM_SRC_DIR=""
+SCRIPT_NAME="$(basename "$0")"
 
-INFO='\033[0;36m[Info]\033[0m'
-WARN='\033[0;33m[Warning]\033[0m'
-ERR='\033[0;31m[Error]\033[0m'
+WITH_DEBUG=0
+WITH_CLANG_TOOLS=0
+WITH_LIBCXX=0
+CPU_ONLY=0
+CLEAN=0
+VERIFY_ONLY=0
+JOBS=""
+BUILD_ROOT=""
+INSTALL_ROOT=""
+LLVM_INPUT=""
+
+if [[ -t 1 ]]; then
+  INFO=$'\033[0;36m[info]\033[0m'
+  WARN=$'\033[0;33m[warn]\033[0m'
+  ERR=$'\033[0;31m[error]\033[0m'
+else
+  INFO='[info]'
+  WARN='[warn]'
+  ERR='[error]'
+fi
 
 usage() {
   cat <<EOF
-Usage: $0 <llvm-src-dir> [options]
+Usage:
+  ${SCRIPT_NAME} <llvm-src-dir> [options]
+
+Builds LLVM from source into a local install layout suitable for CAST.
+
+Defaults:
+  - Build a release LLVM only
+  - Build targets: Native;NVPTX
+  - Install under the source root's parent directory:
+      <root>/release-build
+      <root>/release-install
 
 Options:
-  -build-clang       Build Clang, LLD, and LLDB
-  -build-libc++      Build libc++ and libc++abi
-  -release-only      Only build the release version
-  -native-only       Only build for the native target
-  -minimal           Minimal build, only release version with native target
-  -h, --help         Show this help message
+  --with-debug          Also build and install a debug LLVM
+  --cpu-only            Build Native target only
+  --clean               Remove release-build/ and debug-build/ under the chosen build root
+  --verify-targets      Verify release-install/bin/llvm-config and target support, then exit
+  --with-clang-tools    Build clang, lld, lldb, and clang-tools-extra
+  --with-libcxx         Build libc++, libc++abi, and libunwind
+  --jobs N              Pass --parallel N to cmake --build
+  --build-root DIR      Directory for release-build/ and debug-build/
+  --install-root DIR    Directory for release-install/ and debug-install/
+  -h, --help            Show this help message
+
+Examples:
+  ${SCRIPT_NAME} ~/llvm/22.1.1/llvm-project-22.1.1.src
+  ${SCRIPT_NAME} ~/llvm/22.1.1/llvm-project-22.1.1.src --cpu-only
+  ${SCRIPT_NAME} ~/llvm/22.1.1/llvm-project-22.1.1.src --verify-targets
+  ${SCRIPT_NAME} ~/llvm/22.1.1/llvm-project-22.1.1.src --clean
+  ${SCRIPT_NAME} ~/llvm/22.1.1/llvm-project-22.1.1.src --with-debug --with-clang-tools
 EOF
 }
 
-# Argument parsing loop
-while [[ $# -gt 0 ]]; do
-  case "$1" in 
-  -h|--help)
-    usage
-    exit 0
-    ;;
-  -build-clang)
-    ARG_BUILD_CLANG=1
-    shift
-    ;;
-  -build-libc++)
-    ARG_BUILD_LIBCXX=1
-    shift
-    ;;
-  -release-only)
-    ARG_RELEASE_ONLY=1
-    shift
-    ;;
-  -native-only)
-    ARG_NATIVE_ONLY=1
-    shift
-    ;;
-  -minimal)
-    ARG_MINIMAL=1
-    shift
-    ;;
-  -*)
-    echo "Unknown option: $1"
-    usage
-    exit 1
-    ;;
-  *)
-    # llvm source is assumed to be positional
-    if [[ -z "$ARG_LLVM_SRC_DIR" ]]; then
-      ARG_LLVM_SRC_DIR="$1"
-    else
-      echo -e "${WARN} Ignoring additional positional argument: $1"
-    fi
-    shift
-    ;;
-  esac
-done
+info() {
+  printf '%s %s\n' "${INFO}" "$*"
+}
 
-# Check of argument conflicts
-if [[ $ARG_MINIMAL -eq 1 ]]; then
-  if [[ $ARG_BUILD_CLANG -eq 1 ]] || [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
-  echo -e "${ERR} Cannot build Clang or libc++ with minimal build."
+warn() {
+  printf '%s %s\n' "${WARN}" "$*" >&2
+}
+
+die() {
+  printf '%s %s\n' "${ERR}" "$*" >&2
   exit 1
-  fi
-  echo -e "${INFO} Minimal build selected. " \
-          "Only building a release-version of LLVM with Native target."
-  ARG_RELEASE_ONLY=1
-  ARG_NATIVE_ONLY=1
-  ARG_BUILD_CLANG=0
-  ARG_BUILD_LIBCXX=0
-fi
+}
 
-if [[ -z "$ARG_LLVM_SRC_DIR" ]]; then
-  usage
-  exit 1
-fi
+run() {
+  info "Running: $*"
+  "$@"
+}
 
-if [[ ! -d "$ARG_LLVM_SRC_DIR" ]]; then
-  echo -e "${ERR} LLVM source directory '$ARG_LLVM_SRC_DIR' does not exist."
-  exit 1
-fi
+require_tool() {
+  local tool="$1"
+  command -v "${tool}" >/dev/null 2>&1 || die "Required tool not found in PATH: ${tool}"
+}
 
-# Accept either llvm-project root or llvm-project/llvm.
-LLVM_SRC_DIR=""
-if [[ -f "${ARG_LLVM_SRC_DIR}/llvm/CMakeLists.txt" ]]; then
-  LLVM_SRC_DIR="${ARG_LLVM_SRC_DIR}/llvm"
-  LLVM_ROOT="${ARG_LLVM_SRC_DIR}"
-elif [[ -f "${ARG_LLVM_SRC_DIR}/CMakeLists.txt" ]]; then
-  LLVM_SRC_DIR="${ARG_LLVM_SRC_DIR}"
-  LLVM_ROOT="$(dirname "${ARG_LLVM_SRC_DIR}")"
-else
-  echo -e "${ERR} Could not find llvm source at '${ARG_LLVM_SRC_DIR}'."
-  echo -e "${ERR} Expected llvm/CMakeLists.txt or CMakeLists.txt."
-  exit 1
-fi
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --with-debug)
+        WITH_DEBUG=1
+        shift
+        ;;
+      --cpu-only)
+        CPU_ONLY=1
+        shift
+        ;;
+      --clean)
+        CLEAN=1
+        shift
+        ;;
+      --verify-targets)
+        VERIFY_ONLY=1
+        shift
+        ;;
+      --with-clang-tools)
+        WITH_CLANG_TOOLS=1
+        shift
+        ;;
+      --with-libcxx)
+        WITH_LIBCXX=1
+        shift
+        ;;
+      --jobs)
+        [[ $# -ge 2 ]] || die "--jobs requires a value"
+        JOBS="$2"
+        shift 2
+        ;;
+      --build-root)
+        [[ $# -ge 2 ]] || die "--build-root requires a value"
+        BUILD_ROOT="$2"
+        shift 2
+        ;;
+      --install-root)
+        [[ $# -ge 2 ]] || die "--install-root requires a value"
+        INSTALL_ROOT="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      -*)
+        die "Unknown option: $1"
+        ;;
+      *)
+        if [[ -n "${LLVM_INPUT}" ]]; then
+          die "Unexpected extra positional argument: $1"
+        fi
+        LLVM_INPUT="$1"
+        shift
+        ;;
+    esac
+  done
+}
 
-RELEASE_INSTALL_ROOT="${LLVM_ROOT}/release-install"
-RELEASE_BUILD_ROOT="${LLVM_ROOT}/release-build"
-DEBUG_INSTALL_ROOT="${LLVM_ROOT}/debug-install"
-DEBUG_BUILD_ROOT="${LLVM_ROOT}/debug-build"
+resolve_source_layout() {
+  [[ -n "${LLVM_INPUT}" ]] || die "Missing llvm source directory. See --help."
+  [[ -d "${LLVM_INPUT}" ]] || die "LLVM source directory does not exist: ${LLVM_INPUT}"
 
-
-# Get paths to cmake and ninja
-CMAKE_PATH="$(command -v cmake)"
-NINJA_PATH="$(command -v ninja)"
-if [[ -z "${CMAKE_PATH}" ]]; then
-  echo -e "${ERR} cmake not found in PATH."
-  exit 1
-fi
-if [[ -z "${NINJA_PATH}" ]]; then
-  echo -e "${ERR} ninja not found in PATH."
-  exit 1
-fi
-echo -e "$INFO using cmake in $CMAKE_PATH"
-echo -e "$INFO using ninja in $NINJA_PATH"
-echo -e "$INFO LLVM source is $LLVM_SRC_DIR"
-echo -e "$INFO LLVM_ROOT is $LLVM_ROOT"
-echo -e "$INFO build-clang is set to $ARG_BUILD_CLANG"
-echo -e "$INFO build-libc++ is set to $ARG_BUILD_LIBCXX"
-echo -e "$INFO release-only is set to $ARG_RELEASE_ONLY"
-echo -e "$INFO native-only is set to $ARG_NATIVE_ONLY"
-
-sleep 2
-
-# if not native-only, we will build for NVPTX as well
-ARG_LLVM_TARGETS_TO_BUILD=""
-if [[ $ARG_NATIVE_ONLY -eq 1 ]]; then
-  ARG_LLVM_TARGETS_TO_BUILD="Native"
-else
-  ARG_LLVM_TARGETS_TO_BUILD="Native;NVPTX"
-fi
-
-# build clang, lld, and lldb if requested
-ARG_LLVM_ENABLE_PROJECTS=()
-if [[ $ARG_BUILD_CLANG -eq 1 ]]; then
-  ARG_LLVM_ENABLE_PROJECTS=(
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra"
-  )
-fi
-
-# build libc++ and libc++abi if requested
-ARG_LLVM_ENABLE_RUNTIMES=()
-if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
-  ARG_LLVM_ENABLE_RUNTIMES=(
-    -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind"
-    -DLIBCXXABI_USE_LLVM_UNWINDER=ON
-    -DLIBCXXABI_ENABLE_SHARED=ON
-    -DLIBUNWIND_ENABLE_SHARED=ON
-  )
-fi
-
-# release build
-
-cmake -S "${LLVM_SRC_DIR}" -G Ninja \
-  -B "${RELEASE_BUILD_ROOT}" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DLLVM_ENABLE_RTTI=ON \
-  "-DLLVM_TARGETS_TO_BUILD=${ARG_LLVM_TARGETS_TO_BUILD}" \
-  ${ARG_LLVM_ENABLE_PROJECTS:+${ARG_LLVM_ENABLE_PROJECTS[@]}} \
-  ${ARG_LLVM_ENABLE_RUNTIMES:+${ARG_LLVM_ENABLE_RUNTIMES[@]}}
-
-cmake --build "${RELEASE_BUILD_ROOT}"
-cmake --install "${RELEASE_BUILD_ROOT}" --prefix "${RELEASE_INSTALL_ROOT}"
-
-# exit if only release build was requested
-if [[ $ARG_RELEASE_ONLY -eq 1 ]]; then
-  echo -e "${INFO} LLVM release-version installed successfully."
-  echo -e "${INFO} LLVM is installed for targets ${ARG_LLVM_TARGETS_TO_BUILD}"
-  echo -e "${INFO} Release install root: ${RELEASE_INSTALL_ROOT}"
-  echo -e "${INFO} You may remove build directories by running:"
-  echo -e "${INFO} rm -rf ${RELEASE_BUILD_ROOT}"
-  exit 0
-fi
-
-echo -e "${INFO} LLVM release-version installed successfully. "\
-          "Continuing with debug build..."
-
-ARG_SET_USE_CLANG=()
-if [[ $ARG_BUILD_CLANG -eq 1 ]]; then
-  ARG_SET_USE_CLANG=(
-    "-DCMAKE_C_COMPILER=${RELEASE_INSTALL_ROOT}/bin/clang"
-    "-DCMAKE_CXX_COMPILER=${RELEASE_INSTALL_ROOT}/bin/clang++"
-    "-DCMAKE_LINKER=${RELEASE_INSTALL_ROOT}/bin/ld.lld"
-  )
-fi
-
-ARG_SET_USE_LIBCXX=()
-if [[ $ARG_BUILD_LIBCXX -eq 1 ]]; then
-  ARG_SET_USE_LIBCXX=(
-    -DCMAKE_CXX_FLAGS="-stdlib=libc++ -I${RELEASE_INSTALL_ROOT}/include/c++/v1"
-    -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++ -L${RELEASE_INSTALL_ROOT}/lib"
-    -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++ -L${RELEASE_INSTALL_ROOT}/lib"
-    -DCMAKE_INSTALL_RPATH="${RELEASE_INSTALL_ROOT}/lib"
-    -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
-  )
-  # It seems that libc++ is not always installed in release-install/lib. 
-  # It might be in release-install/lib/x86_64-unknown-linux-gnu or similar.
-  # We will try to find it and set the path accordingly.
-  LIBCXX_DIR=$(find "${RELEASE_INSTALL_ROOT}/lib" \
-               -type f \( -name "libc++*.so*" -o -name "libc++*.dylib*" \)
-               -exec dirname {} \; | head -n 1)
-  if [[ -n "$LIBCXX_DIR" ]]; then
-    echo -e "${INFO} Found libc++ in directory: ${LIBCXX_DIR}"
+  if [[ -f "${LLVM_INPUT}/llvm/CMakeLists.txt" ]]; then
+    LLVM_SOURCE_DIR="${LLVM_INPUT}/llvm"
+    DEFAULT_LAYOUT_ROOT="$(cd "${LLVM_INPUT}/.." && pwd)"
+  elif [[ -f "${LLVM_INPUT}/CMakeLists.txt" ]]; then
+    LLVM_SOURCE_DIR="${LLVM_INPUT}"
+    DEFAULT_LAYOUT_ROOT="$(cd "${LLVM_INPUT}/.." && pwd)"
   else
-    echo -e "${WARN} libc++ not found in ${RELEASE_INSTALL_ROOT}/lib. "\
-            "This means we may have not correctly set up runtime lib path "\
-            "and second phase of this build may fail."
+    die "Could not find LLVM sources under ${LLVM_INPUT}. Expected llvm/CMakeLists.txt or CMakeLists.txt."
   fi
 
-  case $(uname) in
-    Linux)
-      export LD_LIBRARY_PATH="${LIBCXX_DIR}:${LD_LIBRARY_PATH}"
-      ;;
+  BUILD_ROOT="${BUILD_ROOT:-${DEFAULT_LAYOUT_ROOT}}"
+  INSTALL_ROOT="${INSTALL_ROOT:-${DEFAULT_LAYOUT_ROOT}}"
+
+  RELEASE_BUILD_DIR="${BUILD_ROOT}/release-build"
+  DEBUG_BUILD_DIR="${BUILD_ROOT}/debug-build"
+  RELEASE_INSTALL_DIR="${INSTALL_ROOT}/release-install"
+  DEBUG_INSTALL_DIR="${INSTALL_ROOT}/debug-install"
+}
+
+validate_args() {
+  if [[ -n "${JOBS}" ]] && ! [[ "${JOBS}" =~ ^[0-9]+$ ]]; then
+    die "--jobs expects a non-negative integer, got: ${JOBS}"
+  fi
+
+  if [[ "${CLEAN}" -eq 1 ]] && [[ "${VERIFY_ONLY}" -eq 1 ]]; then
+    die "--clean and --verify-targets are mutually exclusive"
+  fi
+
+  if [[ "${CLEAN}" -eq 0 ]] && [[ "${VERIFY_ONLY}" -eq 0 ]]; then
+    require_tool cmake
+    require_tool ninja
+  fi
+
+  if [[ "${WITH_LIBCXX}" -eq 1 ]]; then
+    warn "--with-libcxx is optional and less frequently exercised than the default configuration."
+  fi
+}
+
+targets_to_build() {
+  if [[ "${CPU_ONLY}" -eq 1 ]]; then
+    printf 'Native'
+  else
+    printf 'Native;NVPTX'
+  fi
+}
+
+cmake_build_args() {
+  if [[ -n "${JOBS}" ]]; then
+    printf '%s\0%s\0' --parallel "${JOBS}"
+  fi
+}
+
+libcxx_runtime_dir() {
+  local prefix="$1"
+
+  if [[ ! -d "${prefix}/lib" ]]; then
+    return 0
+  fi
+
+  find "${prefix}/lib" -type f \
+    \( -name 'libc++*.so*' -o -name 'libc++*.dylib*' \) \
+    -exec dirname {} \; 2>/dev/null | head -n 1 || true
+}
+
+run_with_runtime_env() {
+  local runtime_dir="$1"
+  shift
+
+  if [[ -z "${runtime_dir}" ]]; then
+    run "$@"
+    return
+  fi
+
+  case "$(uname)" in
     Darwin)
-      export DYLD_LIBRARY_PATH="${LIBCXX_DIR}:${DYLD_LIBRARY_PATH}"
+      info "Using DYLD_LIBRARY_PATH=${runtime_dir}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+      env DYLD_LIBRARY_PATH="${runtime_dir}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" "$@"
       ;;
     *)
-      echo -e "${WARN} Platform $(uname) not directly supported. "\
-              "Falling back to treating it as Linux."
-      export LD_LIBRARY_PATH="${LIBCXX_DIR}:${LD_LIBRARY_PATH}"
+      info "Using LD_LIBRARY_PATH=${runtime_dir}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+      env LD_LIBRARY_PATH="${runtime_dir}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" "$@"
       ;;
   esac
-fi
+}
 
-# debug build
+configure_release() {
+  local targets
+  local -a args
 
-cmake -S "${LLVM_SRC_DIR}" -G Ninja \
-  -B "${DEBUG_BUILD_ROOT}" \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DLLVM_ENABLE_RTTI=ON \
-  "-DLLVM_TARGETS_TO_BUILD=${ARG_LLVM_TARGETS_TO_BUILD}" \
-  ${ARG_SET_USE_CLANG:+${ARG_SET_USE_CLANG[@]}} \
-  ${ARG_SET_USE_LIBCXX:+${ARG_SET_USE_LIBCXX[@]}}
+  targets="$(targets_to_build)"
+  args=(
+    -S "${LLVM_SOURCE_DIR}"
+    -G Ninja
+    -B "${RELEASE_BUILD_DIR}"
+    -DCMAKE_BUILD_TYPE=Release
+    -DLLVM_ENABLE_RTTI=ON
+    "-DLLVM_TARGETS_TO_BUILD=${targets}"
+  )
 
-cmake --build "${DEBUG_BUILD_ROOT}"
+  if [[ "${WITH_CLANG_TOOLS}" -eq 1 ]]; then
+    args+=("-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra")
+  fi
+  if [[ "${WITH_LIBCXX}" -eq 1 ]]; then
+    args+=(
+      "-DLLVM_ENABLE_RUNTIMES=libcxx;libcxxabi;libunwind"
+      -DLIBCXXABI_USE_LLVM_UNWINDER=ON
+      -DLIBCXXABI_ENABLE_SHARED=ON
+      -DLIBUNWIND_ENABLE_SHARED=ON
+    )
+  fi
 
-cmake --install "${DEBUG_BUILD_ROOT}" --prefix "${DEBUG_INSTALL_ROOT}"
+  run cmake "${args[@]}"
+}
 
-echo -e "${INFO} LLVM *debug* build completed successfully."
-echo -e "${INFO} LLVM is installed for targets ${ARG_LLVM_TARGETS_TO_BUILD}"
-echo -e "${INFO} Debug install root: ${DEBUG_INSTALL_ROOT}"
-echo -e "${INFO} You may remove build directories by running:"
-echo -e "${INFO} rm -rf ${DEBUG_BUILD_ROOT}"
+install_release() {
+  local -a build_args
+
+  build_args=()
+  while IFS= read -r -d '' token; do
+    build_args+=("${token}")
+  done < <(cmake_build_args)
+
+  if [[ "${#build_args[@]}" -gt 0 ]]; then
+    run cmake --build "${RELEASE_BUILD_DIR}" "${build_args[@]}"
+  else
+    run cmake --build "${RELEASE_BUILD_DIR}"
+  fi
+  run cmake --install "${RELEASE_BUILD_DIR}" --prefix "${RELEASE_INSTALL_DIR}"
+}
+
+configure_debug() {
+  local targets
+  local runtime_dir
+  local -a args
+
+  targets="$(targets_to_build)"
+  args=(
+    -S "${LLVM_SOURCE_DIR}"
+    -G Ninja
+    -B "${DEBUG_BUILD_DIR}"
+    -DCMAKE_BUILD_TYPE=Debug
+    -DLLVM_ENABLE_RTTI=ON
+    "-DLLVM_TARGETS_TO_BUILD=${targets}"
+  )
+
+  if [[ -x "${RELEASE_INSTALL_DIR}/bin/clang" ]] && [[ -x "${RELEASE_INSTALL_DIR}/bin/clang++" ]]; then
+    args+=(
+      "-DCMAKE_C_COMPILER=${RELEASE_INSTALL_DIR}/bin/clang"
+      "-DCMAKE_CXX_COMPILER=${RELEASE_INSTALL_DIR}/bin/clang++"
+    )
+    if [[ -x "${RELEASE_INSTALL_DIR}/bin/ld.lld" ]]; then
+      args+=("-DCMAKE_LINKER=${RELEASE_INSTALL_DIR}/bin/ld.lld")
+    fi
+  fi
+
+  runtime_dir=""
+  if [[ "${WITH_LIBCXX}" -eq 1 ]]; then
+    runtime_dir="$(libcxx_runtime_dir "${RELEASE_INSTALL_DIR}")"
+    if [[ -n "${runtime_dir}" ]]; then
+      args+=(
+        "-DCMAKE_CXX_FLAGS=-stdlib=libc++ -I${RELEASE_INSTALL_DIR}/include/c++/v1"
+        "-DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++ -L${runtime_dir}"
+        "-DCMAKE_SHARED_LINKER_FLAGS=-stdlib=libc++ -L${runtime_dir}"
+        "-DCMAKE_INSTALL_RPATH=${runtime_dir}"
+        -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+      )
+    else
+      warn "Could not find libc++ under ${RELEASE_INSTALL_DIR}/lib; continuing without libc++ bootstrap flags."
+    fi
+  fi
+
+  run_with_runtime_env "${runtime_dir}" cmake "${args[@]}"
+}
+
+install_debug() {
+  local runtime_dir
+  local -a build_args
+
+  runtime_dir=""
+  if [[ "${WITH_LIBCXX}" -eq 1 ]]; then
+    runtime_dir="$(libcxx_runtime_dir "${RELEASE_INSTALL_DIR}")"
+  fi
+
+  build_args=()
+  while IFS= read -r -d '' token; do
+    build_args+=("${token}")
+  done < <(cmake_build_args)
+
+  if [[ "${#build_args[@]}" -gt 0 ]]; then
+    run_with_runtime_env "${runtime_dir}" cmake --build "${DEBUG_BUILD_DIR}" "${build_args[@]}"
+  else
+    run_with_runtime_env "${runtime_dir}" cmake --build "${DEBUG_BUILD_DIR}"
+  fi
+  run_with_runtime_env "${runtime_dir}" cmake --install "${DEBUG_BUILD_DIR}" --prefix "${DEBUG_INSTALL_DIR}"
+}
+
+verify_install() {
+  local llvm_config="${RELEASE_INSTALL_DIR}/bin/llvm-config"
+  local targets_output
+  local expected_target
+  local concrete_target
+  local missing_targets=()
+
+  [[ -x "${llvm_config}" ]] || die "Release install did not produce ${llvm_config}"
+  run "${llvm_config}" --version
+  targets_output="$("${llvm_config}" --targets-built)"
+  info "llvm-config --targets-built: ${targets_output}"
+
+  IFS=';' read -r -a expected_targets <<< "$(targets_to_build)"
+  for expected_target in "${expected_targets[@]}"; do
+    concrete_target="${expected_target}"
+    if [[ "${expected_target}" == "Native" ]]; then
+      concrete_target="$(native_backend_target "${llvm_config}")"
+    fi
+
+    if [[ -z "${concrete_target}" ]]; then
+      warn "Could not resolve Native to a concrete LLVM backend; skipping strict Native target verification."
+      continue
+    fi
+
+    if [[ " ${targets_output} " != *" ${concrete_target} "* ]]; then
+      missing_targets+=("${concrete_target}")
+    fi
+  done
+
+  if [[ "${#missing_targets[@]}" -gt 0 ]]; then
+    die "Installed LLVM is missing expected targets: ${missing_targets[*]}"
+  fi
+}
+
+native_backend_target() {
+  local llvm_config="$1"
+  local host_arch
+
+  host_arch="$("${llvm_config}" --host-target 2>/dev/null | cut -d- -f1)"
+  case "${host_arch}" in
+    aarch64|arm64)
+      printf 'AArch64'
+      ;;
+    x86_64|amd64|i386|i486|i586|i686)
+      printf 'X86'
+      ;;
+    riscv32|riscv64)
+      printf 'RISCV'
+      ;;
+    powerpc|powerpc64|powerpc64le|ppc64|ppc64le)
+      printf 'PowerPC'
+      ;;
+    systemz|s390x)
+      printf 'SystemZ'
+      ;;
+    loongarch32|loongarch64)
+      printf 'LoongArch'
+      ;;
+    mips|mipsel|mips64|mips64el)
+      printf 'Mips'
+      ;;
+    sparc|sparcv9)
+      printf 'Sparc'
+      ;;
+    wasm32|wasm64)
+      printf 'WebAssembly'
+      ;;
+    bpf|bpfeb|bpfel)
+      printf 'BPF'
+      ;;
+    *)
+      printf ''
+      ;;
+  esac
+}
+
+remove_dir_if_present() {
+  local dir="$1"
+
+  if [[ ! -e "${dir}" ]]; then
+    info "Skipping missing directory: ${dir}"
+    return
+  fi
+
+  if [[ ! -d "${dir}" ]]; then
+    die "Refusing to remove non-directory path: ${dir}"
+  fi
+
+  case "${dir}" in
+    */release-build|*/debug-build)
+      ;;
+    *)
+      die "Refusing to remove unexpected path: ${dir}"
+      ;;
+  esac
+
+  run rm -rf "${dir}"
+}
+
+clean_build_dirs() {
+  info "Cleaning build directories under ${BUILD_ROOT}"
+  remove_dir_if_present "${RELEASE_BUILD_DIR}"
+  remove_dir_if_present "${DEBUG_BUILD_DIR}"
+}
+
+print_summary() {
+  local targets
+  local llvm_config
+
+  targets="$(targets_to_build)"
+  llvm_config="${RELEASE_INSTALL_DIR}/bin/llvm-config"
+
+  printf '\n'
+  info "LLVM source      : ${LLVM_SOURCE_DIR}"
+  info "Build root       : ${BUILD_ROOT}"
+  info "Install root     : ${INSTALL_ROOT}"
+  info "Targets          : ${targets}"
+  info "Release install  : ${RELEASE_INSTALL_DIR}"
+  if [[ "${WITH_DEBUG}" -eq 1 ]]; then
+    info "Debug install    : ${DEBUG_INSTALL_DIR}"
+  else
+    info "Debug install    : not requested"
+  fi
+  printf '\n'
+  info "Set this for Rust builds:"
+  printf 'export LLVM_CONFIG="%s"\n' "${llvm_config}"
+  printf '\n'
+  info "Legacy CMake variables, if still needed:"
+  printf 'export CAST_LLVM_ROOT="%s"\n' "${RELEASE_INSTALL_DIR}"
+  if [[ "${WITH_DEBUG}" -eq 1 ]]; then
+    printf 'export CAST_DEV_LLVM_ROOT="%s"\n' "${INSTALL_ROOT}"
+  fi
+}
+
+main() {
+  parse_args "$@"
+  validate_args
+  resolve_source_layout
+
+  info "LLVM source     : ${LLVM_SOURCE_DIR}"
+  info "Release build   : ${RELEASE_BUILD_DIR}"
+  info "Release install : ${RELEASE_INSTALL_DIR}"
+  if [[ "${WITH_DEBUG}" -eq 1 ]]; then
+    info "Debug build     : ${DEBUG_BUILD_DIR}"
+    info "Debug install   : ${DEBUG_INSTALL_DIR}"
+  fi
+  info "Targets         : $(targets_to_build)"
+
+  if [[ "${CLEAN}" -eq 1 ]]; then
+    clean_build_dirs
+    exit 0
+  fi
+
+  if [[ "${VERIFY_ONLY}" -eq 1 ]]; then
+    verify_install
+    print_summary
+    exit 0
+  fi
+
+  configure_release
+  install_release
+
+  if [[ "${WITH_DEBUG}" -eq 1 ]]; then
+    configure_debug
+    install_debug
+  fi
+
+  verify_install
+  print_summary
+}
+
+main "$@"

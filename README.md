@@ -1,178 +1,218 @@
-## Update 4th September, 2025
-We might want to clean up `utils/utils.h` a little bit...
+# CAST Simulator
 
-## Update 23th June, 2025
-Code refactoring in process. Python binding in progress. Check the yl5619-dev branch. Stay tuned... :)
+CAST is a Rust-first quantum circuit simulator with CPU and optional CUDA backends.
 
-For the main branch, CPU part does work. To test out, disable `CAST_USE_CUDA` and run
-```
-ninja unit_test && ctest --output-on-failure
-```
-Some demos also run
-```
-ninja cpu_bcmk && ./cpu_bcmk
-```
+## Status
 
-To enable python binding, add `-DCAST_PYTHON_BIND=True` when configuring cmake.
+The migration from the older C++-centric codebase to Rust is nearly complete.
 
-## Environment Setup
-CAST is built with cmake and depends on the [LLVM project](https://github.com/llvm/llvm-project).
+- New features and extensions should be implemented in Rust.
+- The C++ sources under `src/cpp/` are a temporary bridge for the current JIT backends.
+- The legacy CMake/C++ development flow is being retired and will eventually be removed.
 
-CAST is under active developments. We provide two presets to compile CAST, controlled by enviroment variable.
+Today, the main developer workflow is `cargo`-based.
 
-- Either set enviroment variable `CAST_LLVM_ROOT` to the LLVM installation directory. This is the quickest method.
-- Or set enviroment variable `CAST_LLVM_ROOT` to a specific structure (detailed below). This will create a development enviroment for CAST.
-- If both are set, `CAST_LLVM_ROOT` will be prioritized. 
+## Repository Layout
 
-The development enviromnent of CAST requires a specific structure of LLVM installation, and we recommand compiling and installing the LLVM project afresh.
+- `src/`: Rust library code
+- `src/bin/`: Rust command-line tools and experiments
+- `tests/`: end-to-end Rust integration tests
+- `src/cpp/`: temporary C++ FFI/JIT layer used by the current Rust build
+- `scripts/build_llvm.sh`: helper for building a local LLVM install
 
-## Setup LLVM Afresh
-Go to the [LLVM release](https://releases.llvm.org/) page and find a happy version (We mostly developed on 19.1.0. Newer versions should be backward compatible). Download the file `llvm-project-${version}.src.tar.xz`, which should be around 100 - 150 MiB.
+## Requirements
 
-### Fastest Setup
-After unzipping we should get a folder `llvm-project-${version}.src`. Find a happy place to store it and run our provided shell script `build_llvm.sh` with 
+For the current Rust build:
 
-```
-./build_llvm.sh <dir> -minimal
+- Rust toolchain
+- A C++17 compiler available as `c++`, or specified explicitly via `CXX=...`
+- A working LLVM installation with `llvm-config`
 
-# For CPU-only
-./build_llvm.sh <dir> -minimal -native-only
-```
-where `<dir>` is the pull path to `llvm-project-${version}.src`.
+For building LLVM locally with the helper script:
 
-Then call
-```
-export CAST_LLVM_ROOT=<dir>/release-install
-```
+- `cmake`
+- `ninja`
 
-Build CAST
-```
-mkdir build-debug
-cd build-debug
-cmake ..
-```
-Pass in `-DCAST_USE_CUDA=True` if intending to use CUDA backend.
+For CUDA support:
 
-You may adjust the cmake command by needs. For example,
-```
-cmake -GNinja -DCMAKE_BUILD_TYPE=Debug ..
+- CUDA toolkit and driver
+- An LLVM build that includes the `NVPTX` target
+
+## LLVM Setup
+
+The Rust build requires:
+
+```sh
+export LLVM_CONFIG=/path/to/llvm-config
 ```
 
-### Setup for Developing CAST
-The shell script will attempt to do the following things:
+The build script reads `LLVM_CONFIG` directly from the environment. If it is not set, `cargo build`, `cargo check`, and `cargo test` fail immediately.
 
-1. Use `cmake`, `ninja`, and the system compiler to build a release version of LLVM. Optionally build `clang`, `lld,` and `lldb` when specifying argument `-build-clang`. Optionally build `libc++`, `libc++abi`, and `libunwind`, (the LLVM standard library and runtime) when specifying argument `-build-libc++`.  
-2. Build a debug version of LLVM. If `clang` and/or `libc++` is built in the first step, use them to compile this debug version. Otherwise, use the system compiler and runtime. 
+You can either use an existing LLVM install or build one locally with [`scripts/build_llvm.sh`](scripts/build_llvm.sh).
 
-Known issue: On certain platforms, `-build-libc++` will contract system library. LLVM will be built and installed successfully, but we have encountered several issues when building CAST. Building clang only is often okay.
+### Option 1: Use an Existing LLVM Install
 
-Arguments supported:
-- `-release-only` Only build and install the release version of LLVM. Default to be false. If false, build a release version and a debug version of LLVM.
-- `-build-clang` Enables LLVM projects `clang`, `lld`, and `lldb` (all in release version).
-- `-build-libc++` Enables LLVM runtimes `libc++`, `libc++abi`, `libunwind` (all in release version).
-- `-minimal` Set `-release-only=True -build-clang=False -build-libc++=False`.
-- `-native-only` Default to false. If true, build LLVM with target `native` only. Otherwise, build LLVM with target `native` and `NVPTX`. To use CAST with CUDA backend, `-native-only` must be set to false.
+If you already have a suitable LLVM install:
 
-
-As a specific example, say we downloaded the LLVM project version 19.1.0 and unzip it into `$HOME/llvm/19.1.0`, with file structure
-```
-$HOME/llvm/19.1.0
-  |- llvm-project-19.1.0.src
-```
-Then running
-```
-source build_llvm.sh $HOME/llvm/19.1.0
-```
-will use `cmake`, `ninja`, and the native compiler (in system path) to build two version of LLVM: (1) release build, with build directory `release-build` and install directory `release-install`, and (2). debug build, with build directory `debug-build` and install directory `debug-install`.
-
-After the script finishes, the file structure should look like
-```
-$HOME/llvm/19.1.0
-  |- llvm-project-19.1.0.src
-  |- debug-build
-  |- debug-install
-  |- release-build
-  |- release-install
-```
-The setup is now complete, and you can safely delete `llvm-project-19.1.0.src`, `debug-build`, and `release-build`. 
-
-Now `CAST_LLVM_ROOT` should be set to `$HOME/llvm/19.1.0` in this example.
-
-### CMake Commands
-CAST uses CMake to configure build. Supported commands include
-- `-DCAST_USE_CUDA=<bool>` Enable CUDA support in CAST. This commands requires LLVM to be built with NVPTX backend.
-- `CAST_PYTHON_BIND=<bool>` Enables python binding. Python binding is based on `pybind11`. Dependencies will be fetched from GitHub to the `<project_source>/_deps` directory. 
-- `-DCAST_NUM_THREADS=<int>` Optional. Controls the default number of threads to use. This can be useful, for example, when CPUs have P/E cores and you only want to use P cores. You don't have to set this variable in CMake. If not set, CAST will query `num_concurrency()`. You can use environment variable `CAST_NUM_THREADS` to override the behavior.
-
-Some useful tips:
-- We suggest using the Ninja builder by adding `-GNinja` option.
-- When setting `-DCAST_USE_CUDA=True`, cmake needs to find a CUDA installation. You can specify where to find CUDA by `-DCUDAToolkit_ROOT=<path>` (this is not controlled by CAST). It is often found somewhere in `/usr/local/cuda-<version>`. 
-
-### Example
-Say we installed LLVM version 19.1.0 in `$HOME/llvm/19.1.0` with file structure
-```
-$HOME/llvm/19.1.0
-  |- debug-install
-  |- release-install
-```
-We can configure the project by entering the `cast_simulator` directory, and run
-```
-mkdir build-debug && \
-cd build-debug && \
-cmake -GNinja \
--DCMAKE_BUILD_TYPE=Debug \
--DCAST_USE_CUDA=True \
--DCUDAToolkit_ROOT=/usr/local/cuda-12.3
+```sh
+export LLVM_CONFIG=/path/to/bin/llvm-config
 ```
 
-Then run `ninja unit_test && ctest --output-on-failure` to run unit tests, and
-confirm it compiles and runs correctly.
+For CUDA builds, make sure that LLVM was built with `NVPTX` enabled.
 
-## Running Demos
-We provide several demos for testing purposes.
+### Option 2: Build LLVM Locally
 
-### Demo: `cpu_bcmk`
-To compile it, run `ninja cpu_bcmk`. This will give an executable `cpu_bcmk` in the build directory.
+Download and unpack a recent `llvm-project-${version}.src` release somewhere under `~/llvm/`, then run:
 
-The demo generates each one of 1-qubit, 2-qubit, 3-qubit, and 4-qubit random unitary gates as well as 1-qubit, 2-qubit, 3-qubit, and 4-qubit Hadamard gates, for a total of 8 kernels. Then it applies each of these gates to a (defaulted) 28-qubit statevector and reports the time and effective memory update speed of the run. The experiment runs both single-precision and double-precision modes.
-
-You may try out different thread configuration by
+```sh
+scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src
 ```
-# assume in the build directory
-CAST_NUM_THREADS=<N> ./cpu_bcmk
-```
-This command basically sets enviroment variable `CAST_NUM_THREADS` which overrides CAST's query to the number of threads `cast::get_cpu_num_threads()`.
 
+That default mode is aimed at the current Rust workflow:
 
-## Running Experiments
-Update 23 June, 2025: To add README here
-<!-- To use our provided CostModel class to conduct benchmarks for a cost model specialized to your hardware platform follow the steps below: -->
+- release build only
+- targets `Native;NVPTX`
+- install layout under the chosen LLVM root: `release-build/` and `release-install/`
 
-<!-- ### CPU
-To perform benchmarks on your CPU, run a command such as the following from inside the build-debug folder:
-```
-ninja cost_model && ./cost_model -o cost_model.csv -T4 -N 10 -simd-s 2
-```
-Note: you can substitute the arguments provided, or include additional flags. Run `ninja cost_model && ./cost_model --help` to see the manual.
+Useful variants:
 
-### GPU:
-To run benchmarks on your Nvidia GPU, run the following command from inside the build-debug folder:
-```
-ninja cost_model_cuda && ./cost_model_cuda -o cost_model_cuda.csv --blockSize 128 -N 10 -workerThreads 8
-```
-Note: you can customise the flags above, or include additional ones. Run `ninja cost_model_cuda && ./cost_model_cuda --help` to see the manual.
+```sh
+# CPU-only LLVM, no NVPTX
+scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src --cpu-only
 
-### Apply Cost Model
-*Check: have access to qasm files?
+# Verify an existing install against the requested target layout
+scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src --verify-targets
 
+# Remove old release-build/ and debug-build/ directories after a successful install
+scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src --clean
+
+# Also build a debug LLVM install for legacy/debug CMake workflows
+scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src --with-debug
+
+# Include clang/lld/lldb in the release install
+scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src --with-clang-tools
 ```
-ninja demo_ptx && ./demo_ptx ../examples/qft/qft-28-cp.qasm -T4 --run-no-fuse --run-naive-fuse --run-adaptive-fuse --run-cuda-fuse --model cost_model.csv --cuda-model cost_model_cuda.csv --blocksize 128
-``` -->
+
+After a successful build, set:
+
+```sh
+export LLVM_CONFIG=~/llvm/${version}/release-install/bin/llvm-config
+```
+
+The helper also prints legacy CMake variables for the remaining transitional pieces:
+
+```sh
+export CAST_LLVM_ROOT=~/llvm/${version}/release-install
+export CAST_DEV_LLVM_ROOT=~/llvm/${version}
+```
+
+Only the old CMake-based flow still cares about `CAST_LLVM_ROOT` and `CAST_DEV_LLVM_ROOT`. The Rust build path uses `LLVM_CONFIG`.
+
+The helper supports two maintenance-oriented modes:
+
+- `--verify-targets` checks that `release-install/bin/llvm-config` exists and that the install contains the targets implied by your flags, such as `NVPTX` in the default mode.
+- `--clean` removes only `release-build/` and `debug-build/`. It does not remove `release-install/`, `debug-install/`, or the unpacked LLVM source tree.
+- The helper intentionally accepts only the new long-form options. Old alias flags such as `-minimal` and `-native-only` are no longer supported.
+
+## Build Process
+
+The current build is Cargo-driven, but it still compiles a temporary C++ bridge through [`build.rs`](build.rs):
+
+1. Cargo starts the Rust build.
+2. [`build.rs`](build.rs) chooses the C++ compiler:
+   `CXX` if you set it, otherwise plain `c++`.
+3. [`build.rs`](build.rs) runs `llvm-config` from `LLVM_CONFIG` to obtain:
+   - C++ compile flags
+   - LLVM link flags
+   - LLVM library selections
+4. [`build.rs`](build.rs) compiles the bridge sources under `src/cpp/` into static archives and links them into the Rust crate.
+5. With the `cuda` feature enabled, [`build.rs`](build.rs) also builds the CUDA bridge and links CUDA-specific dependencies.
+
+Important details:
+
+- `LLVM_CONFIG` selects the LLVM installation.
+- `LLVM_CONFIG` does not select the C++ compiler.
+- On macOS, the build script automatically adds a Homebrew library search path when LLVM requires `zstd`, so no manual `LIBRARY_PATH` workaround is needed on this machine.
+
+## Rust Build And Test
+
+For the current machine, the normal flow is:
+
+```sh
+source ~/.zshrc
+cargo check
+cargo test
+```
+
+If you want to use a non-default C++ compiler for the temporary bridge layer:
+
+```sh
+source ~/.zshrc
+export CXX=/path/to/your/c++
+cargo test
+```
+
+## CPU Tools
+
+The main CPU profiling and crossover sweep lives in [`src/bin/cpu_crossover.rs`](src/bin/cpu_crossover.rs).
+
+Examples:
+
+```sh
+cargo run --bin cpu_crossover --release -- --help
+cargo run --bin cpu_crossover --release -- --n-qubits 30 --threads 10 --budget-secs 120
+```
+
+There is also a small scratch binary in [`src/bin/scratch.rs`](src/bin/scratch.rs):
+
+```sh
+cargo run --bin scratch
+```
+
+## CUDA Build And Test
+
+CUDA support is behind the Cargo feature `cuda`.
+
+Environment variables used by the build:
+
+- `CUDA_PATH`: optional CUDA toolkit root; if unset, the build probes common locations
+- `NVJITLINK_LIB`: optional directory containing `libnvJitLink`
+
+Build or test with CUDA enabled:
+
+```sh
+cargo test --features cuda --test cpu_cuda_compare -- --ignored
+cargo run --features cuda --bin cuda_crossover --release -- --help
+```
+
+Relevant entry points:
+
+- [`tests/cpu_cuda_compare.rs`](tests/cpu_cuda_compare.rs)
+- [`src/bin/cuda_crossover.rs`](src/bin/cuda_crossover.rs)
+
+The CUDA comparison tests are `#[ignore]` by default because they require a CUDA-capable GPU. You can override the SM target for the tests with:
+
+```sh
+CUDA_SM=80 cargo test --features cuda --test cpu_cuda_compare -- --ignored
+```
+
+For the crossover binary, use `--sm`:
+
+```sh
+cargo run --features cuda --bin cuda_crossover --release -- --sm 80
+```
+
+## Transitional Notes
+
+- The old README sections about CMake demos, Python bindings, and C++-only developer flows are intentionally removed from the main path.
+- The remaining CMake variables and dual-install LLVM layout are kept only because some transitional code still expects them.
+- As the migration finishes, the expectation is that LLVM and backend integration remain, but new simulator functionality is added at the Rust layer only.
 
 ## Citing
 
-If you find our work interesting, please consider citing it:
-```
+If you find this work useful, please consider citing:
+
+```bibtex
 @article{lu2025versatile,
   title={Versatile Cross-platform Compilation Toolchain for Schr$\backslash$" odinger-style Quantum Circuit Simulation},
   author={Lu, Yuncheng and Liang, Shuang and Fan, Hongxiang and Guo, Ce and Luk, Wayne and Kelly, Paul HJ},
