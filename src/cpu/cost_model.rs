@@ -1,11 +1,7 @@
-use rand::{rngs::StdRng, SeedableRng};
-
 use crate::cost_model::HardwareProfile;
 use crate::types::QuantumGate;
 
 use super::*;
-
-const PROFILE_SEED: u64 = 7;
 
 /// Profiles the hardware by timing JIT gate kernels across a range of
 /// arithmetic intensities and fitting a roofline model.
@@ -23,8 +19,6 @@ const PROFILE_SEED: u64 = 7;
 /// 3 points each).
 pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwareProfile> {
     const N_QUBITS_SV: u32 = 28;
-    const N_WARMUP: u32 = 2;
-    const MIN_ITERS: u32 = 3;
     /// Total wall-time budget (seconds) divided evenly across all probe points.
     const BUDGET_SECS: f64 = 30.0;
     const R2_THRESHOLD: f64 = 0.95;
@@ -45,8 +39,6 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
             spec,
             N_QUBITS_SV,
             n_threads,
-            N_WARMUP,
-            MIN_ITERS,
             per_point_budget,
         )?);
     }
@@ -72,8 +64,6 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
                 spec,
                 N_QUBITS_SV,
                 n_threads,
-                N_WARMUP,
-                MIN_ITERS,
                 per_point_budget,
             )?);
         }
@@ -92,16 +82,13 @@ fn probe_ai(
     spec: &CPUKernelGenSpec,
     n_qubits_sv: u32,
     n_threads: u32,
-    n_warmup: u32,
-    min_iters: u32,
     budget_s: f64,
 ) -> anyhow::Result<(f64, f64, f64)> {
     let k = k_for_target_ai(target_ai);
     let qubits: Vec<u32> = (0..k).collect();
     let max_ai = 2.0 * (1usize << k) as f64;
     let sparsity = (target_ai as f64 / max_ai).clamp(0.0, 1.0);
-    let mut rng = StdRng::seed_from_u64(PROFILE_SEED ^ target_ai as u64);
-    let gate = QuantumGate::random_sparse_with_rng(&qubits, sparsity, &mut rng);
+    let gate = QuantumGate::random_sparse(&qubits, sparsity);
     let actual_ai = gate.arithmatic_intensity(spec.ztol);
     let n_qubits =
         n_qubits_sv.max(gate.n_qubits() as u32 + get_simd_s(spec.simd_width, spec.precision) + 1);
@@ -112,7 +99,7 @@ fn probe_ai(
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     sv.initialize();
-    let timing = jit.time_adaptive(kid, &mut sv, n_threads, n_warmup, min_iters, budget_s)?;
+    let timing = jit.time_adaptive(kid, &mut sv, n_threads, budget_s)?;
 
     let gib_s = 2.0 * sv.byte_len() as f64 / timing.mean_s / (1u64 << 30) as f64;
     let gflops_s = actual_ai * sv.len() as f64 * 2.0 / timing.mean_s / 1e9;
