@@ -6,7 +6,7 @@ pub(crate) use statevector::get_simd_s;
 pub use statevector::CPUStatevector;
 
 mod kernel;
-pub use kernel::{CPUKernelGenSpec, CPUKernelGenerator, JitSession, KernelId};
+pub use kernel::{CPUKernelGenSpec, CPUKernelGenerator, JitSession, KernelId, TimingStats};
 
 mod cost_model;
 pub use cost_model::measure_cpu_profile;
