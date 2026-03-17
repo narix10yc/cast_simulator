@@ -11,7 +11,7 @@ mod tests {
 
     /// Creates a normalized statevector with deterministic amplitudes.
     fn seeded_statevector(
-        n_qubits: usize,
+        n_qubits: u32,
         precision: Precision,
         simd_width: SimdWidth,
     ) -> CPUStatevector {
@@ -44,9 +44,9 @@ mod tests {
     /// `n_threads`: number of worker threads passed to `apply`.
     fn run_jit_and_compare_full(
         gate: &QuantumGate,
-        n_qubits_sv: usize,
+        n_qubits_sv: u32,
         spec: CPUKernelGenSpec,
-        n_threads: usize,
+        n_threads: u32,
         tol: f64,
     ) {
         let mut generator = CPUKernelGenerator::new().expect("create generator");
@@ -59,7 +59,7 @@ mod tests {
         let mut sv_ref = sv_jit.clone();
 
         sv_ref.apply_gate(gate);
-        jit.apply(kernel_id, &mut sv_jit, Some(n_threads))
+        jit.apply(kernel_id, &mut sv_jit, n_threads)
             .expect("apply kernel");
 
         assert_statevectors_close(&sv_jit, &sv_ref, tol);
@@ -84,7 +84,7 @@ mod tests {
 
     fn run_jit_and_compare(
         gate: QuantumGate,
-        n_qubits_sv: usize,
+        n_qubits_sv: u32,
         precision: Precision,
         simd_width: SimdWidth,
         tol: f64,
@@ -120,7 +120,7 @@ mod tests {
 
     fn run_circuit_scalar(
         graph: &CircuitGraph,
-        n_qubits_sv: usize,
+        n_qubits_sv: u32,
         precision: Precision,
         simd_width: SimdWidth,
     ) -> CPUStatevector {
@@ -133,9 +133,9 @@ mod tests {
 
     fn run_circuit_jit(
         graph: &CircuitGraph,
-        n_qubits_sv: usize,
+        n_qubits_sv: u32,
         spec: CPUKernelGenSpec,
-        n_threads: usize,
+        n_threads: u32,
     ) -> CPUStatevector {
         let gates = circuit_gates_in_row_order(graph);
         let mut generator = CPUKernelGenerator::new().expect("create generator");
@@ -149,7 +149,7 @@ mod tests {
         let mut jit = generator.init_jit().expect("init jit");
         let mut sv = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
         for kernel_id in kernel_ids {
-            jit.apply(kernel_id, &mut sv, Some(n_threads))
+            jit.apply(kernel_id, &mut sv, n_threads)
                 .expect("apply circuit kernel");
         }
         sv
@@ -157,7 +157,7 @@ mod tests {
 
     fn assert_fused_and_unfused_circuits_agree(
         original: &CircuitGraph,
-        n_qubits_sv: usize,
+        n_qubits_sv: u32,
         spec: CPUKernelGenSpec,
         tol: f64,
     ) {
@@ -213,8 +213,7 @@ mod tests {
 
         let mut sv = CPUStatevector::new(2, Precision::F64, SimdWidth::W128);
         sv.initialize();
-        jit.apply(kernel_id, &mut sv, Some(1))
-            .expect("apply kernel");
+        jit.apply(kernel_id, &mut sv, 1).expect("apply kernel");
 
         let expected = std::f64::consts::FRAC_1_SQRT_2;
         assert!((sv.amp(0) - Complex::new(expected, 0.0)).norm() < 1e-10);
@@ -308,9 +307,7 @@ mod tests {
             .generate(&spec_imm, gate.matrix().data(), gate.qubits())
             .expect("generate imm kernel");
         let mut jit_imm = gen_imm.init_jit().expect("init jit");
-        jit_imm
-            .apply(kid_imm, &mut sv_imm, Some(1))
-            .expect("apply imm");
+        jit_imm.apply(kid_imm, &mut sv_imm, 1).expect("apply imm");
 
         let mut gen_stack = CPUKernelGenerator::new().expect("create generator");
         let kid_stack = gen_stack
@@ -318,7 +315,7 @@ mod tests {
             .expect("generate stack kernel");
         let mut jit_stack = gen_stack.init_jit().expect("init jit");
         jit_stack
-            .apply(kid_stack, &mut sv_stack, Some(1))
+            .apply(kid_stack, &mut sv_stack, 1)
             .expect("apply stack");
 
         assert_statevectors_close(&sv_imm, &sv_stack, tol);
@@ -410,8 +407,8 @@ mod tests {
         sv_ref.apply_gate(&h_gate);
         sv_ref.apply_gate(&cx_gate);
 
-        jit.apply(kid_h, &mut sv_jit, Some(1)).expect("apply H");
-        jit.apply(kid_cx, &mut sv_jit, Some(1)).expect("apply CX");
+        jit.apply(kid_h, &mut sv_jit, 1).expect("apply H");
+        jit.apply(kid_cx, &mut sv_jit, 1).expect("apply CX");
 
         assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
         assert!((sv_jit.norm() - 1.0).abs() < 1e-10);
@@ -479,7 +476,7 @@ mod tests {
         let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
         let mut sv_ref = sv_jit.clone();
         sv_ref.apply_gate(&gate);
-        jit.apply(kid, &mut sv_jit, Some(1)).expect("apply kernel");
+        jit.apply(kid, &mut sv_jit, 1).expect("apply kernel");
 
         assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
     }

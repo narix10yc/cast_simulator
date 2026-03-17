@@ -1,10 +1,8 @@
 //! Computation-memory balance analysis for JIT gate simulation kernels.
 //!
-//! Sweeps gate size and density (arithmetic intensity) from purely memory-bound
-//! (random sparse gates with one nonzero scalar per row) to compute-bound
-//! (dense random real gates up to 5 qubits, arithmetic intensity up to 32), reporting
-//! GiB/s, GFLOPs/s, and timing variance side-by-side so the roofline
-//! crossover is visible.
+//! Sweeps gate size and density (arithmetic intensity) using
+//! [`QuantumGate::random_sparse_with_rng`], reporting GiB/s, GFLOPs/s, and
+//! timing variance side-by-side so the roofline crossover is visible.
 //!
 //! ## Adaptive timing
 //!
@@ -33,10 +31,9 @@
 //! ```
 
 use anyhow::Result;
-use cast::cpu;
-use cast::types::{Complex, ComplexSquareMatrix, Precision, QuantumGate};
+use cast::cpu::{self, CPUStatevector};
+use cast::types::{Precision, QuantumGate};
 use clap::{Parser, ValueEnum};
-use rand::Rng;
 use std::time::Instant;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -60,56 +57,51 @@ impl From<CliPrecision> for Precision {
 #[derive(Parser, Debug)]
 #[command(name = "cpu_crossover")]
 struct Args {
-    /// log2 of statevector length
-    #[arg(long, default_value_t = 20)]
-    n_qubits: usize,
+    /// number of qubits in the statevector
+    #[arg(long, default_value_t = 28)]
+    n_qubits: u32,
 
-    /// worker threads; 0 = hardware_concurrency
-    #[arg(long = "threads", default_value_t = 1)]
-    threads: usize,
+    /// worker threads; 0 = default
+    #[arg(long = "threads", default_value_t = 0)]
+    threads: u32,
 
     #[arg(long, value_enum, default_value_t = CliPrecision::F64)]
     precision: CliPrecision,
-
-    #[arg(skip = cpu::SimdWidth::W128)]
-    simd_width: cpu::SimdWidth,
 
     /// Total wall-time budget for the entire sweep (seconds).
     #[arg(long, default_value_t = 120.0)]
     budget_secs: f64,
 
     /// Minimum timed iterations per gate regardless of budget.
-    #[arg(long, default_value_t = 5)]
-    min_iters: usize,
+    #[arg(long, default_value_t = 3)]
+    min_iters: u32,
 
     /// Warmup iterations (not timed, not counted toward budget).
-    #[arg(long, default_value_t = 3)]
-    n_warmup: usize,
+    #[arg(long, default_value_t = 1)]
+    n_warmup: u32,
 }
 
 impl Args {
-    fn n_threads(&self) -> Option<usize> {
+    fn n_qubits(&self) -> u32 {
+        self.n_qubits
+    }
+
+    fn n_threads(&self) -> u32 {
         if self.threads == 0 {
-            None
+            num_cpus::get() as u32
         } else {
-            Some(self.threads)
+            self.threads
         }
     }
 
+    fn precision(&self) -> Precision {
+        self.precision.into()
+    }
+
     fn spec(&self) -> cpu::CPUKernelGenSpec {
-        let precision: Precision = self.precision.into();
-        cpu::CPUKernelGenSpec {
-            precision,
-            simd_width: self.simd_width,
-            mode: cpu::MatrixLoadMode::ImmValue,
-            ztol: match precision {
-                Precision::F32 => 1e-6,
-                Precision::F64 => 1e-12,
-            },
-            otol: match precision {
-                Precision::F32 => 1e-6,
-                Precision::F64 => 1e-12,
-            },
+        match self.precision {
+            CliPrecision::F32 => cpu::CPUKernelGenSpec::f32(),
+            CliPrecision::F64 => cpu::CPUKernelGenSpec::f64(),
         }
     }
 
@@ -125,81 +117,37 @@ impl Args {
 
 struct Case {
     label: String,
+    ai: f64,
     gate: QuantumGate,
 }
 
-/// Sweeps arithmetic intensity 1 → 32 using only generated dense and sparse matrices.
-///
-/// Dense cases use full real matrices so `ai = edge_size = 2^k`
-/// exactly. Sparse cases use `s` real nonzeros per row so `ai = s`
-/// exactly. This keeps the plotted x-axis aligned with the actual metric
-/// reported by `QuantumGate::arithmatic_intensity`.
-fn gate_sweep() -> Vec<Case> {
+/// The zero tolerance for arithmetic intensity calculation
+const AI_EPS: f64 = 1e-9;
+const NUM_INITIAL_CASES: usize = 5;
+
+fn initial_sweep(n_qubits_sv: u32) -> Vec<Case> {
     let mut cases = Vec::new();
+    cases.reserve(NUM_INITIAL_CASES);
+    let rng = &mut rand::thread_rng();
 
-    for &s in &[1usize, 2, 4, 8] {
-        cases.push(Case {
-            label: format!("Sparse-4q   [rand sparse, s={s}]"),
-            gate: sparse_real(4, s),
-        });
-        cases.push(Case {
-            label: format!("Sparse-5q   [rand sparse, s={s}]"),
-            gate: sparse_real(5, s),
-        });
-    }
+    for i in 0..NUM_INITIAL_CASES {
+        let qubits = rand::seq::index::sample(rng, n_qubits_sv as usize, 4)
+            .iter()
+            .map(|i| i as u32)
+            .collect::<Vec<u32>>();
 
-    cases.push(Case {
-        label: "Sparse-5q   [rand sparse, s=16]".to_string(),
-        gate: sparse_real(5, 16),
-    });
-
-    for k in 1..=5 {
+        let f = 1.0 / (NUM_INITIAL_CASES + 1) as f64;
+        let sparsity = (i + 1) as f64 * f;
+        let gate = QuantumGate::random_sparse(qubits.as_slice(), sparsity);
+        let ai = gate.arithmatic_intensity(AI_EPS);
         cases.push(Case {
-            label: format!("Dense-{k}q    [rand dense]"),
-            gate: dense_real(k),
+            label: format!("Rand-4q [ai={:>4.1}]", ai),
+            ai,
+            gate,
         });
     }
 
     cases
-}
-
-fn dense_real(k: usize) -> QuantumGate {
-    sparse_real(k, 1usize << k)
-}
-
-/// Builds a k-qubit gate matrix with exactly `s` nonzero real entries per row.
-///
-/// Using real-only coefficients makes `ai = s` exactly:
-///
-/// `scalar_nnz(M) = n_rows × s`, `edge_size(M) = n_rows`, so
-/// `ai = scalar_nnz / edge_size = s`.
-///
-/// The matrix is intentionally non-unitary; this tool measures kernel
-/// throughput, not physical validity.
-fn sparse_real(k: usize, s: usize) -> QuantumGate {
-    let n = 1usize << k;
-    assert!(s <= n, "s must be ≤ edge_size");
-    let stride = n / s; // exact because sweep uses powers of two
-    let mut rng = rand::thread_rng();
-    let mut m = ComplexSquareMatrix::zeros(n);
-    for row in 0..n {
-        for t in 0..s {
-            // Offset by n/2 so that s=1 is still a non-trivial permutation.
-            let col = (row + n / 2 + t * stride) % n;
-            m.set(row, col, Complex::new(sample_nonzero_real(&mut rng), 0.0));
-        }
-    }
-    let qubits: Vec<u32> = (0..k as u32).collect();
-    QuantumGate::new(m, qubits)
-}
-
-fn sample_nonzero_real<R: Rng + ?Sized>(rng: &mut R) -> f64 {
-    let mag = rng.gen_range(0.25_f64..1.0);
-    if rng.gen_bool(0.5) {
-        mag
-    } else {
-        -mag
-    }
 }
 
 // ── Adaptive timing ───────────────────────────────────────────────────────────
@@ -216,22 +164,18 @@ struct Timing {
 }
 
 /// Runs `n_warmup` un-timed iterations, then collects timed samples until
-/// `per_gate_budget_s` is exhausted, with at least `min_iters` samples.
-///
-/// Strategy:
-///   1. Probe `N_PROBE` iterations to estimate per-iteration cost.
-///   2. Compute how many more iterations fit in the remaining budget.
-///   3. Collect all probe + fill samples; compute statistics together.
+/// `budget_s` is exhausted, with at least `min_iters` samples. Returns timing
+/// statistics.
 fn time_adaptive(
     jit: &mut cpu::JitSession,
     kid: cpu::KernelId,
     sv: &mut cpu::CPUStatevector,
-    n_threads: Option<usize>,
-    n_warmup: usize,
-    min_iters: usize,
-    per_gate_budget_s: f64,
+    n_threads: u32,
+    n_warmup: u32,
+    min_iters: u32,
+    budget_s: f64,
 ) -> Timing {
-    const N_PROBE: usize = 3;
+    const N_PROBE: u32 = 3;
 
     for _ in 0..n_warmup {
         jit.apply(kid, sv, n_threads).unwrap();
@@ -249,8 +193,8 @@ fn time_adaptive(
 
     // Phase 2: fill remaining budget.
     let est_per_iter = probe_elapsed / N_PROBE as f64;
-    let remaining = (per_gate_budget_s - probe_elapsed).max(0.0);
-    let n_fill = ((remaining / est_per_iter) as usize).max(min_iters.saturating_sub(N_PROBE));
+    let remaining = (budget_s - probe_elapsed).max(0.0);
+    let n_fill = ((remaining / est_per_iter) as u32).max(min_iters.saturating_sub(N_PROBE));
     for _ in 0..n_fill {
         let t = Instant::now();
         jit.apply(kid, sv, n_threads).unwrap();
@@ -278,7 +222,7 @@ fn time_adaptive(
 
 struct Row {
     label: String,
-    k: usize,
+    k: u32,
     nnz: usize,
     ai: f64,
     timing: Timing,
@@ -289,12 +233,10 @@ struct Row {
 struct AiBucket {
     ai: f64,
     mean_gflops_s: f64,
-    max_k: usize,
+    max_k: u32,
 }
 
 fn ai_buckets(rows: &[Row]) -> Vec<AiBucket> {
-    const AI_EPS: f64 = 1e-9;
-
     let mut buckets = Vec::new();
     let mut i = 0;
     while i < rows.len() {
@@ -320,9 +262,14 @@ fn ai_buckets(rows: &[Row]) -> Vec<AiBucket> {
     buckets
 }
 
-fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
+fn measure(
+    sv: &mut CPUStatevector,
+    case: &Case,
+    args: &Args,
+    per_gate_budget_s: f64,
+) -> Result<Row> {
     let spec = args.spec();
-    let k = case.gate.n_qubits();
+    let k = case.gate.n_qubits() as u32;
     let ai = case.gate.arithmatic_intensity(spec.ztol);
     let n = case.gate.matrix().edge_size();
     // scalar_nnz = ai × edge_size; recover as integer for display
@@ -332,13 +279,10 @@ fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
     let kid = gen.generate(&spec, case.gate.matrix().data(), case.gate.qubits())?;
     let mut jit = gen.init_jit()?;
 
-    let mut sv = cpu::CPUStatevector::new(n, spec.precision, spec.simd_width);
-    sv.initialize();
-
     let timing = time_adaptive(
         &mut jit,
         kid,
-        &mut sv,
+        sv,
         args.n_threads(),
         args.n_warmup,
         args.min_iters,
@@ -363,10 +307,7 @@ fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
 
 fn print_report(rows: &[Row], args: &Args) {
     let sv_mib = (1usize << args.n_qubits) * args.scalar_size() * 2 / (1 << 20);
-    let threads = match args.n_threads() {
-        Some(n) => n.to_string(),
-        None => "auto (hardware_concurrency)".to_string(),
-    };
+    let threads = args.n_threads().to_string();
 
     let bar = "═".repeat(100);
     let line = "─".repeat(100);
@@ -385,7 +326,7 @@ fn print_report(rows: &[Row], args: &Args) {
         args.budget_secs,
         args.budget_secs / rows.len() as f64,
     );
-    println!("  FLOPs/scalar : 2 real  (1×mul + 1×add per nonzero scalar component)");
+    println!("  FLOPs/scalar : 2 real  (1xmul + 1×add per nonzero scalar component)");
     println!("  ai           : scalar_nnz(M) / edge_size(M) — re and im parts counted separately");
     println!("  CV           : stddev / mean — scale-free timing noise");
     println!();
@@ -455,7 +396,7 @@ fn print_report(rows: &[Row], args: &Args) {
 
     let mut prev_bucket_regime = "";
     let mut prev_bucket_ai = 0.0_f64;
-    let mut crossover: Option<(f64, f64, usize)> = None;
+    let mut crossover: Option<(f64, f64, u32)> = None;
     for bucket in &buckets {
         let expected_linear = gflops_per_ai * bucket.ai;
         let regime = if bucket.mean_gflops_s >= expected_linear * 0.85 {
@@ -492,32 +433,34 @@ fn print_report(rows: &[Row], args: &Args) {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let cases = gate_sweep();
+    let cases = initial_sweep(args.n_qubits());
     let per_gate_budget = args.budget_secs / cases.len() as f64;
-    let sv_mib = (1usize << args.n_qubits) * args.scalar_size() * 2 / (1 << 20);
+    let sv_mib = (1usize << args.n_qubits()) * args.scalar_size() * 2 / (1 << 20);
 
     eprintln!(
-        "Balance sweep: n_qubits={} ({} MiB, {:?}), threads={:?}",
-        args.n_qubits,
+        "Balance sweep: n_qubits={} ({} MiB, {:?}), {}-thread",
+        args.n_qubits(),
         sv_mib,
-        args.precision,
+        args.precision(),
         args.n_threads(),
     );
     eprintln!(
-        "Budget: {:.0}s total → {:.1}s per gate  (≥{} iters, {} warmup)",
+        "Budget: {:.0}s total → {:.1}s per gate  (≥{} iters, {} warmup run)",
         args.budget_secs, per_gate_budget, args.min_iters, args.n_warmup,
     );
     eprintln!();
 
+    // --- Actual run ---
+    let mut sv =
+        unsafe { CPUStatevector::uninit(args.n_qubits(), args.precision(), cpu::SimdWidth::W128) };
+
     let mut rows: Vec<Row> = Vec::new();
     for case in &cases {
-        eprint!("  {:<40} ", case.label);
-        let row = measure(case, &args, per_gate_budget)?;
+        eprint!("  {:<20} ", case.label);
+        let row = measure(&mut sv, case, &args, per_gate_budget)?;
         eprintln!(
-            "{:>6} iters  {:.2} ms ± {:.3} ms  CV={:.2}%  {:>7.1} GiB/s  {:>7.1} GFLOPs/s",
-            row.timing.n_iters,
+            "{:.2} ms (cv={:.2}%)  {:>7.1} GiB/s  {:>7.1} GFLOPs/s",
             row.timing.mean_s * 1e3,
-            row.timing.stddev_s * 1e3,
             row.timing.cv * 100.0,
             row.gib_s,
             row.gflops_s,

@@ -7,6 +7,7 @@
 
 /// 128-bit complex number (`f64` real and imaginary parts) re-exported from `num_complex`.
 pub use num_complex::Complex64 as Complex;
+pub use num_complex::ComplexFloat;
 
 mod rational;
 pub use rational::Rational;

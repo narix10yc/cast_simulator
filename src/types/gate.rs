@@ -1,3 +1,5 @@
+use rand::Rng;
+
 use super::{Complex, ComplexSquareMatrix};
 
 /// A unitary quantum gate: a `2ⁿ × 2ⁿ` complex matrix paired with `n` target qubit indices.
@@ -111,33 +113,19 @@ impl QuantumGate {
         self.qubits.len()
     }
 
-    /// Arithmetic intensity of the gate: `scalar_nnz(M) / edge_size(M)`.
-    ///
-    /// Real and imaginary parts of each matrix entry are tested against `ztol`
-    /// independently, because the kernel generator emits separate SIMD
-    /// instructions for each nonzero scalar component.  Each such component
-    /// contributes exactly 2 real FLOPs (1 multiply + 1 accumulate) to one
-    /// output amplitude:
-    ///
-    /// ```text
-    /// out_re += M_re * in_re  (if M_re > ztol)
-    /// out_re -= M_im * in_im  (if M_im > ztol)
-    /// out_im += M_re * in_im  (if M_re > ztol)
-    /// out_im += M_im * in_re  (if M_im > ztol)
-    ///
-    /// FLOPs = arithmetic_intensity × |ψ| × 2
-    /// ```
-    ///
-    /// Using complex-entry nnz with a fixed ×8 factor would overcount by 2×
-    /// for purely real matrices (X, CX, H, …) where `M_im = 0` throughout.
-    pub fn arithmatic_intensity(&self, ztol: f64) -> f64 {
-        let scalar_nnz = self
-            .matrix
+    /// The number of non-zero entries in the gate matrix. Real and imag parts are counted
+    /// indepdently. So a k-qubit gate can have up to `2 ** (2k+1)` non-zeros.
+    pub fn scalar_nnz(&self, ztol: f64) -> usize {
+        self.matrix
             .data()
             .iter()
             .map(|z| (z.re.abs() > ztol) as usize + (z.im.abs() > ztol) as usize)
-            .sum::<usize>();
-        scalar_nnz as f64 / self.matrix.edge_size() as f64
+            .sum::<usize>()
+    }
+
+    /// Arithmetic intensity of the gate: `M.scalar_nnz(ztol) / M.edge_size()`.
+    pub fn arithmatic_intensity(&self, ztol: f64) -> f64 {
+        self.scalar_nnz(ztol) as f64 / self.matrix.edge_size() as f64
     }
 
     /// Returns the product `self * other`, expanding both gates to act on the union
@@ -188,6 +176,64 @@ impl QuantumGate {
         }
 
         expanded
+    }
+
+    /// Generate a random unitary gate for the given qubits.
+    ///
+    /// The distribution is uniform according to the Haar measure on the unitary group.
+    /// Delegates to [`ComplexSquareMatrix::random_unitary_with_rng`] for the actual matrix
+    /// generation.
+    ///
+    /// For reproducible randomness, use [`Self::random_unitary_with_rng`].
+    pub fn random_unitary(qubits: &[u32]) -> Self {
+        let rng = &mut rand::thread_rng();
+        Self::random_unitary_with_rng(qubits, rng)
+    }
+
+    /// Generate a random unitary gate for the given qubits.
+    ///
+    /// The distribution is uniform according to the Haar measure on the unitary group.
+    /// Delegates to [`ComplexSquareMatrix::random_unitary_with_rng`] for the actual matrix
+    /// generation.
+    pub fn random_unitary_with_rng<R: Rng + ?Sized>(qubits: &[u32], rng: &mut R) -> Self {
+        let mut sorted = qubits.to_vec();
+        sorted.sort();
+        let edge_size = edge_size_for_n_qubits(sorted.len());
+        let matrix = ComplexSquareMatrix::random_unitary_with_rng(edge_size, rng);
+        Self::new(matrix, sorted)
+    }
+
+    /// Generate a random sparse non-unitary gate for the given qubits.
+    /// Note: the resulting matrix is not guaranteed to be unitary. This method is to be used for
+    /// testing and benchmarking purposes, not for simulating actual quantum circuits.  
+    ///
+    /// For reproducible randomness, use [`Self::random_sparse_with_rng`].
+    pub fn random_sparse(qubits: &[u32], sparsity: f64) -> Self {
+        let rng = &mut rand::thread_rng();
+        Self::random_sparse_with_rng(qubits, sparsity, rng)
+    }
+
+    /// Generate a random sparse non-unitary gate for the given qubits.
+    /// Note: the resulting matrix is not guaranteed to be unitary. This method is to be used for
+    /// testing and benchmarking purposes, not for simulating actual quantum circuits.
+    pub fn random_sparse_with_rng(qubits: &[u32], sparsity: f64, rng: &mut impl Rng) -> Self {
+        let mut sorted = qubits.to_vec();
+        sorted.sort();
+        let edge_size = edge_size_for_n_qubits(sorted.len());
+        let mut matrix = ComplexSquareMatrix::random_sparse_with_rng(edge_size, sparsity, rng);
+
+        // Ensure each row contains at least one non-zero entry
+        // This should happen with super-low prob. If it does, we just randomly sprinkle a non-zero
+        // in that row.
+        for row in 0..edge_size {
+            if matrix.row(row).iter().all(|c| c.norm() <= 1e-8) {
+                let col = rng.gen_range(0..edge_size);
+                let v = rng.gen_range(0.25_f64..1.0);
+                matrix.set(row, col, Complex::new(v, 0.0));
+            }
+        }
+
+        Self::new(matrix, sorted)
     }
 }
 

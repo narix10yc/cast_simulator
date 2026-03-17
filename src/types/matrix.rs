@@ -15,12 +15,35 @@ pub struct ComplexSquareMatrix {
 }
 
 impl ComplexSquareMatrix {
+    fn len_for_edge_size(edge_size: usize) -> usize {
+        edge_size
+            .checked_mul(edge_size)
+            .expect("matrix edge_size overflow")
+    }
+
     /// Creates an `n×n` zero matrix.
     pub fn zeros(edge_size: usize) -> Self {
         Self {
-            data: vec![Complex::default(); edge_size * edge_size],
+            data: vec![Complex::default(); Self::len_for_edge_size(edge_size)],
             edge_size,
         }
+    }
+
+    /// Creates an `n×n` matrix without initializing its elements.
+    ///
+    /// This is intended for performance-sensitive code that will write every
+    /// element via raw pointers before any safe access occurs.
+    ///
+    /// # Safety
+    /// The returned matrix must have all `edge_size * edge_size` elements
+    /// written with valid [`Complex`] values before calling any safe method
+    /// that reads matrix contents (for example [`Self::data`], [`Self::get`],
+    /// [`Self::matmul`], `Clone`, `Debug`, or `PartialEq`).
+    pub unsafe fn uninit(edge_size: usize) -> Self {
+        let len = Self::len_for_edge_size(edge_size);
+        let mut data = Vec::with_capacity(len);
+        unsafe { data.set_len(len) };
+        Self { data, edge_size }
     }
 
     /// Creates an `n×n` identity matrix.
@@ -214,7 +237,8 @@ impl ComplexSquareMatrix {
                 }
 
                 let norm = l2_norm(&current_row);
-                if norm > 1e-12 {
+                // rejects small-norm rows to improve numerical stability
+                if norm > 1e-8 {
                     for value in &mut current_row {
                         *value /= norm;
                     }
@@ -230,6 +254,46 @@ impl ComplexSquareMatrix {
         matrix
     }
 
+    /// Generates a random sparse matrix of size `nxn` with the desired sparsity (fraction of
+    /// non-zero entries).
+    ///
+    /// `sparsity` is clamped to `[0.0, 1.0]`
+    ///
+    /// Delegates to [`Self::random_sparse_with_rng`].
+    pub fn random_sparse(edge_size: usize, sparsity: f64) -> Self {
+        let mut rng = thread_rng();
+        Self::random_sparse_with_rng(edge_size, sparsity, &mut rng)
+    }
+
+    /// Generates a random sparse matrix of size `nxn` with the desired sparsity (fraction of
+    /// non-zero entries).
+    ///
+    /// Simple process: each entry is i.i.d Gaussian with probability `sparsity`, otherwise zero. No
+    /// orthogonalization or normalization is performed. Useful for testing purposes.
+    pub fn random_sparse_with_rng<R: Rng + ?Sized>(
+        edge_size: usize,
+        sparsity: f64,
+        rng: &mut R,
+    ) -> Self {
+        if sparsity < 1e-8 {
+            return Self::zeros(edge_size);
+        }
+
+        let mut matrix = unsafe { Self::uninit(edge_size) };
+        let ptr = matrix.data_ptr_mut();
+        for i in 0..matrix.len() {
+            unsafe {
+                ptr.add(i).write(if rng.gen::<f64>() < sparsity {
+                    Complex::new(StandardNormal.sample(rng), StandardNormal.sample(rng))
+                } else {
+                    Complex::ZERO
+                });
+            }
+        }
+
+        matrix
+    }
+
     /// Creates a matrix from a flat, row-major `Vec` of length `edge_size²`.
     ///
     /// # Panics
@@ -237,7 +301,7 @@ impl ComplexSquareMatrix {
     pub fn from_vec(edge_size: usize, data: Vec<Complex>) -> Self {
         assert_eq!(
             data.len(),
-            edge_size * edge_size,
+            Self::len_for_edge_size(edge_size),
             "matrix data size does not match edge_size"
         );
         Self { data, edge_size }
@@ -268,6 +332,30 @@ impl ComplexSquareMatrix {
     /// Returns a mutable slice over the flat, row-major element buffer.
     pub fn data_mut(&mut self) -> &mut [Complex] {
         &mut self.data
+    }
+
+    /// Returns a view of the row-th row as a slice.
+    pub fn row(&self, row: usize) -> &[Complex] {
+        assert!(row < self.edge_size, "row index out of bounds");
+        let start = row * self.edge_size;
+        &self.data[start..start + self.edge_size]
+    }
+
+    /// Returns a mutable view of the row-th row as a slice.
+    pub fn row_mut(&mut self, row: usize) -> &mut [Complex] {
+        assert!(row < self.edge_size, "row index out of bounds");
+        let start = row * self.edge_size;
+        &mut self.data[start..start + self.edge_size]
+    }
+
+    /// Returns a raw const pointer to the flat, row-major element buffer.
+    pub fn data_ptr(&self) -> *const Complex {
+        self.data.as_ptr()
+    }
+
+    /// Returns a raw mut pointer to the flat, row-major element buffer.
+    pub fn data_ptr_mut(&mut self) -> *mut Complex {
+        self.data.as_mut_ptr()
     }
 
     /// Sets every element to zero in place.
@@ -332,13 +420,6 @@ impl ComplexSquareMatrix {
         assert!(row < self.edge_size, "row index out of bounds");
         assert!(col < self.edge_size, "column index out of bounds");
         row * self.edge_size + col
-    }
-
-    /// Returns a shared slice for the given row.
-    fn row(&self, row: usize) -> &[Complex] {
-        assert!(row < self.edge_size, "row index out of bounds");
-        let start = row * self.edge_size;
-        &self.data[start..start + self.edge_size]
     }
 }
 
@@ -530,5 +611,23 @@ mod tests {
         let b = ComplexSquareMatrix::random_unitary_with_rng(3, &mut rng_b);
 
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn unsafe_uninit_can_be_initialized_via_raw_pointer() {
+        let mut matrix = unsafe { ComplexSquareMatrix::uninit(2) };
+        let ptr = matrix.data_ptr_mut();
+
+        unsafe {
+            ptr.add(0).write(Complex::new(1.0, 0.0));
+            ptr.add(1).write(Complex::new(2.0, 0.0));
+            ptr.add(2).write(Complex::new(3.0, 0.0));
+            ptr.add(3).write(Complex::new(4.0, 0.0));
+        }
+
+        assert_eq!(matrix.get(0, 0), Complex::new(1.0, 0.0));
+        assert_eq!(matrix.get(0, 1), Complex::new(2.0, 0.0));
+        assert_eq!(matrix.get(1, 0), Complex::new(3.0, 0.0));
+        assert_eq!(matrix.get(1, 1), Complex::new(4.0, 0.0));
     }
 }

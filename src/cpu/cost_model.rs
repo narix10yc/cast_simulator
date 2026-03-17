@@ -2,12 +2,14 @@
 
 use std::time::Instant;
 
-use rand::Rng;
+use rand::{rngs::StdRng, SeedableRng};
 
 use crate::cost_model::HardwareProfile;
-use crate::types::{Complex, ComplexSquareMatrix, QuantumGate};
+use crate::types::QuantumGate;
 
 use super::*;
+
+const PROFILE_SEED: u64 = 7;
 
 /// Profiles the hardware by timing JIT gate kernels across a range of
 /// arithmetic intensities and fitting a roofline model.
@@ -27,16 +29,16 @@ use super::*;
 pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwareProfile> {
     // A 20-qubit statevector is 16 MiB for f64 — large enough to stress DRAM
     // on most systems (typical L3 cache is 8–36 MiB).
-    const N_QUBITS_SV: usize = 20;
-    const N_WARMUP: usize = 3;
-    const N_ITERS: usize = 15;
+    const N_QUBITS_SV: u32 = 28;
+    const N_WARMUP: u32 = 3;
+    const N_ITERS: u32 = 3;
     const R2_THRESHOLD: f64 = 0.95;
-    const MAX_REFINEMENT_ROUNDS: usize = 2;
+    const MAX_REFINEMENT_ROUNDS: u32 = 2;
     const MAX_NEW_POINTS_PER_ROUND: usize = 3;
 
     let n_threads = get_num_threads();
 
-    let seed_ais: &[usize] = &[1, 2, 4, 8, 16, 32];
+    let seed_ais: &[u32] = &[1, 2, 4, 8, 16, 32];
     let mut sweep: Vec<(f64, f64, f64)> = Vec::new(); // (ai, gflops_s, gib_s)
     for &target_ai in seed_ais {
         sweep.push(probe_ai(
@@ -56,9 +58,9 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
             break;
         }
         // Candidate arithmetic intensities bracketing [knee/2, knee*1.5]; skip duplicates.
-        let candidates: Vec<usize> = [knee * 0.5, knee, knee * 1.5]
+        let candidates: Vec<u32> = [knee * 0.5, knee, knee * 1.5]
             .iter()
-            .map(|&v| (v.round() as usize).max(1))
+            .map(|&v| (v.round() as u32).max(1))
             .filter(|&ai| {
                 !sweep
                     .iter()
@@ -87,35 +89,40 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
     Ok(HardwareProfile::from_fit(knee_ai, peak_bw_gib_s))
 }
 
-/// Times a JIT kernel for a synthetic gate with the given sparsity `s`
-/// (nonzeros per row → arithmetic intensity = s for real-only matrices).
+/// Times a JIT kernel for a synthetic gate with the given target arithmetic
+/// intensity.
 ///
 /// Returns `(actual_ai, gflops_s, gib_s)`.
 fn probe_ai(
-    target_ai: usize,
+    target_ai: u32,
     spec: &CPUKernelGenSpec,
-    n_qubits_sv: usize,
-    n_threads: usize,
-    n_warmup: usize,
-    n_iters: usize,
+    n_qubits_sv: u32,
+    n_threads: u32,
+    n_warmup: u32,
+    n_iters: u32,
 ) -> anyhow::Result<(f64, f64, f64)> {
-    let gate = make_sparse_real_gate(k_for_sparsity(target_ai), target_ai);
+    let k = k_for_target_ai(target_ai);
+    let qubits: Vec<u32> = (0..k).collect();
+    let max_ai = 2.0 * (1usize << k) as f64;
+    let sparsity = (target_ai as f64 / max_ai).clamp(0.0, 1.0);
+    let mut rng = StdRng::seed_from_u64(PROFILE_SEED ^ target_ai as u64);
+    let gate = QuantumGate::random_sparse_with_rng(&qubits, sparsity, &mut rng);
     let actual_ai = gate.arithmatic_intensity(spec.ztol);
-    let n =
-        n_qubits_sv.max(gate.n_qubits() + super::get_simd_s(spec.simd_width, spec.precision) + 1);
+    let n_qubits = n_qubits_sv
+        .max(gate.n_qubits() as u32 + super::get_simd_s(spec.simd_width, spec.precision) + 1);
 
     let mut gen = CPUKernelGenerator::new()?;
     let kid = gen.generate(spec, gate.matrix().data(), gate.qubits())?;
     let mut jit = gen.init_jit()?;
 
-    let mut sv = CPUStatevector::new(n, spec.precision, spec.simd_width);
+    let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     sv.initialize();
     for _ in 0..n_warmup {
-        jit.apply(kid, &mut sv, Some(n_threads))?;
+        jit.apply(kid, &mut sv, n_threads)?;
     }
     let t = Instant::now();
     for _ in 0..n_iters {
-        jit.apply(kid, &mut sv, Some(n_threads))?;
+        jit.apply(kid, &mut sv, n_threads)?;
     }
     let mean_s = t.elapsed().as_secs_f64() / n_iters as f64;
 
@@ -124,35 +131,11 @@ fn probe_ai(
     Ok((actual_ai, gflops_s, gib_s))
 }
 
-/// Minimum qubit count `k` such that a gate with `s` nonzeros per row fits
-/// in a `k`-qubit matrix (`2^k >= s`).
-fn k_for_sparsity(s: usize) -> usize {
-    if s <= 1 {
-        return 2;
-    }
-    ((s as f64).log2().ceil() as usize).max(2)
-}
-
-/// Builds a `k`-qubit gate with exactly `s` nonzero real entries per row.
-/// Nonzeros at consecutive columns starting at `(row + n/2) % n`, giving
-/// `arithmatic_intensity(ztol=0) = s`. Intended for throughput measurement only.
-fn make_sparse_real_gate(k: usize, s: usize) -> QuantumGate {
-    let n = 1 << k;
-    let s = s.min(n);
-    let mut rng = rand::thread_rng();
-    let mut m = ComplexSquareMatrix::zeros(n);
-    for row in 0..n {
-        for t in 0..s {
-            let col = (row + n / 2 + t) % n;
-            let v = rng.gen_range(0.25_f64..1.0);
-            m.set(
-                row,
-                col,
-                Complex::new(if rng.gen_bool(0.5) { v } else { -v }, 0.0),
-            );
-        }
-    }
-    QuantumGate::new(m, (0..k as u32).collect())
+/// Minimum qubit count `k` such that a random sparse complex gate can reach
+/// the target arithmetic intensity with `sparsity <= 1`.
+fn k_for_target_ai(target_ai: u32) -> u32 {
+    let min_edge_size = ((target_ai as f64) / 2.0).ceil().max(4.0);
+    min_edge_size.log2().ceil() as u32
 }
 
 /// Fits the roofline model to `(ai, gflops_s, gib_s)` data.

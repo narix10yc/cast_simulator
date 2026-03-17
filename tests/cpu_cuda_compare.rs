@@ -90,7 +90,7 @@ fn seeded_state(n_qubits: usize) -> Vec<(f64, f64)> {
 /// Applies `gate` to an n-qubit statevector via the CPU JIT backend and returns
 /// all amplitudes as `(re, im)` pairs.
 fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
-    let n_sv_qubits = init.len().trailing_zeros() as usize;
+    let n_sv_qubits = init.len().trailing_zeros();
     let spec = cpu_spec();
 
     let mut gen = CPUKernelGenerator::new().expect("cpu: create generator");
@@ -112,7 +112,7 @@ fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
 /// Applies `gate` to a CUDA device statevector initialised from `init` and
 /// returns all amplitudes downloaded to the host.
 fn apply_cuda(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
-    let n_sv_qubits = init.len().trailing_zeros() as usize;
+    let n_sv_qubits = init.len().trailing_zeros();
     let spec = cuda_spec();
 
     let ffi_matrix: Vec<(f64, f64)> = gate.matrix().data().iter().map(|c| (c.re, c.im)).collect();
@@ -156,7 +156,7 @@ fn assert_amps_close(cpu: &[(f64, f64)], cuda: &[(f64, f64)], label: &str, tol: 
 }
 
 /// Convenience wrapper: builds the gate, runs both backends, checks closeness.
-fn compare(gate: QuantumGate, n_sv_qubits: usize, label: &str) {
+fn compare(gate: QuantumGate, n_sv_qubits: u32, label: &str) {
     let init = seeded_state(n_sv_qubits);
     let cpu_result = apply_cpu(&gate, &init);
     let cuda_result = apply_cuda(&gate, &init);
@@ -301,7 +301,7 @@ fn compare_cx_gate_20qubit_sv() {
 #[test]
 #[ignore = "requires CUDA device"]
 fn compare_sequential_h_then_x() {
-    let n_sv = 4;
+    let n_sv = 4_u32;
     let init = seeded_state(n_sv);
 
     // CPU: H then X on qubit 0.
@@ -359,7 +359,7 @@ fn compare_sequential_h_then_x() {
 #[test]
 #[ignore = "requires CUDA device"]
 fn compare_h_squared_is_identity() {
-    let n_sv = 3;
+    let n_sv = 3_u32;
     let init = seeded_state(n_sv);
 
     // CPU: H^2

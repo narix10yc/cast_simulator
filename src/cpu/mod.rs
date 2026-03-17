@@ -20,10 +20,10 @@ mod tests;
 ///
 /// Reads `CAST_NUM_THREADS` from the environment. Falls back to the logical
 /// CPU count (`num_cpus::get()`) when the variable is unset or invalid.
-pub fn get_num_threads() -> usize {
+pub fn get_num_threads() -> u32 {
     std::env::var("CAST_NUM_THREADS")
         .ok()
-        .and_then(|s| s.parse::<usize>().ok())
+        .and_then(|s| s.parse::<u32>().ok())
         .filter(|&n| n > 0)
-        .unwrap_or_else(num_cpus::get)
+        .unwrap_or_else(|| num_cpus::get() as u32)
 }
