@@ -1743,4 +1743,53 @@ mod tests {
             1e-10,
         );
     }
+
+    #[test]
+    fn e2e_mixed_parametric_circuit_w512_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::u3(0.7, 0.2, -0.4, 0));
+        graph.insert_gate(QuantumGate::rx(0.5, 2));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::swap(1, 2));
+        graph.insert_gate(QuantumGate::rz(-0.9, 0));
+        graph.insert_gate(QuantumGate::ccx(0, 2, 3));
+        graph.insert_gate(QuantumGate::ry(0.25, 1));
+        graph.insert_gate(QuantumGate::cx(3, 4));
+        graph.insert_gate(QuantumGate::h(5));
+
+        // W512/F64 uses simd_s=3, so give the fused path extra headroom.
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            9,
+            default_spec(Precision::F64, SimdWidth::W512),
+            1e-10,
+        );
+    }
+
+    #[test]
+    fn e2e_brick_wall_circuit_w512_matches_with_and_without_fusion() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::cx(2, 3));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+        graph.insert_gate(QuantumGate::cx(6, 7));
+        graph.insert_gate(QuantumGate::cx(1, 2));
+        graph.insert_gate(QuantumGate::cx(3, 4));
+        graph.insert_gate(QuantumGate::cx(5, 6));
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::rz(0.2, 7));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::cx(2, 3));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+        graph.insert_gate(QuantumGate::cx(6, 7));
+
+        // Use a larger circuit and statevector so W512 exercises fused kernels
+        // that need more than the minimal W128-style headroom.
+        assert_fused_and_unfused_circuits_agree(
+            &graph,
+            10,
+            default_spec(Precision::F64, SimdWidth::W512),
+            1e-10,
+        );
+    }
 }
