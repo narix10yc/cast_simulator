@@ -411,42 +411,58 @@ impl JitSession {
         String::from_utf8(asm_buf).map_err(|e| anyhow::anyhow!("assembly is not valid UTF-8: {e}"))
     }
 
-    /// Runs warmup iterations, then collects timed samples until `budget_s` is
-    /// exhausted, with at least `min_iters` timed samples.
+    /// Times a kernel adaptively within `budget_s` seconds.
     ///
-    /// Phase 1 probes with `N_PROBE` samples to estimate per-iteration cost.
-    /// Phase 2 fills the remaining budget. Fast kernels accumulate many samples;
-    /// slow kernels get fewer — but each spends roughly the same wall time.
+    /// A single probe run starts the clock and estimates per-iteration cost.
+    /// If that one run already exceeds `1.5 × budget_s`, it is returned as the
+    /// sole sample — budget is better respected than forcing more iterations.
+    /// Otherwise the budget is split: ~1/4 for warmup (probe + extra un-timed
+    /// passes), ~3/4 for timed measurements. Fast kernels get many warmup
+    /// passes; slow kernels keep only the single probe as warmup.
     pub fn time_adaptive(
         &mut self,
         kernel_id: KernelId,
         statevector: &mut CPUStatevector,
         n_threads: u32,
-        n_warmup: u32,
-        min_iters: u32,
         budget_s: f64,
     ) -> anyhow::Result<TimingStats> {
-        const N_PROBE: u32 = 3;
+        const WARMUP_FRACTION: f64 = 0.25;
+        const OVER_BUDGET_FACTOR: f64 = 1.5;
 
-        for _ in 0..n_warmup {
+        // Phase 1: single probe — warmup and cost estimate.
+        let t_start = Instant::now();
+        let t = Instant::now();
+        self.apply(kernel_id, statevector, n_threads)?;
+        let probe_time = t.elapsed().as_secs_f64();
+        // Guard against sub-timer-resolution kernels.
+        let est_per_iter = probe_time.max(1e-9);
+
+        // If one run alone blows the budget, return it as the sole sample.
+        if probe_time > budget_s * OVER_BUDGET_FACTOR {
+            return Ok(TimingStats {
+                n_iters: 1,
+                mean_s: probe_time,
+                stddev_s: 0.0,
+                cv: 0.0,
+                min_s: probe_time,
+                max_s: probe_time,
+            });
+        }
+
+        // Phase 2: fill remaining warmup budget with un-timed iterations.
+        let warmup_budget = budget_s * WARMUP_FRACTION;
+        let remaining_warmup = (warmup_budget - probe_time).max(0.0);
+        let n_extra_warmup = (remaining_warmup / est_per_iter) as u32;
+        for _ in 0..n_extra_warmup {
             self.apply(kernel_id, statevector, n_threads)?;
         }
 
-        // Phase 1: probe to estimate per-iteration time.
-        let mut samples: Vec<f64> = Vec::new();
-        let probe_wall = Instant::now();
-        for _ in 0..N_PROBE {
-            let t = Instant::now();
-            self.apply(kernel_id, statevector, n_threads)?;
-            samples.push(t.elapsed().as_secs_f64());
-        }
-        let probe_elapsed = probe_wall.elapsed().as_secs_f64();
-
-        // Phase 2: fill remaining budget.
-        let est_per_iter = probe_elapsed / N_PROBE as f64;
-        let remaining = (budget_s - probe_elapsed).max(0.0);
-        let n_fill = ((remaining / est_per_iter) as u32).max(min_iters.saturating_sub(N_PROBE));
-        for _ in 0..n_fill {
+        // Phase 3: timed measurements over the remaining ~3/4 of budget.
+        let elapsed = t_start.elapsed().as_secs_f64();
+        let remaining = (budget_s - elapsed).max(0.0);
+        let n_timed = ((remaining / est_per_iter) as u32).max(1);
+        let mut samples: Vec<f64> = Vec::with_capacity(n_timed as usize);
+        for _ in 0..n_timed {
             let t = Instant::now();
             self.apply(kernel_id, statevector, n_threads)?;
             samples.push(t.elapsed().as_secs_f64());

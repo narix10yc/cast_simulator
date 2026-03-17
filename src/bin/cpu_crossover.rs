@@ -62,14 +62,6 @@ struct Args {
     /// Total wall-time budget for the entire sweep (seconds).
     #[arg(long, default_value_t = 120.0)]
     budget_secs: f64,
-
-    /// Minimum timed iterations per gate regardless of budget.
-    #[arg(long, default_value_t = 3)]
-    min_iters: u32,
-
-    /// Warmup iterations (not timed, not counted toward budget).
-    #[arg(long, default_value_t = 1)]
-    n_warmup: u32,
 }
 
 impl Args {
@@ -200,14 +192,7 @@ fn measure(
     let kid = gen.generate(&spec, case.gate.matrix().data(), case.gate.qubits())?;
     let mut jit = gen.init_jit()?;
 
-    let timing = jit.time_adaptive(
-        kid,
-        sv,
-        args.n_threads(),
-        args.n_warmup,
-        args.min_iters,
-        per_gate_budget_s,
-    )?;
+    let timing = jit.time_adaptive(kid, sv, args.n_threads(), per_gate_budget_s)?;
 
     let gib_s = 2.0 * sv.byte_len() as f64 / timing.mean_s / (1u64 << 30) as f64;
     let gflops_s = ai * sv.len() as f64 * 2.0 / timing.mean_s / 1e9;
@@ -365,8 +350,8 @@ fn main() -> Result<()> {
         args.n_threads(),
     );
     eprintln!(
-        "Budget: {:.0}s total → {:.1}s per gate  (≥{} iters, {} warmup run)",
-        args.budget_secs, per_gate_budget, args.min_iters, args.n_warmup,
+        "Budget: {:.0}s total → {:.1}s per gate",
+        args.budget_secs, per_gate_budget,
     );
     eprintln!();
 
