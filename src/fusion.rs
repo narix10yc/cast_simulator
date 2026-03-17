@@ -131,22 +131,13 @@ fn fuse_adjacent_two_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize)
 /// Number of distinct qubits in the union of two sorted qubit slices.
 /// Used as a cheap pre-filter before any matrix multiply.
 fn union_qubit_count(a: &[u32], b: &[u32]) -> usize {
-    let (mut i, mut j, mut count) = (0, 0, 0);
-    while i < a.len() || j < b.len() {
-        count += 1;
-        match (a.get(i), b.get(j)) {
-            (Some(&x), Some(&y)) if x == y => {
-                i += 1;
-                j += 1;
-            }
-            (Some(&x), Some(&y)) if x < y => i += 1,
-            (Some(_), Some(_)) => j += 1,
-            (Some(_), None) => i += 1,
-            (None, Some(_)) => j += 1,
-            (None, None) => unreachable!(),
+    let mut union = Vec::with_capacity(a.len() + b.len());
+    for &qubit in a.iter().chain(b.iter()) {
+        if !union.contains(&qubit) {
+            union.push(qubit);
         }
     }
-    count
+    union.len()
 }
 
 /// Attempts to fuse a cluster of gates starting at `(start_row, start_qubit)`.
