@@ -2,6 +2,8 @@ pub mod types;
 
 pub mod circuit;
 
+pub mod cost_model;
+
 pub mod fusion;
 
 pub mod openqasm;

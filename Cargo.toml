@@ -21,3 +21,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "cpu"
 harness = false
+
+[[bin]]
+name = "cuda_crossover"
+path = "src/bin/cuda_crossover.rs"
+required-features = ["cuda"]
