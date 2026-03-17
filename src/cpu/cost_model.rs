@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use rand::{rngs::StdRng, SeedableRng};
 
 use crate::cost_model::HardwareProfile;
@@ -25,8 +23,10 @@ const PROFILE_SEED: u64 = 7;
 /// 3 points each).
 pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwareProfile> {
     const N_QUBITS_SV: u32 = 28;
-    const N_WARMUP: u32 = 3;
-    const N_ITERS: u32 = 3;
+    const N_WARMUP: u32 = 2;
+    const MIN_ITERS: u32 = 3;
+    /// Total wall-time budget (seconds) divided evenly across all probe points.
+    const BUDGET_SECS: f64 = 30.0;
     const R2_THRESHOLD: f64 = 0.95;
     const MAX_REFINEMENT_ROUNDS: u32 = 2;
     const MAX_NEW_POINTS_PER_ROUND: usize = 3;
@@ -34,6 +34,10 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
     let n_threads = get_num_threads();
 
     let seed_ais: &[u32] = &[1, 2, 4, 8, 16, 32];
+    // Pre-allocate budget assuming all refinement slots are used.
+    let max_points = seed_ais.len() + MAX_REFINEMENT_ROUNDS as usize * MAX_NEW_POINTS_PER_ROUND;
+    let per_point_budget = BUDGET_SECS / max_points as f64;
+
     let mut sweep: Vec<(f64, f64, f64)> = Vec::new();
     for &target_ai in seed_ais {
         sweep.push(probe_ai(
@@ -42,7 +46,8 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
             N_QUBITS_SV,
             n_threads,
             N_WARMUP,
-            N_ITERS,
+            MIN_ITERS,
+            per_point_budget,
         )?);
     }
     sweep.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -68,7 +73,8 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
                 N_QUBITS_SV,
                 n_threads,
                 N_WARMUP,
-                N_ITERS,
+                MIN_ITERS,
+                per_point_budget,
             )?);
         }
         sweep.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -87,7 +93,8 @@ fn probe_ai(
     n_qubits_sv: u32,
     n_threads: u32,
     n_warmup: u32,
-    n_iters: u32,
+    min_iters: u32,
+    budget_s: f64,
 ) -> anyhow::Result<(f64, f64, f64)> {
     let k = k_for_target_ai(target_ai);
     let qubits: Vec<u32> = (0..k).collect();
@@ -105,17 +112,10 @@ fn probe_ai(
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     sv.initialize();
-    for _ in 0..n_warmup {
-        jit.apply(kid, &mut sv, n_threads)?;
-    }
-    let t = Instant::now();
-    for _ in 0..n_iters {
-        jit.apply(kid, &mut sv, n_threads)?;
-    }
-    let mean_s = t.elapsed().as_secs_f64() / n_iters as f64;
+    let timing = jit.time_adaptive(kid, &mut sv, n_threads, n_warmup, min_iters, budget_s)?;
 
-    let gib_s = 2.0 * sv.byte_len() as f64 / mean_s / (1u64 << 30) as f64;
-    let gflops_s = actual_ai * sv.len() as f64 * 2.0 / mean_s / 1e9;
+    let gib_s = 2.0 * sv.byte_len() as f64 / timing.mean_s / (1u64 << 30) as f64;
+    let gflops_s = actual_ai * sv.len() as f64 * 2.0 / timing.mean_s / 1e9;
     Ok((actual_ai, gflops_s, gib_s))
 }
 

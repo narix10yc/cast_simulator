@@ -14,6 +14,7 @@ use std::ffi::c_char;
 use std::fmt;
 use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
+use std::time::Instant;
 
 /// Configuration passed to the kernel generator for each gate.
 #[repr(C)]
@@ -57,6 +58,20 @@ impl CPUKernelGenSpec {
 pub type KernelId = u64;
 
 const ERR_BUF_LEN: usize = 1024;
+
+// ── TimingStats ───────────────────────────────────────────────────────────────
+
+/// Statistics returned by [`JitSession::time_adaptive`].
+#[derive(Debug, Clone)]
+pub struct TimingStats {
+    pub n_iters: usize,
+    pub mean_s: f64,
+    pub stddev_s: f64,
+    /// Coefficient of variation: `stddev / mean` (scale-free noise metric).
+    pub cv: f64,
+    pub min_s: f64,
+    pub max_s: f64,
+}
 
 // ── FFI declarations ──────────────────────────────────────────────────────────
 
@@ -394,6 +409,63 @@ impl JitSession {
 
         asm_buf.truncate(asm_len);
         String::from_utf8(asm_buf).map_err(|e| anyhow::anyhow!("assembly is not valid UTF-8: {e}"))
+    }
+
+    /// Runs warmup iterations, then collects timed samples until `budget_s` is
+    /// exhausted, with at least `min_iters` timed samples.
+    ///
+    /// Phase 1 probes with `N_PROBE` samples to estimate per-iteration cost.
+    /// Phase 2 fills the remaining budget. Fast kernels accumulate many samples;
+    /// slow kernels get fewer — but each spends roughly the same wall time.
+    pub fn time_adaptive(
+        &mut self,
+        kernel_id: KernelId,
+        statevector: &mut CPUStatevector,
+        n_threads: u32,
+        n_warmup: u32,
+        min_iters: u32,
+        budget_s: f64,
+    ) -> anyhow::Result<TimingStats> {
+        const N_PROBE: u32 = 3;
+
+        for _ in 0..n_warmup {
+            self.apply(kernel_id, statevector, n_threads)?;
+        }
+
+        // Phase 1: probe to estimate per-iteration time.
+        let mut samples: Vec<f64> = Vec::new();
+        let probe_wall = Instant::now();
+        for _ in 0..N_PROBE {
+            let t = Instant::now();
+            self.apply(kernel_id, statevector, n_threads)?;
+            samples.push(t.elapsed().as_secs_f64());
+        }
+        let probe_elapsed = probe_wall.elapsed().as_secs_f64();
+
+        // Phase 2: fill remaining budget.
+        let est_per_iter = probe_elapsed / N_PROBE as f64;
+        let remaining = (budget_s - probe_elapsed).max(0.0);
+        let n_fill = ((remaining / est_per_iter) as u32).max(min_iters.saturating_sub(N_PROBE));
+        for _ in 0..n_fill {
+            let t = Instant::now();
+            self.apply(kernel_id, statevector, n_threads)?;
+            samples.push(t.elapsed().as_secs_f64());
+        }
+
+        let n = samples.len() as f64;
+        let mean = samples.iter().copied().sum::<f64>() / n;
+        let var = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / n;
+        let stddev = var.sqrt();
+        let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
+        let max = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        Ok(TimingStats {
+            n_iters: samples.len(),
+            mean_s: mean,
+            stddev_s: stddev,
+            cv: stddev / mean,
+            min_s: min,
+            max_s: max,
+        })
     }
 
     /// Applies the kernel identified by `kernel_id` to `statevector` in-place.

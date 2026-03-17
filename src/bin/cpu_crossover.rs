@@ -4,14 +4,6 @@
 //! [`QuantumGate::random_sparse_with_rng`], reporting GiB/s, GFLOPs/s, and
 //! timing variance side-by-side so the roofline crossover is visible.
 //!
-//! ## Adaptive timing
-//!
-//! Each gate is first probed with a small number of iterations to estimate its
-//! per-iteration cost. The remaining per-gate time budget (total budget divided
-//! evenly across gates) is then filled with as many iterations as fit. This
-//! means fast kernels accumulate hundreds of samples while slow kernels at large
-//! qubit counts get fewer — but each gate spends roughly the same wall time.
-//!
 //! ## Metric
 //!
 //! ```text
@@ -34,7 +26,6 @@ use anyhow::Result;
 use cast::cpu::{self, CPUStatevector};
 use cast::types::{Precision, QuantumGate};
 use clap::{Parser, ValueEnum};
-use std::time::Instant;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -148,74 +139,6 @@ fn initial_sweep(n_qubits_sv: u32) -> Vec<Case> {
     cases
 }
 
-// ── Adaptive timing ───────────────────────────────────────────────────────────
-
-struct Timing {
-    /// Number of timed iterations actually collected.
-    n_iters: usize,
-    mean_s: f64,
-    stddev_s: f64,
-    /// Coefficient of variation: stddev / mean (scale-free noise metric).
-    cv: f64,
-    min_s: f64,
-    max_s: f64,
-}
-
-/// Runs `n_warmup` un-timed iterations, then collects timed samples until
-/// `budget_s` is exhausted, with at least `min_iters` samples. Returns timing
-/// statistics.
-fn time_adaptive(
-    jit: &mut cpu::JitSession,
-    kid: cpu::KernelId,
-    sv: &mut cpu::CPUStatevector,
-    n_threads: u32,
-    n_warmup: u32,
-    min_iters: u32,
-    budget_s: f64,
-) -> Timing {
-    const N_PROBE: u32 = 3;
-
-    for _ in 0..n_warmup {
-        jit.apply(kid, sv, n_threads).unwrap();
-    }
-
-    // Phase 1: probe to estimate per-iteration time.
-    let mut samples: Vec<f64> = Vec::new();
-    let probe_wall = Instant::now();
-    for _ in 0..N_PROBE {
-        let t = Instant::now();
-        jit.apply(kid, sv, n_threads).unwrap();
-        samples.push(t.elapsed().as_secs_f64());
-    }
-    let probe_elapsed = probe_wall.elapsed().as_secs_f64();
-
-    // Phase 2: fill remaining budget.
-    let est_per_iter = probe_elapsed / N_PROBE as f64;
-    let remaining = (budget_s - probe_elapsed).max(0.0);
-    let n_fill = ((remaining / est_per_iter) as u32).max(min_iters.saturating_sub(N_PROBE));
-    for _ in 0..n_fill {
-        let t = Instant::now();
-        jit.apply(kid, sv, n_threads).unwrap();
-        samples.push(t.elapsed().as_secs_f64());
-    }
-
-    let n = samples.len() as f64;
-    let mean = samples.iter().copied().sum::<f64>() / n;
-    let var = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / n;
-    let stddev = var.sqrt();
-    let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-
-    Timing {
-        n_iters: samples.len(),
-        mean_s: mean,
-        stddev_s: stddev,
-        cv: stddev / mean,
-        min_s: min,
-        max_s: max,
-    }
-}
-
 // ── Row ───────────────────────────────────────────────────────────────────────
 
 struct Row {
@@ -223,7 +146,7 @@ struct Row {
     k: u32,
     nnz: usize,
     ai: f64,
-    timing: Timing,
+    timing: cpu::TimingStats,
     gib_s: f64,
     gflops_s: f64,
 }
@@ -277,15 +200,14 @@ fn measure(
     let kid = gen.generate(&spec, case.gate.matrix().data(), case.gate.qubits())?;
     let mut jit = gen.init_jit()?;
 
-    let timing = time_adaptive(
-        &mut jit,
+    let timing = jit.time_adaptive(
         kid,
         sv,
         args.n_threads(),
         args.n_warmup,
         args.min_iters,
         per_gate_budget_s,
-    );
+    )?;
 
     let gib_s = 2.0 * sv.byte_len() as f64 / timing.mean_s / (1u64 << 30) as f64;
     let gflops_s = ai * sv.len() as f64 * 2.0 / timing.mean_s / 1e9;
