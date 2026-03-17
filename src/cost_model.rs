@@ -10,13 +10,13 @@ pub trait CostModel: Send + Sync {
 }
 
 /// Size-only cost model: a gate is "free" (1e-10) if it fits within the qubit
-/// and op-count budget, and "expensive" (1.0) otherwise. This yields a pure
+/// and arithmetic-intensity budget, and "expensive" (1.0) otherwise. This yields a pure
 /// size-gated accept/reject decision with no empirical profiling required.
 ///
 /// Corresponds to C++ `SizeOnlyCostModel(maxSize, maxOp, zeroTol)`.
 pub struct SizeOnlyCostModel {
     pub max_size: usize,
-    pub max_op: usize,
+    pub max_ai: usize,
     pub zero_tol: f64,
 }
 
@@ -25,7 +25,7 @@ impl CostModel for SizeOnlyCostModel {
         if gate.n_qubits() > self.max_size {
             return 1.0;
         }
-        if gate.opcount(self.zero_tol) > self.max_op as f64 {
+        if gate.arithmatic_intensity(self.zero_tol) > self.max_ai as f64 {
             return 1.0;
         }
         1e-10
@@ -36,7 +36,7 @@ impl CostModel for SizeOnlyCostModel {
 
 /// Observed hardware performance profile for the roofline cost model.
 ///
-/// The key quantity is `knee_opcount`: the `QuantumGate::opcount` value at
+/// The key quantity is `knee_ai`: the `QuantumGate::arithmatic_intensity` value at
 /// which gate simulation transitions from memory-bound to compute-bound.
 /// Below the knee every gate costs the same (one statevector pass), so fusing
 /// is always beneficial. Above it compute dominates and fusion yields less gain.
@@ -53,8 +53,8 @@ impl CostModel for SizeOnlyCostModel {
 /// let profile = cast::cpu::measure_cpu_profile(&CPUKernelGenSpec::f64())?;
 /// ```
 pub struct HardwareProfile {
-    /// Roofline knee in `QuantumGate::opcount` units.
-    pub knee_opcount: f64,
+    /// Roofline knee in `QuantumGate::arithmatic_intensity` units.
+    pub knee_ai: f64,
     /// Peak effective memory bandwidth (GiB/s, read + write), for reference.
     pub peak_bw_gib_s: f64,
 }
@@ -69,7 +69,7 @@ impl HardwareProfile {
     ///
     /// # Derivation
     ///
-    /// In the memory-bound regime: GFLOPs/s = `opcount · bw_bytes_s / (2·scalar_bytes·1e9)`.
+    /// In the memory-bound regime: GFLOPs/s = `ai · bw_bytes_s / (2·scalar_bytes·1e9)`.
     /// At the knee this equals `peak_gflops`, giving:
     /// `knee = peak_gflops · 2 · scalar_bytes · 1e9 / (peak_bw · GIB)`
     pub fn from_roofline(peak_bw_gib_s: f64, peak_gflops_s: f64, scalar_bytes: usize) -> Self {
@@ -80,16 +80,16 @@ impl HardwareProfile {
             f64::INFINITY
         };
         Self {
-            knee_opcount: knee,
+            knee_ai: knee,
             peak_bw_gib_s,
         }
     }
 
     /// Constructs a profile directly from a pre-fitted knee and bandwidth.
     /// Intended for use by [`crate::cpu::measure_cpu_profile`].
-    pub(crate) fn from_fit(knee_opcount: f64, peak_bw_gib_s: f64) -> Self {
+    pub(crate) fn from_fit(knee_ai: f64, peak_bw_gib_s: f64) -> Self {
         Self {
-            knee_opcount,
+            knee_ai,
             peak_bw_gib_s,
         }
     }
@@ -99,7 +99,7 @@ impl HardwareProfile {
 
 /// Roofline-based cost model.
 ///
-/// A gate costs `max(1.0, opcount / knee_opcount)`. Memory-bound gates (below
+/// A gate costs `max(1.0, ai / knee_ai)`. Memory-bound gates (below
 /// the knee) all cost 1.0; compute-bound gates cost proportionally more.
 ///
 /// - Fusing two memory-bound gates always yields benefit ≈ 1.0 → accepted.
@@ -108,7 +108,7 @@ impl HardwareProfile {
 ///
 /// Gates exceeding `max_size` qubits return `f64::INFINITY`.
 pub struct HardwareAdaptiveCostModel {
-    pub knee_opcount: f64,
+    pub knee_ai: f64,
     pub max_size: usize,
     pub zero_tol: f64,
 }
@@ -116,7 +116,7 @@ pub struct HardwareAdaptiveCostModel {
 impl HardwareAdaptiveCostModel {
     pub fn new(profile: &HardwareProfile, max_size: usize) -> Self {
         Self {
-            knee_opcount: profile.knee_opcount,
+            knee_ai: profile.knee_ai,
             max_size,
             zero_tol: 1e-12,
         }
@@ -128,7 +128,7 @@ impl CostModel for HardwareAdaptiveCostModel {
         if gate.n_qubits() > self.max_size {
             return f64::INFINITY;
         }
-        (gate.opcount(self.zero_tol) / self.knee_opcount).max(1.0)
+        (gate.arithmatic_intensity(self.zero_tol) / self.knee_ai).max(1.0)
     }
 }
 
@@ -147,14 +147,14 @@ pub struct FusionConfig {
 }
 
 impl FusionConfig {
-    /// Pure size-gated fusion up to `max_size` qubits. No op-count cap.
+    /// Pure size-gated fusion up to `max_size` qubits. No arithmetic-intensity cap.
     pub fn size_only(max_size: usize) -> Self {
         Self {
             size_max: max_size,
             benefit_margin: 0.0,
             cost_model: Box::new(SizeOnlyCostModel {
                 max_size,
-                max_op: usize::MAX,
+                max_ai: usize::MAX,
                 zero_tol: 0.0,
             }),
         }
@@ -199,7 +199,7 @@ mod tests {
     fn model(max_size: usize) -> SizeOnlyCostModel {
         SizeOnlyCostModel {
             max_size,
-            max_op: usize::MAX,
+            max_ai: usize::MAX,
             zero_tol: 0.0,
         }
     }
@@ -242,21 +242,21 @@ mod tests {
     }
 
     #[test]
-    fn knee_opcount_formula() {
+    fn knee_ai_formula() {
         // 50 GiB/s bandwidth, 200 GFLOPs/s peak, f64 (8 bytes).
         // C_slope = bw_bytes_s / (2 * 8 * 1e9) = 50*2^30 / 16e9 ≈ 3.355
         // knee = 200 / 3.355 ≈ 59.6
         let profile = HardwareProfile::from_roofline(50.0, 200.0, 8);
         assert!(
-            (profile.knee_opcount - 59.6).abs() < 1.0,
+            (profile.knee_ai - 59.6).abs() < 1.0,
             "knee = {}",
-            profile.knee_opcount
+            profile.knee_ai
         );
     }
 
     #[test]
     fn memory_bound_gate_costs_one() {
-        // With knee ≈ 60, a 1-qubit X gate (opcount = 2) is well below knee.
+        // With knee ≈ 60, a 1-qubit X gate (ai = 2) is well below knee.
         let m = adaptive_model(50.0, 200.0, 4);
         let cost = m.cost_of(&QuantumGate::x(0));
         assert!((cost - 1.0).abs() < 1e-9, "cost = {cost}");
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn compute_bound_gate_costs_more_than_one() {
-        // Use a profile with a tiny knee so even small opcounts exceed it.
+        // Use a profile with a tiny knee so even small arithmetic intensities exceed it.
         // knee = 1e9 * 2 * 8 / (1000 * 2^30) ≈ 0.015
         let m = adaptive_model(1000.0, 1.0, 5);
         let g4 = QuantumGate::cx(0, 1)
@@ -281,8 +281,8 @@ mod tests {
 
     #[test]
     fn fusing_two_memory_bound_gates_yields_positive_benefit() {
-        // CX(0,1) and CX(2,3): opcount = 1.0 each, knee ≈ 60 → memory-bound.
-        // Fused (4-qubit permutation): opcount = 1.0 → also memory-bound.
+        // CX(0,1) and CX(2,3): ai = 1.0 each, knee ≈ 60 → memory-bound.
+        // Fused (4-qubit permutation): ai = 1.0 → also memory-bound.
         // old_cost = 2.0, new_cost = 1.0, benefit > 0.
         let m = adaptive_model(50.0, 200.0, 4);
         let cx01 = QuantumGate::cx(0, 1);

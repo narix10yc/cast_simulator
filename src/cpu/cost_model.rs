@@ -10,9 +10,9 @@ use crate::types::{Complex, ComplexSquareMatrix, QuantumGate};
 use super::*;
 
 /// Profiles the hardware by timing JIT gate kernels across a range of
-/// arithmetic intensities (opcount) and fitting a roofline model.
+/// arithmetic intensities and fitting a roofline model.
 ///
-/// The resulting [`HardwareProfile`] encodes the knee opcount — the boundary
+/// The resulting [`HardwareProfile`] encodes the knee arithmetic intensity — the boundary
 /// between memory-bound and compute-bound gate simulation — suitable for use
 /// with [`crate::cost_model::FusionConfig::hardware_adaptive`].
 ///
@@ -21,7 +21,7 @@ use super::*;
 /// the roofline scales with threads while bandwidth does not, so the knee
 /// shifts accordingly.
 ///
-/// The sweep starts with 6 seed points at opcount 1, 2, 4, 8, 16, 32. Up to
+/// The sweep starts with 6 seed points at arithmetic intensity 1, 2, 4, 8, 16, 32. Up to
 /// two refinement rounds add at most 3 points each near the estimated knee
 /// until the roofline R² exceeds 0.95.
 pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwareProfile> {
@@ -36,11 +36,11 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
 
     let n_threads = get_num_threads();
 
-    let seed_opcounts: &[usize] = &[1, 2, 4, 8, 16, 32];
-    let mut sweep: Vec<(f64, f64, f64)> = Vec::new(); // (opcount, gflops_s, gib_s)
-    for &s in seed_opcounts {
-        sweep.push(probe_opcount(
-            s,
+    let seed_ais: &[usize] = &[1, 2, 4, 8, 16, 32];
+    let mut sweep: Vec<(f64, f64, f64)> = Vec::new(); // (ai, gflops_s, gib_s)
+    for &target_ai in seed_ais {
+        sweep.push(probe_ai(
+            target_ai,
             spec,
             N_QUBITS_SV,
             n_threads,
@@ -55,19 +55,23 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
         if roofline_r2(&sweep, knee, c_slope) >= R2_THRESHOLD {
             break;
         }
-        // Candidate opcounts bracketing [knee/2, knee*1.5]; skip duplicates.
+        // Candidate arithmetic intensities bracketing [knee/2, knee*1.5]; skip duplicates.
         let candidates: Vec<usize> = [knee * 0.5, knee, knee * 1.5]
             .iter()
             .map(|&v| (v.round() as usize).max(1))
-            .filter(|&s| !sweep.iter().any(|(o, _, _)| (*o - s as f64).abs() < 0.5))
+            .filter(|&ai| {
+                !sweep
+                    .iter()
+                    .any(|(measured_ai, _, _)| (*measured_ai - ai as f64).abs() < 0.5)
+            })
             .take(MAX_NEW_POINTS_PER_ROUND)
             .collect();
         if candidates.is_empty() {
             break;
         }
-        for s in candidates {
-            sweep.push(probe_opcount(
-                s,
+        for target_ai in candidates {
+            sweep.push(probe_ai(
+                target_ai,
                 spec,
                 N_QUBITS_SV,
                 n_threads,
@@ -78,25 +82,25 @@ pub fn measure_cpu_profile(spec: &CPUKernelGenSpec) -> anyhow::Result<HardwarePr
         sweep.sort_by(|a, b| a.0.total_cmp(&b.0));
     }
 
-    let (knee_opcount, _) = fit_knee(&sweep);
+    let (knee_ai, _) = fit_knee(&sweep);
     let peak_bw_gib_s = sweep.iter().map(|(_, _, g)| *g).fold(0.0_f64, f64::max);
-    Ok(HardwareProfile::from_fit(knee_opcount, peak_bw_gib_s))
+    Ok(HardwareProfile::from_fit(knee_ai, peak_bw_gib_s))
 }
 
 /// Times a JIT kernel for a synthetic gate with the given sparsity `s`
-/// (nonzeros per row → opcount = s for real-only matrices).
+/// (nonzeros per row → arithmetic intensity = s for real-only matrices).
 ///
-/// Returns `(actual_opcount, gflops_s, gib_s)`.
-fn probe_opcount(
-    s: usize,
+/// Returns `(actual_ai, gflops_s, gib_s)`.
+fn probe_ai(
+    target_ai: usize,
     spec: &CPUKernelGenSpec,
     n_qubits_sv: usize,
     n_threads: usize,
     n_warmup: usize,
     n_iters: usize,
 ) -> anyhow::Result<(f64, f64, f64)> {
-    let gate = make_sparse_real_gate(k_for_sparsity(s), s);
-    let actual_opcount = gate.opcount(spec.ztol);
+    let gate = make_sparse_real_gate(k_for_sparsity(target_ai), target_ai);
+    let actual_ai = gate.arithmatic_intensity(spec.ztol);
     let n =
         n_qubits_sv.max(gate.n_qubits() + super::get_simd_s(spec.simd_width, spec.precision) + 1);
 
@@ -116,8 +120,8 @@ fn probe_opcount(
     let mean_s = t.elapsed().as_secs_f64() / n_iters as f64;
 
     let gib_s = 2.0 * sv.byte_len() as f64 / mean_s / (1u64 << 30) as f64;
-    let gflops_s = actual_opcount * sv.len() as f64 * 2.0 / mean_s / 1e9;
-    Ok((actual_opcount, gflops_s, gib_s))
+    let gflops_s = actual_ai * sv.len() as f64 * 2.0 / mean_s / 1e9;
+    Ok((actual_ai, gflops_s, gib_s))
 }
 
 /// Minimum qubit count `k` such that a gate with `s` nonzeros per row fits
@@ -131,7 +135,7 @@ fn k_for_sparsity(s: usize) -> usize {
 
 /// Builds a `k`-qubit gate with exactly `s` nonzero real entries per row.
 /// Nonzeros at consecutive columns starting at `(row + n/2) % n`, giving
-/// `opcount(ztol=0) = s`. Intended for throughput measurement only.
+/// `arithmatic_intensity(ztol=0) = s`. Intended for throughput measurement only.
 fn make_sparse_real_gate(k: usize, s: usize) -> QuantumGate {
     let n = 1 << k;
     let s = s.min(n);
@@ -151,14 +155,14 @@ fn make_sparse_real_gate(k: usize, s: usize) -> QuantumGate {
     QuantumGate::new(m, (0..k as u32).collect())
 }
 
-/// Fits the roofline model to `(opcount, gflops_s, gib_s)` data.
+/// Fits the roofline model to `(ai, gflops_s, gib_s)` data.
 ///
-/// Returns `(knee_opcount, c_slope)` where `c_slope` is GFLOPs/s per opcount
+/// Returns `(knee_ai, c_slope)` where `c_slope` is GFLOPs/s per unit of arithmetic intensity
 /// in the memory-bound regime (slope of the linear region).
 fn fit_knee(sweep: &[(f64, f64, f64)]) -> (f64, f64) {
     let n = sweep.len();
     let lower = &sweep[..(n + 1) / 2];
-    let mut ratios: Vec<f64> = lower.iter().map(|(op, g, _)| g / op).collect();
+    let mut ratios: Vec<f64> = lower.iter().map(|(ai, g, _)| g / ai).collect();
     ratios.sort_by(|a, b| a.total_cmp(b));
     let c_slope = ratios[ratios.len() / 2];
     let peak_gflops = sweep.iter().map(|(_, g, _)| *g).fold(0.0_f64, f64::max);
@@ -170,7 +174,7 @@ fn fit_knee(sweep: &[(f64, f64, f64)]) -> (f64, f64) {
     (knee, c_slope)
 }
 
-/// R² of the piecewise roofline fit `gflops_pred = min(c_slope*op, c_slope*knee)`.
+/// R² of the piecewise roofline fit `gflops_pred = min(c_slope*ai, c_slope*knee)`.
 fn roofline_r2(sweep: &[(f64, f64, f64)], knee: f64, c_slope: f64) -> f64 {
     let peak = c_slope * knee;
     let gflops: Vec<f64> = sweep.iter().map(|(_, g, _)| *g).collect();
@@ -181,7 +185,7 @@ fn roofline_r2(sweep: &[(f64, f64, f64)], knee: f64, c_slope: f64) -> f64 {
     }
     let ss_res: f64 = sweep
         .iter()
-        .map(|(op, g, _)| (g - (c_slope * op).min(peak)).powi(2))
+        .map(|(ai, g, _)| (g - (c_slope * ai).min(peak)).powi(2))
         .sum();
     1.0 - ss_res / ss_tot
 }

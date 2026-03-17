@@ -1,8 +1,8 @@
 //! Computation-memory balance analysis for JIT gate simulation kernels.
 //!
-//! Sweeps gate size and density (opcount) from purely memory-bound
+//! Sweeps gate size and density (arithmetic intensity) from purely memory-bound
 //! (random sparse gates with one nonzero scalar per row) to compute-bound
-//! (dense random real gates up to 5 qubits, opcount up to 32), reporting
+//! (dense random real gates up to 5 qubits, arithmetic intensity up to 32), reporting
 //! GiB/s, GFLOPs/s, and timing variance side-by-side so the roofline
 //! crossover is visible.
 //!
@@ -17,8 +17,8 @@
 //! ## Metric
 //!
 //! ```text
-//! opcount  = scalar_nnz(M) / edge_size(M)   (re and im parts counted separately)
-//! FLOPs    = opcount × |ψ| × 2              (2 real FLOPs per nonzero scalar component)
+//! ai       = scalar_nnz(M) / edge_size(M)   (re and im parts counted separately)
+//! FLOPs    = ai × |ψ| × 2                   (2 real FLOPs per nonzero scalar component)
 //! GFLOPs/s = FLOPs / mean_time
 //! GiB/s    = 2 × sv_bytes / mean_time   (read + write every amplitude once)
 //! CV       = stddev / mean              (coefficient of variation; scale-free noise)
@@ -35,101 +35,78 @@
 use anyhow::Result;
 use cast::cpu;
 use cast::types::{Complex, ComplexSquareMatrix, Precision, QuantumGate};
+use clap::{Parser, ValueEnum};
 use rand::Rng;
 use std::time::Instant;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+#[value(rename_all = "lower")]
+enum CliPrecision {
+    F32,
+    F64,
+}
+
+impl From<CliPrecision> for Precision {
+    fn from(value: CliPrecision) -> Self {
+        match value {
+            CliPrecision::F32 => Precision::F32,
+            CliPrecision::F64 => Precision::F64,
+        }
+    }
+}
+
+#[derive(Parser, Debug)]
+#[command(name = "cpu_crossover")]
 struct Args {
+    /// log2 of statevector length
+    #[arg(long, default_value_t = 20)]
     n_qubits: usize,
-    /// `None` → C++ picks `hardware_concurrency`.
-    n_threads: Option<usize>,
-    precision: Precision,
+
+    /// worker threads; 0 = hardware_concurrency
+    #[arg(long = "threads", default_value_t = 1)]
+    threads: usize,
+
+    #[arg(long, value_enum, default_value_t = CliPrecision::F64)]
+    precision: CliPrecision,
+
+    #[arg(skip = cpu::SimdWidth::W128)]
     simd_width: cpu::SimdWidth,
+
     /// Total wall-time budget for the entire sweep (seconds).
+    #[arg(long, default_value_t = 120.0)]
     budget_secs: f64,
+
     /// Minimum timed iterations per gate regardless of budget.
+    #[arg(long, default_value_t = 5)]
     min_iters: usize,
+
     /// Warmup iterations (not timed, not counted toward budget).
+    #[arg(long, default_value_t = 3)]
     n_warmup: usize,
 }
 
-impl Default for Args {
-    fn default() -> Self {
-        Self {
-            n_qubits: 20,
-            n_threads: Some(1),
-            precision: Precision::F64,
-            simd_width: cpu::SimdWidth::W128,
-            budget_secs: 120.0,
-            min_iters: 5,
-            n_warmup: 3,
-        }
-    }
-}
-
 impl Args {
-    fn parse() -> Result<Self> {
-        let mut a = Self::default();
-        let mut it = std::env::args().skip(1);
-        while let Some(flag) = it.next() {
-            let mut val = || {
-                it.next()
-                    .ok_or_else(|| anyhow::anyhow!("{flag} requires a value"))
-            };
-            match flag.as_str() {
-                "--n-qubits" => {
-                    a.n_qubits = val()?.parse()?;
-                }
-                "--n-warmup" => {
-                    a.n_warmup = val()?.parse()?;
-                }
-                "--min-iters" => {
-                    a.min_iters = val()?.parse()?;
-                }
-                "--budget-secs" => {
-                    a.budget_secs = val()?.parse()?;
-                }
-                "--threads" => {
-                    let n: usize = val()?.parse()?;
-                    a.n_threads = if n == 0 { None } else { Some(n) };
-                }
-                "--precision" => {
-                    a.precision = match val()?.as_str() {
-                        "f32" => Precision::F32,
-                        "f64" => Precision::F64,
-                        s => anyhow::bail!("unknown precision {s:?}; want f32 or f64"),
-                    };
-                }
-                "--help" | "-h" => {
-                    println!("Usage: cpu_crossover [OPTIONS]");
-                    println!();
-                    println!("  --n-qubits N      log2 of statevector length  (default: 20 → 16 MiB for f64)");
-                    println!("  --threads N       worker threads; 0 = hardware_concurrency  (default: 1)");
-                    println!("  --precision P     f32 or f64  (default: f64)");
-                    println!(
-                        "  --budget-secs T   total wall-time budget in seconds  (default: 120)"
-                    );
-                    println!("  --min-iters N     minimum timed samples per gate  (default: 5)");
-                    println!("  --n-warmup N      warmup iterations before timing  (default: 3)");
-                    std::process::exit(0);
-                }
-                other => anyhow::bail!("unknown flag {other:?}; run with --help"),
-            }
+    fn n_threads(&self) -> Option<usize> {
+        if self.threads == 0 {
+            None
+        } else {
+            Some(self.threads)
         }
-        Ok(a)
     }
 
     fn spec(&self) -> cpu::CPUKernelGenSpec {
+        let precision: Precision = self.precision.into();
         cpu::CPUKernelGenSpec {
-            precision: self.precision,
+            precision,
             simd_width: self.simd_width,
             mode: cpu::MatrixLoadMode::ImmValue,
-            ztol: match self.precision {
+            ztol: match precision {
                 Precision::F32 => 1e-6,
                 Precision::F64 => 1e-12,
             },
-            otol: match self.precision {
+            otol: match precision {
                 Precision::F32 => 1e-6,
                 Precision::F64 => 1e-12,
             },
@@ -138,8 +115,8 @@ impl Args {
 
     fn scalar_size(&self) -> usize {
         match self.precision {
-            Precision::F32 => 4,
-            Precision::F64 => 8,
+            CliPrecision::F32 => 4,
+            CliPrecision::F64 => 8,
         }
     }
 }
@@ -151,12 +128,12 @@ struct Case {
     gate: QuantumGate,
 }
 
-/// Sweeps opcount 1 → 32 using only generated dense and sparse matrices.
+/// Sweeps arithmetic intensity 1 → 32 using only generated dense and sparse matrices.
 ///
-/// Dense cases use full real matrices so `opcount = edge_size = 2^k`
-/// exactly. Sparse cases use `s` real nonzeros per row so `opcount = s`
+/// Dense cases use full real matrices so `ai = edge_size = 2^k`
+/// exactly. Sparse cases use `s` real nonzeros per row so `ai = s`
 /// exactly. This keeps the plotted x-axis aligned with the actual metric
-/// reported by `QuantumGate::opcount`.
+/// reported by `QuantumGate::arithmatic_intensity`.
 fn gate_sweep() -> Vec<Case> {
     let mut cases = Vec::new();
 
@@ -192,10 +169,10 @@ fn dense_real(k: usize) -> QuantumGate {
 
 /// Builds a k-qubit gate matrix with exactly `s` nonzero real entries per row.
 ///
-/// Using real-only coefficients makes `opcount = s` exactly:
+/// Using real-only coefficients makes `ai = s` exactly:
 ///
 /// `scalar_nnz(M) = n_rows × s`, `edge_size(M) = n_rows`, so
-/// `opcount = scalar_nnz / edge_size = s`.
+/// `ai = scalar_nnz / edge_size = s`.
 ///
 /// The matrix is intentionally non-unitary; this tool measures kernel
 /// throughput, not physical validity.
@@ -303,38 +280,38 @@ struct Row {
     label: String,
     k: usize,
     nnz: usize,
-    opcount: f64,
+    ai: f64,
     timing: Timing,
     gib_s: f64,
     gflops_s: f64,
 }
 
-struct OpcountBucket {
-    opcount: f64,
+struct AiBucket {
+    ai: f64,
     mean_gflops_s: f64,
     max_k: usize,
 }
 
-fn opcount_buckets(rows: &[Row]) -> Vec<OpcountBucket> {
-    const OPCOUNT_EPS: f64 = 1e-9;
+fn ai_buckets(rows: &[Row]) -> Vec<AiBucket> {
+    const AI_EPS: f64 = 1e-9;
 
     let mut buckets = Vec::new();
     let mut i = 0;
     while i < rows.len() {
-        let opcount = rows[i].opcount;
+        let ai = rows[i].ai;
         let mut sum_gflops = 0.0;
         let mut count = 0usize;
         let mut max_k = rows[i].k;
 
-        while i < rows.len() && (rows[i].opcount - opcount).abs() < OPCOUNT_EPS {
+        while i < rows.len() && (rows[i].ai - ai).abs() < AI_EPS {
             sum_gflops += rows[i].gflops_s;
             count += 1;
             max_k = max_k.max(rows[i].k);
             i += 1;
         }
 
-        buckets.push(OpcountBucket {
-            opcount,
+        buckets.push(AiBucket {
+            ai,
             mean_gflops_s: sum_gflops / count as f64,
             max_k,
         });
@@ -346,10 +323,10 @@ fn opcount_buckets(rows: &[Row]) -> Vec<OpcountBucket> {
 fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
     let spec = args.spec();
     let k = case.gate.n_qubits();
-    let opcount = case.gate.opcount(spec.ztol);
+    let ai = case.gate.arithmatic_intensity(spec.ztol);
     let n = case.gate.matrix().edge_size();
-    // scalar_nnz = opcount × edge_size; recover as integer for display
-    let scalar_nnz = (opcount * n as f64).round() as usize;
+    // scalar_nnz = ai × edge_size; recover as integer for display
+    let scalar_nnz = (ai * n as f64).round() as usize;
 
     let mut gen = cpu::CPUKernelGenerator::new()?;
     let kid = gen.generate(&spec, case.gate.matrix().data(), case.gate.qubits())?;
@@ -362,20 +339,20 @@ fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
         &mut jit,
         kid,
         &mut sv,
-        args.n_threads,
+        args.n_threads(),
         args.n_warmup,
         args.min_iters,
         per_gate_budget_s,
     );
 
     let gib_s = 2.0 * sv.byte_len() as f64 / timing.mean_s / (1u64 << 30) as f64;
-    let gflops_s = opcount * sv.len() as f64 * 2.0 / timing.mean_s / 1e9;
+    let gflops_s = ai * sv.len() as f64 * 2.0 / timing.mean_s / 1e9;
 
     Ok(Row {
         label: case.label.clone(),
         k,
         nnz: scalar_nnz,
-        opcount,
+        ai,
         timing,
         gib_s,
         gflops_s,
@@ -386,7 +363,7 @@ fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
 
 fn print_report(rows: &[Row], args: &Args) {
     let sv_mib = (1usize << args.n_qubits) * args.scalar_size() * 2 / (1 << 20);
-    let threads = match args.n_threads {
+    let threads = match args.n_threads() {
         Some(n) => n.to_string(),
         None => "auto (hardware_concurrency)".to_string(),
     };
@@ -409,23 +386,23 @@ fn print_report(rows: &[Row], args: &Args) {
         args.budget_secs / rows.len() as f64,
     );
     println!("  FLOPs/scalar : 2 real  (1×mul + 1×add per nonzero scalar component)");
-    println!("  opcount      : scalar_nnz(M) / edge_size(M) — re and im parts counted separately");
+    println!("  ai           : scalar_nnz(M) / edge_size(M) — re and im parts counted separately");
     println!("  CV           : stddev / mean — scale-free timing noise");
     println!();
 
     // ── Performance table ─────────────────────────────────────────────────────
     println!(
         "  {:<32}  {:>2}  {:>5}  {:>7}  {:>10}  {:>9}  {:>10}  {:>8}",
-        "gate", "k", "snnz", "opcount", "mean (ms)", "GiB/s", "GFLOPs/s", "regime",
+        "gate", "k", "snnz", "ai", "mean (ms)", "GiB/s", "GFLOPs/s", "regime",
     );
     println!("  {line}");
 
-    let buckets = opcount_buckets(rows);
+    let buckets = ai_buckets(rows);
     let first = buckets.first().unwrap();
-    let gflops_per_opcount = first.mean_gflops_s / first.opcount;
+    let gflops_per_ai = first.mean_gflops_s / first.ai;
 
     for row in rows {
-        let expected_linear = gflops_per_opcount * row.opcount;
+        let expected_linear = gflops_per_ai * row.ai;
         let regime = if row.gflops_s >= expected_linear * 0.85 {
             "mem-bound"
         } else {
@@ -437,7 +414,7 @@ fn print_report(rows: &[Row], args: &Args) {
             row.label,
             row.k,
             row.nnz,
-            row.opcount,
+            row.ai,
             row.timing.mean_s * 1e3,
             row.gib_s,
             row.gflops_s,
@@ -474,34 +451,34 @@ fn print_report(rows: &[Row], args: &Args) {
     // ── Summary ───────────────────────────────────────────────────────────────
     let peak_gib = rows.iter().map(|r| r.gib_s).fold(0.0_f64, f64::max);
     let peak_gflops = rows.iter().map(|r| r.gflops_s).fold(0.0_f64, f64::max);
-    let knee = peak_gflops / gflops_per_opcount;
+    let knee_ai = peak_gflops / gflops_per_ai;
 
     let mut prev_bucket_regime = "";
-    let mut prev_bucket_opcount = 0.0_f64;
+    let mut prev_bucket_ai = 0.0_f64;
     let mut crossover: Option<(f64, f64, usize)> = None;
     for bucket in &buckets {
-        let expected_linear = gflops_per_opcount * bucket.opcount;
+        let expected_linear = gflops_per_ai * bucket.ai;
         let regime = if bucket.mean_gflops_s >= expected_linear * 0.85 {
             "mem-bound"
         } else {
             "compute↑"
         };
         if prev_bucket_regime == "mem-bound" && regime == "compute↑" && crossover.is_none() {
-            crossover = Some((prev_bucket_opcount, bucket.opcount, bucket.max_k));
+            crossover = Some((prev_bucket_ai, bucket.ai, bucket.max_k));
         }
         prev_bucket_regime = regime;
-        prev_bucket_opcount = bucket.opcount;
+        prev_bucket_ai = bucket.ai;
     }
 
     println!();
     println!("  Peak memory bandwidth  : {peak_gib:.1} GiB/s");
     println!("  Peak compute observed  : {peak_gflops:.1} GFLOPs/s");
-    println!("  Roofline knee (est.)   : opcount ≈ {knee:.1}");
+    println!("  Roofline knee (est.)   : ai ≈ {knee_ai:.1}");
 
-    if let Some((op_before, op_after, k)) = crossover {
+    if let Some((ai_before, ai_after, k)) = crossover {
         println!();
         println!(
-            "  ⚑ Crossover: mem-bound → compute-bound between opcount {op_before:.0}–{op_after:.0} ({k}-qubit gate)",
+            "  ⚑ Crossover: mem-bound → compute-bound between ai {ai_before:.0}–{ai_after:.0} ({k}-qubit gate)",
         );
     } else {
         println!();
@@ -513,7 +490,7 @@ fn print_report(rows: &[Row], args: &Args) {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
-    let args = Args::parse()?;
+    let args = Args::parse();
 
     let cases = gate_sweep();
     let per_gate_budget = args.budget_secs / cases.len() as f64;
@@ -521,7 +498,10 @@ fn main() -> Result<()> {
 
     eprintln!(
         "Balance sweep: n_qubits={} ({} MiB, {:?}), threads={:?}",
-        args.n_qubits, sv_mib, args.precision, args.n_threads,
+        args.n_qubits,
+        sv_mib,
+        args.precision,
+        args.n_threads(),
     );
     eprintln!(
         "Budget: {:.0}s total → {:.1}s per gate  (≥{} iters, {} warmup)",
@@ -546,8 +526,7 @@ fn main() -> Result<()> {
     }
 
     rows.sort_by(|a, b| {
-        a.opcount
-            .total_cmp(&b.opcount)
+        a.ai.total_cmp(&b.ai)
             .then_with(|| a.k.cmp(&b.k))
             .then_with(|| a.label.cmp(&b.label))
     });

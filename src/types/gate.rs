@@ -125,12 +125,12 @@ impl QuantumGate {
     /// out_im += M_re * in_im  (if M_re > ztol)
     /// out_im += M_im * in_re  (if M_im > ztol)
     ///
-    /// FLOPs = opcount × |ψ| × 2
+    /// FLOPs = arithmetic_intensity × |ψ| × 2
     /// ```
     ///
     /// Using complex-entry nnz with a fixed ×8 factor would overcount by 2×
     /// for purely real matrices (X, CX, H, …) where `M_im = 0` throughout.
-    pub fn opcount(&self, ztol: f64) -> f64 {
+    pub fn arithmatic_intensity(&self, ztol: f64) -> f64 {
         let scalar_nnz = self
             .matrix
             .data()
