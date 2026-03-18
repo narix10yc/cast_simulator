@@ -6,6 +6,7 @@
 
 #include <llvm/Support/Error.h>
 
+#include <algorithm>
 #include <exception>
 #include <memory>
 #include <string>
@@ -13,14 +14,19 @@
 
 using namespace cast_cuda_detail;
 
-// ── Opaque struct body (generator only; session body lives in cuda_jit.h) ────
+// ── Opaque struct bodies ──────────────────────────────────────────────────────
 
 struct cast_cuda_kernel_generator_t {
   std::vector<CastCudaGeneratedKernel> kernels{};
   cast_cuda_kernel_id_t next_kernel_id = 0;
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// Compilation session stores kernels in insertion order for O(1) indexed access.
+struct cast_cuda_compilation_session_t {
+  std::vector<CastCudaCompiledKernel> kernels{};
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 namespace {
 
@@ -38,13 +44,14 @@ const CastCudaCompiledKernel *find_compiled(
     const cast_cuda_compilation_session_t *session,
     cast_cuda_kernel_id_t kernel_id) {
   if (!session) return nullptr;
-  auto it = session->kernels.find(kernel_id);
-  return (it != session->kernels.end()) ? &it->second : nullptr;
+  for (const auto &k : session->kernels)
+    if (k.kernel_id == kernel_id) return &k;
+  return nullptr;
 }
 
 } // namespace
 
-// ── Generator ────────────────────────────────────────────────────────────────
+// ── Generator ─────────────────────────────────────────────────────────────────
 
 extern "C" cast_cuda_kernel_generator_t *
 cast_cuda_kernel_generator_new(void) {
@@ -83,12 +90,12 @@ cast_cuda_kernel_generator_generate(cast_cuda_kernel_generator_t *generator,
 
   try {
     CastCudaGeneratedKernel kernel;
-    kernel.kernel_id    = generator->next_kernel_id++;
+    kernel.kernel_id     = generator->next_kernel_id++;
     kernel.n_gate_qubits = static_cast<uint32_t>(n_qubits);
-    kernel.spec         = *spec;
-    kernel.func_name    = "k_" + std::to_string(kernel.kernel_id);
-    kernel.context   = std::make_unique<llvm::LLVMContext>();
-    kernel.module    = std::make_unique<llvm::Module>(
+    kernel.spec          = *spec;
+    kernel.func_name     = "k_" + std::to_string(kernel.kernel_id);
+    kernel.context       = std::make_unique<llvm::LLVMContext>();
+    kernel.module        = std::make_unique<llvm::Module>(
         kernel.func_name + "_module", *kernel.context);
 
     auto func = cast_cuda_generate_kernel_ir(
@@ -132,15 +139,13 @@ cast_cuda_kernel_generator_emit_ir(cast_cuda_kernel_generator_t *generator,
     return 1;
   }
 
-  // Optimize (idempotent); populates kernel->ir.
   if (auto err = cast_cuda_optimize_kernel_ir(*kernel)) {
     write_error_message(err_buf, err_buf_len, llvm::toString(std::move(err)));
     return 1;
   }
 
   const std::string &ir = kernel->ir;
-  if (out_ir_len != nullptr)
-    *out_ir_len = ir.size();
+  if (out_ir_len != nullptr) *out_ir_len = ir.size();
 
   if (out_ir != nullptr && ir_buf_len > 0) {
     const size_t n = std::min(ir_buf_len - 1, ir.size());
@@ -179,8 +184,7 @@ cast_cuda_kernel_generator_finish(cast_cuda_kernel_generator_t *generator,
         delete session;
         return 1;
       }
-      const auto kid = compiled.kernel_id;
-      session->kernels.emplace(kid, std::move(compiled));
+      session->kernels.push_back(std::move(compiled));
     }
 
     *out_session = session;
@@ -197,7 +201,43 @@ cast_cuda_kernel_generator_finish(cast_cuda_kernel_generator_t *generator,
   }
 }
 
-// ── Compilation session ───────────────────────────────────────────────────────
+// ── Compilation session — indexed accessors ───────────────────────────────────
+
+extern "C" uint32_t
+cast_cuda_compilation_session_n_kernels(
+    const cast_cuda_compilation_session_t *session) {
+  return session ? static_cast<uint32_t>(session->kernels.size()) : 0u;
+}
+
+extern "C" cast_cuda_kernel_id_t
+cast_cuda_compilation_session_kernel_id_at(
+    const cast_cuda_compilation_session_t *session, uint32_t idx) {
+  return (session && idx < session->kernels.size())
+      ? session->kernels[idx].kernel_id : 0;
+}
+
+extern "C" uint32_t
+cast_cuda_compilation_session_n_gate_qubits_at(
+    const cast_cuda_compilation_session_t *session, uint32_t idx) {
+  return (session && idx < session->kernels.size())
+      ? session->kernels[idx].n_gate_qubits : 0;
+}
+
+extern "C" uint8_t
+cast_cuda_compilation_session_precision_at(
+    const cast_cuda_compilation_session_t *session, uint32_t idx) {
+  return (session && idx < session->kernels.size())
+      ? static_cast<uint8_t>(session->kernels[idx].precision) : 0;
+}
+
+extern "C" const char *
+cast_cuda_compilation_session_func_name_at(
+    const cast_cuda_compilation_session_t *session, uint32_t idx) {
+  return (session && idx < session->kernels.size())
+      ? session->kernels[idx].func_name.c_str() : nullptr;
+}
+
+// ── Compilation session — PTX / cubin extraction ─────────────────────────────
 
 extern "C" int
 cast_cuda_compilation_session_emit_ptx(
@@ -217,8 +257,7 @@ cast_cuda_compilation_session_emit_ptx(
   }
 
   const std::string &ptx = kernel->ptx;
-  if (out_ptx_len != nullptr)
-    *out_ptx_len = ptx.size();
+  if (out_ptx_len != nullptr) *out_ptx_len = ptx.size();
 
   if (out_ptx != nullptr && ptx_buf_len > 0) {
     const size_t n = std::min(ptx_buf_len - 1, ptx.size());
@@ -248,8 +287,7 @@ cast_cuda_compilation_session_emit_cubin(
   }
 
   const auto &cubin = kernel->cubin;
-  if (out_cubin_len != nullptr)
-    *out_cubin_len = cubin.size();
+  if (out_cubin_len != nullptr) *out_cubin_len = cubin.size();
 
   if (out_cubin != nullptr && cubin_buf_len > 0) {
     const size_t n = std::min(cubin_buf_len, cubin.size());

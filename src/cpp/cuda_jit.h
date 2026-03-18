@@ -9,7 +9,6 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 /// IR generated for one kernel, not yet compiled.
@@ -33,12 +32,6 @@ struct CastCudaCompiledKernel {
   std::string            func_name{};
   std::string            ptx{};
   std::vector<uint8_t>   cubin{};
-};
-
-/// Compilation session: keyed by kernel_id for O(1) lookup.
-/// Defined here (not in cuda.cpp) so cuda_exec.cpp can access the kernels map.
-struct cast_cuda_compilation_session_t {
-  std::unordered_map<cast_cuda_kernel_id_t, CastCudaCompiledKernel> kernels{};
 };
 
 /// Runs O1 with the NVPTX target machine, caches the IR text, sets
