@@ -10,8 +10,7 @@
 
 namespace cast_cuda_detail {
 
-inline void write_error_message(char *err_buf, size_t err_buf_len,
-                                const std::string &msg) {
+inline void write_error_message(char *err_buf, size_t err_buf_len, const std::string &msg) {
   if (err_buf == nullptr || err_buf_len == 0)
     return;
   const size_t n = std::min(err_buf_len - 1, msg.size());

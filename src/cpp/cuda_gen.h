@@ -18,12 +18,8 @@ class StringRef;
 /// where each GPU thread processes a strided slice of the "combos"
 /// (amplitude index combinations).  For ImmValue mode the matrix pointer
 /// is unused at runtime — all matrix elements are baked as constants.
-llvm::Expected<llvm::Function *>
-cast_cuda_generate_kernel_ir(const cast_cuda_kernel_gen_spec_t &spec,
-                             const cast_cuda_complex64_t *matrix,
-                             size_t matrix_len,
-                             const uint32_t *qubits, size_t n_qubits,
-                             llvm::StringRef func_name,
-                             llvm::Module &module);
+llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
+    const cast_cuda_kernel_gen_spec_t &spec, const cast_cuda_complex64_t *matrix, size_t matrix_len,
+    const uint32_t *qubits, size_t n_qubits, llvm::StringRef func_name, llvm::Module &module);
 
 #endif // CAST_SIMULATOR_SRC_CPP_CUDA_GEN_H

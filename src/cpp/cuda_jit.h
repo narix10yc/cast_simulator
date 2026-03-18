@@ -3,6 +3,7 @@
 
 #include "cuda.h"
 
+#include <cstdint>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Error.h>
@@ -12,25 +13,22 @@
 #include <vector>
 
 /// IR generated for one kernel, not yet compiled.
-/// Owned by cast_cuda_kernel_generator_t; moved out during finish().
 struct CastCudaGeneratedKernel {
   cast_cuda_kernel_gen_spec_t spec{};
-  cast_cuda_kernel_id_t       kernel_id = 0;
-  uint32_t                    n_gate_qubits = 0;
-  std::string                 func_name{};
+  uint32_t n_gate_qubits = 0;
+  std::string func_name{};
   std::unique_ptr<llvm::LLVMContext> context{};
-  std::unique_ptr<llvm::Module>      module{};
-  std::string ir{};      ///< cached after cast_cuda_optimize_kernel_ir
-  bool        optimized = false;
+  std::unique_ptr<llvm::Module> module{};
+  std::string ir{}; ///< cached after cast_cuda_optimize_kernel_ir
+  bool optimized = false;
 };
 
 /// Result of compiling one kernel: PTX text.
 struct CastCudaCompiledKernel {
-  cast_cuda_kernel_id_t  kernel_id = 0;
-  uint32_t               n_gate_qubits = 0;
-  cast_cuda_precision_t  precision = CAST_CUDA_PRECISION_F64;
-  std::string            func_name{};
-  std::string            ptx{};
+  uint32_t n_gate_qubits = 0;
+  cast_cuda_precision_t precision = CAST_CUDA_PRECISION_F64;
+  std::string func_name{};
+  std::string ptx{};
 };
 
 /// Runs O1 with the NVPTX target machine, caches the IR text, sets
@@ -40,6 +38,6 @@ llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated);
 /// Full pipeline: optimize → PTX (via NVPTX addPassesToEmitFile).
 /// On success the compiled data lives in `out`.
 llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
-                                     CastCudaCompiledKernel  &out);
+                                     CastCudaCompiledKernel &out);
 
 #endif // CAST_SIMULATOR_SRC_CPP_CUDA_JIT_H

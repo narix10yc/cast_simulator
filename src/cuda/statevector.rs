@@ -1,8 +1,45 @@
+use std::ffi::c_char;
 use std::fmt;
 
 use super::error_from_buf;
-use super::ffi;
 use super::types::{CudaPrecision, ERR_BUF_LEN};
+
+mod ffi {
+    use std::ffi::c_char;
+
+    unsafe extern "C" {
+        pub fn cast_cuda_sv_alloc(
+            n_elements: usize,
+            precision: u8,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> u64;
+        pub fn cast_cuda_sv_free(dptr: u64);
+        pub fn cast_cuda_sv_zero(
+            dptr: u64,
+            n_elements: usize,
+            precision: u8,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+        pub fn cast_cuda_sv_upload(
+            dptr: u64,
+            host_data: *const f64,
+            n_elements: usize,
+            precision: u8,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+        pub fn cast_cuda_sv_download(
+            dptr: u64,
+            host_data: *mut f64,
+            n_elements: usize,
+            precision: u8,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+    }
+}
 
 /// A statevector allocated in GPU device memory.
 ///
@@ -38,7 +75,7 @@ impl CudaStatevector {
     /// Allocates a device statevector for `2^n_qubits` complex amplitudes.
     pub fn new(n_qubits: u32, precision: CudaPrecision) -> anyhow::Result<Self> {
         let n_elements = 2usize << n_qubits; // 2 * 2^n_qubits
-        let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let dptr = unsafe {
             ffi::cast_cuda_sv_alloc(
                 n_elements,
@@ -78,7 +115,7 @@ impl CudaStatevector {
 
     /// Sets the device statevector to the `|0⟩` computational basis state.
     pub fn zero(&mut self) -> anyhow::Result<()> {
-        let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let status = unsafe {
             ffi::cast_cuda_sv_zero(
                 self.dptr,
@@ -107,7 +144,7 @@ impl CudaStatevector {
             );
         }
         let flat: Vec<f64> = data.iter().flat_map(|&(re, im)| [re, im]).collect();
-        let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let status = unsafe {
             ffi::cast_cuda_sv_upload(
                 self.dptr,
@@ -128,7 +165,7 @@ impl CudaStatevector {
     /// Downloads all amplitudes to the host as `(re, im)` pairs.
     pub fn download(&self) -> anyhow::Result<Vec<(f64, f64)>> {
         let mut flat = vec![0.0f64; self.n_elements];
-        let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let status = unsafe {
             ffi::cast_cuda_sv_download(
                 self.dptr,

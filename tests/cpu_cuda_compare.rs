@@ -15,10 +15,7 @@
 
 use cast::{
     cpu::{CPUKernelGenSpec, CPUKernelGenerator, CPUStatevector, MatrixLoadMode, SimdWidth},
-    cuda::{
-        query_device_sm, CudaJitSession, CudaKernelGenSpec, CudaKernelGenerator, CudaPrecision,
-        CudaStatevector,
-    },
+    cuda::{device_sm, CudaKernelGenSpec, CudaKernelManager, CudaPrecision, CudaStatevector},
     types::{Complex, ComplexSquareMatrix, Precision, QuantumGate},
 };
 
@@ -38,7 +35,7 @@ fn cpu_spec() -> CPUKernelGenSpec {
 }
 
 fn cuda_spec() -> CudaKernelGenSpec {
-    let (sm_major, sm_minor) = query_device_sm().expect("query device SM");
+    let (sm_major, sm_minor) = device_sm().expect("query device SM");
     CudaKernelGenSpec {
         precision: CudaPrecision::F64,
         ztol: 1e-12,
@@ -51,9 +48,6 @@ fn cuda_spec() -> CudaKernelGenSpec {
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 /// Builds a deterministic, normalised statevector of 2^n_qubits amplitudes.
-///
-/// Uses a simple formula so the state is non-trivial (non-zero in every
-/// component) and reproducible: `amp[i] = (i+1) + i*0.5i`, then normalised.
 fn seeded_state(n_qubits: usize) -> Vec<(f64, f64)> {
     let len = 1usize << n_qubits;
     let mut amps: Vec<(f64, f64)> = (0..len)
@@ -71,8 +65,7 @@ fn seeded_state(n_qubits: usize) -> Vec<(f64, f64)> {
     amps
 }
 
-/// Applies `gate` to an n-qubit statevector via the CPU JIT backend and returns
-/// all amplitudes as `(re, im)` pairs.
+/// Applies `gate` to an n-qubit statevector via the CPU JIT backend.
 fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let n_sv_qubits = init.len().trailing_zeros();
     let spec = cpu_spec();
@@ -89,29 +82,22 @@ fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     }
 
     jit.apply(kid, &mut sv, 1).expect("cpu: apply");
-
     sv.amplitudes().into_iter().map(|c| (c.re, c.im)).collect()
 }
 
-/// Applies `gate` to a CUDA device statevector initialised from `init` and
-/// returns all amplitudes downloaded to the host.
+/// Applies `gate` to a CUDA device statevector initialised from `init`.
 fn apply_cuda(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let n_sv_qubits = init.len().trailing_zeros();
-    let spec = cuda_spec();
-
-    let ffi_matrix: Vec<(f64, f64)> = gate.matrix().data().iter().map(|c| (c.re, c.im)).collect();
-
-    let mut gen = CudaKernelGenerator::new().expect("cuda: create generator");
-    let kid = gen
-        .generate(&spec, &ffi_matrix, gate.qubits())
+    let mgr = CudaKernelManager::new();
+    let kid = mgr
+        .generate(gate, cuda_spec())
         .expect("cuda: generate kernel");
-    let session = gen.compile().expect("cuda: compile");
-    let exec = CudaJitSession::new(&session).expect("cuda: create jit session");
 
     let mut sv = CudaStatevector::new(n_sv_qubits as u32, CudaPrecision::F64)
         .expect("cuda: alloc statevector");
     sv.upload(init).expect("cuda: upload");
-    exec.apply(kid, &mut sv).expect("cuda: apply");
+    mgr.apply(kid, &mut sv).expect("cuda: apply");
+    mgr.sync().expect("cuda: sync");
     sv.download().expect("cuda: download")
 }
 
@@ -134,8 +120,6 @@ fn assert_amps_close(cpu: &[(f64, f64)], cuda: &[(f64, f64)], label: &str, tol: 
              |Δ|={diff:.2e} > tol={tol:.2e}",
         );
     }
-    // Informational: uncomment to see max error per test:
-    // eprintln!("{label}: max |Δ| = {max_diff:.2e}");
     let _ = max_diff;
 }
 
@@ -151,8 +135,6 @@ fn compare(gate: QuantumGate, n_sv_qubits: u32, label: &str) {
 
 #[test]
 fn compare_h_gate_1qubit_sv() {
-    // The CPU F64/W128 layout requires n_sv ≥ n_gate + simd_s (= 1), so the
-    // minimum statevector for a 1-qubit gate is 2 qubits.
     compare(QuantumGate::h(0), 2, "H on 2-qubit SV");
 }
 
@@ -163,17 +145,14 @@ fn compare_x_gate_1qubit_sv() {
 
 #[test]
 fn compare_h_gate_on_larger_sv() {
-    // H on qubit 0 of an 8-qubit statevector.
     compare(QuantumGate::h(0), 8, "H on 8-qubit SV");
 }
 
 #[test]
 fn compare_h_gate_non_zero_qubit() {
-    // H targeting qubit 3 of a 6-qubit statevector.
     compare(QuantumGate::h(3), 6, "H[q3] on 6-qubit SV");
 }
 
-/// T gate: [[1,0],[0,e^{iπ/4}]] — exercises complex (non-real) matrix entries.
 #[test]
 fn compare_t_gate() {
     let s = std::f64::consts::FRAC_1_SQRT_2;
@@ -181,19 +160,17 @@ fn compare_t_gate() {
         Complex::new(1.0, 0.0),
         Complex::new(0.0, 0.0),
         Complex::new(0.0, 0.0),
-        Complex::new(s, s), // e^{iπ/4}
+        Complex::new(s, s),
     ];
     let gate = QuantumGate::new(ComplexSquareMatrix::from_vec(2, t_matrix), vec![0]);
     compare(gate, 5, "T gate");
 }
 
-/// Rx(θ) gate — arbitrary rotation, exercises non-trivial ImmValue constants.
 #[test]
 fn compare_rx_gate() {
     compare(QuantumGate::rx(std::f64::consts::PI / 3.0, 0), 5, "Rx(π/3)");
 }
 
-/// Rz(θ) gate — diagonal matrix.
 #[test]
 fn compare_rz_gate() {
     compare(QuantumGate::rz(std::f64::consts::PI / 5.0, 0), 5, "Rz(π/5)");
@@ -208,7 +185,6 @@ fn compare_cx_adjacent_qubits() {
 
 #[test]
 fn compare_cx_non_adjacent_qubits() {
-    // Control on qubit 0, target on qubit 4 — exercises non-contiguous bit scatter.
     compare(QuantumGate::cx(0, 4), 6, "CX(0,4) on 6-qubit SV");
 }
 
@@ -251,8 +227,6 @@ fn compare_haar_random_3qubit() {
 
 #[test]
 fn compare_h_gate_20qubit_sv() {
-    // 2^20 = 1 M amplitudes.  The persistent-grid loop ensures the CUDA kernel
-    // processes all of them even with a capped grid dimension.
     compare(QuantumGate::h(0), 20, "H on 20-qubit SV");
 }
 
@@ -261,10 +235,8 @@ fn compare_cx_gate_20qubit_sv() {
     compare(QuantumGate::cx(0, 19), 20, "CX(0,19) on 20-qubit SV");
 }
 
-// ── Sequential gates (statefulness check) ────────────────────────────────────
+// ── Sequential gates ──────────────────────────────────────────────────────────
 
-/// Apply two gates in sequence on both backends and compare the final state.
-/// This verifies that state is correctly updated in-place between applies.
 #[test]
 fn compare_sequential_h_then_x() {
     let n_sv = 4_u32;
@@ -292,36 +264,20 @@ fn compare_sequential_h_then_x() {
         .map(|c| (c.re, c.im))
         .collect();
 
-    // CUDA: H then X on qubit 0.
-    let c_spec = cuda_spec();
-    let h_mat: Vec<(f64, f64)> = QuantumGate::h(0)
-        .matrix()
-        .data()
-        .iter()
-        .map(|c| (c.re, c.im))
-        .collect();
-    let x_mat: Vec<(f64, f64)> = QuantumGate::x(0)
-        .matrix()
-        .data()
-        .iter()
-        .map(|c| (c.re, c.im))
-        .collect();
-    let mut cuda_gen = CudaKernelGenerator::new().unwrap();
-    let h_kid = cuda_gen.generate(&c_spec, &h_mat, &[0]).unwrap();
-    let x_kid = cuda_gen.generate(&c_spec, &x_mat, &[0]).unwrap();
-    let session = cuda_gen.compile().unwrap();
-    let exec = CudaJitSession::new(&session).unwrap();
+    // CUDA: H then X enqueued on the same stream.
+    let mgr = CudaKernelManager::new();
+    let h_kid = mgr.generate(&QuantumGate::h(0), cuda_spec()).unwrap();
+    let x_kid = mgr.generate(&QuantumGate::x(0), cuda_spec()).unwrap();
     let mut cuda_sv = CudaStatevector::new(n_sv as u32, CudaPrecision::F64).unwrap();
     cuda_sv.upload(&init).unwrap();
-    exec.apply(h_kid, &mut cuda_sv).unwrap();
-    exec.apply(x_kid, &mut cuda_sv).unwrap();
+    mgr.apply(h_kid, &mut cuda_sv).unwrap();
+    mgr.apply(x_kid, &mut cuda_sv).unwrap();
+    mgr.sync().unwrap();
     let cuda_result = cuda_sv.download().unwrap();
 
     assert_amps_close(&cpu_result, &cuda_result, "H then X sequential", TOLERANCE);
 }
 
-/// Verify that H applied twice is the identity: CPU and CUDA should both return
-/// a state within TOLERANCE of the original.
 #[test]
 fn compare_h_squared_is_identity() {
     let n_sv = 3_u32;
@@ -346,28 +302,17 @@ fn compare_h_squared_is_identity() {
         .map(|c| (c.re, c.im))
         .collect();
 
-    // CUDA: H^2
-    let c_spec = cuda_spec();
-    let h_mat: Vec<(f64, f64)> = QuantumGate::h(0)
-        .matrix()
-        .data()
-        .iter()
-        .map(|c| (c.re, c.im))
-        .collect();
-    let mut cuda_gen = CudaKernelGenerator::new().unwrap();
-    let kid = cuda_gen.generate(&c_spec, &h_mat, &[0]).unwrap();
-    let session = cuda_gen.compile().unwrap();
-    let exec = CudaJitSession::new(&session).unwrap();
+    // CUDA: H^2 — apply the same kernel twice.
+    let mgr = CudaKernelManager::new();
+    let h_kid = mgr.generate(&QuantumGate::h(0), cuda_spec()).unwrap();
     let mut cuda_sv = CudaStatevector::new(n_sv as u32, CudaPrecision::F64).unwrap();
     cuda_sv.upload(&init).unwrap();
-    exec.apply(kid, &mut cuda_sv).unwrap();
-    exec.apply(kid, &mut cuda_sv).unwrap();
+    mgr.apply(h_kid, &mut cuda_sv).unwrap();
+    mgr.apply(h_kid, &mut cuda_sv).unwrap();
+    mgr.sync().unwrap();
     let cuda_result = cuda_sv.download().unwrap();
 
-    // Both should agree with each other.
     assert_amps_close(&cpu_result, &cuda_result, "H^2 cpu vs cuda", TOLERANCE);
-
-    // And both should agree with the original state (H is its own inverse).
     assert_amps_close(&init, &cpu_result, "H^2 ≈ identity (CPU)", TOLERANCE);
     assert_amps_close(&init, &cuda_result, "H^2 ≈ identity (CUDA)", TOLERANCE);
 }
@@ -376,7 +321,6 @@ fn compare_h_squared_is_identity() {
 
 #[test]
 fn compare_y_gate() {
-    // Y has imaginary off-diagonal entries (±i) — exercises complex constant folding.
     compare(QuantumGate::y(0), 4, "Y gate");
 }
 
@@ -406,13 +350,10 @@ fn compare_haar_random_4qubit() {
     compare(gate, 6, "Haar-4q on 6-qubit SV");
 }
 
-// ── Multi-kernel same session ─────────────────────────────────────────────────
+// ── Multi-kernel same manager ─────────────────────────────────────────────────
 
-/// Compile H and CX into one [`CudaKernelArtifacts`]/[`CudaJitSession`] and
-/// apply them in sequence.  Verifies that a single session with multiple
-/// kernels works correctly end-to-end.
 #[test]
-fn compare_multi_kernel_same_session() {
+fn compare_multi_kernel_same_manager() {
     let n_sv = 5_u32;
     let init = seeded_state(n_sv as usize);
 
@@ -438,42 +379,27 @@ fn compare_multi_kernel_same_session() {
         .map(|c| (c.re, c.im))
         .collect();
 
-    // CUDA: compile H and CX into a single artifacts/session.
-    let c_spec = cuda_spec();
-    let h_mat: Vec<(f64, f64)> = QuantumGate::h(0)
-        .matrix()
-        .data()
-        .iter()
-        .map(|c| (c.re, c.im))
-        .collect();
-    let cx_mat: Vec<(f64, f64)> = QuantumGate::cx(0, 1)
-        .matrix()
-        .data()
-        .iter()
-        .map(|c| (c.re, c.im))
-        .collect();
-    let mut cuda_gen = CudaKernelGenerator::new().unwrap();
-    let h_kid = cuda_gen.generate(&c_spec, &h_mat, &[0]).unwrap();
-    let cx_kid = cuda_gen.generate(&c_spec, &cx_mat, &[0, 1]).unwrap();
-    let artifacts = cuda_gen.compile().unwrap();
-    let jit_session = CudaJitSession::new(&artifacts).unwrap();
+    // CUDA: H and CX in one manager, enqueued in order.
+    let mgr = CudaKernelManager::new();
+    let h_kid = mgr.generate(&QuantumGate::h(0), cuda_spec()).unwrap();
+    let cx_kid = mgr.generate(&QuantumGate::cx(0, 1), cuda_spec()).unwrap();
     let mut cuda_sv = CudaStatevector::new(n_sv, CudaPrecision::F64).unwrap();
     cuda_sv.upload(&init).unwrap();
-    jit_session.apply(h_kid, &mut cuda_sv).unwrap();
-    jit_session.apply(cx_kid, &mut cuda_sv).unwrap();
+    mgr.apply(h_kid, &mut cuda_sv).unwrap();
+    mgr.apply(cx_kid, &mut cuda_sv).unwrap();
+    mgr.sync().unwrap();
     let cuda_result = cuda_sv.download().unwrap();
 
     assert_amps_close(
         &cpu_result,
         &cuda_result,
-        "multi-kernel same session",
+        "multi-kernel same manager",
         TOLERANCE,
     );
 }
 
 // ── F32 precision ─────────────────────────────────────────────────────────────
 
-/// Tolerance for F32 comparisons: single precision accumulates ~1e-7 error.
 const F32_TOLERANCE: f64 = 1e-5;
 
 fn apply_cpu_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
@@ -500,7 +426,7 @@ fn apply_cpu_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
 
 fn apply_cuda_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let n_sv_qubits = init.len().trailing_zeros();
-    let (sm_major, sm_minor) = query_device_sm().expect("query device SM");
+    let (sm_major, sm_minor) = device_sm().expect("query device SM");
     let spec = CudaKernelGenSpec {
         precision: CudaPrecision::F32,
         ztol: 1e-6,
@@ -508,17 +434,13 @@ fn apply_cuda_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
         sm_major,
         sm_minor,
     };
-    let ffi_matrix: Vec<(f64, f64)> = gate.matrix().data().iter().map(|c| (c.re, c.im)).collect();
-    let mut gen = CudaKernelGenerator::new().expect("cuda f32: create generator");
-    let kid = gen
-        .generate(&spec, &ffi_matrix, gate.qubits())
-        .expect("cuda f32: generate");
-    let artifacts = gen.compile().expect("cuda f32: compile");
-    let jit = CudaJitSession::new(&artifacts).expect("cuda f32: create jit session");
+    let mgr = CudaKernelManager::new();
+    let kid = mgr.generate(gate, spec).expect("cuda f32: generate");
     let mut sv =
         CudaStatevector::new(n_sv_qubits as u32, CudaPrecision::F32).expect("cuda f32: alloc");
     sv.upload(init).expect("cuda f32: upload");
-    jit.apply(kid, &mut sv).expect("cuda f32: apply");
+    mgr.apply(kid, &mut sv).expect("cuda f32: apply");
+    mgr.sync().expect("cuda f32: sync");
     sv.download().expect("cuda f32: download")
 }
 
