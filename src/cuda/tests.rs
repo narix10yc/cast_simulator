@@ -157,7 +157,6 @@ fn test_h_gate_emit_cubin() {
 // ── GPU execution tests (require a CUDA device) ───────────────────────────────
 
 #[test]
-#[ignore = "requires CUDA device"]
 fn test_statevector_zero_state() {
     let mut sv = CudaStatevector::new(3, CudaPrecision::F64).expect("alloc statevector");
     sv.zero().expect("zero");
@@ -173,7 +172,6 @@ fn test_statevector_zero_state() {
 }
 
 #[test]
-#[ignore = "requires CUDA device"]
 fn test_statevector_upload_download_roundtrip() {
     let data: Vec<(f64, f64)> = (0..4u32)
         .map(|i| (i as f64 * 0.1, i as f64 * -0.05))
@@ -188,7 +186,6 @@ fn test_statevector_upload_download_roundtrip() {
 }
 
 #[test]
-#[ignore = "requires CUDA device"]
 fn test_h_gate_apply_to_zero_state() {
     let spec = default_spec();
     let mut gen = CudaKernelGenerator::new().expect("create generator");
@@ -211,7 +208,6 @@ fn test_h_gate_apply_to_zero_state() {
 }
 
 #[test]
-#[ignore = "requires CUDA device"]
 fn test_x_gate_apply_to_zero_state() {
     let x_matrix = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 0.0), (0.0, 0.0)];
     let spec = default_spec();
@@ -232,7 +228,6 @@ fn test_x_gate_apply_to_zero_state() {
 }
 
 #[test]
-#[ignore = "requires CUDA device"]
 fn test_apply_on_larger_statevector() {
     let spec = default_spec();
     let mut gen = CudaKernelGenerator::new().expect("create generator");
