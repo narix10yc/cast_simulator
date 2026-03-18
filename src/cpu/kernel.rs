@@ -10,7 +10,8 @@
 use super::*;
 use crate::types::{Complex, Precision};
 
-use std::ffi::c_char;
+use std::collections::HashMap;
+use std::ffi::{c_char, c_void};
 use std::fmt;
 use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
@@ -80,6 +81,8 @@ mod ffi {
     use super::{CPUKernelGenSpec, KernelId, Precision, SimdWidth};
     use std::ffi::{c_char, c_void};
 
+    use crate::cpu::MatrixLoadMode;
+
     /// Opaque C++ `cast_cpu_kernel_generator_t`.
     #[repr(C)]
     pub struct CastCpuKernelGenerator {
@@ -94,9 +97,33 @@ mod ffi {
 
     /// Matches `cast_cpu_complex64_t` in `cpu.h` (always f64 re/im regardless of precision).
     #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct FfiComplex64 {
         pub re: f64,
         pub im: f64,
+    }
+
+    /// Matches `cast_cpu_kernel_metadata_t` in `cpu.h`.
+    #[repr(C)]
+    pub struct KernelMetadata {
+        pub kernel_id: KernelId,
+        pub precision: Precision,
+        pub simd_width: SimdWidth,
+        pub mode: MatrixLoadMode,
+        pub n_gate_qubits: u32,
+    }
+
+    /// Matches `cast_cpu_jit_kernel_record_t` in `cpu.h`.
+    #[repr(C)]
+    pub struct FfiKernelRecord {
+        pub metadata: KernelMetadata,
+        /// JIT-compiled function pointer; always non-null on a successful finish.
+        pub entry: Option<unsafe extern "C" fn(*mut c_void)>,
+        /// NULL for ImmValue mode; malloc'd otherwise.
+        pub matrix: *mut FfiComplex64,
+        pub matrix_len: usize,
+        /// NULL if request_asm was not called; malloc'd otherwise.
+        pub asm_text: *mut c_char,
     }
 
     unsafe extern "C" {
@@ -114,16 +141,15 @@ mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        /// Runs O1 on the kernel and returns its optimized IR text (two-call pattern).
-        /// Marks `kernel_id` for assembly capture during `init_jit`. Returns 0 on success.
+        /// Marks `kernel_id` for assembly capture during `finish`. Returns 0 on success.
         pub fn cast_cpu_kernel_generator_request_asm(
             generator: *mut CastCpuKernelGenerator,
             kernel_id: KernelId,
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        /// Pass `out_ir = null` on the first call to get the required length via
-        /// `*out_ir_len`, then allocate and call again with the buffer.
+        /// Runs O1 on the kernel and returns its optimized IR text (two-call pattern).
+        /// Returns 0 on success.
         pub fn cast_cpu_kernel_generator_emit_ir(
             generator: *mut CastCpuKernelGenerator,
             kernel_id: KernelId,
@@ -133,62 +159,130 @@ mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        /// Consumes the generator and produces a JIT session. Returns 0 on success.
+        /// Compiles all kernels into a JIT session and returns per-kernel records.
+        /// On success, deletes the generator and returns 0.
+        /// Caller must call `cast_cpu_jit_kernel_records_free` after use.
         pub fn cast_cpu_kernel_generator_finish(
             generator: *mut CastCpuKernelGenerator,
             out_session: *mut *mut CastCpuJitSession,
+            out_records: *mut *mut FfiKernelRecord,
+            out_n_records: *mut usize,
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        pub fn cast_cpu_jit_session_apply(
-            session: *mut CastCpuJitSession,
-            kernel_id: KernelId,
-            sv: *mut c_void,
-            n_qubits: u32,
-            sv_precision: Precision,
-            sv_simd_width: SimdWidth,
-            n_threads: i32,
-            err_buf: *mut c_char,
-            err_buf_len: usize,
-        ) -> i32;
-        /// Returns the native assembly text captured during JIT compilation (two-call pattern).
-        pub fn cast_cpu_jit_session_emit_asm(
-            session: *mut CastCpuJitSession,
-            kernel_id: KernelId,
-            out_asm: *mut c_char,
-            asm_buf_len: usize,
-            out_asm_len: *mut usize,
-            err_buf: *mut c_char,
-            err_buf_len: usize,
-        ) -> i32;
+        /// Frees the records array returned by `cast_cpu_kernel_generator_finish`.
+        pub fn cast_cpu_jit_kernel_records_free(records: *mut FfiKernelRecord, n: usize);
         pub fn cast_cpu_jit_session_delete(session: *mut CastCpuJitSession);
+    }
+}
+
+// ── CastCpuLaunchArgs ─────────────────────────────────────────────────────────
+
+/// Matches `cast_cpu_launch_args_t` in `cpu.h`.
+/// Each JIT-compiled kernel reads its work range and matrix pointer from this struct.
+#[repr(C)]
+struct CastCpuLaunchArgs {
+    sv: *mut c_void,
+    ctr_begin: u64,
+    ctr_end: u64,
+    p_mat: *mut c_void,
+}
+
+// ── RustJittedKernel ──────────────────────────────────────────────────────────
+
+/// Rust-owned data for a single compiled kernel.
+/// The `entry` pointer is valid for the lifetime of the owning `JitSession`
+/// (the C++ `LLJIT` inside the session keeps the code pages alive).
+struct RustJittedKernel {
+    entry: unsafe extern "C" fn(*mut c_void),
+    precision: Precision,
+    simd_width: SimdWidth,
+    mode: MatrixLoadMode,
+    n_gate_qubits: u32,
+    /// Non-empty only for StackLoad mode.
+    matrix: Vec<ffi::FfiComplex64>,
+    /// Some only if `request_asm` was called before `init_jit`.
+    asm_text: Option<String>,
+}
+
+// ── MatrixBuffer ──────────────────────────────────────────────────────────────
+
+/// Typed matrix buffer for StackLoad dispatch; ensures correct scalar alignment.
+enum MatrixBuffer {
+    F32(Vec<f32>),
+    F64(Vec<f64>),
+    Empty,
+}
+
+impl MatrixBuffer {
+    fn as_ptr(&self) -> *const c_void {
+        match self {
+            MatrixBuffer::F32(v) => v.as_ptr().cast(),
+            MatrixBuffer::F64(v) => v.as_ptr().cast(),
+            MatrixBuffer::Empty => std::ptr::null(),
+        }
+    }
+}
+
+fn build_matrix_buffer(kernel: &RustJittedKernel) -> MatrixBuffer {
+    if !matches!(kernel.mode, MatrixLoadMode::StackLoad) || kernel.matrix.is_empty() {
+        return MatrixBuffer::Empty;
+    }
+    match kernel.precision {
+        Precision::F32 => {
+            let v: Vec<f32> = kernel
+                .matrix
+                .iter()
+                .flat_map(|c| [c.re as f32, c.im as f32])
+                .collect();
+            MatrixBuffer::F32(v)
+        }
+        Precision::F64 => {
+            let v: Vec<f64> = kernel.matrix.iter().flat_map(|c| [c.re, c.im]).collect();
+            MatrixBuffer::F64(v)
+        }
     }
 }
 
 // ── CPUKernelGenerator ────────────────────────────────────────────────────────
 
-/// Accumulates gate kernels as LLVM IR, then compiles them all at once via
-/// [`CPUKernelGenerator::init_jit`].
+/// Builds LLVM IR for gate kernels and JIT-compiles them into a [`JitSession`].
 ///
-/// Owns the C++ `cast_cpu_kernel_generator_t` object. Calling `init_jit` transfers
-/// ownership to a [`JitSession`]; the generator is then consumed and must not be used again.
+/// The typical workflow is:
+/// 1. Create a generator with [`CPUKernelGenerator::new`].
+/// 2. Register each gate with [`CPUKernelGenerator::generate`], saving the returned
+///    [`KernelId`] for later.
+/// 3. Optionally call [`CPUKernelGenerator::emit_ir`] or
+///    [`CPUKernelGenerator::request_asm`] for debugging.
+/// 4. Call [`CPUKernelGenerator::init_jit`] to compile everything; this consumes
+///    the generator and returns a [`JitSession`].
 pub struct CPUKernelGenerator {
     raw: NonNull<ffi::CastCpuKernelGenerator>,
+}
+
+impl Drop for CPUKernelGenerator {
+    fn drop(&mut self) {
+        unsafe { ffi::cast_cpu_kernel_generator_delete(self.raw.as_ptr()) };
+    }
+}
+
+impl fmt::Debug for CPUKernelGenerator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CPUKernelGenerator").finish_non_exhaustive()
+    }
 }
 
 impl CPUKernelGenerator {
     pub fn new() -> anyhow::Result<Self> {
         let raw = unsafe { ffi::cast_cpu_kernel_generator_new() };
-        let raw = NonNull::new(raw)
-            .ok_or_else(|| anyhow::anyhow!("failed to create CPU kernel generator"))?;
+        let raw = NonNull::new(raw).ok_or_else(|| anyhow::anyhow!("failed to create generator"))?;
         Ok(Self { raw })
     }
 
     /// Generates LLVM IR for a gate kernel and returns its [`KernelId`].
     ///
-    /// `matrix` must be a row-major unitary matrix of size `(2^k)²` where `k = qubits.len()`.
-    /// Qubits are given as absolute qubit indices in the statevector (ascending order enforced
-    /// by [`QuantumGate`]).
+    /// `matrix`: complex matrix entries in row-major order, each as `(re, im)` f64 pairs.
+    /// `qubits`: target qubit indices, in the same order used when constructing the gate.
     pub fn generate(
         &mut self,
         spec: &CPUKernelGenSpec,
@@ -197,13 +291,13 @@ impl CPUKernelGenerator {
     ) -> anyhow::Result<KernelId> {
         let mut kernel_id: KernelId = 0;
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
-        let ffi_matrix = matrix
+
+        // Reinterpret Complex (re: f64, im: f64) as FfiComplex64 — same layout.
+        let ffi_matrix: Vec<ffi::FfiComplex64> = matrix
             .iter()
-            .map(|value| ffi::FfiComplex64 {
-                re: value.re,
-                im: value.im,
-            })
-            .collect::<Vec<_>>();
+            .map(|c| ffi::FfiComplex64 { re: c.re, im: c.im })
+            .collect();
+
         let status = unsafe {
             ffi::cast_cpu_kernel_generator_generate(
                 self.raw.as_ptr(),
@@ -224,15 +318,14 @@ impl CPUKernelGenerator {
         }
     }
 
-    /// Returns the optimized LLVM IR for the kernel identified by `kernel_id`.
+    /// Runs O1 optimisation on the kernel module and returns the resulting LLVM IR text.
     ///
-    /// Triggers the O1 pass pipeline on the plain `Module` if it hasn't run yet.
-    /// Must be called before [`init_jit`](Self::init_jit), which moves the module
-    /// into the JIT and makes it inaccessible.
+    /// Idempotent: a second call for the same `kernel_id` returns the cached text.
+    /// Must be called before [`CPUKernelGenerator::init_jit`], which consumes the module.
     pub fn emit_ir(&mut self, kernel_id: KernelId) -> anyhow::Result<String> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
 
-        // First call: query the IR byte length (excluding the null terminator).
+        // First call: query the IR byte length.
         let mut ir_len: usize = 0;
         let status = unsafe {
             ffi::cast_cpu_kernel_generator_emit_ir(
@@ -249,7 +342,7 @@ impl CPUKernelGenerator {
             return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
         }
 
-        // Second call: write IR into a caller-owned buffer.
+        // Second call: fill the buffer.
         let mut ir_buf = vec![0u8; ir_len + 1];
         let status = unsafe {
             ffi::cast_cpu_kernel_generator_emit_ir(
@@ -270,11 +363,12 @@ impl CPUKernelGenerator {
         String::from_utf8(ir_buf).map_err(|e| anyhow::anyhow!("IR is not valid UTF-8: {e}"))
     }
 
-    /// Opts `kernel_id` into assembly capture during [`init_jit`](Self::init_jit).
+    /// Marks `kernel_id` so that native assembly is captured during [`init_jit`].
     ///
-    /// Must be called before `init_jit`; has no effect afterwards (the module
-    /// has already been consumed). Kernels that were not opted in will return an
-    /// error from [`JitSession::emit_asm`].
+    /// Must be called before [`CPUKernelGenerator::init_jit`]. After compilation,
+    /// retrieve the text with [`JitSession::emit_asm`].
+    ///
+    /// [`init_jit`]: CPUKernelGenerator::init_jit
     pub fn request_asm(&mut self, kernel_id: KernelId) -> anyhow::Result<()> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let status = unsafe {
@@ -294,51 +388,81 @@ impl CPUKernelGenerator {
 
     /// Compiles all generated kernels and returns a [`JitSession`], consuming `self`.
     ///
-    /// The C++ side takes ownership of the generator's IR modules. On failure the generator
-    /// is dropped normally. On success the underlying C++ object is freed by the session.
+    /// On success the C++ generator is deleted by the JIT pipeline; `self` must not
+    /// be used afterwards (enforced by consuming `self`).
     pub fn init_jit(self) -> anyhow::Result<JitSession> {
-        // Wrap in ManuallyDrop so we decide exactly when the C++ destructor fires.
-        let mut this = ManuallyDrop::new(self);
-        let mut raw_session = std::ptr::null_mut();
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let mut raw_session: *mut ffi::CastCpuJitSession = std::ptr::null_mut();
+        let mut raw_records: *mut ffi::FfiKernelRecord = std::ptr::null_mut();
+        let mut n_records: usize = 0;
+
+        // ManuallyDrop prevents Rust from calling drop (→ cast_cpu_kernel_generator_delete)
+        // after finish() returns: on success C++ already deleted the generator; on failure
+        // C++ leaves it intact but we give up ownership to avoid a double-free.
+        let generator = ManuallyDrop::new(self);
 
         let status = unsafe {
             ffi::cast_cpu_kernel_generator_finish(
-                this.raw.as_ptr(),
+                generator.raw.as_ptr(),
                 &mut raw_session,
+                &mut raw_records,
+                &mut n_records,
                 err_buf.as_mut_ptr(),
                 err_buf.len(),
             )
         };
-
         if status != 0 {
-            // finish failed; the generator is still valid, so run its destructor.
-            unsafe { ManuallyDrop::drop(&mut this) };
             return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
         }
 
-        // finish succeeded; the C++ object is now owned by the session.
         let raw = NonNull::new(raw_session)
-            .ok_or_else(|| anyhow::anyhow!("C++ side returned a null JIT session"))?;
-        Ok(JitSession { raw })
-    }
-}
+            .ok_or_else(|| anyhow::anyhow!("finish returned null session"))?;
 
-impl Default for CPUKernelGenerator {
-    fn default() -> Self {
-        Self::new().expect("failed to create CPU kernel generator")
-    }
-}
+        // Consume the records array into a Rust HashMap, then free it.
+        let mut kernels: HashMap<KernelId, RustJittedKernel> = HashMap::with_capacity(n_records);
 
-impl Drop for CPUKernelGenerator {
-    fn drop(&mut self) {
-        unsafe { ffi::cast_cpu_kernel_generator_delete(self.raw.as_ptr()) };
-    }
-}
+        // SAFETY: C++ guarantees `n_records` valid, fully initialised records at `raw_records`.
+        let records = unsafe { std::slice::from_raw_parts(raw_records, n_records) };
+        for record in records {
+            let entry = record
+                .entry
+                .ok_or_else(|| anyhow::anyhow!("finish returned null entry pointer"))?;
 
-impl fmt::Debug for CPUKernelGenerator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CPUKernelGenerator").finish_non_exhaustive()
+            let matrix = if record.matrix.is_null() {
+                Vec::new()
+            } else {
+                // SAFETY: C++ allocated `matrix_len` valid FfiComplex64 entries.
+                unsafe { std::slice::from_raw_parts(record.matrix, record.matrix_len) }.to_vec()
+            };
+
+            let asm_text = if record.asm_text.is_null() {
+                None
+            } else {
+                // SAFETY: C++ allocated a valid null-terminated UTF-8 string.
+                let s = unsafe { std::ffi::CStr::from_ptr(record.asm_text) }
+                    .to_string_lossy()
+                    .into_owned();
+                Some(s)
+            };
+
+            kernels.insert(
+                record.metadata.kernel_id,
+                RustJittedKernel {
+                    entry,
+                    precision: record.metadata.precision,
+                    simd_width: record.metadata.simd_width,
+                    mode: record.metadata.mode,
+                    n_gate_qubits: record.metadata.n_gate_qubits,
+                    matrix,
+                    asm_text,
+                },
+            );
+        }
+
+        // Free the malloc'd records array (inner fields were already copied above).
+        unsafe { ffi::cast_cpu_jit_kernel_records_free(raw_records, n_records) };
+
+        Ok(JitSession { raw, kernels })
     }
 }
 
@@ -348,8 +472,13 @@ impl fmt::Debug for CPUKernelGenerator {
 ///
 /// Created by [`CPUKernelGenerator::init_jit`]. Individual kernels are applied to
 /// statevectors via [`JitSession::apply`].
+///
+/// The C++ `LLJIT` object inside `raw` keeps the JIT-compiled code pages alive for
+/// the session's lifetime; `kernels` stores the Rust-owned per-kernel data including
+/// the entry function pointers.
 pub struct JitSession {
     raw: NonNull<ffi::CastCpuJitSession>,
+    kernels: HashMap<KernelId, RustJittedKernel>,
 }
 
 impl Drop for JitSession {
@@ -365,50 +494,21 @@ impl fmt::Debug for JitSession {
 }
 
 impl JitSession {
-    /// Returns the native assembly text that was emitted during JIT compilation.
+    /// Returns the native assembly text that was captured during JIT compilation.
     ///
-    /// The assembly is captured once at compile time (before the module is consumed
-    /// by the JIT pipeline) and cached for the lifetime of the session. This method
-    /// just retrieves the cached text, so it is cheap to call repeatedly.
+    /// Only available for kernels on which [`CPUKernelGenerator::request_asm`] was
+    /// called before [`CPUKernelGenerator::init_jit`].
     pub fn emit_asm(&self, kernel_id: KernelId) -> anyhow::Result<String> {
-        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
-
-        // First call: query the assembly byte length (excluding null terminator).
-        let mut asm_len: usize = 0;
-        let status = unsafe {
-            ffi::cast_cpu_jit_session_emit_asm(
-                self.raw.as_ptr(),
-                kernel_id,
-                std::ptr::null_mut(),
-                0,
-                &mut asm_len,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
+        let kernel = self
+            .kernels
+            .get(&kernel_id)
+            .ok_or_else(|| anyhow::anyhow!("kernel id not found in JIT session"))?;
+        kernel.asm_text.clone().ok_or_else(|| {
+            anyhow::anyhow!(
+                "assembly was not captured for this kernel; \
+                 call request_asm before init_jit"
             )
-        };
-        if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
-        }
-
-        // Second call: write the assembly into a caller-owned buffer.
-        let mut asm_buf = vec![0u8; asm_len + 1];
-        let status = unsafe {
-            ffi::cast_cpu_jit_session_emit_asm(
-                self.raw.as_ptr(),
-                kernel_id,
-                asm_buf.as_mut_ptr().cast(),
-                asm_buf.len(),
-                std::ptr::null_mut(),
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
-        }
-
-        asm_buf.truncate(asm_len);
-        String::from_utf8(asm_buf).map_err(|e| anyhow::anyhow!("assembly is not valid UTF-8: {e}"))
+        })
     }
 
     /// Times a kernel adaptively within `budget_s` seconds.
@@ -486,8 +586,7 @@ impl JitSession {
 
     /// Applies the kernel identified by `kernel_id` to `statevector` in-place.
     ///
-    /// `n_threads`: number of worker threads. `None` lets the C++ side choose based on
-    /// hardware concurrency.
+    /// `n_threads`: number of worker threads. Pass `0` to use the hardware thread count.
     ///
     /// The kernel's precision and SIMD width must match those of the statevector, and the
     /// statevector must have at least `n_gate_qubits + simd_s` qubits.
@@ -497,26 +596,73 @@ impl JitSession {
         statevector: &mut CPUStatevector,
         n_threads: u32,
     ) -> anyhow::Result<()> {
-        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
-        let n_qubits = statevector.n_qubits();
-        let status = unsafe {
-            ffi::cast_cpu_jit_session_apply(
-                self.raw.as_ptr(),
-                kernel_id,
-                statevector.raw_mut_ptr(),
-                n_qubits,
-                statevector.precision(),
-                statevector.simd_width(),
-                n_threads as i32,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+        let kernel = self
+            .kernels
+            .get(&kernel_id)
+            .ok_or_else(|| anyhow::anyhow!("kernel id not found in JIT session"))?;
+
+        if statevector.precision() as u32 != kernel.precision as u32 {
+            return Err(anyhow::anyhow!(
+                "statevector precision does not match kernel"
+            ));
         }
+        if statevector.simd_width() as u32 != kernel.simd_width as u32 {
+            return Err(anyhow::anyhow!(
+                "statevector SIMD width does not match kernel"
+            ));
+        }
+
+        let n_qubits = statevector.n_qubits();
+        let simd_s = get_simd_s(kernel.simd_width, kernel.precision);
+        let n_task_bits = n_qubits
+            .checked_sub(kernel.n_gate_qubits + simd_s)
+            .ok_or_else(|| anyhow::anyhow!("statevector has too few qubits for this kernel"))?;
+
+        let n_tasks: u64 = 1 << n_task_bits;
+        let n_threads = if n_threads == 0 {
+            super::get_num_threads()
+        } else {
+            n_threads
+        };
+        // Clamp so every thread gets at least one task.
+        let n_threads = (n_threads as u64).min(n_tasks).max(1) as u32;
+        let n_tasks_per_thread = n_tasks / n_threads as u64;
+
+        let matrix_buf = build_matrix_buffer(kernel);
+
+        let entry = kernel.entry;
+        let sv_addr = statevector.raw_mut_ptr() as usize;
+        let p_mat_addr = matrix_buf.as_ptr() as usize;
+
+        // SAFETY:
+        // - `entry` is a valid JIT-compiled function pointer backed by the LLJIT in `self.raw`.
+        // - `sv_addr` points to a valid, aligned statevector buffer with the correct precision
+        //   and SIMD width; the `&mut statevector` borrow ensures exclusive access.
+        // - Each thread receives a disjoint `[ctr_begin, ctr_end)` counter range, so there are
+        //   no data races on the statevector buffer.
+        // - `p_mat_addr` is either null (ImmValue) or points to `matrix_buf` which lives for
+        //   the duration of the `thread::scope` call.
+        std::thread::scope(|s| {
+            for i in 0..n_threads {
+                let ctr_begin = n_tasks_per_thread * i as u64;
+                let ctr_end = if i + 1 == n_threads {
+                    n_tasks
+                } else {
+                    n_tasks_per_thread * (i as u64 + 1)
+                };
+                s.spawn(move || {
+                    let mut args = CastCpuLaunchArgs {
+                        sv: sv_addr as *mut c_void,
+                        ctr_begin,
+                        ctr_end,
+                        p_mat: p_mat_addr as *mut c_void,
+                    };
+                    unsafe { entry(&mut args as *mut CastCpuLaunchArgs as *mut c_void) };
+                });
+            }
+        });
+
+        Ok(())
     }
 }
 

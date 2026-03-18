@@ -12,8 +12,6 @@
 #include <string>
 #include <vector>
 
-using cast_cpu_kernel_entry_t = void(void *);
-
 struct CastCpuGeneratedKernel {
   cast_cpu_kernel_metadata_t metadata{};
   std::string func_name{};
@@ -28,16 +26,6 @@ struct CastCpuGeneratedKernel {
   bool capture_asm = false;
 };
 
-struct CastCpuJittedKernel {
-  cast_cpu_kernel_metadata_t metadata{};
-  std::string func_name{};
-  cast_cpu_kernel_entry_t *entry = nullptr;
-  std::vector<cast_cpu_complex64_t> matrix{};
-  /// Native assembly text emitted during cast_cpu_jit_compile_kernel, before
-  /// the module was moved into the JIT pipeline.
-  std::string asm_text{};
-};
-
 llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> cast_cpu_jit_create(unsigned n_compile_threads);
 
 /// Runs the O1 pass pipeline on the plain Module inside `generated`.
@@ -46,11 +34,12 @@ llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> cast_cpu_jit_create(unsigned n
 /// Must be called before cast_cpu_jit_compile_kernel, which moves the Module out.
 llvm::Error cast_cpu_optimize_kernel_ir(CastCpuGeneratedKernel &generated);
 
-llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedKernel &generated,
-                                        CastCpuJittedKernel &out);
-
-llvm::Error cast_cpu_jit_apply_kernel(const CastCpuJittedKernel &kernel, void *sv,
-                                      uint32_t n_qubits_sv, cast_cpu_precision_t sv_precision,
-                                      cast_cpu_simd_width_t sv_simd_width, int n_threads);
+/// Compiles `generated` into the JIT and writes per-kernel data into `out`.
+/// Heap-allocates out.matrix (for StackLoad mode) and out.asm_text (if
+/// capture_asm is set); the caller is responsible for freeing them (e.g. via
+/// cast_cpu_jit_kernel_records_free).
+llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit,
+                                        CastCpuGeneratedKernel &generated,
+                                        cast_cpu_jit_kernel_record_t &out);
 
 #endif // CAST_SIMULATOR_SRC_CPP_CPU_JIT_H
