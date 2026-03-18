@@ -27,8 +27,7 @@
 
 use anyhow::Result;
 use cast::cuda::{
-    CudaJitSession, CudaKernelArtifacts, CudaKernelGenSpec, CudaKernelGenerator, CudaKernelId,
-    CudaPrecision, CudaStatevector,
+    CudaKernelGenSpec, CudaKernelId, CudaKernelManager, CudaPrecision, CudaStatevector,
 };
 use cast::types::{Complex, ComplexSquareMatrix, QuantumGate};
 use clap::{Parser, ValueEnum};
@@ -216,10 +215,10 @@ struct Timing {
 /// Runs `n_warmup` un-timed iterations, then collects timed samples until
 /// `per_gate_budget_s` is exhausted, with at least `min_iters` samples.
 ///
-/// Each sample times a single `exec.apply()` call which includes a full
-/// device synchronisation, so host-side `Instant` is accurate.
+/// Each sample times a single `apply` + `sync` pair, matching the wall-time
+/// of one full GPU kernel execution.
 fn time_adaptive(
-    exec: &CudaJitSession,
+    mgr: &CudaKernelManager,
     kid: CudaKernelId,
     sv: &mut CudaStatevector,
     n_warmup: usize,
@@ -229,7 +228,8 @@ fn time_adaptive(
     const N_PROBE: usize = 3;
 
     for _ in 0..n_warmup {
-        exec.apply(kid, sv).unwrap();
+        mgr.apply(kid, sv).unwrap();
+        mgr.sync().unwrap();
     }
 
     // Phase 1: probe to estimate per-iteration cost.
@@ -237,7 +237,8 @@ fn time_adaptive(
     let probe_wall = Instant::now();
     for _ in 0..N_PROBE {
         let t = Instant::now();
-        exec.apply(kid, sv).unwrap();
+        mgr.apply(kid, sv).unwrap();
+        mgr.sync().unwrap();
         samples.push(t.elapsed().as_secs_f64());
     }
     let probe_elapsed = probe_wall.elapsed().as_secs_f64();
@@ -248,7 +249,8 @@ fn time_adaptive(
     let n_fill = ((remaining / est_per_iter) as usize).max(min_iters.saturating_sub(N_PROBE));
     for _ in 0..n_fill {
         let t = Instant::now();
-        exec.apply(kid, sv).unwrap();
+        mgr.apply(kid, sv).unwrap();
+        mgr.sync().unwrap();
         samples.push(t.elapsed().as_secs_f64());
     }
 
@@ -322,28 +324,16 @@ fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
     let n = case.gate.matrix().edge_size();
     let scalar_nnz = (ai * n as f64).round() as usize;
 
-    // CUDA has no SIMD-layout minimum — just ensure the SV is large enough for
-    // the gate.
     let n_sv = args.n_qubits.max(k);
 
-    let ffi_matrix: Vec<(f64, f64)> = case
-        .gate
-        .matrix()
-        .data()
-        .iter()
-        .map(|c| (c.re, c.im))
-        .collect();
-
-    let mut gen = CudaKernelGenerator::new()?;
-    let kid = gen.generate(&spec, &ffi_matrix, case.gate.qubits())?;
-    let session: CudaKernelArtifacts = gen.compile()?;
-    let exec = CudaJitSession::new(&session)?;
+    let mgr = CudaKernelManager::new();
+    let kid = mgr.generate(&case.gate, spec)?;
 
     let mut sv = CudaStatevector::new(n_sv as u32, spec.precision)?;
     sv.zero()?;
 
     let timing = time_adaptive(
-        &exec,
+        &mgr,
         kid,
         &mut sv,
         args.n_warmup,
@@ -391,7 +381,9 @@ fn print_report(rows: &[Row], args: &Args) {
     println!("  FLOPs/scalar : 2 real  (1×mul + 1×add per nonzero scalar component)");
     println!("  ai           : scalar_nnz(M) / edge_size(M) — re and im parts counted separately");
     println!("  CV           : stddev / mean — scale-free timing noise");
-    println!("  note         : each sample includes cuCtxSynchronize; reflects true GPU wall time");
+    println!(
+        "  note         : each sample includes cuStreamSynchronize; reflects true GPU wall time"
+    );
     println!();
 
     // ── Performance table ─────────────────────────────────────────────────────

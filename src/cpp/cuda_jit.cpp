@@ -9,6 +9,7 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/TargetParser/Triple.h>
 
+#include <cstring>
 #include <mutex>
 #include <string>
 
@@ -26,25 +27,24 @@ static void ensure_nvptx_initialized() {
 
 // ── NVPTX TargetMachine helper ───────────────────────────────────────────────
 
-static llvm::Expected<std::unique_ptr<llvm::TargetMachine>>
-create_nvptx_tm(uint32_t sm_major, uint32_t sm_minor) {
+static llvm::Expected<std::unique_ptr<llvm::TargetMachine>> create_nvptx_tm(uint32_t sm_major,
+                                                                            uint32_t sm_minor) {
   ensure_nvptx_initialized();
 
   llvm::Triple triple("nvptx64-nvidia-cuda");
-  std::string  err;
-  const auto  *target =
-      llvm::TargetRegistry::lookupTarget(triple.getTriple(), err);
+  std::string err;
+  const auto *target = llvm::TargetRegistry::lookupTarget(triple, err);
   if (!target)
     return llvm::createStringError("NVPTX target not found: " + err);
 
   std::string arch = "sm_" + std::to_string(sm_major) + std::to_string(sm_minor);
   llvm::TargetOptions options;
-  auto *tm = target->createTargetMachine(triple, arch, /*features=*/"",
-                                         options, /*reloc=*/std::nullopt);
+  auto tm = std::unique_ptr<llvm::TargetMachine>(
+      target->createTargetMachine(triple, arch, /*features=*/"", options,
+                                  /*reloc=*/std::nullopt));
   if (!tm)
-    return llvm::createStringError("failed to create NVPTX TargetMachine for "
-                                   + arch);
-  return std::unique_ptr<llvm::TargetMachine>(tm);
+    return llvm::createStringError("failed to create NVPTX TargetMachine for " + arch);
+  return tm;
 }
 
 // ── raw_pwrite_string_ostream ────────────────────────────────────────────────
@@ -55,9 +55,7 @@ namespace {
 class raw_pwrite_string_ostream : public llvm::raw_pwrite_stream {
   std::string &out_;
 
-  void write_impl(const char *Ptr, size_t Size) override {
-    out_.append(Ptr, Size);
-  }
+  void write_impl(const char *Ptr, size_t Size) override { out_.append(Ptr, Size); }
   void pwrite_impl(const char *Ptr, size_t Size, uint64_t Offset) override {
     if (out_.size() < Offset + Size)
       out_.resize(static_cast<size_t>(Offset + Size));
@@ -66,9 +64,7 @@ class raw_pwrite_string_ostream : public llvm::raw_pwrite_stream {
   uint64_t current_pos() const override { return out_.size(); }
 
 public:
-  explicit raw_pwrite_string_ostream(std::string &str) : out_(str) {
-    SetUnbuffered();
-  }
+  explicit raw_pwrite_string_ostream(std::string &str) : out_(str) { SetUnbuffered(); }
   ~raw_pwrite_string_ostream() override { flush(); }
 };
 } // namespace
@@ -91,13 +87,13 @@ llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated) {
   M.setTargetTriple((*tm)->getTargetTriple());
   M.setDataLayout((*tm)->createDataLayout());
 
-  llvm::LoopAnalysisManager    lam;
+  llvm::LoopAnalysisManager lam;
   llvm::FunctionAnalysisManager fam;
-  llvm::CGSCCAnalysisManager    cgam;
-  llvm::ModuleAnalysisManager   mam;
+  llvm::CGSCCAnalysisManager cgam;
+  llvm::ModuleAnalysisManager mam;
 
   llvm::PassInstrumentationCallbacks pic;
-  llvm::StandardInstrumentations     si(M.getContext(), /*DebugLogging=*/false);
+  llvm::StandardInstrumentations si(M.getContext(), /*DebugLogging=*/false);
   si.registerCallbacks(pic, &mam);
 
   llvm::PipelineTuningOptions pto;
@@ -126,7 +122,7 @@ llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated) {
 // ── cast_cuda_compile_kernel ─────────────────────────────────────────────────
 
 llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
-                                      CastCudaCompiledKernel  &out) {
+                                     CastCudaCompiledKernel &out) {
   // Stage 1: optimize (idempotent; also sets triple+layout on module).
   if (auto err = cast_cuda_optimize_kernel_ir(generated))
     return err;
@@ -141,8 +137,7 @@ llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
     std::string errStr;
     llvm::raw_string_ostream sstream(errStr);
     if (llvm::verifyModule(*generated.module, &sstream))
-      return llvm::createStringError("module verification failed before PTX: "
-                                     + errStr);
+      return llvm::createStringError("module verification failed before PTX: " + errStr);
 
     raw_pwrite_string_ostream ptxStream(out.ptx);
     llvm::legacy::PassManager pm;
@@ -155,9 +150,8 @@ llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
   if (out.ptx.empty())
     return llvm::createStringError("PTX emission produced empty output");
 
-  out.kernel_id     = generated.kernel_id;
   out.n_gate_qubits = generated.n_gate_qubits;
-  out.precision     = generated.spec.precision;
-  out.func_name     = std::move(generated.func_name);
+  out.precision = generated.spec.precision;
+  out.func_name = std::move(generated.func_name);
   return llvm::Error::success();
 }

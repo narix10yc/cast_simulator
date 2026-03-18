@@ -1,87 +1,382 @@
-use std::ffi::{CStr, CString};
+use std::collections::{HashMap, VecDeque};
+use std::ffi::{c_char, CStr, CString};
 use std::fmt;
-use std::mem::ManuallyDrop;
-use std::ptr::NonNull;
+use std::sync::{Arc, Mutex};
 
+use super::error_from_buf;
 use super::ffi;
-use super::types::{CudaKernelId, CudaPrecision, ERR_BUF_LEN};
-use super::{error_from_buf, CudaStatevector};
+use super::types::{CudaKernelGenSpec, CudaKernelId, CudaPrecision, ERR_BUF_LEN};
+#[cfg(feature = "cuda")]
+use super::CudaStatevector;
+use crate::types::QuantumGate;
 
-// ── CudaKernelGenerator ───────────────────────────────────────────────────────
+// ── CudaKernel ───────────────────────────────────────────────────────────────
 
-/// Accumulates gate kernels as NVPTX LLVM IR, then compiles them via
-/// [`CudaKernelGenerator::compile`].
-pub struct CudaKernelGenerator {
-    raw: NonNull<ffi::CastCudaKernelGenerator>,
+/// A compiled CUDA kernel, ready to be loaded and launched.
+///
+/// Owned by [`CudaKernelManager`]; obtained via [`CudaKernelManager::generate`].
+/// CUDA module handles are not stored here — they live in the manager's LRU cache.
+pub struct CudaKernel {
+    n_gate_qubits: u32,
+    precision: CudaPrecision,
+    /// PTX assembly text produced by the LLVM NVPTX backend.
+    ptx: String,
+    /// Entry-point name in the PTX / cubin (e.g. `"k_gate"`).
+    func_name: String,
+
+    /// Device-native binary produced by the CUDA JIT linker.
+    /// Module loading is deferred to `sync`; the manager's LRU cache owns
+    /// the CUmodule handles.
+    #[cfg(feature = "cuda")]
+    cubin: Option<Vec<u8>>,
 }
 
-impl CudaKernelGenerator {
-    pub fn new() -> anyhow::Result<Self> {
-        let raw = unsafe { ffi::cast_cuda_kernel_generator_new() };
-        let raw = NonNull::new(raw)
-            .ok_or_else(|| anyhow::anyhow!("failed to create CUDA kernel generator"))?;
-        Ok(Self { raw })
+impl CudaKernel {
+    /// Returns the number of qubits in the gate this kernel implements.
+    pub fn n_gate_qubits(&self) -> u32 {
+        self.n_gate_qubits
     }
 
-    /// Generates NVPTX LLVM IR for a gate kernel and returns its [`CudaKernelId`].
-    ///
-    /// `matrix` must be a row-major flat slice of complex64 values of size `(2^k)²`
-    /// where `k = qubits.len()`.
-    pub fn generate(
+    /// Returns the floating-point precision this kernel operates on.
+    pub fn precision(&self) -> CudaPrecision {
+        self.precision
+    }
+
+    /// Returns the PTX assembly text for this kernel.
+    pub fn ptx(&self) -> &str {
+        &self.ptx
+    }
+
+    /// Returns the kernel entry-point name.
+    pub fn func_name(&self) -> &str {
+        &self.func_name
+    }
+}
+
+impl fmt::Debug for CudaKernel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CudaKernel")
+            .field("n_gate_qubits", &self.n_gate_qubits)
+            .field("precision", &self.precision)
+            .field("func_name", &self.func_name)
+            .field("ptx_bytes", &self.ptx.len())
+            .finish_non_exhaustive()
+    }
+}
+
+// ── LRU module cache ──────────────────────────────────────────────────────────
+
+/// Number of CUmodule slots in the manager's LRU cache.
+#[cfg(feature = "cuda")]
+const LRU_SIZE: usize = 2;
+
+/// A CUmodule / CUfunction pair held in the manager's LRU cache.
+#[cfg(feature = "cuda")]
+struct LoadedModule {
+    kernel_id: CudaKernelId,
+    cu_module: *mut std::ffi::c_void,
+    cu_function: *mut std::ffi::c_void,
+    /// Monotonically increasing tick set on each cache access; smaller → older.
+    lru_tick: u64,
+}
+
+/// One enqueued but not-yet-launched apply request.
+#[cfg(feature = "cuda")]
+struct PendingApply {
+    kernel_id: CudaKernelId,
+    sv_dptr: u64,
+    sv_n_qubits: u32,
+    n_gate_qubits: u32,
+    precision: CudaPrecision,
+}
+
+// ── ManagerInner ─────────────────────────────────────────────────────────────
+
+struct ManagerInner {
+    kernels: HashMap<CudaKernelId, Arc<CudaKernel>>,
+    next_id: u64,
+    /// Ordered queue of apply requests not yet launched onto the stream.
+    #[cfg(feature = "cuda")]
+    pending: VecDeque<PendingApply>,
+    /// LRU cache of loaded CUmodule handles; capacity is [`LRU_SIZE`].
+    #[cfg(feature = "cuda")]
+    loaded: [Option<LoadedModule>; LRU_SIZE],
+    #[cfg(feature = "cuda")]
+    lru_tick: u64,
+    /// Lazily initialised on first `sync`; `None` until then.
+    #[cfg(feature = "cuda")]
+    stream: Option<*mut std::ffi::c_void>,
+}
+
+// loaded / stream are accessed only through the Mutex.
+unsafe impl Send for ManagerInner {}
+
+#[cfg(feature = "cuda")]
+impl Drop for ManagerInner {
+    fn drop(&mut self) {
+        // Destroy the stream first so in-flight GPU work completes before we
+        // unload modules that those launches may still reference.
+        if let Some(stream) = self.stream.take() {
+            unsafe { ffi::cast_cuda_stream_destroy(stream) };
+        }
+        for slot in &mut self.loaded {
+            if let Some(m) = slot.take() {
+                unsafe { ffi::cast_cuda_module_unload(m.cu_module) };
+            }
+        }
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl ManagerInner {
+    /// Returns the CUDA stream, creating it on the first call.
+    fn ensure_stream(&mut self) -> anyhow::Result<*mut std::ffi::c_void> {
+        if let Some(stream) = self.stream {
+            return Ok(stream);
+        }
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let stream = unsafe { ffi::cast_cuda_stream_create(err_buf.as_mut_ptr(), err_buf.len()) };
+        if stream.is_null() {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+        self.stream = Some(stream);
+        Ok(stream)
+    }
+
+    /// Ensures the module for `kernel` is resident in one of the two LRU slots,
+    /// loading (and possibly evicting the LRU entry) as needed.
+    /// Returns `cu_function` for immediate use.
+    fn ensure_module(
         &mut self,
-        spec: &super::CudaKernelGenSpec,
-        matrix: &[(f64, f64)],
-        qubits: &[u32],
-    ) -> anyhow::Result<CudaKernelId> {
-        let mut kernel_id: CudaKernelId = 0;
-        let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
-        let ffi_matrix: Vec<ffi::FfiComplex64> = matrix
+        kernel: &CudaKernel,
+        id: CudaKernelId,
+    ) -> anyhow::Result<*mut std::ffi::c_void> {
+        // ── Cache hit ────────────────────────────────────────────────────────
+        let hit_idx = self
+            .loaded
             .iter()
-            .map(|&(re, im)| ffi::FfiComplex64 { re, im })
+            .position(|s| s.as_ref().map_or(false, |m| m.kernel_id == id));
+        if let Some(idx) = hit_idx {
+            self.lru_tick += 1;
+            let tick = self.lru_tick;
+            let m = self.loaded[idx].as_mut().unwrap();
+            m.lru_tick = tick;
+            return Ok(m.cu_function);
+        }
+
+        // ── Select a slot: prefer empty, else evict LRU ──────────────────────
+        let slot_idx = if let Some(i) = self.loaded.iter().position(|s| s.is_none()) {
+            i
+        } else {
+            let idx = self
+                .loaded
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, s)| s.as_ref().unwrap().lru_tick)
+                .unwrap()
+                .0;
+            let evicted = self.loaded[idx].take().unwrap();
+            log::debug!("cuda: evicting module for kernel {}", evicted.kernel_id);
+            unsafe { ffi::cast_cuda_module_unload(evicted.cu_module) };
+            idx
+        };
+
+        // ── Load module from cubin ────────────────────────────────────────────
+        let cubin = kernel
+            .cubin
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("kernel {} has no cubin", id))?;
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let cu_module = unsafe {
+            ffi::cast_cuda_cubin_load(
+                cubin.as_ptr(),
+                cubin.len(),
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if cu_module.is_null() {
+            return Err(anyhow::anyhow!(
+                "cubin load failed: {}",
+                error_from_buf(&err_buf)
+            ));
+        }
+
+        let func_cstr = CString::new(kernel.func_name().as_bytes())
+            .map_err(|e| anyhow::anyhow!("func_name contains null byte: {e}"))?;
+        let cu_function = unsafe {
+            ffi::cast_cuda_module_get_function(
+                cu_module,
+                func_cstr.as_ptr(),
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if cu_function.is_null() {
+            unsafe { ffi::cast_cuda_module_unload(cu_module) };
+            return Err(anyhow::anyhow!(
+                "module_get_function failed: {}",
+                error_from_buf(&err_buf)
+            ));
+        }
+
+        self.lru_tick += 1;
+        self.loaded[slot_idx] = Some(LoadedModule {
+            kernel_id: id,
+            cu_module,
+            cu_function,
+            lru_tick: self.lru_tick,
+        });
+        log::debug!(
+            "cuda: loaded module for kernel {} into slot {}",
+            id,
+            slot_idx
+        );
+        Ok(cu_function)
+    }
+
+    /// Launches every pending apply request in order, using the 2-slot LRU
+    /// module cache.  `stream` must have been obtained from [`ensure_stream`].
+    fn drain_pending(&mut self, stream: *mut std::ffi::c_void) -> anyhow::Result<()> {
+        let pending: Vec<PendingApply> = self.pending.drain(..).collect();
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        for item in &pending {
+            // Clone the Arc so the immutable borrow on self.kernels ends before
+            // ensure_module takes &mut self.
+            let kernel = self
+                .kernels
+                .get(&item.kernel_id)
+                .ok_or_else(|| anyhow::anyhow!("kernel {} missing during drain", item.kernel_id))?
+                .clone();
+
+            let cu_function = self.ensure_module(&*kernel, item.kernel_id)?;
+
+            let status = unsafe {
+                ffi::cast_cuda_kernel_launch(
+                    cu_function,
+                    stream,
+                    item.sv_dptr,
+                    item.n_gate_qubits,
+                    item.sv_n_qubits,
+                    item.precision as u8,
+                    err_buf.as_mut_ptr(),
+                    err_buf.len(),
+                )
+            };
+            if status != 0 {
+                return Err(anyhow::anyhow!(
+                    "kernel {} launch failed: {}",
+                    item.kernel_id,
+                    error_from_buf(&err_buf)
+                ));
+            }
+            log::debug!(
+                "cuda: launched kernel {} ({} gate qubits, {} sv qubits, {:?})",
+                item.kernel_id,
+                item.n_gate_qubits,
+                item.sv_n_qubits,
+                item.precision,
+            );
+        }
+        Ok(())
+    }
+}
+
+// ── CudaKernelManager ────────────────────────────────────────────────────────
+
+/// Unified manager for CUDA kernel generation, PTX storage, and GPU execution.
+///
+/// # Workflow
+///
+/// ```ignore
+/// let mgr = CudaKernelManager::new();
+/// let kid = mgr.generate(&gate, spec)?;   // LLVM IR → PTX (→ cubin with cuda feature)
+/// mgr.apply(kid, &mut statevector)?;      // queue for launch (non-blocking)
+/// mgr.sync()?;                            // flush queue, then wait for GPU
+/// let amps = statevector.download()?;
+/// ```
+///
+/// `generate` can be called from multiple threads concurrently; each call runs
+/// the full LLVM pipeline independently before briefly locking to insert the result.
+/// `apply` is non-blocking — it validates and enqueues the request.  `sync` drains
+/// the queue in order, loading and evicting CUmodules via a 2-slot LRU policy
+/// (keeping at most two modules resident at once), then blocks until all GPU work
+/// is complete.
+///
+/// # Safety contract
+///
+/// A `CudaStatevector` passed to `apply` must remain valid (not dropped) until
+/// the next call to `sync`.
+pub struct CudaKernelManager {
+    inner: Mutex<ManagerInner>,
+}
+
+impl fmt::Debug for CudaKernelManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let n = self.inner.lock().map(|g| g.kernels.len()).unwrap_or(0);
+        f.debug_struct("CudaKernelManager")
+            .field("n_kernels", &n)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CudaKernelManager {
+    /// Creates a new manager. Does not initialise the CUDA driver.
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(ManagerInner {
+                kernels: HashMap::new(),
+                next_id: 0,
+                #[cfg(feature = "cuda")]
+                pending: VecDeque::new(),
+                #[cfg(feature = "cuda")]
+                loaded: std::array::from_fn(|_| None),
+                #[cfg(feature = "cuda")]
+                lru_tick: 0,
+                #[cfg(feature = "cuda")]
+                stream: None,
+            }),
+        }
+    }
+
+    /// Generates a CUDA kernel for `gate`.
+    ///
+    /// Runs LLVM IR generation → O1 optimisation → NVPTX PTX emission on the
+    /// calling thread (no CUDA device required).  When the `cuda` feature is
+    /// enabled the PTX is further compiled to device-native cubin via the
+    /// CUDA JIT linker.  Multiple threads may call `generate` concurrently;
+    /// the manager lock is only held briefly at the end to insert the result.
+    pub fn generate(
+        &self,
+        gate: &QuantumGate,
+        spec: CudaKernelGenSpec,
+    ) -> anyhow::Result<CudaKernelId> {
+        let ffi_matrix: Vec<ffi::FfiComplex64> = gate
+            .matrix()
+            .data()
+            .iter()
+            .map(|c| ffi::FfiComplex64 { re: c.re, im: c.im })
             .collect();
+        let qubits = gate.qubits();
+
+        // ── C++ LLVM pipeline (blocking, no lock held) ────────────────────
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let mut out_ptx: *mut c_char = std::ptr::null_mut();
+        let mut out_func_name: *mut c_char = std::ptr::null_mut();
+        let mut n_gate_qubits: u32 = 0;
+        let mut precision_byte: u8 = 0;
+
         let status = unsafe {
-            ffi::cast_cuda_kernel_generator_generate(
-                self.raw.as_ptr(),
-                spec as *const super::CudaKernelGenSpec,
+            ffi::cast_cuda_compile_gate_ptx(
+                &spec as *const CudaKernelGenSpec,
                 ffi_matrix.as_ptr(),
                 ffi_matrix.len(),
                 qubits.as_ptr(),
                 qubits.len(),
-                &mut kernel_id,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if status == 0 {
-            log::debug!(
-                "cuda: generated kernel {} ({} gate qubits, {:?} precision, sm_{}{})",
-                kernel_id,
-                qubits.len(),
-                spec.precision,
-                spec.sm_major,
-                spec.sm_minor,
-            );
-            Ok(kernel_id)
-        } else {
-            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
-        }
-    }
-
-    /// Returns the optimized NVPTX LLVM IR for the kernel identified by `kernel_id`.
-    ///
-    /// Triggers the O1 pass pipeline on the NVPTX module if it hasn't run yet.
-    /// Must be called before [`compile`](Self::compile).
-    pub fn emit_ir(&mut self, kernel_id: CudaKernelId) -> anyhow::Result<String> {
-        let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
-
-        let mut ir_len: usize = 0;
-        let status = unsafe {
-            ffi::cast_cuda_kernel_generator_emit_ir(
-                self.raw.as_ptr(),
-                kernel_id,
-                std::ptr::null_mut(),
-                0,
-                &mut ir_len,
+                &mut out_ptx,
+                &mut out_func_name,
+                &mut n_gate_qubits,
+                &mut precision_byte,
                 err_buf.as_mut_ptr(),
                 err_buf.len(),
             )
@@ -90,328 +385,154 @@ impl CudaKernelGenerator {
             return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
         }
 
-        let mut ir_buf = vec![0u8; ir_len + 1];
-        let status = unsafe {
-            ffi::cast_cuda_kernel_generator_emit_ir(
-                self.raw.as_ptr(),
-                kernel_id,
-                ir_buf.as_mut_ptr().cast(),
-                ir_buf.len(),
-                std::ptr::null_mut(),
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
-        }
+        // Safety: C++ guarantees non-null, null-terminated strings on success.
+        let ptx = unsafe { CStr::from_ptr(out_ptx) }
+            .to_string_lossy()
+            .into_owned();
+        let func_name = unsafe { CStr::from_ptr(out_func_name) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { ffi::cast_cuda_str_free(out_ptx) };
+        unsafe { ffi::cast_cuda_str_free(out_func_name) };
 
-        ir_buf.truncate(ir_len);
-        String::from_utf8(ir_buf).map_err(|e| anyhow::anyhow!("IR is not valid UTF-8: {e}"))
-    }
-
-    /// Compiles all generated kernels and returns a [`CudaKernelArtifacts`], consuming `self`.
-    ///
-    /// The artifacts are a pure-Rust value owning the PTX/cubin data; the underlying
-    /// C++ object is deleted before this function returns.
-    pub fn compile(self) -> anyhow::Result<CudaKernelArtifacts> {
-        let mut this = ManuallyDrop::new(self);
-        let mut raw_session = std::ptr::null_mut::<ffi::CastCudaKernelArtifacts>();
-        let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
-
-        let status = unsafe {
-            ffi::cast_cuda_kernel_generator_finish(
-                this.raw.as_ptr(),
-                &mut raw_session,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if status != 0 {
-            unsafe { ManuallyDrop::drop(&mut this) };
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
-        }
-
-        // Drain compiled kernel data from the C++ session into a Rust Vec, then delete it.
-        let result = drain_kernel_artifacts(raw_session, &mut err_buf);
-        unsafe { ffi::cast_cuda_kernel_artifacts_delete(raw_session) };
-        result
-    }
-}
-
-/// Extracts all compiled kernel data from `raw` into a [`CudaKernelArtifacts`].
-fn drain_kernel_artifacts(
-    raw: *mut ffi::CastCudaKernelArtifacts,
-    err_buf: &mut [std::ffi::c_char; ERR_BUF_LEN],
-) -> anyhow::Result<CudaKernelArtifacts> {
-    let n = unsafe { ffi::cast_cuda_kernel_artifacts_n_kernels(raw) };
-    let mut kernels = Vec::with_capacity(n as usize);
-
-    for idx in 0..n {
-        let kernel_id = unsafe { ffi::cast_cuda_kernel_artifacts_kernel_id_at(raw, idx) };
-        let n_gate_qubits = unsafe { ffi::cast_cuda_kernel_artifacts_n_gate_qubits_at(raw, idx) };
-        let precision_byte = unsafe { ffi::cast_cuda_kernel_artifacts_precision_at(raw, idx) };
         let precision = if precision_byte == 0 {
             CudaPrecision::F32
         } else {
             CudaPrecision::F64
         };
-        let func_name_ptr = unsafe { ffi::cast_cuda_kernel_artifacts_func_name_at(raw, idx) };
-        let func_name = unsafe { CStr::from_ptr(func_name_ptr) }
-            .to_string_lossy()
-            .into_owned();
-
-        let ptx = extract_ptx(raw, kernel_id, err_buf)?;
 
         log::debug!(
-            "cuda: compiled kernel {} '{}' ({} gate qubits, {:?}, ptx {} B)",
-            kernel_id,
-            func_name,
+            "cuda: compiled kernel ({} gate qubits, {:?} precision, {} B PTX)",
             n_gate_qubits,
             precision,
             ptx.len(),
         );
-        kernels.push(CompiledKernel {
-            kernel_id,
-            n_gate_qubits,
-            precision,
-            func_name,
-            ptx,
-        });
-    }
-    log::info!("cuda: compiled {} kernel(s)", kernels.len());
-    Ok(CudaKernelArtifacts { kernels })
-}
 
-fn extract_ptx(
-    raw: *mut ffi::CastCudaKernelArtifacts,
-    kernel_id: CudaKernelId,
-    err_buf: &mut [std::ffi::c_char; ERR_BUF_LEN],
-) -> anyhow::Result<String> {
-    let mut ptx_len: usize = 0;
-    let status = unsafe {
-        ffi::cast_cuda_kernel_artifacts_emit_ptx(
-            raw,
-            kernel_id,
-            std::ptr::null_mut(),
-            0,
-            &mut ptx_len,
-            err_buf.as_mut_ptr(),
-            err_buf.len(),
-        )
-    };
-    if status != 0 {
-        return Err(anyhow::anyhow!(error_from_buf(err_buf)));
-    }
-    let mut buf = vec![0u8; ptx_len + 1];
-    let status = unsafe {
-        ffi::cast_cuda_kernel_artifacts_emit_ptx(
-            raw,
-            kernel_id,
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-            std::ptr::null_mut(),
-            err_buf.as_mut_ptr(),
-            err_buf.len(),
-        )
-    };
-    if status != 0 {
-        return Err(anyhow::anyhow!(error_from_buf(err_buf)));
-    }
-    buf.truncate(ptx_len);
-    String::from_utf8(buf).map_err(|e| anyhow::anyhow!("PTX is not valid UTF-8: {e}"))
-}
-
-impl Default for CudaKernelGenerator {
-    fn default() -> Self {
-        Self::new().expect("failed to create CUDA kernel generator")
-    }
-}
-
-impl Drop for CudaKernelGenerator {
-    fn drop(&mut self) {
-        unsafe { ffi::cast_cuda_kernel_generator_delete(self.raw.as_ptr()) };
-    }
-}
-
-impl fmt::Debug for CudaKernelGenerator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CudaKernelGenerator")
-            .finish_non_exhaustive()
-    }
-}
-
-// ── CudaKernelArtifacts ────────────────────────────────────────────────────
-
-/// Metadata and artifacts for a single compiled kernel.
-#[derive(Debug, Clone)]
-pub struct CompiledKernel {
-    pub kernel_id: CudaKernelId,
-    pub n_gate_qubits: u32,
-    pub precision: CudaPrecision,
-    pub func_name: String,
-    /// PTX assembly text (null-terminated, ASCII).
-    pub ptx: String,
-}
-
-/// Pure-Rust PTX/cubin artifacts for each compiled kernel.
-///
-/// Created by [`CudaKernelGenerator::compile`]. The underlying C++ object is fully
-/// drained and deleted before this value is returned.
-#[derive(Debug)]
-pub struct CudaKernelArtifacts {
-    pub kernels: Vec<CompiledKernel>,
-}
-
-impl CudaKernelArtifacts {
-    /// Returns the PTX assembly text for the kernel identified by `kernel_id`.
-    pub fn emit_ptx(&self, kernel_id: CudaKernelId) -> anyhow::Result<&str> {
-        self.kernels
-            .iter()
-            .find(|k| k.kernel_id == kernel_id)
-            .map(|k| k.ptx.as_str())
-            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in kernel artifacts", kernel_id))
-    }
-}
-
-// ── CudaJitSession ───────────────────────────────────────────────────────────
-
-struct JitEntry {
-    kernel_id: CudaKernelId,
-    n_gate_qubits: u32,
-    precision: CudaPrecision,
-    cu_module: *mut std::ffi::c_void,
-    cu_function: *mut std::ffi::c_void,
-}
-
-/// Holds CUDA modules loaded from a [`CudaKernelArtifacts`], ready to launch.
-///
-/// Owns the `CUmodule`/`CUfunction` handles; modules are unloaded on drop.
-pub struct CudaJitSession {
-    entries: Vec<JitEntry>,
-}
-
-impl Drop for CudaJitSession {
-    fn drop(&mut self) {
-        for e in &self.entries {
-            unsafe { ffi::cast_cuda_module_unload(e.cu_module) };
-        }
-    }
-}
-
-impl fmt::Debug for CudaJitSession {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CudaJitSession")
-            .field("n_kernels", &self.entries.len())
-            .finish_non_exhaustive()
-    }
-}
-
-impl CudaJitSession {
-    /// Loads all compiled kernels from `artifacts` into CUDA driver modules.
-    ///
-    /// Initialises the CUDA driver once per process (device 0).
-    pub fn new(artifacts: &CudaKernelArtifacts) -> anyhow::Result<Self> {
-        let mut this = Self {
-            entries: Vec::with_capacity(artifacts.kernels.len()),
-        };
-
-        for kernel in &artifacts.kernels {
-            let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
-
-            let ptx_cstr = CString::new(kernel.ptx.as_bytes())
+        // ── PTX → cubin (cuda feature only) ──────────────────────────────
+        #[cfg(feature = "cuda")]
+        let cubin = {
+            let ptx_cstr = CString::new(ptx.as_bytes())
                 .map_err(|e| anyhow::anyhow!("PTX contains null byte: {e}"))?;
-            let cu_module = unsafe {
-                ffi::cast_cuda_ptx_load(ptx_cstr.as_ptr(), err_buf.as_mut_ptr(), err_buf.len())
-            };
-            if cu_module.is_null() {
-                return Err(anyhow::anyhow!(
-                    "failed to load PTX for '{}': {}",
-                    kernel.func_name,
-                    error_from_buf(&err_buf)
-                ));
-            }
-
-            let func_cstr = CString::new(kernel.func_name.as_bytes())
-                .map_err(|e| anyhow::anyhow!("func_name contains null byte: {e}"))?;
-            let cu_function = unsafe {
-                ffi::cast_cuda_module_get_function(
-                    cu_module,
-                    func_cstr.as_ptr(),
+            let mut raw_cubin: *mut u8 = std::ptr::null_mut();
+            let mut cubin_len: usize = 0;
+            let status = unsafe {
+                ffi::cast_cuda_ptx_to_cubin(
+                    ptx_cstr.as_ptr(),
+                    &mut raw_cubin,
+                    &mut cubin_len,
                     err_buf.as_mut_ptr(),
                     err_buf.len(),
                 )
             };
-            if cu_function.is_null() {
-                // Unload the module we just loaded (not yet in entries, so drop won't touch it).
-                unsafe { ffi::cast_cuda_module_unload(cu_module) };
+            if status != 0 {
                 return Err(anyhow::anyhow!(
-                    "failed to get function '{}': {}",
-                    kernel.func_name,
+                    "PTX → cubin failed: {}",
                     error_from_buf(&err_buf)
                 ));
             }
+            // Safety: raw_cubin points to cubin_len bytes allocated by C++.
+            let bytes = unsafe { std::slice::from_raw_parts(raw_cubin, cubin_len) }.to_vec();
+            unsafe { ffi::cast_cuda_cubin_free(raw_cubin) };
+            Some(bytes)
+        };
 
-            this.entries.push(JitEntry {
-                kernel_id: kernel.kernel_id,
-                n_gate_qubits: kernel.n_gate_qubits,
-                precision: kernel.precision,
-                cu_module,
-                cu_function,
-            });
+        let kernel = Arc::new(CudaKernel {
+            n_gate_qubits,
+            precision,
+            ptx,
+            func_name,
+            #[cfg(feature = "cuda")]
+            cubin,
+        });
 
-            log::debug!(
-                "cuda: loaded kernel {} '{}' ({} gate qubits, {:?} precision)",
-                kernel.kernel_id,
-                kernel.func_name,
-                kernel.n_gate_qubits,
-                kernel.precision,
-            );
-        }
+        // ── Insert under lock (brief) ─────────────────────────────────────
+        let mut guard = self.inner.lock().unwrap();
+        let id = guard.next_id;
+        guard.next_id += 1;
+        guard.kernels.insert(id, kernel);
         log::info!(
-            "cuda: jit session ready with {} kernel(s)",
-            this.entries.len()
+            "cuda: manager registered kernel {} ({} gate qubits, {:?})",
+            id,
+            n_gate_qubits,
+            precision,
         );
-        Ok(this)
+        Ok(id)
     }
 
-    /// Applies the kernel identified by `kernel_id` to `sv` in-place.
-    ///
-    /// Synchronises the device before returning.
-    pub fn apply(&self, kernel_id: CudaKernelId, sv: &mut CudaStatevector) -> anyhow::Result<()> {
-        let entry = self
-            .entries
-            .iter()
-            .find(|e| e.kernel_id == kernel_id)
-            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in jit session", kernel_id))?;
+    /// Returns the PTX assembly text for the given kernel. We have to return a copy because
+    /// `CudaKernel` is shared via `Arc`.
+    pub fn emit_ptx(&self, id: CudaKernelId) -> Option<String> {
+        let guard = self.inner.lock().unwrap();
+        let kernel = guard.kernels.get(&id)?;
+        Some(kernel.ptx().into())
+    }
 
-        if sv.n_qubits() < entry.n_gate_qubits {
+    /// Queues a launch of kernel `id` on `sv`, without touching the GPU immediately.
+    ///
+    /// Validates that `id` exists and that the statevector's qubit count and
+    /// precision match the kernel, then pushes the request onto an internal queue.
+    /// Call [`sync`](Self::sync) to flush the queue and wait for completion.
+    ///
+    /// # Safety contract
+    ///
+    /// `sv` must remain valid (not dropped) until the next call to `sync`.
+    #[cfg(feature = "cuda")]
+    pub fn apply(&self, id: CudaKernelId, sv: &mut CudaStatevector) -> anyhow::Result<()> {
+        let mut guard = self.inner.lock().unwrap();
+        let kernel = guard
+            .kernels
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found", id))?;
+
+        if sv.n_qubits() < kernel.n_gate_qubits() {
             anyhow::bail!("statevector has fewer qubits than the gate kernel requires");
         }
-        if sv.precision() as u8 != entry.precision as u8 {
+        if sv.precision() as u8 != kernel.precision() as u8 {
             anyhow::bail!("statevector precision does not match kernel precision");
         }
 
+        guard.pending.push_back(PendingApply {
+            kernel_id: id,
+            sv_dptr: sv.dptr(),
+            sv_n_qubits: sv.n_qubits(),
+            n_gate_qubits: kernel.n_gate_qubits(),
+            precision: kernel.precision(),
+        });
+
         log::debug!(
-            "cuda: apply kernel {} ({} gate qubits, {} sv qubits, {:?} precision)",
-            kernel_id,
-            entry.n_gate_qubits,
+            "cuda: queued kernel {} ({} gate qubits, {} sv qubits, {:?})",
+            id,
+            kernel.n_gate_qubits(),
             sv.n_qubits(),
-            entry.precision,
+            kernel.precision(),
         );
 
-        let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
-        let status = unsafe {
-            ffi::cast_cuda_kernel_apply(
-                entry.cu_function,
-                sv.dptr(),
-                entry.n_gate_qubits,
-                sv.n_qubits(),
-                entry.precision as u8,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
+        Ok(())
+    }
+
+    /// Flushes the apply queue — loading and evicting CUmodules via a 2-slot LRU
+    /// policy — enqueues all pending kernel launches onto the internal CUDA stream,
+    /// then blocks until the stream is idle.
+    ///
+    /// Returns immediately if nothing has been queued and no stream was ever created.
+    #[cfg(feature = "cuda")]
+    pub fn sync(&self) -> anyhow::Result<()> {
+        let stream = {
+            let mut guard = self.inner.lock().unwrap();
+
+            if guard.pending.is_empty() && guard.stream.is_none() {
+                return Ok(());
+            }
+
+            let stream = guard.ensure_stream()?;
+            guard.drain_pending(stream)?;
+            stream
+        }; // lock released here — stream_sync runs without holding the mutex
+
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let status =
+            unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) };
         if status == 0 {
             Ok(())
         } else {

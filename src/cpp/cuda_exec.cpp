@@ -19,33 +19,47 @@ static std::string cu_error_string(CUresult rc) {
   cuGetErrorName(rc, &name);
   cuGetErrorString(rc, &desc);
   std::string s = "CUDA ";
-  if (name) s += name;
-  if (desc) { s += " — "; s += desc; }
+  if (name)
+    s += name;
+  if (desc) {
+    s += " — ";
+    s += desc;
+  }
   return s;
 }
 
 static bool cu_check(CUresult rc, const char *op, std::string &err_out) {
-  if (rc == CUDA_SUCCESS) return true;
+  if (rc == CUDA_SUCCESS)
+    return true;
   err_out = std::string(op) + " failed: " + cu_error_string(rc);
   return false;
 }
 
 // ── Per-process CUDA initialisation ──────────────────────────────────────────
 
-static CUdevice  g_device  = 0;
+static CUdevice g_device = 0;
 static CUcontext g_context = nullptr;
 static std::string g_init_error;
 
 static void cuda_init_once() {
   std::string err;
   CUresult rc = cuInit(0);
-  if (!cu_check(rc, "cuInit", err)) { g_init_error = err; return; }
+  if (!cu_check(rc, "cuInit", err)) {
+    g_init_error = err;
+    return;
+  }
 
   rc = cuDeviceGet(&g_device, 0);
-  if (!cu_check(rc, "cuDeviceGet", err)) { g_init_error = err; return; }
+  if (!cu_check(rc, "cuDeviceGet", err)) {
+    g_init_error = err;
+    return;
+  }
 
   rc = cuDevicePrimaryCtxRetain(&g_context, g_device);
-  if (!cu_check(rc, "cuDevicePrimaryCtxRetain", err)) { g_init_error = err; return; }
+  if (!cu_check(rc, "cuDevicePrimaryCtxRetain", err)) {
+    g_init_error = err;
+    return;
+  }
 
   rc = cuCtxSetCurrent(g_context);
   if (!cu_check(rc, "cuCtxSetCurrent", err)) {
@@ -57,60 +71,134 @@ static void cuda_init_once() {
 static bool ensure_cuda(std::string &err) {
   static std::once_flag flag;
   std::call_once(flag, cuda_init_once);
-  if (!g_init_error.empty()) { err = g_init_error; return false; }
-  if (!g_context) { err = "CUDA context not initialised"; return false; }
+  if (!g_init_error.empty()) {
+    err = g_init_error;
+    return false;
+  }
+  if (!g_context) {
+    err = "CUDA context not initialised";
+    return false;
+  }
   // The primary context must be made current for the *calling* thread.
   CUresult rc = cuCtxSetCurrent(g_context);
-  if (!cu_check(rc, "cuCtxSetCurrent", err)) return false;
+  if (!cu_check(rc, "cuCtxSetCurrent", err))
+    return false;
   return true;
 }
 
 // ── Grid / block helper ───────────────────────────────────────────────────────
 
-static void launch_dims(uint64_t n_combos,
-                        unsigned int &grid_x, unsigned int &block_x) {
+static void launch_dims(uint64_t n_combos, unsigned int &grid_x, unsigned int &block_x) {
   block_x = static_cast<unsigned int>(std::min<uint64_t>(256, n_combos));
-  if (block_x == 0) block_x = 1;
+  if (block_x == 0)
+    block_x = 1;
   uint64_t g = (n_combos + block_x - 1) / block_x;
   grid_x = static_cast<unsigned int>(std::min<uint64_t>(65535, g));
-  if (grid_x == 0) grid_x = 1;
+  if (grid_x == 0)
+    grid_x = 1;
 }
 
 // ── Device capability query ───────────────────────────────────────────────────
 
-extern "C" int
-cast_cuda_device_sm(uint32_t *out_major, uint32_t *out_minor,
-                    char *err_buf, size_t err_buf_len) {
+extern "C" int cast_cuda_device_sm(uint32_t *out_major, uint32_t *out_minor, char *err_buf,
+                                   size_t err_buf_len) {
   std::string err;
   if (!ensure_cuda(err)) {
     write_error_message(err_buf, err_buf_len, err);
     return 1;
   }
   int major = 0, minor = 0;
-  CUresult rc = cuDeviceGetAttribute(
-      &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, g_device);
+  CUresult rc =
+      cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, g_device);
   if (!cu_check(rc, "cuDeviceGetAttribute (major)", err)) {
     write_error_message(err_buf, err_buf_len, err);
     return 1;
   }
-  rc = cuDeviceGetAttribute(
-      &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, g_device);
+  rc = cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, g_device);
   if (!cu_check(rc, "cuDeviceGetAttribute (minor)", err)) {
     write_error_message(err_buf, err_buf_len, err);
     return 1;
   }
-  if (out_major) *out_major = static_cast<uint32_t>(major);
-  if (out_minor) *out_minor = static_cast<uint32_t>(minor);
+  if (out_major)
+    *out_major = static_cast<uint32_t>(major);
+  if (out_minor)
+    *out_minor = static_cast<uint32_t>(minor);
   clear_error_buffer(err_buf, err_buf_len);
   return 0;
 }
 
-// ── Stateless CUDA module loading ─────────────────────────────────────────────
+// ── PTX → cubin compilation ───────────────────────────────────────────────────
 
-extern "C" void *
-cast_cuda_ptx_load(const char *ptx_data, char *err_buf, size_t err_buf_len) {
-  if (!ptx_data) {
-    write_error_message(err_buf, err_buf_len, "ptx_data must not be null");
+extern "C" int cast_cuda_ptx_to_cubin(const char *ptx_data, uint8_t **out_cubin,
+                                      size_t *out_cubin_len, char *err_buf, size_t err_buf_len) {
+  if (!ptx_data || !out_cubin || !out_cubin_len) {
+    write_error_message(err_buf, err_buf_len, "arguments must not be null");
+    return 1;
+  }
+  std::string err;
+  if (!ensure_cuda(err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+
+  // Capture JIT compiler errors so PTX syntax problems surface clearly.
+  char jit_log[4096] = {};
+  uintptr_t log_size = sizeof(jit_log);
+  CUjit_option opt_keys[] = {CU_JIT_ERROR_LOG_BUFFER, CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES};
+  void *opt_vals[] = {static_cast<void *>(jit_log), reinterpret_cast<void *>(log_size)};
+
+  CUlinkState link_state = nullptr;
+  CUresult rc = cuLinkCreate(2, opt_keys, opt_vals, &link_state);
+  if (!cu_check(rc, "cuLinkCreate", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+
+  rc = cuLinkAddData(link_state, CU_JIT_INPUT_PTX,
+                     const_cast<void *>(static_cast<const void *>(ptx_data)), std::strlen(ptx_data),
+                     "kernel.ptx", 0, nullptr, nullptr);
+  if (!cu_check(rc, "cuLinkAddData", err)) {
+    if (jit_log[0] != '\0') {
+      err += " — ";
+      err += jit_log;
+    }
+    cuLinkDestroy(link_state);
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+
+  void *cubin_ptr = nullptr;
+  size_t cubin_size = 0;
+  rc = cuLinkComplete(link_state, &cubin_ptr, &cubin_size);
+  if (!cu_check(rc, "cuLinkComplete", err)) {
+    if (jit_log[0] != '\0') {
+      err += " — ";
+      err += jit_log;
+    }
+    cuLinkDestroy(link_state);
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+
+  // cubin_ptr is owned by the linker state; copy before destroying.
+  auto *buf = new uint8_t[cubin_size];
+  std::memcpy(buf, cubin_ptr, cubin_size);
+  cuLinkDestroy(link_state);
+
+  *out_cubin = buf;
+  *out_cubin_len = cubin_size;
+  clear_error_buffer(err_buf, err_buf_len);
+  return 0;
+}
+
+extern "C" void cast_cuda_cubin_free(uint8_t *cubin) { delete[] cubin; }
+
+// ── CUDA module loading ───────────────────────────────────────────────────────
+
+extern "C" void *cast_cuda_cubin_load(const uint8_t *cubin_data, size_t /*cubin_len*/,
+                                      char *err_buf, size_t err_buf_len) {
+  if (!cubin_data) {
+    write_error_message(err_buf, err_buf_len, "cubin_data must not be null");
     return nullptr;
   }
   std::string err;
@@ -119,7 +207,7 @@ cast_cuda_ptx_load(const char *ptx_data, char *err_buf, size_t err_buf_len) {
     return nullptr;
   }
   CUmodule mod = nullptr;
-  CUresult rc = cuModuleLoadData(&mod, ptx_data);
+  CUresult rc = cuModuleLoadData(&mod, cubin_data);
   if (!cu_check(rc, "cuModuleLoadData", err)) {
     write_error_message(err_buf, err_buf_len, err);
     return nullptr;
@@ -128,23 +216,20 @@ cast_cuda_ptx_load(const char *ptx_data, char *err_buf, size_t err_buf_len) {
   return static_cast<void *>(mod);
 }
 
-extern "C" void
-cast_cuda_module_unload(void *cu_module) {
-  if (cu_module) cuModuleUnload(static_cast<CUmodule>(cu_module));
+extern "C" void cast_cuda_module_unload(void *cu_module) {
+  if (cu_module)
+    cuModuleUnload(static_cast<CUmodule>(cu_module));
 }
 
-extern "C" void *
-cast_cuda_module_get_function(void *cu_module, const char *func_name,
-                              char *err_buf, size_t err_buf_len) {
+extern "C" void *cast_cuda_module_get_function(void *cu_module, const char *func_name,
+                                               char *err_buf, size_t err_buf_len) {
   if (!cu_module || !func_name) {
-    write_error_message(err_buf, err_buf_len,
-                        "cu_module and func_name must not be null");
+    write_error_message(err_buf, err_buf_len, "cu_module and func_name must not be null");
     return nullptr;
   }
   CUfunction func = nullptr;
   std::string err;
-  CUresult rc = cuModuleGetFunction(&func, static_cast<CUmodule>(cu_module),
-                                    func_name);
+  CUresult rc = cuModuleGetFunction(&func, static_cast<CUmodule>(cu_module), func_name);
   if (!cu_check(rc, "cuModuleGetFunction", err)) {
     write_error_message(err_buf, err_buf_len, err);
     return nullptr;
@@ -153,25 +238,58 @@ cast_cuda_module_get_function(void *cu_module, const char *func_name,
   return static_cast<void *>(func);
 }
 
-extern "C" int
-cast_cuda_kernel_apply(void *cu_function,
-                       uint64_t sv_dptr,
-                       uint32_t n_gate_qubits, uint32_t sv_n_qubits,
-                       uint8_t /*precision*/,
-                       char *err_buf, size_t err_buf_len) {
+// ── CUDA stream ───────────────────────────────────────────────────────────────
+
+extern "C" void *cast_cuda_stream_create(char *err_buf, size_t err_buf_len) {
+  std::string err;
+  if (!ensure_cuda(err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return nullptr;
+  }
+  CUstream stream = nullptr;
+  CUresult rc = cuStreamCreate(&stream, CU_STREAM_DEFAULT);
+  if (!cu_check(rc, "cuStreamCreate", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return nullptr;
+  }
+  clear_error_buffer(err_buf, err_buf_len);
+  return static_cast<void *>(stream);
+}
+
+extern "C" void cast_cuda_stream_destroy(void *stream) {
+  if (stream)
+    cuStreamDestroy(static_cast<CUstream>(stream));
+}
+
+extern "C" int cast_cuda_stream_sync(void *stream, char *err_buf, size_t err_buf_len) {
+  std::string err;
+  CUresult rc = cuStreamSynchronize(static_cast<CUstream>(stream));
+  if (!cu_check(rc, "cuStreamSynchronize", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  clear_error_buffer(err_buf, err_buf_len);
+  return 0;
+}
+
+// ── Kernel launch ─────────────────────────────────────────────────────────────
+
+extern "C" int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t sv_dptr,
+                                       uint32_t n_gate_qubits, uint32_t sv_n_qubits,
+                                       uint8_t /*precision*/, char *err_buf, size_t err_buf_len) {
   if (!cu_function) {
     write_error_message(err_buf, err_buf_len, "cu_function must not be null");
     return 1;
   }
   if (sv_n_qubits < n_gate_qubits) {
     write_error_message(err_buf, err_buf_len,
-        "statevector has fewer qubits than the gate kernel requires");
+                        "statevector has fewer qubits than the gate kernel requires");
     return 1;
   }
 
-  CUdeviceptr sv_d   = static_cast<CUdeviceptr>(sv_dptr);
-  CUdeviceptr mat_d  = 0;
-  uint64_t    n_combos = UINT64_C(1) << (sv_n_qubits - n_gate_qubits);
+  CUdeviceptr sv_d = static_cast<CUdeviceptr>(sv_dptr);
+  CUdeviceptr mat_d = 0;
+  uint64_t n_combos = UINT64_C(1) << (sv_n_qubits - n_gate_qubits);
 
   void *args[] = {&sv_d, &mat_d, &n_combos};
 
@@ -179,19 +297,9 @@ cast_cuda_kernel_apply(void *cu_function,
   launch_dims(n_combos, grid_x, block_x);
 
   std::string err;
-  CUresult rc = cuLaunchKernel(static_cast<CUfunction>(cu_function),
-                               grid_x, 1, 1,
-                               block_x, 1, 1,
-                               /*shared_bytes=*/0,
-                               /*stream=*/nullptr,
-                               args, nullptr);
+  CUresult rc = cuLaunchKernel(static_cast<CUfunction>(cu_function), grid_x, 1, 1, block_x, 1, 1,
+                               /*shared_bytes=*/0, static_cast<CUstream>(stream), args, nullptr);
   if (!cu_check(rc, "cuLaunchKernel", err)) {
-    write_error_message(err_buf, err_buf_len, err);
-    return 1;
-  }
-
-  rc = cuCtxSynchronize();
-  if (!cu_check(rc, "cuCtxSynchronize", err)) {
     write_error_message(err_buf, err_buf_len, err);
     return 1;
   }
@@ -202,9 +310,8 @@ cast_cuda_kernel_apply(void *cu_function,
 
 // ── Stateless device memory ───────────────────────────────────────────────────
 
-extern "C" uint64_t
-cast_cuda_sv_alloc(size_t n_elements, uint8_t precision,
-                   char *err_buf, size_t err_buf_len) {
+extern "C" uint64_t cast_cuda_sv_alloc(size_t n_elements, uint8_t precision, char *err_buf,
+                                       size_t err_buf_len) {
   std::string err;
   if (!ensure_cuda(err)) {
     write_error_message(err_buf, err_buf_len, err);
@@ -221,14 +328,13 @@ cast_cuda_sv_alloc(size_t n_elements, uint8_t precision,
   return static_cast<uint64_t>(dptr);
 }
 
-extern "C" void
-cast_cuda_sv_free(uint64_t dptr) {
-  if (dptr) cuMemFree(static_cast<CUdeviceptr>(dptr));
+extern "C" void cast_cuda_sv_free(uint64_t dptr) {
+  if (dptr)
+    cuMemFree(static_cast<CUdeviceptr>(dptr));
 }
 
-extern "C" int
-cast_cuda_sv_zero(uint64_t dptr, size_t n_elements, uint8_t precision,
-                  char *err_buf, size_t err_buf_len) {
+extern "C" int cast_cuda_sv_zero(uint64_t dptr, size_t n_elements, uint8_t precision, char *err_buf,
+                                 size_t err_buf_len) {
   CUdeviceptr d = static_cast<CUdeviceptr>(dptr);
   size_t scalar_bytes = (precision == 0) ? sizeof(float) : sizeof(double);
 
@@ -256,9 +362,8 @@ cast_cuda_sv_zero(uint64_t dptr, size_t n_elements, uint8_t precision,
   return 0;
 }
 
-extern "C" int
-cast_cuda_sv_upload(uint64_t dptr, const double *host_data, size_t n_elements,
-                    uint8_t precision, char *err_buf, size_t err_buf_len) {
+extern "C" int cast_cuda_sv_upload(uint64_t dptr, const double *host_data, size_t n_elements,
+                                   uint8_t precision, char *err_buf, size_t err_buf_len) {
   CUdeviceptr d = static_cast<CUdeviceptr>(dptr);
   std::string err;
   CUresult rc;
@@ -284,9 +389,8 @@ cast_cuda_sv_upload(uint64_t dptr, const double *host_data, size_t n_elements,
   return 0;
 }
 
-extern "C" int
-cast_cuda_sv_download(uint64_t dptr, double *host_data, size_t n_elements,
-                      uint8_t precision, char *err_buf, size_t err_buf_len) {
+extern "C" int cast_cuda_sv_download(uint64_t dptr, double *host_data, size_t n_elements,
+                                     uint8_t precision, char *err_buf, size_t err_buf_len) {
   CUdeviceptr d = static_cast<CUdeviceptr>(dptr);
   std::string err;
   CUresult rc;
