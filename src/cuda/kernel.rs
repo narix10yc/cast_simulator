@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_char, CStr, CString};
 use std::fmt;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use super::error_from_buf;
 use super::ffi;
@@ -23,12 +24,17 @@ pub struct CudaKernel {
     ptx: String,
     /// Entry-point name in the PTX / cubin (e.g. `"k_gate"`).
     func_name: String,
+    /// Wall time for the LLVM IR → PTX stage.
+    ptx_compile_time: Duration,
 
     /// Device-native binary produced by the CUDA JIT linker.
     /// Module loading is deferred to `sync`; the manager's LRU cache owns
     /// the CUmodule handles.
     #[cfg(feature = "cuda")]
     cubin: Option<Vec<u8>>,
+    /// Wall time for the PTX → cubin JIT stage.
+    #[cfg(feature = "cuda")]
+    jit_compile_time: Duration,
 }
 
 impl CudaKernel {
@@ -51,16 +57,30 @@ impl CudaKernel {
     pub fn func_name(&self) -> &str {
         &self.func_name
     }
+
+    /// Wall time spent in the LLVM IR → PTX stage of `generate`.
+    pub fn ptx_compile_time(&self) -> Duration {
+        self.ptx_compile_time
+    }
+
+    /// Wall time spent in the PTX → cubin JIT stage of `generate`.
+    #[cfg(feature = "cuda")]
+    pub fn jit_compile_time(&self) -> Duration {
+        self.jit_compile_time
+    }
 }
 
 impl fmt::Debug for CudaKernel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CudaKernel")
-            .field("n_gate_qubits", &self.n_gate_qubits)
+        let mut s = f.debug_struct("CudaKernel");
+        s.field("n_gate_qubits", &self.n_gate_qubits)
             .field("precision", &self.precision)
             .field("func_name", &self.func_name)
             .field("ptx_bytes", &self.ptx.len())
-            .finish_non_exhaustive()
+            .field("ptx_compile_time", &self.ptx_compile_time);
+        #[cfg(feature = "cuda")]
+        s.field("jit_compile_time", &self.jit_compile_time);
+        s.finish_non_exhaustive()
     }
 }
 
@@ -366,6 +386,7 @@ impl CudaKernelManager {
         let mut n_gate_qubits: u32 = 0;
         let mut precision_byte: u8 = 0;
 
+        let ptx_t0 = Instant::now();
         let status = unsafe {
             ffi::cast_cuda_compile_gate_ptx(
                 &spec as *const CudaKernelGenSpec,
@@ -381,6 +402,7 @@ impl CudaKernelManager {
                 err_buf.len(),
             )
         };
+        let ptx_compile_time = ptx_t0.elapsed();
         if status != 0 {
             return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
         }
@@ -402,19 +424,21 @@ impl CudaKernelManager {
         };
 
         log::debug!(
-            "cuda: compiled kernel ({} gate qubits, {:?} precision, {} B PTX)",
+            "cuda: compiled kernel ({} gate qubits, {:?} precision, {} B PTX, {:?} PTX stage)",
             n_gate_qubits,
             precision,
             ptx.len(),
+            ptx_compile_time,
         );
 
         // ── PTX → cubin (cuda feature only) ──────────────────────────────
         #[cfg(feature = "cuda")]
-        let cubin = {
+        let (cubin, jit_compile_time) = {
             let ptx_cstr = CString::new(ptx.as_bytes())
                 .map_err(|e| anyhow::anyhow!("PTX contains null byte: {e}"))?;
             let mut raw_cubin: *mut u8 = std::ptr::null_mut();
             let mut cubin_len: usize = 0;
+            let jit_t0 = Instant::now();
             let status = unsafe {
                 ffi::cast_cuda_ptx_to_cubin(
                     ptx_cstr.as_ptr(),
@@ -424,6 +448,7 @@ impl CudaKernelManager {
                     err_buf.len(),
                 )
             };
+            let jit_compile_time = jit_t0.elapsed();
             if status != 0 {
                 return Err(anyhow::anyhow!(
                     "PTX → cubin failed: {}",
@@ -433,7 +458,8 @@ impl CudaKernelManager {
             // Safety: raw_cubin points to cubin_len bytes allocated by C++.
             let bytes = unsafe { std::slice::from_raw_parts(raw_cubin, cubin_len) }.to_vec();
             unsafe { ffi::cast_cuda_cubin_free(raw_cubin) };
-            Some(bytes)
+            log::debug!("cuda: JIT PTX → cubin took {:?}", jit_compile_time);
+            (Some(bytes), jit_compile_time)
         };
 
         let kernel = Arc::new(CudaKernel {
@@ -441,8 +467,11 @@ impl CudaKernelManager {
             precision,
             ptx,
             func_name,
+            ptx_compile_time,
             #[cfg(feature = "cuda")]
             cubin,
+            #[cfg(feature = "cuda")]
+            jit_compile_time,
         });
 
         // ── Insert under lock (brief) ─────────────────────────────────────
