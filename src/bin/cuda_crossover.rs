@@ -27,7 +27,7 @@
 
 use anyhow::Result;
 use cast::cuda::{
-    CudaCompilationSession, CudaExecSession, CudaKernelGenSpec, CudaKernelGenerator, CudaKernelId,
+    CudaJitSession, CudaKernelArtifacts, CudaKernelGenSpec, CudaKernelGenerator, CudaKernelId,
     CudaPrecision, CudaStatevector,
 };
 use cast::types::{Complex, ComplexSquareMatrix, QuantumGate};
@@ -219,7 +219,7 @@ struct Timing {
 /// Each sample times a single `exec.apply()` call which includes a full
 /// device synchronisation, so host-side `Instant` is accurate.
 fn time_adaptive(
-    exec: &CudaExecSession,
+    exec: &CudaJitSession,
     kid: CudaKernelId,
     sv: &mut CudaStatevector,
     n_warmup: usize,
@@ -336,8 +336,8 @@ fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
 
     let mut gen = CudaKernelGenerator::new()?;
     let kid = gen.generate(&spec, &ffi_matrix, case.gate.qubits())?;
-    let session: CudaCompilationSession = gen.compile()?;
-    let exec = CudaExecSession::new(&session)?;
+    let session: CudaKernelArtifacts = gen.compile()?;
+    let exec = CudaJitSession::new(&session)?;
 
     let mut sv = CudaStatevector::new(n_sv as u32, spec.precision)?;
     sv.zero()?;

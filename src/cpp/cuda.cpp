@@ -22,7 +22,7 @@ struct cast_cuda_kernel_generator_t {
 };
 
 // Compilation session stores kernels in insertion order for O(1) indexed access.
-struct cast_cuda_compilation_session_t {
+struct cast_cuda_kernel_artifacts_t {
   std::vector<CastCudaCompiledKernel> kernels{};
 };
 
@@ -41,7 +41,7 @@ CastCudaGeneratedKernel *find_generated(cast_cuda_kernel_generator_t *gen,
 }
 
 const CastCudaCompiledKernel *find_compiled(
-    const cast_cuda_compilation_session_t *session,
+    const cast_cuda_kernel_artifacts_t *session,
     cast_cuda_kernel_id_t kernel_id) {
   if (!session) return nullptr;
   for (const auto &k : session->kernels)
@@ -159,7 +159,7 @@ cast_cuda_kernel_generator_emit_ir(cast_cuda_kernel_generator_t *generator,
 
 extern "C" int
 cast_cuda_kernel_generator_finish(cast_cuda_kernel_generator_t *generator,
-                                  cast_cuda_compilation_session_t **out_session,
+                                  cast_cuda_kernel_artifacts_t **out_session,
                                   char *err_buf, size_t err_buf_len) {
   if (!generator) {
     write_error_message(err_buf, err_buf_len, "generator must not be null");
@@ -171,7 +171,7 @@ cast_cuda_kernel_generator_finish(cast_cuda_kernel_generator_t *generator,
   }
 
   try {
-    auto *session = new cast_cuda_compilation_session_t();
+    auto *session = new cast_cuda_kernel_artifacts_t();
     session->kernels.reserve(generator->kernels.size());
 
     for (auto &generated : generator->kernels) {
@@ -204,35 +204,35 @@ cast_cuda_kernel_generator_finish(cast_cuda_kernel_generator_t *generator,
 // ── Compilation session — indexed accessors ───────────────────────────────────
 
 extern "C" uint32_t
-cast_cuda_compilation_session_n_kernels(
-    const cast_cuda_compilation_session_t *session) {
+cast_cuda_kernel_artifacts_n_kernels(
+    const cast_cuda_kernel_artifacts_t *session) {
   return session ? static_cast<uint32_t>(session->kernels.size()) : 0u;
 }
 
 extern "C" cast_cuda_kernel_id_t
-cast_cuda_compilation_session_kernel_id_at(
-    const cast_cuda_compilation_session_t *session, uint32_t idx) {
+cast_cuda_kernel_artifacts_kernel_id_at(
+    const cast_cuda_kernel_artifacts_t *session, uint32_t idx) {
   return (session && idx < session->kernels.size())
       ? session->kernels[idx].kernel_id : 0;
 }
 
 extern "C" uint32_t
-cast_cuda_compilation_session_n_gate_qubits_at(
-    const cast_cuda_compilation_session_t *session, uint32_t idx) {
+cast_cuda_kernel_artifacts_n_gate_qubits_at(
+    const cast_cuda_kernel_artifacts_t *session, uint32_t idx) {
   return (session && idx < session->kernels.size())
       ? session->kernels[idx].n_gate_qubits : 0;
 }
 
 extern "C" uint8_t
-cast_cuda_compilation_session_precision_at(
-    const cast_cuda_compilation_session_t *session, uint32_t idx) {
+cast_cuda_kernel_artifacts_precision_at(
+    const cast_cuda_kernel_artifacts_t *session, uint32_t idx) {
   return (session && idx < session->kernels.size())
       ? static_cast<uint8_t>(session->kernels[idx].precision) : 0;
 }
 
 extern "C" const char *
-cast_cuda_compilation_session_func_name_at(
-    const cast_cuda_compilation_session_t *session, uint32_t idx) {
+cast_cuda_kernel_artifacts_func_name_at(
+    const cast_cuda_kernel_artifacts_t *session, uint32_t idx) {
   return (session && idx < session->kernels.size())
       ? session->kernels[idx].func_name.c_str() : nullptr;
 }
@@ -240,8 +240,8 @@ cast_cuda_compilation_session_func_name_at(
 // ── Compilation session — PTX / cubin extraction ─────────────────────────────
 
 extern "C" int
-cast_cuda_compilation_session_emit_ptx(
-    cast_cuda_compilation_session_t *session,
+cast_cuda_kernel_artifacts_emit_ptx(
+    cast_cuda_kernel_artifacts_t *session,
     cast_cuda_kernel_id_t kernel_id,
     char *out_ptx, size_t ptx_buf_len, size_t *out_ptx_len,
     char *err_buf, size_t err_buf_len) {
@@ -270,8 +270,8 @@ cast_cuda_compilation_session_emit_ptx(
 }
 
 extern "C" int
-cast_cuda_compilation_session_emit_cubin(
-    cast_cuda_compilation_session_t *session,
+cast_cuda_kernel_artifacts_emit_cubin(
+    cast_cuda_kernel_artifacts_t *session,
     cast_cuda_kernel_id_t kernel_id,
     uint8_t *out_cubin, size_t cubin_buf_len, size_t *out_cubin_len,
     char *err_buf, size_t err_buf_len) {
@@ -299,6 +299,6 @@ cast_cuda_compilation_session_emit_cubin(
 }
 
 extern "C" void
-cast_cuda_compilation_session_delete(cast_cuda_compilation_session_t *session) {
+cast_cuda_kernel_artifacts_delete(cast_cuda_kernel_artifacts_t *session) {
   delete session;
 }

@@ -76,6 +76,35 @@ static void launch_dims(uint64_t n_combos,
   if (grid_x == 0) grid_x = 1;
 }
 
+// ── Device capability query ───────────────────────────────────────────────────
+
+extern "C" int
+cast_cuda_device_sm(uint32_t *out_major, uint32_t *out_minor,
+                    char *err_buf, size_t err_buf_len) {
+  std::string err;
+  if (!ensure_cuda(err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  int major = 0, minor = 0;
+  CUresult rc = cuDeviceGetAttribute(
+      &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, g_device);
+  if (!cu_check(rc, "cuDeviceGetAttribute (major)", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  rc = cuDeviceGetAttribute(
+      &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, g_device);
+  if (!cu_check(rc, "cuDeviceGetAttribute (minor)", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  if (out_major) *out_major = static_cast<uint32_t>(major);
+  if (out_minor) *out_minor = static_cast<uint32_t>(minor);
+  clear_error_buffer(err_buf, err_buf_len);
+  return 0;
+}
+
 // ── Stateless CUDA module loading ─────────────────────────────────────────────
 
 extern "C" void *

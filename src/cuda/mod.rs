@@ -4,22 +4,22 @@
 //! 1. Create a [`CudaKernelGenerator`] and call [`CudaKernelGenerator::generate`] for each gate.
 //! 2. Call [`CudaKernelGenerator::emit_ir`] to retrieve the optimized NVPTX LLVM IR (optional).
 //! 3. Call [`CudaKernelGenerator::compile`] to compile all kernels and obtain a
-//!    [`CudaCompilationSession`] — a pure-Rust value owning the PTX/cubin data.
-//! 4. Build a [`CudaExecSession`] from the compilation session to load kernels into the driver.
-//! 5. Allocate a [`CudaStatevector`] and call [`CudaExecSession::apply`].
+//!    [`CudaKernelArtifacts`] — a pure-Rust value owning the PTX/cubin data.
+//! 4. Build a [`CudaJitSession`] from the kernel artifacts to load kernels into the driver.
+//! 5. Allocate a [`CudaStatevector`] and call [`CudaJitSession::apply`].
 
-mod types;
 mod kernel;
 mod statevector;
+mod types;
 
 #[cfg(test)]
 mod tests;
 
 use std::ffi::c_char;
 
-pub use types::{CudaKernelGenSpec, CudaKernelId, CudaPrecision};
-pub use kernel::{CompiledKernel, CudaCompilationSession, CudaExecSession, CudaKernelGenerator};
+pub use kernel::{CompiledKernel, CudaJitSession, CudaKernelArtifacts, CudaKernelGenerator};
 pub use statevector::CudaStatevector;
+pub use types::{CudaKernelGenSpec, CudaKernelId, CudaPrecision};
 
 // ── FFI declarations ──────────────────────────────────────────────────────────
 
@@ -33,9 +33,9 @@ pub(super) mod ffi {
         _private: [u8; 0],
     }
 
-    /// Opaque C++ `cast_cuda_compilation_session_t`.
+    /// Opaque C++ `cast_cuda_kernel_artifacts_t`.
     #[repr(C)]
-    pub struct CastCudaCompilationSession {
+    pub struct CastCudaKernelArtifacts {
         _private: [u8; 0],
     }
 
@@ -72,33 +72,32 @@ pub(super) mod ffi {
         ) -> i32;
         pub fn cast_cuda_kernel_generator_finish(
             generator: *mut CastCudaKernelGenerator,
-            out_session: *mut *mut CastCudaCompilationSession,
+            out_session: *mut *mut CastCudaKernelArtifacts,
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
 
-        // ── Compilation session indexed accessors ─────────────────────────────
-        pub fn cast_cuda_compilation_session_n_kernels(
-            session: *const CastCudaCompilationSession,
-        ) -> u32;
-        pub fn cast_cuda_compilation_session_kernel_id_at(
-            session: *const CastCudaCompilationSession,
+        // ── Kernel artifacts indexed accessors ────────────────────────────────
+        pub fn cast_cuda_kernel_artifacts_n_kernels(session: *const CastCudaKernelArtifacts)
+            -> u32;
+        pub fn cast_cuda_kernel_artifacts_kernel_id_at(
+            session: *const CastCudaKernelArtifacts,
             idx: u32,
         ) -> CudaKernelId;
-        pub fn cast_cuda_compilation_session_n_gate_qubits_at(
-            session: *const CastCudaCompilationSession,
+        pub fn cast_cuda_kernel_artifacts_n_gate_qubits_at(
+            session: *const CastCudaKernelArtifacts,
             idx: u32,
         ) -> u32;
-        pub fn cast_cuda_compilation_session_precision_at(
-            session: *const CastCudaCompilationSession,
+        pub fn cast_cuda_kernel_artifacts_precision_at(
+            session: *const CastCudaKernelArtifacts,
             idx: u32,
         ) -> u8;
-        pub fn cast_cuda_compilation_session_func_name_at(
-            session: *const CastCudaCompilationSession,
+        pub fn cast_cuda_kernel_artifacts_func_name_at(
+            session: *const CastCudaKernelArtifacts,
             idx: u32,
         ) -> *const c_char;
-        pub fn cast_cuda_compilation_session_emit_ptx(
-            session: *mut CastCudaCompilationSession,
+        pub fn cast_cuda_kernel_artifacts_emit_ptx(
+            session: *mut CastCudaKernelArtifacts,
             kernel_id: CudaKernelId,
             out_ptx: *mut c_char,
             ptx_buf_len: usize,
@@ -106,8 +105,8 @@ pub(super) mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        pub fn cast_cuda_compilation_session_emit_cubin(
-            session: *mut CastCudaCompilationSession,
+        pub fn cast_cuda_kernel_artifacts_emit_cubin(
+            session: *mut CastCudaKernelArtifacts,
             kernel_id: CudaKernelId,
             out_cubin: *mut u8,
             cubin_buf_len: usize,
@@ -115,7 +114,15 @@ pub(super) mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        pub fn cast_cuda_compilation_session_delete(session: *mut CastCudaCompilationSession);
+        pub fn cast_cuda_kernel_artifacts_delete(session: *mut CastCudaKernelArtifacts);
+
+        // ── Device capability query ────────────────────────────────────────────
+        pub fn cast_cuda_device_sm(
+            out_major: *mut u32,
+            out_minor: *mut u32,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
 
         // ── Stateless CUDA module loading ──────────────────────────────────────
         /// Load PTX into a CUDA driver module; returns opaque CUmodule as void*.
@@ -175,6 +182,24 @@ pub(super) mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
+    }
+}
+
+/// Queries the compute capability of CUDA device 0.
+///
+/// Returns `(sm_major, sm_minor)`, e.g. `(8, 6)` for sm_86. Initialises the
+/// CUDA driver on first call (same as all other CUDA entry points).
+pub fn query_device_sm() -> anyhow::Result<(u32, u32)> {
+    let mut err_buf = [0 as c_char; types::ERR_BUF_LEN];
+    let mut major: u32 = 0;
+    let mut minor: u32 = 0;
+    let status = unsafe {
+        ffi::cast_cuda_device_sm(&mut major, &mut minor, err_buf.as_mut_ptr(), err_buf.len())
+    };
+    if status == 0 {
+        Ok((major, minor))
+    } else {
+        Err(anyhow::anyhow!(error_from_buf(&err_buf)))
     }
 }
 
