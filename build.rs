@@ -37,7 +37,7 @@ fn main() {
 
     if env::var_os("CARGO_FEATURE_CUDA").is_some() {
         emit_rerun_if_changed(CUDA_FFI_SOURCES);
-        emit_rerun_if_env_changed(&["CUDA_PATH", "NVJITLINK_LIB"]);
+        emit_rerun_if_env_changed(&["CUDA_PATH"]);
         build_cuda_ffi(&out_dir, &llvm_config);
     }
 }
@@ -88,11 +88,8 @@ fn build_cuda_ffi(out_dir: &Path, llvm_config: &Path) {
     println!("cargo:rustc-link-lib=static={archive}");
     emit_llvm_link_flags(&llvm.link_flags);
 
-    // nvJitLink and the CUDA driver do not come from llvm-config. Prefer an
-    // explicit NVJITLINK_LIB override, then fall back to common toolkit paths.
-    if let Ok(path) = env::var("NVJITLINK_LIB") {
-        println!("cargo:rustc-link-search=native={path}");
-    } else if let Some(cuda_lib) = cuda_lib_dir() {
+    // The CUDA driver does not come from llvm-config; find it via toolkit path.
+    if let Some(cuda_lib) = cuda_lib_dir() {
         println!("cargo:rustc-link-search=native={}", cuda_lib.display());
         let stubs_dir = cuda_lib.join("stubs");
         if stubs_dir.exists() {
@@ -100,7 +97,6 @@ fn build_cuda_ffi(out_dir: &Path, llvm_config: &Path) {
         }
     }
 
-    println!("cargo:rustc-link-lib=nvJitLink");
     println!("cargo:rustc-link-lib=cuda");
     println!("cargo:rustc-link-lib={}", cxx_stdlib_name());
 }

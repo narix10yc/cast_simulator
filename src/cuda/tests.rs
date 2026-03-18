@@ -141,19 +141,6 @@ fn test_multi_kernel_session() {
     assert_ne!(ptx_h, ptx_cnot);
 }
 
-#[test]
-#[ignore = "requires CUDA device with nvJitLink support"]
-fn test_h_gate_emit_cubin() {
-    let mut gen = CudaKernelGenerator::new().expect("create generator");
-    let kid = gen
-        .generate(&default_spec(), &hadamard_matrix(), &[0])
-        .expect("generate kernel");
-    let session = gen.compile().expect("compile");
-    let cubin = session.emit_cubin(kid).expect("emit cubin");
-    assert!(cubin.len() >= 4, "cubin should be non-empty");
-    assert_eq!(&cubin[..4], b"\x7fELF", "cubin should start with ELF magic");
-}
-
 // ── GPU execution tests (require a CUDA device) ───────────────────────────────
 
 #[test]

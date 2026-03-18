@@ -61,10 +61,9 @@ int cast_cuda_kernel_generator_emit_ir(cast_cuda_kernel_generator_t *generator,
                                        size_t *out_ir_len,
                                        char *err_buf, size_t err_buf_len);
 
-/// Compiles all kernels (optimize → PTX → cubin) and produces a compilation
-/// session.  On success: returns 0, writes the session into *out_session, and
-/// deletes the generator.  On failure: returns non-zero, leaves the generator
-/// intact.
+/// Compiles all kernels (optimize → PTX) and produces a compilation session.
+/// On success: returns 0, writes the session into *out_session, and deletes
+/// the generator.  On failure: returns non-zero, leaves the generator intact.
 int cast_cuda_kernel_generator_finish(cast_cuda_kernel_generator_t *generator,
                                       cast_cuda_kernel_artifacts_t **out_session,
                                       char *err_buf, size_t err_buf_len);
@@ -98,14 +97,6 @@ int cast_cuda_kernel_artifacts_emit_ptx(cast_cuda_kernel_artifacts_t *session,
                                            char *out_ptx, size_t ptx_buf_len,
                                            size_t *out_ptx_len,
                                            char *err_buf, size_t err_buf_len);
-
-/// Two-call pattern (pass out_cubin = NULL to size, then fill).
-int cast_cuda_kernel_artifacts_emit_cubin(cast_cuda_kernel_artifacts_t *session,
-                                             cast_cuda_kernel_id_t kernel_id,
-                                             uint8_t *out_cubin,
-                                             size_t cubin_buf_len,
-                                             size_t *out_cubin_len,
-                                             char *err_buf, size_t err_buf_len);
 
 void cast_cuda_kernel_artifacts_delete(cast_cuda_kernel_artifacts_t *session);
 

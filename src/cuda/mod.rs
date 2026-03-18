@@ -4,7 +4,7 @@
 //! 1. Create a [`CudaKernelGenerator`] and call [`CudaKernelGenerator::generate`] for each gate.
 //! 2. Call [`CudaKernelGenerator::emit_ir`] to retrieve the optimized NVPTX LLVM IR (optional).
 //! 3. Call [`CudaKernelGenerator::compile`] to compile all kernels and obtain a
-//!    [`CudaKernelArtifacts`] — a pure-Rust value owning the PTX/cubin data.
+//!    [`CudaKernelArtifacts`] — a pure-Rust value owning the PTX data.
 //! 4. Build a [`CudaJitSession`] from the kernel artifacts to load kernels into the driver.
 //! 5. Allocate a [`CudaStatevector`] and call [`CudaJitSession::apply`].
 
@@ -102,15 +102,6 @@ pub(super) mod ffi {
             out_ptx: *mut c_char,
             ptx_buf_len: usize,
             out_ptx_len: *mut usize,
-            err_buf: *mut c_char,
-            err_buf_len: usize,
-        ) -> i32;
-        pub fn cast_cuda_kernel_artifacts_emit_cubin(
-            session: *mut CastCudaKernelArtifacts,
-            kernel_id: CudaKernelId,
-            out_cubin: *mut u8,
-            cubin_buf_len: usize,
-            out_cubin_len: *mut usize,
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;

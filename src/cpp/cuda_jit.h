@@ -24,22 +24,21 @@ struct CastCudaGeneratedKernel {
   bool        optimized = false;
 };
 
-/// Result of compiling one kernel: PTX text + cubin bytes.
+/// Result of compiling one kernel: PTX text.
 struct CastCudaCompiledKernel {
   cast_cuda_kernel_id_t  kernel_id = 0;
   uint32_t               n_gate_qubits = 0;
   cast_cuda_precision_t  precision = CAST_CUDA_PRECISION_F64;
   std::string            func_name{};
   std::string            ptx{};
-  std::vector<uint8_t>   cubin{};
 };
 
 /// Runs O1 with the NVPTX target machine, caches the IR text, sets
 /// triple + data layout on the module.  Idempotent: a second call is a no-op.
 llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated);
 
-/// Full pipeline: optimize → PTX (via NVPTX addPassesToEmitFile) →
-/// cubin (via nvJitLink).  On success the compiled data lives in `out`.
+/// Full pipeline: optimize → PTX (via NVPTX addPassesToEmitFile).
+/// On success the compiled data lives in `out`.
 llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
                                      CastCudaCompiledKernel  &out);
 
