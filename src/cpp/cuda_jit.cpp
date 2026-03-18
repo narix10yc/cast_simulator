@@ -9,8 +9,6 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/TargetParser/Triple.h>
 
-#include <nvJitLink.h>
-
 #include <mutex>
 #include <string>
 
@@ -156,62 +154,6 @@ llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
 
   if (out.ptx.empty())
     return llvm::createStringError("PTX emission produced empty output");
-
-  // Stage 3: PTX → cubin via nvJitLink.
-  {
-    std::string archOpt = "-arch=sm_"
-        + std::to_string(10 * generated.spec.sm_major + generated.spec.sm_minor);
-    const char *options[] = {archOpt.c_str()};
-
-    nvJitLinkHandle handle = nullptr;
-    auto rc = nvJitLinkCreate(&handle, 1, options);
-    if (rc != NVJITLINK_SUCCESS) {
-      std::string msg = "nvJitLinkCreate failed (rc=" + std::to_string(rc) + ")";
-      return llvm::createStringError(msg);
-    }
-    // RAII: ensure handle is always destroyed.
-    struct Guard {
-      nvJitLinkHandle h;
-      ~Guard() { if (h) nvJitLinkDestroy(&h); }
-    } guard{handle};
-
-    rc = nvJitLinkAddData(handle, NVJITLINK_INPUT_PTX,
-                          out.ptx.data(), out.ptx.size(),
-                          generated.func_name.c_str());
-    if (rc != NVJITLINK_SUCCESS) {
-      std::string log;
-      size_t logSize = 0;
-      if (nvJitLinkGetErrorLogSize(handle, &logSize) == NVJITLINK_SUCCESS
-          && logSize > 0) {
-        log.resize(logSize);
-        nvJitLinkGetErrorLog(handle, log.data());
-      }
-      return llvm::createStringError(
-          "nvJitLinkAddData failed (rc=" + std::to_string(rc)
-          + (log.empty() ? "" : "): " + log)
-          + (log.empty() ? ")" : ""));
-    }
-
-    rc = nvJitLinkComplete(handle);
-    if (rc != NVJITLINK_SUCCESS) {
-      std::string log;
-      size_t logSize = 0;
-      if (nvJitLinkGetErrorLogSize(handle, &logSize) == NVJITLINK_SUCCESS
-          && logSize > 0) {
-        log.resize(logSize);
-        nvJitLinkGetErrorLog(handle, log.data());
-      }
-      return llvm::createStringError(
-          "nvJitLinkComplete failed (rc=" + std::to_string(rc)
-          + (log.empty() ? "" : "): " + log)
-          + (log.empty() ? ")" : ""));
-    }
-
-    size_t cubinSize = 0;
-    nvJitLinkGetLinkedCubinSize(handle, &cubinSize);
-    out.cubin.resize(cubinSize);
-    nvJitLinkGetLinkedCubin(handle, out.cubin.data());
-  }
 
   out.kernel_id     = generated.kernel_id;
   out.n_gate_qubits = generated.n_gate_qubits;

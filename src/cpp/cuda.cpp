@@ -269,35 +269,6 @@ cast_cuda_kernel_artifacts_emit_ptx(
   return 0;
 }
 
-extern "C" int
-cast_cuda_kernel_artifacts_emit_cubin(
-    cast_cuda_kernel_artifacts_t *session,
-    cast_cuda_kernel_id_t kernel_id,
-    uint8_t *out_cubin, size_t cubin_buf_len, size_t *out_cubin_len,
-    char *err_buf, size_t err_buf_len) {
-  if (!session) {
-    write_error_message(err_buf, err_buf_len, "session must not be null");
-    return 1;
-  }
-  const auto *kernel = find_compiled(session, kernel_id);
-  if (!kernel) {
-    write_error_message(err_buf, err_buf_len,
-                        "kernel id not found in compilation session");
-    return 1;
-  }
-
-  const auto &cubin = kernel->cubin;
-  if (out_cubin_len != nullptr) *out_cubin_len = cubin.size();
-
-  if (out_cubin != nullptr && cubin_buf_len > 0) {
-    const size_t n = std::min(cubin_buf_len, cubin.size());
-    std::memcpy(out_cubin, cubin.data(), n);
-  }
-
-  clear_error_buffer(err_buf, err_buf_len);
-  return 0;
-}
-
 extern "C" void
 cast_cuda_kernel_artifacts_delete(cast_cuda_kernel_artifacts_t *session) {
   delete session;

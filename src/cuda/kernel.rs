@@ -162,16 +162,14 @@ fn drain_kernel_artifacts(
             .into_owned();
 
         let ptx = extract_ptx(raw, kernel_id, err_buf)?;
-        let cubin = extract_cubin(raw, kernel_id, err_buf)?;
 
         log::debug!(
-            "cuda: compiled kernel {} '{}' ({} gate qubits, {:?}, ptx {} B, cubin {} B)",
+            "cuda: compiled kernel {} '{}' ({} gate qubits, {:?}, ptx {} B)",
             kernel_id,
             func_name,
             n_gate_qubits,
             precision,
             ptx.len(),
-            cubin.len(),
         );
         kernels.push(CompiledKernel {
             kernel_id,
@@ -179,7 +177,6 @@ fn drain_kernel_artifacts(
             precision,
             func_name,
             ptx,
-            cubin,
         });
     }
     log::info!("cuda: compiled {} kernel(s)", kernels.len());
@@ -225,44 +222,6 @@ fn extract_ptx(
     String::from_utf8(buf).map_err(|e| anyhow::anyhow!("PTX is not valid UTF-8: {e}"))
 }
 
-fn extract_cubin(
-    raw: *mut ffi::CastCudaKernelArtifacts,
-    kernel_id: CudaKernelId,
-    err_buf: &mut [std::ffi::c_char; ERR_BUF_LEN],
-) -> anyhow::Result<Vec<u8>> {
-    let mut cubin_len: usize = 0;
-    let status = unsafe {
-        ffi::cast_cuda_kernel_artifacts_emit_cubin(
-            raw,
-            kernel_id,
-            std::ptr::null_mut(),
-            0,
-            &mut cubin_len,
-            err_buf.as_mut_ptr(),
-            err_buf.len(),
-        )
-    };
-    if status != 0 {
-        return Err(anyhow::anyhow!(error_from_buf(err_buf)));
-    }
-    let mut buf = vec![0u8; cubin_len];
-    let status = unsafe {
-        ffi::cast_cuda_kernel_artifacts_emit_cubin(
-            raw,
-            kernel_id,
-            buf.as_mut_ptr(),
-            buf.len(),
-            std::ptr::null_mut(),
-            err_buf.as_mut_ptr(),
-            err_buf.len(),
-        )
-    };
-    if status != 0 {
-        return Err(anyhow::anyhow!(error_from_buf(err_buf)));
-    }
-    Ok(buf)
-}
-
 impl Default for CudaKernelGenerator {
     fn default() -> Self {
         Self::new().expect("failed to create CUDA kernel generator")
@@ -293,8 +252,6 @@ pub struct CompiledKernel {
     pub func_name: String,
     /// PTX assembly text (null-terminated, ASCII).
     pub ptx: String,
-    /// cubin ELF binary (`\x7fELF…`).
-    pub cubin: Vec<u8>,
 }
 
 /// Pure-Rust PTX/cubin artifacts for each compiled kernel.
@@ -313,15 +270,6 @@ impl CudaKernelArtifacts {
             .iter()
             .find(|k| k.kernel_id == kernel_id)
             .map(|k| k.ptx.as_str())
-            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in kernel artifacts", kernel_id))
-    }
-
-    /// Returns the cubin binary for the kernel identified by `kernel_id`.
-    pub fn emit_cubin(&self, kernel_id: CudaKernelId) -> anyhow::Result<&[u8]> {
-        self.kernels
-            .iter()
-            .find(|k| k.kernel_id == kernel_id)
-            .map(|k| k.cubin.as_slice())
             .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in kernel artifacts", kernel_id))
     }
 }
