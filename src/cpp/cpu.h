@@ -48,6 +48,28 @@ typedef struct cast_cpu_kernel_metadata_t {
   uint32_t n_gate_qubits;
 } cast_cpu_kernel_metadata_t;
 
+/// Function type for JIT-compiled kernel entry points.
+typedef void cast_cpu_kernel_entry_t(void *);
+
+/// Arguments passed to each JIT kernel invocation.
+typedef struct cast_cpu_launch_args_t {
+  void *sv;
+  uint64_t ctr_begin;
+  uint64_t ctr_end;
+  void *p_mat;
+} cast_cpu_launch_args_t;
+
+/// Per-kernel data returned by cast_cpu_kernel_generator_finish.
+/// The `matrix` and `asm_text` fields are heap-allocated (malloc); call
+/// cast_cpu_jit_kernel_records_free to release them after copying the data.
+typedef struct cast_cpu_jit_kernel_record_t {
+  cast_cpu_kernel_metadata_t metadata;
+  cast_cpu_kernel_entry_t *entry; ///< JIT-compiled function pointer.
+  cast_cpu_complex64_t *matrix;   ///< NULL for ImmValue mode.
+  size_t matrix_len;
+  char *asm_text; ///< NULL if request_asm was not called before finish.
+} cast_cpu_jit_kernel_record_t;
+
 typedef struct cast_cpu_kernel_generator_t cast_cpu_kernel_generator_t;
 typedef struct cast_cpu_jit_session_t cast_cpu_jit_session_t;
 
@@ -63,7 +85,7 @@ int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
                                        cast_cpu_kernel_id_t *out_kernel_id, char *err_buf,
                                        size_t err_buf_len);
 
-// Marks the kernel identified by kernel_id for assembly capture during init_jit.
+// Marks the kernel identified by kernel_id for assembly capture during finish.
 // Call this before cast_cpu_kernel_generator_finish.
 // Returns 0 on success and non-zero if kernel_id is not found.
 int cast_cpu_kernel_generator_request_asm(cast_cpu_kernel_generator_t *generator,
@@ -71,46 +93,31 @@ int cast_cpu_kernel_generator_request_asm(cast_cpu_kernel_generator_t *generator
                                           size_t err_buf_len);
 
 // Runs the O1 pass pipeline on the kernel identified by kernel_id and returns
-// its optimized LLVM IR as a null-terminated string.
-//
-// Two-call pattern for the buffer:
-//   1. Pass out_ir = NULL to query the required buffer size via *out_ir_len.
-//   2. Allocate out_ir_len + 1 bytes, then call again with out_ir pointing to
-//      that buffer and ir_buf_len set to the allocated size.
-//
-// out_ir_len may be NULL if you only need the text and provide a large enough
-// buffer.
+// its optimized LLVM IR as a null-terminated string (two-call pattern).
 // Returns 0 on success and non-zero on error (message written to err_buf).
 int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *generator,
                                       cast_cpu_kernel_id_t kernel_id, char *out_ir,
                                       size_t ir_buf_len, size_t *out_ir_len, char *err_buf,
                                       size_t err_buf_len);
 
-// Compiles all kernels previously registered with cast_cpu_kernel_generator_generate and
-// produces a JIT session.
-// On success, returns 0, writes the session into *out_session, and deletes the generator.
-// Ownership is transferred; the caller must not use or free the generator afterwards.
-// On failure, returns non-zero and leaves the generator intact.
+// Compiles all kernels and produces a JIT session plus a malloc'd array of
+// per-kernel records.
+//
+// On success: writes the session to *out_session, the malloc'd records array
+// to *out_records, the record count to *out_n_records, deletes the generator,
+// and returns 0. The caller must call cast_cpu_jit_kernel_records_free after
+// copying the data out of the records.
+//
+// On failure: returns non-zero, leaves the generator intact, and writes an
+// error message to err_buf.
 int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *generator,
-                                     cast_cpu_jit_session_t **out_session, char *err_buf,
-                                     size_t err_buf_len);
+                                     cast_cpu_jit_session_t **out_session,
+                                     cast_cpu_jit_kernel_record_t **out_records,
+                                     size_t *out_n_records, char *err_buf, size_t err_buf_len);
 
-int cast_cpu_jit_session_apply(cast_cpu_jit_session_t *session, cast_cpu_kernel_id_t kernel_id,
-                               void *sv, uint32_t n_qubits, cast_cpu_precision_t sv_precision,
-                               cast_cpu_simd_width_t sv_simd_width, int32_t n_threads,
-                               char *err_buf, size_t err_buf_len);
-
-// Returns the native assembly text emitted during JIT compilation for the
-// kernel identified by kernel_id.
-//
-// Same two-call pattern as cast_cpu_kernel_generator_emit_ir:
-//   1. Pass out_asm = NULL to query the length via *out_asm_len.
-//   2. Allocate out_asm_len + 1 bytes, then call again with the buffer.
-//
-// Returns 0 on success and non-zero on error (message written to err_buf).
-int cast_cpu_jit_session_emit_asm(cast_cpu_jit_session_t *session, cast_cpu_kernel_id_t kernel_id,
-                                  char *out_asm, size_t asm_buf_len, size_t *out_asm_len,
-                                  char *err_buf, size_t err_buf_len);
+// Frees the matrix and asm_text fields of each record and then the records
+// array itself. Safe to call with records=NULL or n=0.
+void cast_cpu_jit_kernel_records_free(cast_cpu_jit_kernel_record_t *records, size_t n);
 
 void cast_cpu_jit_session_delete(cast_cpu_jit_session_t *session);
 

@@ -640,6 +640,20 @@ mod tests {
 
     // ── Multithreaded apply ────────────────────────────────────────────────────
 
+    // Runs `graph` with `n_threads` and asserts the result equals 1-thread output.
+    fn assert_multithreaded_matches_single(
+        graph: &CircuitGraph,
+        n_qubits_sv: u32,
+        spec: CPUKernelGenSpec,
+        n_threads: u32,
+        tol: f64,
+    ) {
+        let sv_single = run_circuit_jit(graph, n_qubits_sv, spec, 1);
+        let sv_multi = run_circuit_jit(graph, n_qubits_sv, spec, n_threads);
+        assert_statevectors_close(&sv_multi, &sv_single, tol);
+        assert!((sv_multi.norm() - 1.0).abs() < tol);
+    }
+
     // Result must be identical to single-threaded regardless of how work is split.
     #[test]
     fn jit_multithreaded_matches_single_thread() {
@@ -647,6 +661,172 @@ mod tests {
         let spec = default_spec(Precision::F64, SimdWidth::W128);
 
         run_jit_and_compare_full(&gate, 6, spec, 4, 1e-10);
+    }
+
+    // 2-thread split on a CX gate over 8 qubits (128 tasks → 64 per thread).
+    #[test]
+    fn jit_multithreaded_2_threads_cx_gate() {
+        run_jit_and_compare_full(
+            &QuantumGate::cx(0, 3),
+            8,
+            default_spec(Precision::F64, SimdWidth::W128),
+            2,
+            1e-10,
+        );
+    }
+
+    // 8 threads on a 10-qubit statevector (1024 tasks → 128 per thread).
+    #[test]
+    fn jit_multithreaded_8_threads_large_sv() {
+        run_jit_and_compare_full(
+            &QuantumGate::rx(std::f64::consts::PI / 5.0, 4),
+            10,
+            default_spec(Precision::F64, SimdWidth::W128),
+            8,
+            1e-10,
+        );
+    }
+
+    // Multi-kernel session: 8 gates compiled in one session, applied with 4 threads.
+    // Verifies that thread-local counter ranges are correct across kernel boundaries.
+    #[test]
+    fn jit_multithreaded_circuit_4_threads() {
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::cx(0, 1));
+        graph.insert_gate(QuantumGate::rx(0.3, 2));
+        graph.insert_gate(QuantumGate::cx(1, 3));
+        graph.insert_gate(QuantumGate::rz(0.7, 0));
+        graph.insert_gate(QuantumGate::h(4));
+        graph.insert_gate(QuantumGate::cx(4, 5));
+        graph.insert_gate(QuantumGate::ry(1.1, 3));
+
+        assert_multithreaded_matches_single(
+            &graph,
+            8,
+            default_spec(Precision::F64, SimdWidth::W128),
+            4,
+            1e-10,
+        );
+    }
+
+    // StackLoad mode: each thread receives the same p_mat pointer; verifies that
+    // the Rust-side matrix buffer allocation is correct and all threads read it
+    // consistently without data races.
+    #[test]
+    fn jit_multithreaded_stack_load_4_threads() {
+        let spec = CPUKernelGenSpec {
+            mode: MatrixLoadMode::StackLoad,
+            ..default_spec(Precision::F64, SimdWidth::W128)
+        };
+        run_jit_and_compare_full(&QuantumGate::cx(0, 3), 8, spec, 4, 1e-10);
+    }
+
+    // StackLoad + multi-kernel circuit + threads.
+    #[test]
+    fn jit_multithreaded_stack_load_circuit_4_threads() {
+        let spec = CPUKernelGenSpec {
+            mode: MatrixLoadMode::StackLoad,
+            ..default_spec(Precision::F64, SimdWidth::W128)
+        };
+        let mut graph = CircuitGraph::new();
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::cx(0, 2));
+        graph.insert_gate(QuantumGate::rz(0.5, 1));
+        graph.insert_gate(QuantumGate::cx(1, 3));
+        graph.insert_gate(QuantumGate::ry(0.9, 0));
+
+        assert_multithreaded_matches_single(&graph, 7, spec, 4, 1e-10);
+    }
+
+    // F32 precision with 4 threads.
+    #[test]
+    fn jit_multithreaded_f32_4_threads() {
+        run_jit_and_compare_full(
+            &QuantumGate::rx(std::f64::consts::PI / 4.0, 2),
+            8,
+            default_spec(Precision::F32, SimdWidth::W128),
+            4,
+            5e-5,
+        );
+    }
+
+    // W256 SIMD (simd_s = 2 for F64) with 4 threads.
+    #[test]
+    fn jit_multithreaded_w256_4_threads() {
+        run_jit_and_compare_full(
+            &QuantumGate::rx(0.9, 1),
+            8,
+            default_spec(Precision::F64, SimdWidth::W256),
+            4,
+            1e-10,
+        );
+    }
+
+    // W512 SIMD (simd_s = 3 for F64) with 4 threads.
+    #[test]
+    fn jit_multithreaded_w512_4_threads() {
+        run_jit_and_compare_full(
+            &QuantumGate::rx(0.5, 2),
+            9,
+            default_spec(Precision::F64, SimdWidth::W512),
+            4,
+            1e-10,
+        );
+    }
+
+    // Large brick-wall circuit over 12 qubits, 8 threads.
+    #[test]
+    fn jit_multithreaded_large_circuit_8_threads() {
+        let mut graph = CircuitGraph::new();
+        for i in (0u32..10).step_by(2) {
+            graph.insert_gate(QuantumGate::cx(i, i + 1));
+        }
+        for i in (1u32..9).step_by(2) {
+            graph.insert_gate(QuantumGate::cx(i, i + 1));
+        }
+        graph.insert_gate(QuantumGate::h(0));
+        graph.insert_gate(QuantumGate::rz(0.4, 5));
+        graph.insert_gate(QuantumGate::rx(0.8, 9));
+        for i in (0u32..10).step_by(2) {
+            graph.insert_gate(QuantumGate::cx(i, i + 1));
+        }
+        graph.insert_gate(QuantumGate::swap(2, 7));
+        graph.insert_gate(QuantumGate::ccx(0, 3, 6));
+
+        assert_multithreaded_matches_single(
+            &graph,
+            12,
+            default_spec(Precision::F64, SimdWidth::W128),
+            8,
+            1e-10,
+        );
+    }
+
+    // Thread count exactly equals n_tasks: each thread handles exactly one task.
+    // For a 1-qubit gate (simd_s=1) on a 3-qubit sv: n_tasks = 2^(3-1-1) = 2.
+    #[test]
+    fn jit_multithreaded_thread_count_equals_task_count() {
+        run_jit_and_compare_full(
+            &QuantumGate::h(0),
+            3,
+            default_spec(Precision::F64, SimdWidth::W128),
+            2,
+            1e-10,
+        );
+    }
+
+    // Thread count exceeds n_tasks: clamping logic must prevent empty threads from
+    // corrupting the statevector. Same setup as above (n_tasks=2), 8 threads → clamped to 2.
+    #[test]
+    fn jit_multithreaded_thread_count_exceeds_task_count() {
+        run_jit_and_compare_full(
+            &QuantumGate::h(0),
+            3,
+            default_spec(Precision::F64, SimdWidth::W128),
+            8,
+            1e-10,
+        );
     }
 
     // ── End-to-end circuits with and without fusion ─────────────────────────
