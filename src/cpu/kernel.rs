@@ -4,8 +4,8 @@
 //! 1. Create a [`CPUKernelGenerator`] and call [`CPUKernelGenerator::generate`] for each gate
 //!    variant you need.
 //! 2. Call [`CPUKernelGenerator::init_jit`] to compile all generated kernels and obtain a
-//!    [`JitSession`].
-//! 3. Allocate a [`CPUStatevector`] and drive simulation by calling [`JitSession::apply`].
+//!    [`CpuJitSession`].
+//! 3. Allocate a [`CPUStatevector`] and drive simulation by calling [`CpuJitSession::apply`].
 
 use super::*;
 use crate::types::{Complex, Precision};
@@ -55,14 +55,14 @@ impl CPUKernelGenSpec {
 }
 
 /// Opaque handle returned by [`CPUKernelGenerator::generate`], used to identify a compiled
-/// kernel inside a [`JitSession`].
+/// kernel inside a [`CpuJitSession`].
 pub type KernelId = u64;
 
 const ERR_BUF_LEN: usize = 1024;
 
 // ── TimingStats ───────────────────────────────────────────────────────────────
 
-/// Statistics returned by [`JitSession::time_adaptive`].
+/// Statistics returned by [`CpuJitSession::time_adaptive`].
 #[derive(Debug, Clone)]
 pub struct TimingStats {
     pub n_iters: usize,
@@ -191,7 +191,7 @@ struct CastCpuLaunchArgs {
 // ── RustJittedKernel ──────────────────────────────────────────────────────────
 
 /// Rust-owned data for a single compiled kernel.
-/// The `entry` pointer is valid for the lifetime of the owning `JitSession`
+/// The `entry` pointer is valid for the lifetime of the owning `CpuJitSession`
 /// (the C++ `LLJIT` inside the session keeps the code pages alive).
 struct RustJittedKernel {
     entry: unsafe extern "C" fn(*mut c_void),
@@ -246,7 +246,7 @@ fn build_matrix_buffer(kernel: &RustJittedKernel) -> MatrixBuffer {
 
 // ── CPUKernelGenerator ────────────────────────────────────────────────────────
 
-/// Builds LLVM IR for gate kernels and JIT-compiles them into a [`JitSession`].
+/// Builds LLVM IR for gate kernels and JIT-compiles them into a [`CpuJitSession`].
 ///
 /// The typical workflow is:
 /// 1. Create a generator with [`CPUKernelGenerator::new`].
@@ -255,7 +255,7 @@ fn build_matrix_buffer(kernel: &RustJittedKernel) -> MatrixBuffer {
 /// 3. Optionally call [`CPUKernelGenerator::emit_ir`] or
 ///    [`CPUKernelGenerator::request_asm`] for debugging.
 /// 4. Call [`CPUKernelGenerator::init_jit`] to compile everything; this consumes
-///    the generator and returns a [`JitSession`].
+///    the generator and returns a [`CpuJitSession`].
 pub struct CPUKernelGenerator {
     raw: NonNull<ffi::CastCpuKernelGenerator>,
 }
@@ -312,6 +312,13 @@ impl CPUKernelGenerator {
             )
         };
         if status == 0 {
+            log::debug!(
+                "cpu: generated kernel {} ({} gate qubits, {:?} precision, {:?} simd)",
+                kernel_id,
+                qubits.len(),
+                spec.precision,
+                spec.simd_width,
+            );
             Ok(kernel_id)
         } else {
             Err(anyhow::anyhow!(error_from_buf(&err_buf)))
@@ -366,7 +373,7 @@ impl CPUKernelGenerator {
     /// Marks `kernel_id` so that native assembly is captured during [`init_jit`].
     ///
     /// Must be called before [`CPUKernelGenerator::init_jit`]. After compilation,
-    /// retrieve the text with [`JitSession::emit_asm`].
+    /// retrieve the text with [`CpuJitSession::emit_asm`].
     ///
     /// [`init_jit`]: CPUKernelGenerator::init_jit
     pub fn request_asm(&mut self, kernel_id: KernelId) -> anyhow::Result<()> {
@@ -386,11 +393,11 @@ impl CPUKernelGenerator {
         }
     }
 
-    /// Compiles all generated kernels and returns a [`JitSession`], consuming `self`.
+    /// Compiles all generated kernels and returns a [`CpuJitSession`], consuming `self`.
     ///
     /// On success the C++ generator is deleted by the JIT pipeline; `self` must not
     /// be used afterwards (enforced by consuming `self`).
-    pub fn init_jit(self) -> anyhow::Result<JitSession> {
+    pub fn init_jit(self) -> anyhow::Result<CpuJitSession> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let mut raw_session: *mut ffi::CastCpuJitSession = std::ptr::null_mut();
         let mut raw_records: *mut ffi::FfiKernelRecord = std::ptr::null_mut();
@@ -462,38 +469,50 @@ impl CPUKernelGenerator {
         // Free the malloc'd records array (inner fields were already copied above).
         unsafe { ffi::cast_cpu_jit_kernel_records_free(raw_records, n_records) };
 
-        Ok(JitSession { raw, kernels })
+        log::info!("cpu: jit-compiled {} kernel(s)", kernels.len());
+        for (id, k) in &kernels {
+            log::debug!(
+                "cpu:   kernel {} — {} gate qubits, {:?} precision, {:?} simd, {:?} mode",
+                id,
+                k.n_gate_qubits,
+                k.precision,
+                k.simd_width,
+                k.mode,
+            );
+        }
+
+        Ok(CpuJitSession { raw, kernels })
     }
 }
 
-// ── JitSession ────────────────────────────────────────────────────────────────
+// ── CpuJitSession ────────────────────────────────────────────────────────────────
 
 /// A compiled JIT session holding ready-to-run native kernel functions.
 ///
 /// Created by [`CPUKernelGenerator::init_jit`]. Individual kernels are applied to
-/// statevectors via [`JitSession::apply`].
+/// statevectors via [`CpuJitSession::apply`].
 ///
 /// The C++ `LLJIT` object inside `raw` keeps the JIT-compiled code pages alive for
 /// the session's lifetime; `kernels` stores the Rust-owned per-kernel data including
 /// the entry function pointers.
-pub struct JitSession {
+pub struct CpuJitSession {
     raw: NonNull<ffi::CastCpuJitSession>,
     kernels: HashMap<KernelId, RustJittedKernel>,
 }
 
-impl Drop for JitSession {
+impl Drop for CpuJitSession {
     fn drop(&mut self) {
         unsafe { ffi::cast_cpu_jit_session_delete(self.raw.as_ptr()) };
     }
 }
 
-impl fmt::Debug for JitSession {
+impl fmt::Debug for CpuJitSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("JitSession").finish_non_exhaustive()
+        f.debug_struct("CpuJitSession").finish_non_exhaustive()
     }
 }
 
-impl JitSession {
+impl CpuJitSession {
     /// Returns the native assembly text that was captured during JIT compilation.
     ///
     /// Only available for kernels on which [`CPUKernelGenerator::request_asm`] was
@@ -627,6 +646,14 @@ impl JitSession {
         // Clamp so every thread gets at least one task.
         let n_threads = (n_threads as u64).min(n_tasks).max(1) as u32;
         let n_tasks_per_thread = n_tasks / n_threads as u64;
+
+        log::debug!(
+            "cpu: apply kernel {} ({} gate qubits, {} tasks, {} thread(s))",
+            kernel_id,
+            kernel.n_gate_qubits,
+            n_tasks,
+            n_threads,
+        );
 
         let matrix_buf = build_matrix_buffer(kernel);
 

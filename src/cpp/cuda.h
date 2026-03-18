@@ -33,7 +33,7 @@ typedef struct cast_cuda_complex64_t {
 } cast_cuda_complex64_t;
 
 typedef struct cast_cuda_kernel_generator_t cast_cuda_kernel_generator_t;
-typedef struct cast_cuda_compilation_session_t cast_cuda_compilation_session_t;
+typedef struct cast_cuda_kernel_artifacts_t cast_cuda_kernel_artifacts_t;
 
 // ── Generator ─────────────────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ int cast_cuda_kernel_generator_emit_ir(cast_cuda_kernel_generator_t *generator,
 /// deletes the generator.  On failure: returns non-zero, leaves the generator
 /// intact.
 int cast_cuda_kernel_generator_finish(cast_cuda_kernel_generator_t *generator,
-                                      cast_cuda_compilation_session_t **out_session,
+                                      cast_cuda_kernel_artifacts_t **out_session,
                                       char *err_buf, size_t err_buf_len);
 
 // ── Compilation session — indexed accessors ───────────────────────────────────
@@ -75,39 +75,47 @@ int cast_cuda_kernel_generator_finish(cast_cuda_kernel_generator_t *generator,
 // and then delete the session, so the C++ object does not need to outlive
 // the caller.
 
-uint32_t cast_cuda_compilation_session_n_kernels(
-    const cast_cuda_compilation_session_t *session);
+uint32_t cast_cuda_kernel_artifacts_n_kernels(
+    const cast_cuda_kernel_artifacts_t *session);
 
-cast_cuda_kernel_id_t cast_cuda_compilation_session_kernel_id_at(
-    const cast_cuda_compilation_session_t *session, uint32_t idx);
+cast_cuda_kernel_id_t cast_cuda_kernel_artifacts_kernel_id_at(
+    const cast_cuda_kernel_artifacts_t *session, uint32_t idx);
 
-uint32_t cast_cuda_compilation_session_n_gate_qubits_at(
-    const cast_cuda_compilation_session_t *session, uint32_t idx);
+uint32_t cast_cuda_kernel_artifacts_n_gate_qubits_at(
+    const cast_cuda_kernel_artifacts_t *session, uint32_t idx);
 
 /// Returns 0 for F32, 1 for F64.
-uint8_t cast_cuda_compilation_session_precision_at(
-    const cast_cuda_compilation_session_t *session, uint32_t idx);
+uint8_t cast_cuda_kernel_artifacts_precision_at(
+    const cast_cuda_kernel_artifacts_t *session, uint32_t idx);
 
 /// Returns a pointer into session-owned storage; valid until the session is deleted.
-const char *cast_cuda_compilation_session_func_name_at(
-    const cast_cuda_compilation_session_t *session, uint32_t idx);
+const char *cast_cuda_kernel_artifacts_func_name_at(
+    const cast_cuda_kernel_artifacts_t *session, uint32_t idx);
 
 /// Two-call pattern (pass out_ptx = NULL to size, then fill).
-int cast_cuda_compilation_session_emit_ptx(cast_cuda_compilation_session_t *session,
+int cast_cuda_kernel_artifacts_emit_ptx(cast_cuda_kernel_artifacts_t *session,
                                            cast_cuda_kernel_id_t kernel_id,
                                            char *out_ptx, size_t ptx_buf_len,
                                            size_t *out_ptx_len,
                                            char *err_buf, size_t err_buf_len);
 
 /// Two-call pattern (pass out_cubin = NULL to size, then fill).
-int cast_cuda_compilation_session_emit_cubin(cast_cuda_compilation_session_t *session,
+int cast_cuda_kernel_artifacts_emit_cubin(cast_cuda_kernel_artifacts_t *session,
                                              cast_cuda_kernel_id_t kernel_id,
                                              uint8_t *out_cubin,
                                              size_t cubin_buf_len,
                                              size_t *out_cubin_len,
                                              char *err_buf, size_t err_buf_len);
 
-void cast_cuda_compilation_session_delete(cast_cuda_compilation_session_t *session);
+void cast_cuda_kernel_artifacts_delete(cast_cuda_kernel_artifacts_t *session);
+
+// ── Device capability query ───────────────────────────────────────────────────
+
+/// Query the compute capability of device 0.
+/// Writes major/minor into *out_major / *out_minor.
+/// Returns 0 on success; writes a message into err_buf on failure.
+int cast_cuda_device_sm(uint32_t *out_major, uint32_t *out_minor,
+                        char *err_buf, size_t err_buf_len);
 
 // ── Stateless CUDA module loading ─────────────────────────────────────────────
 //

@@ -1,8 +1,8 @@
 use std::fmt;
 
+use super::error_from_buf;
 use super::ffi;
 use super::types::{CudaPrecision, ERR_BUF_LEN};
-use super::error_from_buf;
 
 /// A statevector allocated in GPU device memory.
 ///
@@ -50,7 +50,12 @@ impl CudaStatevector {
         if dptr == 0 {
             return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
         }
-        Ok(Self { dptr, n_qubits, precision, n_elements })
+        Ok(Self {
+            dptr,
+            n_qubits,
+            precision,
+            n_elements,
+        })
     }
 
     pub fn n_qubits(&self) -> u32 {
@@ -83,7 +88,11 @@ impl CudaStatevector {
                 err_buf.len(),
             )
         };
-        if status == 0 { Ok(()) } else { Err(anyhow::anyhow!(error_from_buf(&err_buf))) }
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+        }
     }
 
     /// Uploads amplitudes from a host slice of `(re, im)` pairs.
@@ -109,7 +118,11 @@ impl CudaStatevector {
                 err_buf.len(),
             )
         };
-        if status == 0 { Ok(()) } else { Err(anyhow::anyhow!(error_from_buf(&err_buf))) }
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+        }
     }
 
     /// Downloads all amplitudes to the host as `(re, im)` pairs.

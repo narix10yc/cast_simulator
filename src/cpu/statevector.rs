@@ -360,7 +360,7 @@ impl CPUStatevector {
         inner.norm_sqr()
     }
 
-    /// Applies `gate` using the scalar (non-JIT) path. Use [`JitSession::apply`] for
+    /// Applies `gate` using the scalar (non-JIT) path. Use [`CpuJitSession::apply`] for
     /// performance-critical paths.
     pub fn apply_gate(&mut self, gate: &QuantumGate) {
         self.with_data_mut(|data| data.apply_gate(gate));

@@ -46,7 +46,7 @@ impl CudaKernelGenSpec {
 }
 
 /// Opaque handle returned by [`super::CudaKernelGenerator::generate`], used to identify a
-/// compiled kernel inside a [`super::CudaCompilationSession`].
+/// compiled kernel inside a [`super::CudaKernelArtifacts`].
 pub type CudaKernelId = u64;
 
 pub(super) const ERR_BUF_LEN: usize = 1024;

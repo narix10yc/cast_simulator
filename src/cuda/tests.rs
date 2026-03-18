@@ -7,10 +7,22 @@ fn hadamard_matrix() -> Vec<(f64, f64)> {
 
 fn cnot_matrix() -> Vec<(f64, f64)> {
     vec![
-        (1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (0.0, 0.0),
-        (0.0, 0.0), (1.0, 0.0), (0.0, 0.0), (0.0, 0.0),
-        (0.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0),
-        (0.0, 0.0), (0.0, 0.0), (1.0, 0.0), (0.0, 0.0),
+        (1.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (0.0, 0.0),
     ]
 }
 
@@ -50,7 +62,7 @@ fn test_h_gate_emit_ptx() {
 }
 
 #[test]
-fn test_compilation_session_kernels_accessible() {
+fn test_kernel_artifacts_accessible() {
     let mut gen = CudaKernelGenerator::new().expect("create generator");
     let kid = gen
         .generate(&default_spec(), &hadamard_matrix(), &[0])
@@ -122,7 +134,10 @@ fn test_multi_kernel_session() {
     let ptx_h = session.emit_ptx(kid_h).expect("emit H PTX");
     let ptx_cnot = session.emit_ptx(kid_cnot).expect("emit CNOT PTX");
     assert!(ptx_h.contains(".visible .entry"), "H PTX should have entry");
-    assert!(ptx_cnot.contains(".visible .entry"), "CNOT PTX should have entry");
+    assert!(
+        ptx_cnot.contains(".visible .entry"),
+        "CNOT PTX should have entry"
+    );
     assert_ne!(ptx_h, ptx_cnot);
 }
 
@@ -181,7 +196,7 @@ fn test_h_gate_apply_to_zero_state() {
         .generate(&spec, &hadamard_matrix(), &[0])
         .expect("generate H kernel");
     let session = gen.compile().expect("compile");
-    let exec = super::CudaExecSession::new(&session).expect("create exec session");
+    let exec = super::CudaJitSession::new(&session).expect("create jit session");
 
     let mut sv = CudaStatevector::new(1, CudaPrecision::F64).expect("alloc statevector");
     sv.zero().expect("zero");
@@ -205,7 +220,7 @@ fn test_x_gate_apply_to_zero_state() {
         .generate(&spec, &x_matrix, &[0])
         .expect("generate X kernel");
     let session = gen.compile().expect("compile");
-    let exec = super::CudaExecSession::new(&session).expect("create exec session");
+    let exec = super::CudaJitSession::new(&session).expect("create jit session");
 
     let mut sv = CudaStatevector::new(1, CudaPrecision::F64).expect("alloc statevector");
     sv.zero().expect("zero");
@@ -225,7 +240,7 @@ fn test_apply_on_larger_statevector() {
         .generate(&spec, &hadamard_matrix(), &[0])
         .expect("generate H kernel");
     let session = gen.compile().expect("compile");
-    let exec = super::CudaExecSession::new(&session).expect("create exec session");
+    let exec = super::CudaJitSession::new(&session).expect("create jit session");
 
     let mut sv = CudaStatevector::new(4, CudaPrecision::F64).expect("alloc statevector");
     sv.zero().expect("zero");

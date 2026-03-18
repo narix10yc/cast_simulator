@@ -511,7 +511,7 @@ mod tests {
 
     // ── emit_asm ──────────────────────────────────────────────────────────────
 
-    fn compile_h_session_with_asm() -> (JitSession, KernelId) {
+    fn compile_h_session_with_asm() -> (CpuJitSession, KernelId) {
         let gate = QuantumGate::h(0);
         let mut gen = CPUKernelGenerator::new().expect("create generator");
         let kid = gen

@@ -53,6 +53,14 @@ impl CudaKernelGenerator {
             )
         };
         if status == 0 {
+            log::debug!(
+                "cuda: generated kernel {} ({} gate qubits, {:?} precision, sm_{}{})",
+                kernel_id,
+                qubits.len(),
+                spec.precision,
+                spec.sm_major,
+                spec.sm_minor,
+            );
             Ok(kernel_id)
         } else {
             Err(anyhow::anyhow!(error_from_buf(&err_buf)))
@@ -102,13 +110,13 @@ impl CudaKernelGenerator {
         String::from_utf8(ir_buf).map_err(|e| anyhow::anyhow!("IR is not valid UTF-8: {e}"))
     }
 
-    /// Compiles all generated kernels and returns a [`CudaCompilationSession`], consuming `self`.
+    /// Compiles all generated kernels and returns a [`CudaKernelArtifacts`], consuming `self`.
     ///
-    /// The compilation session is a pure-Rust value owning the PTX/cubin data; the underlying
-    /// C++ compilation object is deleted before this function returns.
-    pub fn compile(self) -> anyhow::Result<CudaCompilationSession> {
+    /// The artifacts are a pure-Rust value owning the PTX/cubin data; the underlying
+    /// C++ object is deleted before this function returns.
+    pub fn compile(self) -> anyhow::Result<CudaKernelArtifacts> {
         let mut this = ManuallyDrop::new(self);
-        let mut raw_session = std::ptr::null_mut::<ffi::CastCudaCompilationSession>();
+        let mut raw_session = std::ptr::null_mut::<ffi::CastCudaKernelArtifacts>();
         let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
 
         let status = unsafe {
@@ -125,34 +133,30 @@ impl CudaKernelGenerator {
         }
 
         // Drain compiled kernel data from the C++ session into a Rust Vec, then delete it.
-        let result = drain_compilation_session(raw_session, &mut err_buf);
-        unsafe { ffi::cast_cuda_compilation_session_delete(raw_session) };
+        let result = drain_kernel_artifacts(raw_session, &mut err_buf);
+        unsafe { ffi::cast_cuda_kernel_artifacts_delete(raw_session) };
         result
     }
 }
 
-/// Extracts all compiled kernel data from `raw` into a [`CudaCompilationSession`].
-fn drain_compilation_session(
-    raw: *mut ffi::CastCudaCompilationSession,
+/// Extracts all compiled kernel data from `raw` into a [`CudaKernelArtifacts`].
+fn drain_kernel_artifacts(
+    raw: *mut ffi::CastCudaKernelArtifacts,
     err_buf: &mut [std::ffi::c_char; ERR_BUF_LEN],
-) -> anyhow::Result<CudaCompilationSession> {
-    let n = unsafe { ffi::cast_cuda_compilation_session_n_kernels(raw) };
+) -> anyhow::Result<CudaKernelArtifacts> {
+    let n = unsafe { ffi::cast_cuda_kernel_artifacts_n_kernels(raw) };
     let mut kernels = Vec::with_capacity(n as usize);
 
     for idx in 0..n {
-        let kernel_id =
-            unsafe { ffi::cast_cuda_compilation_session_kernel_id_at(raw, idx) };
-        let n_gate_qubits =
-            unsafe { ffi::cast_cuda_compilation_session_n_gate_qubits_at(raw, idx) };
-        let precision_byte =
-            unsafe { ffi::cast_cuda_compilation_session_precision_at(raw, idx) };
+        let kernel_id = unsafe { ffi::cast_cuda_kernel_artifacts_kernel_id_at(raw, idx) };
+        let n_gate_qubits = unsafe { ffi::cast_cuda_kernel_artifacts_n_gate_qubits_at(raw, idx) };
+        let precision_byte = unsafe { ffi::cast_cuda_kernel_artifacts_precision_at(raw, idx) };
         let precision = if precision_byte == 0 {
             CudaPrecision::F32
         } else {
             CudaPrecision::F64
         };
-        let func_name_ptr =
-            unsafe { ffi::cast_cuda_compilation_session_func_name_at(raw, idx) };
+        let func_name_ptr = unsafe { ffi::cast_cuda_kernel_artifacts_func_name_at(raw, idx) };
         let func_name = unsafe { CStr::from_ptr(func_name_ptr) }
             .to_string_lossy()
             .into_owned();
@@ -160,6 +164,15 @@ fn drain_compilation_session(
         let ptx = extract_ptx(raw, kernel_id, err_buf)?;
         let cubin = extract_cubin(raw, kernel_id, err_buf)?;
 
+        log::debug!(
+            "cuda: compiled kernel {} '{}' ({} gate qubits, {:?}, ptx {} B, cubin {} B)",
+            kernel_id,
+            func_name,
+            n_gate_qubits,
+            precision,
+            ptx.len(),
+            cubin.len(),
+        );
         kernels.push(CompiledKernel {
             kernel_id,
             n_gate_qubits,
@@ -169,17 +182,18 @@ fn drain_compilation_session(
             cubin,
         });
     }
-    Ok(CudaCompilationSession { kernels })
+    log::info!("cuda: compiled {} kernel(s)", kernels.len());
+    Ok(CudaKernelArtifacts { kernels })
 }
 
 fn extract_ptx(
-    raw: *mut ffi::CastCudaCompilationSession,
+    raw: *mut ffi::CastCudaKernelArtifacts,
     kernel_id: CudaKernelId,
     err_buf: &mut [std::ffi::c_char; ERR_BUF_LEN],
 ) -> anyhow::Result<String> {
     let mut ptx_len: usize = 0;
     let status = unsafe {
-        ffi::cast_cuda_compilation_session_emit_ptx(
+        ffi::cast_cuda_kernel_artifacts_emit_ptx(
             raw,
             kernel_id,
             std::ptr::null_mut(),
@@ -194,7 +208,7 @@ fn extract_ptx(
     }
     let mut buf = vec![0u8; ptx_len + 1];
     let status = unsafe {
-        ffi::cast_cuda_compilation_session_emit_ptx(
+        ffi::cast_cuda_kernel_artifacts_emit_ptx(
             raw,
             kernel_id,
             buf.as_mut_ptr().cast(),
@@ -212,13 +226,13 @@ fn extract_ptx(
 }
 
 fn extract_cubin(
-    raw: *mut ffi::CastCudaCompilationSession,
+    raw: *mut ffi::CastCudaKernelArtifacts,
     kernel_id: CudaKernelId,
     err_buf: &mut [std::ffi::c_char; ERR_BUF_LEN],
 ) -> anyhow::Result<Vec<u8>> {
     let mut cubin_len: usize = 0;
     let status = unsafe {
-        ffi::cast_cuda_compilation_session_emit_cubin(
+        ffi::cast_cuda_kernel_artifacts_emit_cubin(
             raw,
             kernel_id,
             std::ptr::null_mut(),
@@ -233,7 +247,7 @@ fn extract_cubin(
     }
     let mut buf = vec![0u8; cubin_len];
     let status = unsafe {
-        ffi::cast_cuda_compilation_session_emit_cubin(
+        ffi::cast_cuda_kernel_artifacts_emit_cubin(
             raw,
             kernel_id,
             buf.as_mut_ptr(),
@@ -263,11 +277,12 @@ impl Drop for CudaKernelGenerator {
 
 impl fmt::Debug for CudaKernelGenerator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CudaKernelGenerator").finish_non_exhaustive()
+        f.debug_struct("CudaKernelGenerator")
+            .finish_non_exhaustive()
     }
 }
 
-// ── CudaCompilationSession ────────────────────────────────────────────────────
+// ── CudaKernelArtifacts ────────────────────────────────────────────────────
 
 /// Metadata and artifacts for a single compiled kernel.
 #[derive(Debug, Clone)]
@@ -282,38 +297,38 @@ pub struct CompiledKernel {
     pub cubin: Vec<u8>,
 }
 
-/// A pure-Rust compilation session owning PTX/cubin for each compiled kernel.
+/// Pure-Rust PTX/cubin artifacts for each compiled kernel.
 ///
-/// Created by [`CudaKernelGenerator::compile`]. The underlying C++ compilation object
-/// is fully drained and deleted before this value is returned.
+/// Created by [`CudaKernelGenerator::compile`]. The underlying C++ object is fully
+/// drained and deleted before this value is returned.
 #[derive(Debug)]
-pub struct CudaCompilationSession {
+pub struct CudaKernelArtifacts {
     pub kernels: Vec<CompiledKernel>,
 }
 
-impl CudaCompilationSession {
+impl CudaKernelArtifacts {
     /// Returns the PTX assembly text for the kernel identified by `kernel_id`.
-    pub fn emit_ptx(&self, kernel_id: CudaKernelId) -> anyhow::Result<String> {
+    pub fn emit_ptx(&self, kernel_id: CudaKernelId) -> anyhow::Result<&str> {
         self.kernels
             .iter()
             .find(|k| k.kernel_id == kernel_id)
-            .map(|k| k.ptx.clone())
-            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in compilation session", kernel_id))
+            .map(|k| k.ptx.as_str())
+            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in kernel artifacts", kernel_id))
     }
 
     /// Returns the cubin binary for the kernel identified by `kernel_id`.
-    pub fn emit_cubin(&self, kernel_id: CudaKernelId) -> anyhow::Result<Vec<u8>> {
+    pub fn emit_cubin(&self, kernel_id: CudaKernelId) -> anyhow::Result<&[u8]> {
         self.kernels
             .iter()
             .find(|k| k.kernel_id == kernel_id)
-            .map(|k| k.cubin.clone())
-            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in compilation session", kernel_id))
+            .map(|k| k.cubin.as_slice())
+            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in kernel artifacts", kernel_id))
     }
 }
 
-// ── CudaExecSession ───────────────────────────────────────────────────────────
+// ── CudaJitSession ───────────────────────────────────────────────────────────
 
-struct ExecEntry {
+struct JitEntry {
     kernel_id: CudaKernelId,
     n_gate_qubits: u32,
     precision: CudaPrecision,
@@ -321,14 +336,14 @@ struct ExecEntry {
     cu_function: *mut std::ffi::c_void,
 }
 
-/// Holds CUDA modules loaded from a [`CudaCompilationSession`], ready to launch.
+/// Holds CUDA modules loaded from a [`CudaKernelArtifacts`], ready to launch.
 ///
 /// Owns the `CUmodule`/`CUfunction` handles; modules are unloaded on drop.
-pub struct CudaExecSession {
-    entries: Vec<ExecEntry>,
+pub struct CudaJitSession {
+    entries: Vec<JitEntry>,
 }
 
-impl Drop for CudaExecSession {
+impl Drop for CudaJitSession {
     fn drop(&mut self) {
         for e in &self.entries {
             unsafe { ffi::cast_cuda_module_unload(e.cu_module) };
@@ -336,22 +351,24 @@ impl Drop for CudaExecSession {
     }
 }
 
-impl fmt::Debug for CudaExecSession {
+impl fmt::Debug for CudaJitSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CudaExecSession")
+        f.debug_struct("CudaJitSession")
             .field("n_kernels", &self.entries.len())
             .finish_non_exhaustive()
     }
 }
 
-impl CudaExecSession {
-    /// Loads all compiled kernels from `session` into CUDA driver modules.
+impl CudaJitSession {
+    /// Loads all compiled kernels from `artifacts` into CUDA driver modules.
     ///
     /// Initialises the CUDA driver once per process (device 0).
-    pub fn new(session: &CudaCompilationSession) -> anyhow::Result<Self> {
-        let mut this = Self { entries: Vec::with_capacity(session.kernels.len()) };
+    pub fn new(artifacts: &CudaKernelArtifacts) -> anyhow::Result<Self> {
+        let mut this = Self {
+            entries: Vec::with_capacity(artifacts.kernels.len()),
+        };
 
-        for kernel in &session.kernels {
+        for kernel in &artifacts.kernels {
             let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
 
             let ptx_cstr = CString::new(kernel.ptx.as_bytes())
@@ -387,14 +404,26 @@ impl CudaExecSession {
                 ));
             }
 
-            this.entries.push(ExecEntry {
+            this.entries.push(JitEntry {
                 kernel_id: kernel.kernel_id,
                 n_gate_qubits: kernel.n_gate_qubits,
                 precision: kernel.precision,
                 cu_module,
                 cu_function,
             });
+
+            log::debug!(
+                "cuda: loaded kernel {} '{}' ({} gate qubits, {:?} precision)",
+                kernel.kernel_id,
+                kernel.func_name,
+                kernel.n_gate_qubits,
+                kernel.precision,
+            );
         }
+        log::info!(
+            "cuda: jit session ready with {} kernel(s)",
+            this.entries.len()
+        );
         Ok(this)
     }
 
@@ -406,7 +435,7 @@ impl CudaExecSession {
             .entries
             .iter()
             .find(|e| e.kernel_id == kernel_id)
-            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in exec session", kernel_id))?;
+            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found in jit session", kernel_id))?;
 
         if sv.n_qubits() < entry.n_gate_qubits {
             anyhow::bail!("statevector has fewer qubits than the gate kernel requires");
@@ -414,6 +443,14 @@ impl CudaExecSession {
         if sv.precision() as u8 != entry.precision as u8 {
             anyhow::bail!("statevector precision does not match kernel precision");
         }
+
+        log::debug!(
+            "cuda: apply kernel {} ({} gate qubits, {} sv qubits, {:?} precision)",
+            kernel_id,
+            entry.n_gate_qubits,
+            sv.n_qubits(),
+            entry.precision,
+        );
 
         let mut err_buf = [0 as std::ffi::c_char; ERR_BUF_LEN];
         let status = unsafe {
