@@ -143,18 +143,53 @@ cargo test
 
 ## Hardware Profiling
 
-The roofline profiler measures the memory/compute crossover for gate simulation
-kernels on CPU and CUDA backends at F32 and F64 precision.  See
-[`src/bin/profile_hw.rs`](src/bin/profile_hw.rs).
+The adaptive roofline profiler (`profile_hw`) measures the memory/compute
+crossover point for gate simulation kernels.  It sweeps gate kernels across a
+range of arithmetic intensities, fits a two-segment piecewise roofline model,
+and outputs a `HardwareProfile` with peak bandwidth, peak compute, the
+memory-bound slope, and the crossover AI — plus raw sweep data for plotting.
+
+The crossover AI determines when gate fusion helps vs. hurts: fusing gates
+whose combined AI stays below the crossover is free (memory-bound); fusing past
+it pushes into the compute-bound regime with diminishing returns.
+
+### Usage
 
 ```sh
 cargo run --bin profile_hw --release -- --help
-cargo run --bin profile_hw --release                                    # CPU F32+F64
-cargo run --bin profile_hw --features cuda --release                    # CPU + CUDA, F32+F64
+
+# CPU only (all precisions)
+cargo run --bin profile_hw --release
+
+# CPU + CUDA, all precisions
+cargo run --bin profile_hw --features cuda --release
+
+# CUDA only, F32, 60s budget, 30-qubit statevector, save profiles
 cargo run --bin profile_hw --features cuda --release -- \
-      --backend cuda --precision f32 --budget 60                        # CUDA F32 only
-CAST_NUM_THREADS=32 cargo run --bin profile_hw --release -- --output profile.json
+      --backend cuda --precision f32 -n 30 --budget 60 \
+      --save-profiles profiles/
+
+# Override CPU thread count
+CAST_NUM_THREADS=32 cargo run --bin profile_hw --release
 ```
+
+### Cached Profiles
+
+Saved profiles are JSON files in `profiles/` (gitignored) and can be loaded by
+`bench_fusion` via `--profile profiles/cuda_f64.json` to skip re-profiling:
+
+```sh
+cargo run --bin bench_fusion --features cuda --release -- \
+      --backend cuda --profile profiles/cuda_f64.json \
+      examples/journal_examples/qft-cx-30.qasm
+```
+
+### Key Source Files
+
+- [`src/profile.rs`](src/profile.rs) — Adaptive sweep engine, `measure()`, `measure_cpu()`, `measure_cuda()`
+- [`src/cost_model.rs`](src/cost_model.rs) — `HardwareProfile`, `HardwareAdaptiveCostModel`, `FusionConfig`
+- [`src/bin/profile_hw.rs`](src/bin/profile_hw.rs) — CLI for running profiles
+- [`src/bin/bench_fusion.rs`](src/bin/bench_fusion.rs) — Fusion benchmark, consumes profiles
 
 ## CUDA Build And Test
 

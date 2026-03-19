@@ -25,7 +25,7 @@ use anyhow::{Context, Result};
 use cast::cost_model::{FusionConfig, HardwareProfile};
 use cast::fusion;
 use cast::openqasm::parse_qasm;
-use cast::timing::TimingStats;
+use cast::timing::{fmt_duration, TimingStats};
 use cast::types::QuantumGate;
 use cast::CircuitGraph;
 use clap::{Parser, ValueEnum};
@@ -99,8 +99,7 @@ struct BenchResult {
     label: String,
     n_gates: usize,
     n_rows: usize,
-    fusion_time_ms: f64,
-    compile_time_ms: f64,
+    compile_s: f64,
     timing: TimingStats,
 }
 
@@ -119,7 +118,7 @@ fn run_cpu(graph: &CircuitGraph, n_qubits: u32, budget_s: f64) -> Result<(f64, T
     for gate in &gates {
         kernel_ids.push(mgr.generate(&spec, gate)?);
     }
-    let compile_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let compile_s = t0.elapsed().as_secs_f64();
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     let timing = cast::timing::time_adaptive(
@@ -133,7 +132,7 @@ fn run_cpu(graph: &CircuitGraph, n_qubits: u32, budget_s: f64) -> Result<(f64, T
         budget_s,
     )?;
 
-    Ok((compile_ms, timing))
+    Ok((compile_s, timing))
 }
 
 // ── CUDA runner ──────────────────────────────────────────────────────────────
@@ -161,7 +160,7 @@ fn run_cuda(graph: &CircuitGraph, n_qubits: u32, budget_s: f64) -> Result<(f64, 
     for gate in &gates {
         kernel_ids.push(mgr.generate(gate, spec)?);
     }
-    let compile_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let compile_s = t0.elapsed().as_secs_f64();
 
     let mut sv = CudaStatevector::new(n_qubits, CudaPrecision::F64)?;
     let timing = cast::timing::time_adaptive_with(
@@ -176,7 +175,7 @@ fn run_cuda(graph: &CircuitGraph, n_qubits: u32, budget_s: f64) -> Result<(f64, 
         budget_s,
     )?;
 
-    Ok((compile_ms, timing))
+    Ok((compile_s, timing))
 }
 
 #[cfg(not(feature = "cuda"))]
@@ -195,14 +194,12 @@ fn bench_one_config(
     budget_s: f64,
 ) -> Result<BenchResult> {
     let mut graph = original.clone();
-    let t0 = Instant::now();
     fusion::optimize(&mut graph, config);
-    let fusion_time_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     let n_gates = gates_in_order(&graph).len();
     let n_rows = graph.n_rows();
 
-    let (compile_ms, timing) = match backend {
+    let (compile_s, timing) = match backend {
         Backend::Cpu => run_cpu(&graph, n_qubits, budget_s)?,
         Backend::Cuda => run_cuda(&graph, n_qubits, budget_s)?,
     };
@@ -211,8 +208,7 @@ fn bench_one_config(
         label: label.to_string(),
         n_gates,
         n_rows,
-        fusion_time_ms,
-        compile_time_ms: compile_ms,
+        compile_s,
         timing,
     })
 }
@@ -280,11 +276,17 @@ fn main() -> Result<()> {
     ];
 
     // ── Print header ────────────────────────────────────────────────────────
+    //
+    // "Compile" is the cold-compilation wall time (all kernels generated
+    // upfront before any execution).  In practice compilation and GPU
+    // execution overlap thanks to the LRU module cache, so the actual
+    // overhead is just the startup latency of the first few kernels.
+    // "GPU time" is pure device time measured via CUDA events.
     println!(
-        "{:<28} {:<14} {:>7} {:>6} {:>10} {:>10} {:>16}",
-        "Circuit", "Config", "Gates", "Depth", "Fuse(ms)", "JIT(ms)", "Exec"
+        "{:<16} {:<14} {:>7} {:>6} {:>10} {:>16}",
+        "Circuit", "Config", "Gates", "Depth", "Cold-Start", "GPU time"
     );
-    println!("{}", "-".repeat(98));
+    println!("{}", "-".repeat(76));
 
     // ── Run benchmarks ──────────────────────────────────────────────────────
     for path in &args.files {
@@ -309,13 +311,12 @@ fn main() -> Result<()> {
                 args.bench_budget,
             )?;
             println!(
-                "{:<28} {:<14} {:>7} {:>6} {:>10.1} {:>10.1} {:>16}",
+                "{:<16} {:<14} {:>7} {:>6} {:>10} {:>16}",
                 filename,
                 r.label,
                 r.n_gates,
                 r.n_rows,
-                r.fusion_time_ms,
-                r.compile_time_ms,
+                fmt_duration(r.compile_s),
                 r.timing,
             );
         }
