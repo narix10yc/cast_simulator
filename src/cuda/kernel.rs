@@ -317,7 +317,7 @@ impl ManagerInner {
             if start_ev.is_null() {
                 return Err(anyhow::anyhow!(
                     "event_create (start) failed: {}",
-                    error_from_buf(err_buf)
+                    error_from_buf(&err_buf)
                 ));
             }
             let status = unsafe {
@@ -327,7 +327,7 @@ impl ManagerInner {
                 unsafe { ffi::cast_cuda_event_destroy(start_ev) };
                 return Err(anyhow::anyhow!(
                     "event_record (start) failed: {}",
-                    error_from_buf(err_buf)
+                    error_from_buf(&err_buf)
                 ));
             }
 
@@ -349,7 +349,7 @@ impl ManagerInner {
                 return Err(anyhow::anyhow!(
                     "kernel {} launch failed: {}",
                     item.kernel_id,
-                    error_from_buf(err_buf)
+                    error_from_buf(&err_buf)
                 ));
             }
 
@@ -360,7 +360,7 @@ impl ManagerInner {
                 unsafe { ffi::cast_cuda_event_destroy(start_ev) };
                 return Err(anyhow::anyhow!(
                     "event_create (end) failed: {}",
-                    error_from_buf(err_buf)
+                    error_from_buf(&err_buf)
                 ));
             }
             let status = unsafe {
@@ -371,7 +371,7 @@ impl ManagerInner {
                 unsafe { ffi::cast_cuda_event_destroy(end_ev) };
                 return Err(anyhow::anyhow!(
                     "event_record (end) failed: {}",
-                    error_from_buf(err_buf)
+                    error_from_buf(&err_buf)
                 ));
             }
 
