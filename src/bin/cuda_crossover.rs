@@ -26,15 +26,15 @@
 //! ## Usage
 //!
 //! ```sh
-//! cargo run --bin cuda_crossover --features cuda --release
-//! cargo run --bin cuda_crossover --features cuda --release -- --sm 89
+//! cargo run --bin cuda_crossover --features cuda --release             # auto-detect SM
+//! cargo run --bin cuda_crossover --features cuda --release -- --sm 89  # override SM
 //! cargo run --bin cuda_crossover --features cuda --release -- --help
 //! ```
 
 use anyhow::Result;
 use cast::cuda::{
-    measure_peak_bw_gib_s, CudaKernelGenSpec, CudaKernelId, CudaKernelManager, CudaPrecision,
-    CudaStatevector,
+    device_sm, measure_peak_bw_gib_s, CudaKernelGenSpec, CudaKernelId, CudaKernelManager,
+    CudaPrecision, CudaStatevector,
 };
 use cast::types::{Complex, ComplexSquareMatrix, QuantumGate};
 use clap::{Parser, ValueEnum};
@@ -115,9 +115,9 @@ struct Args {
     #[arg(long, value_enum, default_value_t = CliCudaPrecision::F64)]
     precision: CliCudaPrecision,
 
-    /// CUDA SM target, e.g. 86 or 120.
-    #[arg(long = "sm", default_value = "86")]
-    sm: SmTarget,
+    /// CUDA SM target, e.g. 86 or 120. Auto-detected from device 0 if omitted.
+    #[arg(long = "sm")]
+    sm: Option<SmTarget>,
 
     /// Total wall-time budget for the gate sweep (seconds; BW test is extra).
     #[arg(long, default_value_t = 120.0)]
@@ -141,11 +141,25 @@ struct Args {
 }
 
 impl Args {
+    /// Resolve `--sm`: use the explicit value if given, otherwise auto-detect from device 0.
+    fn resolve_sm(&mut self) -> Result<()> {
+        if self.sm.is_none() {
+            let (major, minor) = device_sm()?;
+            self.sm = Some(SmTarget { major, minor });
+        }
+        Ok(())
+    }
+
+    fn sm(&self) -> SmTarget {
+        self.sm.expect("SM must be resolved before use")
+    }
+
     fn precision(&self) -> CudaPrecision {
         self.precision.into()
     }
 
     fn spec(&self) -> CudaKernelGenSpec {
+        let sm = self.sm();
         let p = self.precision();
         let tol = if matches!(self.precision, CliCudaPrecision::F32) {
             1e-6
@@ -156,8 +170,8 @@ impl Args {
             precision: p,
             ztol: tol,
             otol: tol,
-            sm_major: self.sm.major,
-            sm_minor: self.sm.minor,
+            sm_major: sm.major,
+            sm_minor: sm.minor,
         }
     }
 
@@ -365,8 +379,8 @@ fn explore(args: &Args) -> Result<(HardwareProfile, Vec<Measurement>)> {
         args.profile_n_qubits(),
         sv_mib,
         args.precision,
-        args.sm.major,
-        args.sm.minor,
+        args.sm().major,
+        args.sm().minor,
         args.budget_secs,
     );
     eprintln!();
@@ -437,23 +451,6 @@ fn explore(args: &Args) -> Result<(HardwareProfile, Vec<Measurement>)> {
     }
     eprintln!();
 
-    let peak_gflops_s = escalation_anchor_gflops;
-    let theoretical_crossover_ai = if peak_gflops_s > 0.0 {
-        peak_gflops_s / gflops_per_ai
-    } else {
-        f64::INFINITY
-    };
-    let profile = HardwareProfile {
-        peak_bw_gib_s,
-        gflops_per_ai,
-        peak_gflops_s,
-        theoretical_crossover_ai,
-    };
-
-    eprintln!(
-        "  Theoretical crossover: ai ≈ {:.1}",
-        theoretical_crossover_ai
-    );
     eprintln!();
 
     // ── Phase 2: Coarse sweep — fill in remaining power-of-2 AI points ───────
@@ -474,6 +471,13 @@ fn explore(args: &Args) -> Result<(HardwareProfile, Vec<Measurement>)> {
         args.budget_secs * 0.55 / coarse_ais.len() as f64
     };
 
+    // Stop early once a crossover bracket is established: a mem-bound or
+    // transition point at some AI, followed by a compute-bound point at a
+    // higher AI.  Beyond the bracket, larger gates are slow and redundant.
+    let mut seen_non_comp = measurements
+        .iter()
+        .any(|m| classify(m, gflops_per_ai) != Regime::CompBound);
+
     for &ai in &coarse_ais {
         let k = gate_qubits_for_ai(ai);
         eprint!("  ai={ai:>4} k={k} ... ");
@@ -486,7 +490,14 @@ fn explore(args: &Args) -> Result<(HardwareProfile, Vec<Measurement>)> {
             m.gflops_s,
             gflops_per_ai * m.ai,
         );
+        if r != Regime::CompBound {
+            seen_non_comp = true;
+        }
         measurements.push(m);
+        if seen_non_comp && r == Regime::CompBound {
+            eprintln!("  (crossover bracket found — skipping higher AI values)");
+            break;
+        }
     }
     eprintln!();
 
@@ -533,6 +544,30 @@ fn explore(args: &Args) -> Result<(HardwareProfile, Vec<Measurement>)> {
     }
     eprintln!();
 
+    // ── Build hardware profile from all measurements ─────────────────────────
+
+    let peak_gflops_s = measurements
+        .iter()
+        .map(|m| m.gflops_s)
+        .fold(0.0_f64, f64::max);
+    let theoretical_crossover_ai = if peak_gflops_s > 0.0 {
+        peak_gflops_s / gflops_per_ai
+    } else {
+        f64::INFINITY
+    };
+    let profile = HardwareProfile {
+        peak_bw_gib_s,
+        gflops_per_ai,
+        peak_gflops_s,
+        theoretical_crossover_ai,
+    };
+
+    eprintln!(
+        "  Theoretical crossover: ai ≈ {:.1}  (peak observed: {:.1} GFLOPs/s)",
+        theoretical_crossover_ai, peak_gflops_s,
+    );
+    eprintln!();
+
     Ok((profile, measurements))
 }
 
@@ -558,7 +593,8 @@ fn print_report(profile: &HardwareProfile, rows: &[Measurement], args: &Args) {
     );
     println!(
         "  CUDA SM target     : sm_{}{}",
-        args.sm.major, args.sm.minor
+        args.sm().major,
+        args.sm().minor
     );
     println!(
         "  budget             : {:.0} s gate sweep  +  BW test",
@@ -708,7 +744,8 @@ fn print_report(profile: &HardwareProfile, rows: &[Measurement], args: &Args) {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    args.resolve_sm()?;
     let (profile, mut measurements) = explore(&args)?;
     measurements.sort_by(|a, b| a.ai_target.cmp(&b.ai_target).then(a.k.cmp(&b.k)));
     print_report(&profile, &measurements, &args);
