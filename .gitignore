@@ -1,11 +1,14 @@
-.vscode/*
-.idea/*
+.vscode/
+.idea/
 .DS_Store
 
 target/
 
 analysis/
+examples/
+profiles/
 tmp/
+
 *.csv
 *.ipynb
 
