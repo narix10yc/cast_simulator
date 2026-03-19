@@ -450,7 +450,13 @@ impl CpuKernelManager {
         request_llvm_ir: bool,
         request_asm: bool,
     ) -> anyhow::Result<KernelId> {
-        self.generate_inner(spec, gate.matrix().data(), gate.qubits(), request_llvm_ir, request_asm)
+        self.generate_inner(
+            spec,
+            gate.matrix().data(),
+            gate.qubits(),
+            request_llvm_ir,
+            request_asm,
+        )
     }
 
     fn generate_inner(
@@ -646,10 +652,7 @@ impl CpuKernelManager {
         n_threads: u32,
         budget_s: f64,
     ) -> anyhow::Result<crate::timing::TimingStats> {
-        crate::timing::time_adaptive(
-            || self.apply(id, statevector, n_threads),
-            budget_s,
-        )
+        crate::timing::time_adaptive(|| self.apply(id, statevector, n_threads), budget_s)
     }
 }
 

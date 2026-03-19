@@ -50,9 +50,7 @@ mod tests {
         tol: f64,
     ) {
         let mgr = CpuKernelManager::new();
-        let kernel_id = mgr
-            .generate(&spec, gate)
-            .expect("generate kernel");
+        let kernel_id = mgr.generate(&spec, gate).expect("generate kernel");
 
         let mut sv_jit = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
         let mut sv_ref = sv_jit.clone();
@@ -140,9 +138,7 @@ mod tests {
         let mgr = CpuKernelManager::new();
         let mut kernel_ids = Vec::with_capacity(gates.len());
         for gate in &gates {
-            let kernel_id = mgr
-                .generate(&spec, gate)
-                .expect("generate kernel");
+            let kernel_id = mgr.generate(&spec, gate).expect("generate kernel");
             kernel_ids.push(kernel_id);
         }
         let mut sv = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
@@ -163,7 +159,7 @@ mod tests {
         let unfused_jit = run_circuit_jit(original, n_qubits_sv, spec, 1);
 
         let mut fused = original.clone();
-        fusion::optimize(&mut fused, &FusionConfig::balanced());
+        fusion::optimize(&mut fused, &FusionConfig::default());
         let fused_jit = run_circuit_jit(&fused, n_qubits_sv, spec, 1);
 
         assert_statevectors_close(&unfused_jit, &scalar_ref, tol);
@@ -297,9 +293,7 @@ mod tests {
         };
 
         let mgr = CpuKernelManager::new();
-        let kid_imm = mgr
-            .generate(&spec_imm, &gate)
-            .expect("generate imm kernel");
+        let kid_imm = mgr.generate(&spec_imm, &gate).expect("generate imm kernel");
         mgr.apply(kid_imm, &mut sv_imm, 1).expect("apply imm");
 
         let kid_stack = mgr
@@ -382,12 +376,8 @@ mod tests {
         let cx_gate = QuantumGate::cx(0, 1);
 
         let mgr = CpuKernelManager::new();
-        let kid_h = mgr
-            .generate(&spec, &h_gate)
-            .expect("generate H kernel");
-        let kid_cx = mgr
-            .generate(&spec, &cx_gate)
-            .expect("generate CX kernel");
+        let kid_h = mgr.generate(&spec, &h_gate).expect("generate H kernel");
+        let kid_cx = mgr.generate(&spec, &cx_gate).expect("generate CX kernel");
 
         let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
         let mut sv_ref = sv_jit.clone();
@@ -411,7 +401,8 @@ mod tests {
             .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
                 &QuantumGate::h(0),
-                true, false,
+                true,
+                false,
             )
             .expect("generate kernel");
 
@@ -432,7 +423,8 @@ mod tests {
             .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
                 &QuantumGate::x(0),
-                true, false,
+                true,
+                false,
             )
             .expect("generate kernel");
 
@@ -518,7 +510,8 @@ mod tests {
             .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
                 &gate,
-                false, true,
+                false,
+                true,
             )
             .expect("generate kernel");
         (mgr, kid)

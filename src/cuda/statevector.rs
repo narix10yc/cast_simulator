@@ -108,6 +108,10 @@ impl CudaStatevector {
         1 << self.n_qubits
     }
 
+    pub fn is_empty(&self) -> bool {
+        false // a statevector always has at least 1 amplitude
+    }
+
     /// Returns the raw `CUdeviceptr` (for passing to the exec session).
     pub(super) fn dptr(&self) -> u64 {
         self.dptr

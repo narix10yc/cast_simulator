@@ -1,13 +1,8 @@
-//! Hardware roofline profiler using `HardwareProfile::measure_cpu` /
-//! `measure_cuda`.
+//! Hardware roofline profiler.
 //!
 //! Measures the roofline crossover point for one or more backend × precision
 //! combinations.  By default profiles all available backends at both F32 and
 //! F64; use `--backend` and `--precision` to narrow the scope.
-//!
-//! A one-line result is printed to stdout after each stage completes, followed
-//! by a summary table at the end.  Use `--output <path>` to save the results
-//! as JSON (`.json`) or plain text.
 //!
 //! ## Usage
 //!
@@ -17,15 +12,14 @@
 //! cargo run --bin profile_hw --features cuda --release -- \
 //!       --backend cuda --precision f32                          # CUDA F32 only
 //! CAST_NUM_THREADS=32 cargo run --bin profile_hw --release      # override threads
-//! cargo run --bin profile_hw --release -- --output profile.json # save JSON
-//! cargo run --bin profile_hw --release -- --help
+//! cargo run --bin profile_hw --release -- -n 32 --budget 60     # 32-qubit SV, 60s
+//! cargo run --bin profile_hw --release -- --save-profiles ./profiles
 //! ```
 
 use anyhow::Result;
 use cast::cost_model::HardwareProfile;
-use cast::cpu::CPUKernelGenSpec;
+use cast::profile;
 use clap::{Parser, ValueEnum};
-use std::io::Write;
 use std::path::PathBuf;
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
@@ -64,195 +58,110 @@ struct Args {
     #[arg(long = "threads", default_value_t = 0)]
     threads: u32,
 
+    /// Number of statevector qubits for profiling kernels.
+    #[arg(long, short, default_value_t = 30)]
+    n_qubits: u32,
+
     /// Wall-time budget per profile run (seconds).
     #[arg(long, default_value_t = 30.0)]
     budget: f64,
 
-    /// Save results to a file. Format is inferred from the extension:
-    ///   .json  → JSON
-    ///   other  → human-readable text table
-    #[arg(long, short)]
-    output: Option<PathBuf>,
+    /// Save each HardwareProfile as a separate JSON file in this directory.
+    /// Files are named `<backend>_<precision>.json` (e.g. `cpu_f64.json`).
+    #[arg(long)]
+    save_profiles: Option<PathBuf>,
 }
 
 impl Args {
-    fn n_threads(&self) -> u32 {
-        if self.threads == 0 {
-            cast::cpu::get_num_threads()
-        } else {
-            self.threads
-        }
-    }
-
     fn do_cpu(&self) -> bool {
         matches!(self.backend, Backend::Cpu | Backend::All)
     }
-
-    #[allow(dead_code)]
     fn do_cuda(&self) -> bool {
         matches!(self.backend, Backend::Cuda | Backend::All)
     }
-
     fn do_f32(&self) -> bool {
         matches!(self.precision, CliPrecision::F32 | CliPrecision::All)
     }
-
     fn do_f64(&self) -> bool {
         matches!(self.precision, CliPrecision::F64 | CliPrecision::All)
     }
 }
 
-// ── Profile result ───────────────────────────────────────────────────────────
-
-struct ProfileResult {
-    backend: String,
-    precision: String,
-    detail: String,
-    peak_bw_gib_s: f64,
-    peak_gflops_s: f64,
-    gflops_per_ai: f64,
-    crossover_ai: f64,
-    wall_s: f64,
-}
-
-impl ProfileResult {
-    fn new(
-        backend: &str,
-        precision: &str,
-        detail: &str,
-        p: &HardwareProfile,
-        wall_s: f64,
-    ) -> Self {
-        Self {
-            backend: backend.to_string(),
-            precision: precision.to_string(),
-            detail: detail.to_string(),
-            peak_bw_gib_s: p.peak_bw_gib_s(),
-            peak_gflops_s: p.peak_gflops_s(),
-            gflops_per_ai: p.gflops_per_ai(),
-            crossover_ai: p.crossover_ai(),
-            wall_s,
-        }
-    }
-
-    fn label(&self) -> String {
-        format!("{} {} ({})", self.backend, self.precision, self.detail)
-    }
-
-    fn print_short(&self) {
-        println!(
-            "  {:<24}  BW {:>7.1} GiB/s  Compute {:>9.1} GFLOPs/s  Crossover AI {:>5.1}  ({:.1}s)",
-            self.label(), self.peak_bw_gib_s, self.peak_gflops_s,
-            self.crossover_ai, self.wall_s,
-        );
-    }
-}
-
 // ── Output formatting ────────────────────────────────────────────────────────
 
-fn format_table(results: &[ProfileResult]) -> String {
-    let bar = "=".repeat(88);
-    let line = "-".repeat(88);
-    let mut s = String::new();
-
-    s += &format!("\n  {bar}\n");
-    s += "  Summary\n";
-    s += &format!("  {bar}\n\n");
-    s += &format!(
-        "  {:<24} {:>12} {:>14} {:>12} {:>12} {:>8}\n",
-        "Config", "Peak BW", "Peak Compute", "GFLOPs/AI", "Crossover", "Time"
+fn print_short(p: &HardwareProfile, wall_s: f64) {
+    println!(
+        "  {:<28}  BW {:>7.1} GiB/s  Compute {:>9.1} GFLOPs/s  Crossover AI {:>5.1}  ({:.1}s)",
+        p.config.device, p.peak_bw_gib_s, p.peak_gflops_s, p.crossover_ai, wall_s,
     );
-    s += &format!(
-        "  {:<24} {:>12} {:>14} {:>12} {:>12} {:>8}\n",
-        "", "(GiB/s)", "(GFLOPs/s)", "", "(AI)", "(s)"
-    );
-    s += &format!("  {line}\n");
+}
 
-    for r in results {
-        s += &format!(
-            "  {:<24} {:>12.1} {:>14.1} {:>12.2} {:>12.1} {:>8.1}\n",
-            r.label(), r.peak_bw_gib_s, r.peak_gflops_s, r.gflops_per_ai,
-            r.crossover_ai, r.wall_s,
+fn print_table(profiles: &[(HardwareProfile, f64)]) {
+    let bar = "=".repeat(92);
+    let line = "-".repeat(92);
+
+    println!("\n  {bar}");
+    println!("  Summary");
+    println!("  {bar}\n");
+    println!(
+        "  {:<28} {:>12} {:>14} {:>12} {:>12} {:>8}",
+        "Config", "Peak BW", "Peak Compute", "BW Slope", "Crossover", "Time"
+    );
+    println!(
+        "  {:<28} {:>12} {:>14} {:>12} {:>12} {:>8}",
+        "", "(GiB/s)", "(GFLOPs/s)", "(GFLOPs/AI)", "(AI)", "(s)"
+    );
+    println!("  {line}");
+
+    for (p, wall_s) in profiles {
+        println!(
+            "  {:<28} {:>12.1} {:>14.1} {:>12.2} {:>12.1} {:>8.1}",
+            format!(
+                "{} {}",
+                p.config.device,
+                p.config.precision.to_ascii_uppercase()
+            ),
+            p.peak_bw_gib_s,
+            p.peak_gflops_s,
+            p.bw_slope,
+            p.crossover_ai,
+            wall_s,
         );
     }
 
-    s += &format!("  {line}\n\n");
-    s
-}
-
-fn format_json(results: &[ProfileResult]) -> String {
-    // Hand-rolled JSON to avoid a serde dependency.
-    let mut s = String::from("[\n");
-    for (i, r) in results.iter().enumerate() {
-        s += "  {\n";
-        s += &format!("    \"backend\": {:?},\n", r.backend);
-        s += &format!("    \"precision\": {:?},\n", r.precision);
-        s += &format!("    \"detail\": {:?},\n", r.detail);
-        s += &format!("    \"peak_bw_gib_s\": {:.2},\n", r.peak_bw_gib_s);
-        s += &format!("    \"peak_gflops_s\": {:.2},\n", r.peak_gflops_s);
-        s += &format!("    \"gflops_per_ai\": {:.2},\n", r.gflops_per_ai);
-        s += &format!("    \"crossover_ai\": {:.2},\n", r.crossover_ai);
-        s += &format!("    \"wall_s\": {:.2}\n", r.wall_s);
-        s += "  }";
-        if i + 1 < results.len() {
-            s += ",";
-        }
-        s += "\n";
-    }
-    s += "]\n";
-    s
-}
-
-fn save_results(path: &PathBuf, results: &[ProfileResult]) -> Result<()> {
-    let is_json = path
-        .extension()
-        .map_or(false, |ext| ext.eq_ignore_ascii_case("json"));
-
-    let content = if is_json {
-        format_json(results)
-    } else {
-        format_table(results)
-    };
-
-    let mut f = std::fs::File::create(path)?;
-    f.write_all(content.as_bytes())?;
-    eprintln!("Saved results to {}", path.display());
-    Ok(())
+    println!("  {line}\n");
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let mut results: Vec<ProfileResult> = Vec::new();
+    let mut profiles: Vec<(HardwareProfile, f64)> = Vec::new();
 
-    // If threads were overridden, set the env var so measure_cpu picks it up.
     if args.threads > 0 {
         std::env::set_var("CAST_NUM_THREADS", args.threads.to_string());
     }
-
-    let n_threads = args.n_threads();
-    let thread_detail = format!("{n_threads} threads");
 
     println!();
 
     // ── CPU profiles ─────────────────────────────────────────────────────────
 
     if args.do_cpu() {
+        use cast::cpu::CPUKernelGenSpec;
+
         if args.do_f64() {
             let t0 = std::time::Instant::now();
-            let p = HardwareProfile::measure_cpu(&CPUKernelGenSpec::f64(), args.budget)?;
-            let r = ProfileResult::new("CPU", "F64", &thread_detail, &p, t0.elapsed().as_secs_f64());
-            r.print_short();
-            results.push(r);
+            let p = profile::measure_cpu(&CPUKernelGenSpec::f64(), args.n_qubits, args.budget)?;
+            let wall_s = t0.elapsed().as_secs_f64();
+            print_short(&p, wall_s);
+            profiles.push((p, wall_s));
         }
-
         if args.do_f32() {
             let t0 = std::time::Instant::now();
-            let p = HardwareProfile::measure_cpu(&CPUKernelGenSpec::f32(), args.budget)?;
-            let r = ProfileResult::new("CPU", "F32", &thread_detail, &p, t0.elapsed().as_secs_f64());
-            r.print_short();
-            results.push(r);
+            let p = profile::measure_cpu(&CPUKernelGenSpec::f32(), args.n_qubits, args.budget)?;
+            let wall_s = t0.elapsed().as_secs_f64();
+            print_short(&p, wall_s);
+            profiles.push((p, wall_s));
         }
     }
 
@@ -263,7 +172,6 @@ fn main() -> Result<()> {
         use cast::cuda::{device_sm, CudaKernelGenSpec, CudaPrecision};
 
         let (sm_major, sm_minor) = device_sm()?;
-        let sm_detail = format!("sm_{sm_major}{sm_minor}");
 
         if args.do_f64() {
             let spec = CudaKernelGenSpec {
@@ -274,12 +182,11 @@ fn main() -> Result<()> {
                 sm_minor,
             };
             let t0 = std::time::Instant::now();
-            let p = HardwareProfile::measure_cuda(&spec, args.budget)?;
-            let r = ProfileResult::new("CUDA", "F64", &sm_detail, &p, t0.elapsed().as_secs_f64());
-            r.print_short();
-            results.push(r);
+            let p = profile::measure_cuda(&spec, args.n_qubits, args.budget)?;
+            let wall_s = t0.elapsed().as_secs_f64();
+            print_short(&p, wall_s);
+            profiles.push((p, wall_s));
         }
-
         if args.do_f32() {
             let spec = CudaKernelGenSpec {
                 precision: CudaPrecision::F32,
@@ -289,30 +196,42 @@ fn main() -> Result<()> {
                 sm_minor,
             };
             let t0 = std::time::Instant::now();
-            let p = HardwareProfile::measure_cuda(&spec, args.budget)?;
-            let r = ProfileResult::new("CUDA", "F32", &sm_detail, &p, t0.elapsed().as_secs_f64());
-            r.print_short();
-            results.push(r);
+            let p = profile::measure_cuda(&spec, args.n_qubits, args.budget)?;
+            let wall_s = t0.elapsed().as_secs_f64();
+            print_short(&p, wall_s);
+            profiles.push((p, wall_s));
         }
     }
 
     #[cfg(not(feature = "cuda"))]
     if args.do_cuda() {
-        eprintln!("Warning: --backend cuda/all requires the `cuda` feature; skipping CUDA profiles.");
+        eprintln!(
+            "Warning: --backend cuda/all requires the `cuda` feature; skipping CUDA profiles."
+        );
     }
 
     // ── Output ───────────────────────────────────────────────────────────────
 
-    if results.is_empty() {
+    if profiles.is_empty() {
         eprintln!("Nothing to profile. Check --backend and --precision flags.");
-    } else if results.len() > 1 {
-        print!("{}", format_table(&results));
+    } else if profiles.len() > 1 {
+        print_table(&profiles);
     } else {
         println!();
     }
 
-    if let Some(ref path) = args.output {
-        save_results(path, &results)?;
+    if let Some(ref dir) = args.save_profiles {
+        std::fs::create_dir_all(dir)?;
+        for (p, _) in &profiles {
+            let backend = match &p.config.device {
+                cast::cost_model::Device::Cpu { .. } => "cpu",
+                cast::cost_model::Device::Cuda { .. } => "cuda",
+            };
+            let name = format!("{}_{}.json", backend, p.config.precision);
+            let path = dir.join(name);
+            p.save(&path)?;
+            eprintln!("Saved profile to {}", path.display());
+        }
     }
 
     Ok(())

@@ -6,6 +6,8 @@ pub mod circuit;
 
 pub mod cost_model;
 
+pub mod profile;
+
 pub mod fusion;
 
 pub mod openqasm;
