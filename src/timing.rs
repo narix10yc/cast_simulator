@@ -17,7 +17,7 @@ pub struct TimingStats {
 
 /// Formats a duration in seconds to 3 significant figures with an appropriate
 /// unit (s, ms, µs, ns).
-fn fmt_duration(secs: f64) -> String {
+pub fn fmt_duration(secs: f64) -> String {
     let (val, unit) = if secs >= 1.0 {
         (secs, "s")
     } else if secs >= 1e-3 {
@@ -40,16 +40,21 @@ fn fmt_duration(secs: f64) -> String {
 }
 
 impl fmt::Display for TimingStats {
-    /// Displays as `213 ms ± 71.0 ms (33 iters)`.
+    /// Displays as `213 ms ± 71.0 ms (33 iters)` for multi-iter results,
+    /// or just `6.18 s (1 iter)` when there is only a single sample (no
+    /// meaningful stddev).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} ± {} ({} iter{})",
-            fmt_duration(self.mean_s),
-            fmt_duration(self.stddev_s),
-            self.n_iters,
-            if self.n_iters == 1 { "" } else { "s" },
-        )
+        if self.n_iters <= 1 {
+            write!(f, "{} (1 iter)", fmt_duration(self.mean_s))
+        } else {
+            write!(
+                f,
+                "{} ± {} ({} iters)",
+                fmt_duration(self.mean_s),
+                fmt_duration(self.stddev_s),
+                self.n_iters,
+            )
+        }
     }
 }
 
