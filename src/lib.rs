@@ -1,5 +1,7 @@
 pub mod types;
 
+pub mod timing;
+
 pub mod circuit;
 
 pub mod cost_model;

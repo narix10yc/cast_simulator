@@ -94,7 +94,7 @@ fn probe_ai(
         n_qubits_sv.max(gate.n_qubits() as u32 + get_simd_s(spec.simd_width, spec.precision) + 1);
 
     let mgr = CpuKernelManager::new();
-    let kid = mgr.generate(spec, gate.matrix().data(), gate.qubits())?;
+    let kid = mgr.generate(spec, &gate)?;
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     sv.initialize();
