@@ -235,6 +235,57 @@ impl QuantumGate {
 
         Self::new(matrix, sorted)
     }
+
+    /// Generate a random sparse gate targeting the given arithmetic intensity,
+    /// with randomly chosen target qubits in `0..n_qubits_sv`.
+    ///
+    /// Auto-determines the gate size (number of qubits) needed to achieve `ai`
+    /// with sparsity in `[0, 1]`, then picks that many random distinct qubits.
+    /// The matrix is not guaranteed to be unitary — intended for benchmarking
+    /// and profiling, not quantum circuit simulation.
+    ///
+    /// `ztol` controls the zero-tolerance used when computing the actual AI of
+    /// the resulting gate.
+    ///
+    /// # Panics
+    /// Panics if `n_qubits_sv` is too small for the required gate size.
+    pub fn random_arithmatic_intensity(n_qubits_sv: u32, ai: f64, ztol: f64) -> Self {
+        let rng = &mut rand::thread_rng();
+        Self::random_arithmatic_intensity_with_rng(n_qubits_sv, ai, ztol, rng)
+    }
+
+    /// Seeded variant of [`Self::random_arithmatic_intensity`].
+    pub fn random_arithmatic_intensity_with_rng(
+        n_qubits_sv: u32,
+        ai: f64,
+        ztol: f64,
+        rng: &mut impl Rng,
+    ) -> Self {
+        // Minimum gate qubits k such that edge_size = 2^k can achieve the
+        // target AI with sparsity <= 1:  max_ai = 2 * edge_size, so we need
+        // edge_size >= ceil(ai / 2), i.e. k >= ceil(log2(ceil(ai / 2))).
+        const MIN_GATE_QUBITS: u32 = 4;
+        let k = ((ai / 2.0).ceil().max(1.0).log2().ceil() as u32).max(MIN_GATE_QUBITS);
+        assert!(
+            n_qubits_sv >= k,
+            "n_qubits_sv ({n_qubits_sv}) too small for gate requiring {k} qubits"
+        );
+
+        let edge_size = 1u64 << k;
+        let max_ai = 2.0 * edge_size as f64;
+        let sparsity = (ai / max_ai).clamp(0.0, 1.0);
+
+        // Pick k distinct random qubits from 0..n_qubits_sv.
+        let mut pool: Vec<u32> = (0..n_qubits_sv).collect();
+        for i in 0..k as usize {
+            let j = rng.gen_range(i..pool.len());
+            pool.swap(i, j);
+        }
+        let qubits = &pool[..k as usize];
+
+        let _ = ztol; // ztol is for the caller's use; gate construction doesn't need it
+        Self::random_sparse_with_rng(qubits, sparsity, rng)
+    }
 }
 
 /// Returns `2^n_qubits`, panicking on overflow.

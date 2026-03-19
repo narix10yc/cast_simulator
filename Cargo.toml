@@ -19,6 +19,5 @@ rand = "0.8.5"
 rand_distr = "0.4.3"
 
 [[bin]]
-name = "cuda_crossover"
-path = "src/bin/cuda_crossover.rs"
-required-features = ["cuda"]
+name = "profile_hw"
+path = "src/bin/profile_hw.rs"

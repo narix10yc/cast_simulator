@@ -45,6 +45,16 @@ impl CudaKernelGenSpec {
     }
 }
 
+impl CudaPrecision {
+    /// Size of one real scalar in bytes (4 for F32, 8 for F64).
+    pub fn scalar_bytes(self) -> usize {
+        match self {
+            CudaPrecision::F32 => 4,
+            CudaPrecision::F64 => 8,
+        }
+    }
+}
+
 /// Opaque handle returned by [`super::CudaKernelGenerator::generate`], used to identify a
 /// compiled kernel inside a [`super::CudaKernelArtifacts`].
 pub type CudaKernelId = u64;
