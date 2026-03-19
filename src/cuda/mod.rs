@@ -21,6 +21,8 @@ use std::ffi::c_char;
 
 pub use kernel::{CudaKernel, CudaKernelManager};
 #[cfg(feature = "cuda")]
+pub use kernel::{KernelExecTime, SyncStats};
+#[cfg(feature = "cuda")]
 pub use statevector::CudaStatevector;
 pub use types::{CudaKernelGenSpec, CudaKernelId, CudaPrecision};
 
@@ -126,6 +128,33 @@ pub(super) mod ffi {
             n_gate_qubits: u32,
             sv_n_qubits: u32,
             precision: u8,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+
+        // ── CUDA timing events ────────────────────────────────────────────────
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_event_create(
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> *mut std::ffi::c_void;
+
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_event_record(
+            event: *mut std::ffi::c_void,
+            stream: *mut std::ffi::c_void,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_event_destroy(event: *mut std::ffi::c_void);
+
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_event_elapsed_ms(
+            start_event: *mut std::ffi::c_void,
+            end_event: *mut std::ffi::c_void,
+            out_ms: *mut f32,
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;

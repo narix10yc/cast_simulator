@@ -101,6 +101,26 @@ int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t sv_dptr,
                             uint32_t n_gate_qubits, uint32_t sv_n_qubits, uint8_t precision,
                             char *err_buf, size_t err_buf_len);
 
+// ── CUDA timing events ───────────────────────────────────────────────────────
+
+/// Create a CUDA timing event. Returns an opaque CUevent as void*, or NULL on
+/// failure (message written to err_buf).
+void *cast_cuda_event_create(char *err_buf, size_t err_buf_len);
+
+/// Record `event` at the current position on `stream` (non-blocking).
+/// Returns 0 on success; writes a message into err_buf on failure.
+int cast_cuda_event_record(void *event, void *stream, char *err_buf, size_t err_buf_len);
+
+/// Destroy a CUDA event previously created with cast_cuda_event_create.
+void cast_cuda_event_destroy(void *event);
+
+/// Query the elapsed GPU time in milliseconds between two recorded events.
+/// Both events must have fired (i.e., the stream must have been synchronised).
+/// Writes the elapsed time into *out_ms.
+/// Returns 0 on success; writes a message into err_buf on failure.
+int cast_cuda_event_elapsed_ms(void *start_event, void *end_event, float *out_ms,
+                               char *err_buf, size_t err_buf_len);
+
 // ── Stateless device memory ───────────────────────────────────────────────────
 
 /// Allocate device memory for n_elements scalars of the given precision.
