@@ -121,6 +121,14 @@ void cast_cuda_event_destroy(void *event);
 int cast_cuda_event_elapsed_ms(void *start_event, void *end_event, float *out_ms,
                                char *err_buf, size_t err_buf_len);
 
+// ── Device-to-device async memcpy ────────────────────────────────────────────
+
+/// Enqueue an asynchronous device-to-device copy of `n_bytes` bytes from `src`
+/// to `dst` on `stream`.  Returns 0 on success; writes a message into err_buf
+/// on failure.
+int cast_cuda_memcpy_dtod_async(uint64_t dst, uint64_t src, size_t n_bytes, void *stream,
+                                char *err_buf, size_t err_buf_len);
+
 // ── Stateless device memory ───────────────────────────────────────────────────
 
 /// Allocate device memory for n_elements scalars of the given precision.

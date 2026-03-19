@@ -364,6 +364,25 @@ extern "C" int cast_cuda_event_elapsed_ms(void *start_event, void *end_event, fl
   return 0;
 }
 
+// ── Device-to-device async memcpy ─────────────────────────────────────────────
+
+extern "C" int cast_cuda_memcpy_dtod_async(uint64_t dst, uint64_t src, size_t n_bytes, void *stream,
+                                           char *err_buf, size_t err_buf_len) {
+  std::string err;
+  if (!ensure_cuda(err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  CUresult rc = cuMemcpyDtoDAsync(static_cast<CUdeviceptr>(dst), static_cast<CUdeviceptr>(src),
+                                  n_bytes, static_cast<CUstream>(stream));
+  if (!cu_check(rc, "cuMemcpyDtoDAsync", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  clear_error_buffer(err_buf, err_buf_len);
+  return 0;
+}
+
 // ── Stateless device memory ───────────────────────────────────────────────────
 
 extern "C" uint64_t cast_cuda_sv_alloc(size_t n_elements, uint8_t precision, char *err_buf,

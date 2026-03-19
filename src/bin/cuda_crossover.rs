@@ -1,39 +1,65 @@
-//! Computation-memory balance analysis for CUDA NVPTX gate simulation kernels.
+//! CUDA kernel roofline profiler: adaptive crossover detection.
 //!
-//! Mirrors `cpu_crossover` exactly, substituting the CUDA execution backend for
-//! the CPU JIT backend. Sweeps gate size and density (arithmetic intensity) from purely
-//! memory-bound (random sparse gates with one nonzero scalar per row) to
-//! compute-bound (dense random real gates up to 5 qubits, arithmetic intensity up to 32),
-//! reporting GiB/s, GFLOPs/s, and timing variance side-by-side so the roofline
-//! crossover is visible.
+//! Locates the arithmetic-intensity crossover between the memory-bound and
+//! compute-bound regimes of the gate simulation kernel using three phases:
 //!
-//! ## Metrics
+//! 1. **BW calibration** — measures device peak memory bandwidth via D2D
+//!    async memcpy (no gate involved).
+//! 2. **Heuristic escalation** — probes AI = 2, 4, 8, … (doubling) with the
+//!    smallest gate that achieves each AI, stopping at the first non-mem-bound
+//!    measurement.  Never pre-commits to a large dense gate.
+//! 3. **Coarse sweep + bisection** — probes the remaining power-of-2 AI
+//!    points to build the full curve, then bisects between the last mem-bound
+//!    and first non-mem-bound measurement to pinpoint the crossover.
 //!
-//! ```text
-//! ai       = scalar_nnz(M) / edge_size(M)   (re and im counted separately)
-//! FLOPs    = ai × |ψ| × 2                   (2 real FLOPs per nonzero scalar)
-//! GFLOPs/s = FLOPs / mean_time
-//! GiB/s    = 2 × sv_bytes / mean_time       (read + write every amplitude once)
-//! CV       = stddev / mean                  (coefficient of variation)
-//! ```
+//! GPU time is measured via CUDA events (`SyncStats::kernels[*].gpu_time`),
+//! not CPU wall-clock, for sub-microsecond accuracy.
+//!
+//! ## Statevector size
+//!
+//! The benchmark automatically clamps the profiling statevector to
+//! [`PROFILE_N_QUBITS`] qubits regardless of `--n-qubits`, because:
+//!   - Too small → L2 cache dominates, masking the true HBM/GDDR bandwidth.
+//!   - Too large → allocation + first-touch time dominates the budget.
+//! The `--n-qubits` argument is recorded in the report header only.
 //!
 //! ## Usage
 //!
 //! ```sh
 //! cargo run --bin cuda_crossover --features cuda --release
-//! cargo run --bin cuda_crossover --features cuda --release -- --n-qubits 28 --sm 120
+//! cargo run --bin cuda_crossover --features cuda --release -- --sm 89
 //! cargo run --bin cuda_crossover --features cuda --release -- --help
 //! ```
 
 use anyhow::Result;
 use cast::cuda::{
-    CudaKernelGenSpec, CudaKernelId, CudaKernelManager, CudaPrecision, CudaStatevector,
+    measure_peak_bw_gib_s, CudaKernelGenSpec, CudaKernelId, CudaKernelManager, CudaPrecision,
+    CudaStatevector,
 };
 use cast::types::{Complex, ComplexSquareMatrix, QuantumGate};
 use clap::{Parser, ValueEnum};
 use rand::Rng;
 use std::str::FromStr;
 use std::time::Instant;
+
+// ── Profiling constants ───────────────────────────────────────────────────────
+
+/// Statevector size used for all gate benchmarks and the BW test.
+/// 28 qubits ≈ 4 GiB (F64) / 2 GiB (F32) — large enough to spill all GPU
+/// caches on any current device while remaining quickly allocatable.
+const PROFILE_N_QUBITS: usize = 28;
+
+/// Smallest gate size (qubits) used in any probe, regardless of AI.
+const MIN_GATE_QUBITS: usize = 4;
+
+/// Largest gate size (qubits); caps the probed AI range at 2^MAX_GATE_QUBITS.
+const MAX_GATE_QUBITS: usize = 6;
+
+/// GFLOPs/s ≥ this fraction of the mem-bound linear prediction → mem-bound.
+const MEM_BOUND_RATIO: f64 = 0.85;
+
+/// GFLOPs/s < this fraction → compute-bound (below = transition).
+const COMP_BOUND_RATIO: f64 = 0.65;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -45,8 +71,8 @@ enum CliCudaPrecision {
 }
 
 impl From<CliCudaPrecision> for CudaPrecision {
-    fn from(value: CliCudaPrecision) -> Self {
-        match value {
+    fn from(v: CliCudaPrecision) -> Self {
+        match v {
             CliCudaPrecision::F32 => CudaPrecision::F32,
             CliCudaPrecision::F64 => CudaPrecision::F64,
         }
@@ -61,63 +87,75 @@ struct SmTarget {
 
 impl FromStr for SmTarget {
     type Err = String;
-
-    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        let value = value.trim();
-        if value.len() < 2 {
-            return Err("expected a value like 80 or 120".to_owned());
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.len() < 2 {
+            return Err("expected e.g. 86 or 120".into());
         }
-        let (major, minor) = value.split_at(value.len() - 1);
-        let major = major
-            .parse()
-            .map_err(|_| format!("invalid SM major version in {value:?}"))?;
-        let minor = minor
-            .parse()
-            .map_err(|_| format!("invalid SM minor version in {value:?}"))?;
-        Ok(Self { major, minor })
+        let (major, minor) = s.split_at(s.len() - 1);
+        Ok(Self {
+            major: major
+                .parse()
+                .map_err(|_| format!("bad SM major in {s:?}"))?,
+            minor: minor
+                .parse()
+                .map_err(|_| format!("bad SM minor in {s:?}"))?,
+        })
     }
 }
 
 #[derive(Parser, Debug)]
 #[command(name = "cuda_crossover")]
 struct Args {
-    /// log2 of statevector length
-    #[arg(long, default_value_t = 25)]
+    /// Target qubit count for large simulations (recorded in report only).
+    /// The profiling statevector is clamped to PROFILE_N_QUBITS internally.
+    #[arg(long, default_value_t = 30)]
     n_qubits: usize,
 
     #[arg(long, value_enum, default_value_t = CliCudaPrecision::F64)]
     precision: CliCudaPrecision,
 
-    /// CUDA SM target, e.g. 80 or 120
-    #[arg(long = "sm", default_value = "80")]
+    /// CUDA SM target, e.g. 86 or 120.
+    #[arg(long = "sm", default_value = "86")]
     sm: SmTarget,
 
-    /// Total wall-time budget for the entire sweep (seconds).
+    /// Total wall-time budget for the gate sweep (seconds; BW test is extra).
     #[arg(long, default_value_t = 120.0)]
     budget_secs: f64,
 
-    /// Minimum timed iterations per gate regardless of budget.
-    #[arg(long, default_value_t = 5)]
+    /// Minimum timed GPU iterations per gate probe.
+    #[arg(long, default_value_t = 10)]
     min_iters: usize,
 
-    /// Warmup iterations (not timed, not counted toward budget).
-    #[arg(long, default_value_t = 3)]
+    /// Warmup GPU iterations per gate probe (not timed).
+    #[arg(long, default_value_t = 5)]
     n_warmup: usize,
+
+    /// Warmup iterations for the D2D memcpy BW test.
+    #[arg(long, default_value_t = 10)]
+    bw_warmup: usize,
+
+    /// Timed iterations for the D2D memcpy BW test.
+    #[arg(long, default_value_t = 50)]
+    bw_iters: usize,
 }
 
 impl Args {
+    fn precision(&self) -> CudaPrecision {
+        self.precision.into()
+    }
+
     fn spec(&self) -> CudaKernelGenSpec {
-        let precision: CudaPrecision = self.precision.into();
+        let p = self.precision();
+        let tol = if matches!(self.precision, CliCudaPrecision::F32) {
+            1e-6
+        } else {
+            1e-12
+        };
         CudaKernelGenSpec {
-            precision,
-            ztol: match precision {
-                CudaPrecision::F32 => 1e-6,
-                CudaPrecision::F64 => 1e-12,
-            },
-            otol: match precision {
-                CudaPrecision::F32 => 1e-6,
-                CudaPrecision::F64 => 1e-12,
-            },
+            precision: p,
+            ztol: tol,
+            otol: tol,
             sm_major: self.sm.major,
             sm_minor: self.sm.minor,
         }
@@ -130,80 +168,48 @@ impl Args {
         }
     }
 
-    /// Total bytes of device statevector memory: 2 scalars × 2^n_qubits amplitudes.
-    fn sv_bytes(&self, n_sv_qubits: usize) -> usize {
-        (1usize << n_sv_qubits) * 2 * self.scalar_size()
+    /// Number of qubits used for the actual profiling statevector.
+    fn profile_n_qubits(&self) -> usize {
+        PROFILE_N_QUBITS.min(self.n_qubits)
+    }
+
+    /// Total bytes in the profiling statevector (2 scalars × 2^n amplitudes).
+    fn profile_sv_bytes(&self) -> usize {
+        (1usize << self.profile_n_qubits()) * 2 * self.scalar_size()
     }
 }
 
-// ── Gate sweep ────────────────────────────────────────────────────────────────
+// ── Gate construction ─────────────────────────────────────────────────────────
 
-struct Case {
-    label: String,
-    gate: QuantumGate,
+/// Returns the smallest gate size k ≥ MIN_GATE_QUBITS such that 2^k ≥ target_ai.
+fn gate_qubits_for_ai(target_ai: usize) -> usize {
+    let k = (target_ai as f64).log2().ceil() as usize;
+    k.max(MIN_GATE_QUBITS)
 }
 
-fn gate_sweep() -> Vec<Case> {
-    let mut cases = Vec::new();
-
-    for &s in &[1usize, 2, 4, 8] {
-        cases.push(Case {
-            label: format!("Sparse-4q   [rand sparse, s={s}]"),
-            gate: sparse_real(4, s),
-        });
-        cases.push(Case {
-            label: format!("Sparse-5q   [rand sparse, s={s}]"),
-            gate: sparse_real(5, s),
-        });
-    }
-
-    cases.push(Case {
-        label: "Sparse-5q   [rand sparse, s=16]".to_string(),
-        gate: sparse_real(5, 16),
-    });
-
-    for k in 1..=5 {
-        cases.push(Case {
-            label: format!("Dense-{k}q    [rand dense]"),
-            gate: dense_real(k),
-        });
-    }
-
-    cases
-}
-
-fn dense_real(k: usize) -> QuantumGate {
-    sparse_real(k, 1usize << k)
-}
-
-fn sparse_real(k: usize, s: usize) -> QuantumGate {
+/// Build a k-qubit sparse-real gate with exactly `s` nonzero real entries per row.
+/// Arithmetic intensity = s (re parts; im parts are all zero).
+/// Requires 1 ≤ s ≤ 2^k.
+fn gate_for_ai(k: usize, s: usize) -> QuantumGate {
     let n = 1usize << k;
-    assert!(s <= n, "s must be ≤ edge_size");
-    let stride = n / s;
+    debug_assert!(s >= 1 && s <= n);
+    let stride = if s < n { n / s } else { 1 };
     let mut rng = rand::thread_rng();
     let mut m = ComplexSquareMatrix::zeros(n);
     for row in 0..n {
         for t in 0..s {
             let col = (row + n / 2 + t * stride) % n;
-            m.set(row, col, Complex::new(sample_nonzero_real(&mut rng), 0.0));
+            let sign = if rng.gen_bool(0.5) { 1.0 } else { -1.0 };
+            let v = rng.gen_range(0.25_f64..1.0) * sign;
+            m.set(row, col, Complex::new(v, 0.0));
         }
     }
-    let qubits: Vec<u32> = (0..k as u32).collect();
-    QuantumGate::new(m, qubits)
+    QuantumGate::new(m, (0..k as u32).collect())
 }
 
-fn sample_nonzero_real<R: Rng + ?Sized>(rng: &mut R) -> f64 {
-    let mag = rng.gen_range(0.25_f64..1.0);
-    if rng.gen_bool(0.5) {
-        mag
-    } else {
-        -mag
-    }
-}
+// ── GPU event timing ──────────────────────────────────────────────────────────
 
-// ── Adaptive timing ───────────────────────────────────────────────────────────
-
-struct Timing {
+struct GpuTiming {
     n_iters: usize,
     mean_s: f64,
     stddev_s: f64,
@@ -212,227 +218,430 @@ struct Timing {
     max_s: f64,
 }
 
-/// Runs `n_warmup` un-timed iterations, then collects timed samples until
-/// `per_gate_budget_s` is exhausted, with at least `min_iters` samples.
+/// Times `apply + sync` using CUDA event GPU time.
 ///
-/// Each sample times a single `apply` + `sync` pair, matching the wall-time
-/// of one full GPU kernel execution.
-fn time_adaptive(
+/// Runs `n_warmup` un-recorded warm-up iterations, then probes [`N_PROBE`]
+/// iterations to estimate the per-iteration cost and budget remaining time.
+fn time_gpu(
     mgr: &CudaKernelManager,
     kid: CudaKernelId,
     sv: &mut CudaStatevector,
     n_warmup: usize,
     min_iters: usize,
-    per_gate_budget_s: f64,
-) -> Timing {
+    budget_s: f64,
+) -> Result<GpuTiming> {
     const N_PROBE: usize = 3;
 
     for _ in 0..n_warmup {
-        mgr.apply(kid, sv).unwrap();
-        mgr.sync().unwrap();
+        mgr.apply(kid, sv)?;
+        mgr.sync()?;
     }
 
-    // Phase 1: probe to estimate per-iteration cost.
+    // Phase 1: probe iterations — wall-clock tracks budget, GPU events track time.
     let mut samples: Vec<f64> = Vec::new();
     let probe_wall = Instant::now();
     for _ in 0..N_PROBE {
-        let t = Instant::now();
-        mgr.apply(kid, sv).unwrap();
-        mgr.sync().unwrap();
-        samples.push(t.elapsed().as_secs_f64());
+        mgr.apply(kid, sv)?;
+        let stats = mgr.sync()?;
+        samples.push(stats.kernels[0].gpu_time.as_secs_f64());
     }
     let probe_elapsed = probe_wall.elapsed().as_secs_f64();
 
     // Phase 2: fill remaining budget.
     let est_per_iter = probe_elapsed / N_PROBE as f64;
-    let remaining = (per_gate_budget_s - probe_elapsed).max(0.0);
+    let remaining = (budget_s - probe_elapsed).max(0.0);
     let n_fill = ((remaining / est_per_iter) as usize).max(min_iters.saturating_sub(N_PROBE));
     for _ in 0..n_fill {
-        let t = Instant::now();
-        mgr.apply(kid, sv).unwrap();
-        mgr.sync().unwrap();
-        samples.push(t.elapsed().as_secs_f64());
+        mgr.apply(kid, sv)?;
+        let stats = mgr.sync()?;
+        samples.push(stats.kernels[0].gpu_time.as_secs_f64());
     }
 
     let n = samples.len() as f64;
     let mean = samples.iter().copied().sum::<f64>() / n;
-    let var = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / n;
+    let var = samples.iter().map(|&s| (s - mean).powi(2)).sum::<f64>() / n;
     let stddev = var.sqrt();
     let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
     let max = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
-    Timing {
+    Ok(GpuTiming {
         n_iters: samples.len(),
         mean_s: mean,
         stddev_s: stddev,
         cv: stddev / mean,
         min_s: min,
         max_s: max,
-    }
+    })
 }
 
-// ── Row ───────────────────────────────────────────────────────────────────────
+// ── Measurement ───────────────────────────────────────────────────────────────
 
-struct Row {
-    label: String,
+struct Measurement {
+    ai_target: usize,
     k: usize,
-    nnz: usize,
     ai: f64,
-    timing: Timing,
+    nnz: usize,
+    timing: GpuTiming,
     gib_s: f64,
     gflops_s: f64,
 }
 
-struct AiBucket {
-    ai: f64,
-    mean_gflops_s: f64,
-    max_k: usize,
-}
-
-fn ai_buckets(rows: &[Row]) -> Vec<AiBucket> {
-    const AI_EPS: f64 = 1e-9;
-
-    let mut buckets = Vec::new();
-    let mut i = 0;
-    while i < rows.len() {
-        let ai = rows[i].ai;
-        let mut sum_gflops = 0.0;
-        let mut count = 0usize;
-        let mut max_k = rows[i].k;
-
-        while i < rows.len() && (rows[i].ai - ai).abs() < AI_EPS {
-            sum_gflops += rows[i].gflops_s;
-            count += 1;
-            max_k = max_k.max(rows[i].k);
-            i += 1;
-        }
-
-        buckets.push(AiBucket {
-            ai,
-            mean_gflops_s: sum_gflops / count as f64,
-            max_k,
-        });
-    }
-
-    buckets
-}
-
-fn measure(case: &Case, args: &Args, per_gate_budget_s: f64) -> Result<Row> {
+fn measure_at(
+    target_ai: usize,
+    mgr: &CudaKernelManager,
+    sv: &mut CudaStatevector,
+    args: &Args,
+    budget_s: f64,
+) -> Result<Measurement> {
     let spec = args.spec();
-    let k = case.gate.n_qubits();
-    let ai = case.gate.arithmatic_intensity(spec.ztol);
-    let n = case.gate.matrix().edge_size();
-    let scalar_nnz = (ai * n as f64).round() as usize;
+    let k = gate_qubits_for_ai(target_ai);
+    let gate = gate_for_ai(k, target_ai);
+    let ai = gate.arithmatic_intensity(spec.ztol);
+    let nnz = gate.scalar_nnz(spec.ztol);
+    let kid = mgr.generate(&gate, spec)?;
+    let timing = time_gpu(mgr, kid, sv, args.n_warmup, args.min_iters, budget_s)?;
 
-    let n_sv = args.n_qubits.max(k);
-
-    let mgr = CudaKernelManager::new();
-    let kid = mgr.generate(&case.gate, spec)?;
-
-    let mut sv = CudaStatevector::new(n_sv as u32, spec.precision)?;
-    sv.zero()?;
-
-    let timing = time_adaptive(
-        &mgr,
-        kid,
-        &mut sv,
-        args.n_warmup,
-        args.min_iters,
-        per_gate_budget_s,
-    );
-
-    let sv_bytes = args.sv_bytes(n_sv);
+    let n_sv = args.profile_n_qubits();
+    let sv_bytes = args.profile_sv_bytes();
     let gib_s = 2.0 * sv_bytes as f64 / timing.mean_s / (1u64 << 30) as f64;
     let gflops_s = ai * (1usize << n_sv) as f64 * 2.0 / timing.mean_s / 1e9;
 
-    Ok(Row {
-        label: case.label.clone(),
+    Ok(Measurement {
+        ai_target: target_ai,
         k,
-        nnz: scalar_nnz,
         ai,
+        nnz,
         timing,
         gib_s,
         gflops_s,
     })
 }
 
+// ── Regime classification ─────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Regime {
+    MemBound,
+    Transition,
+    CompBound,
+}
+
+fn classify(m: &Measurement, gflops_per_ai: f64) -> Regime {
+    let ratio = m.gflops_s / (gflops_per_ai * m.ai);
+    if ratio >= MEM_BOUND_RATIO {
+        Regime::MemBound
+    } else if ratio < COMP_BOUND_RATIO {
+        Regime::CompBound
+    } else {
+        Regime::Transition
+    }
+}
+
+// ── Hardware profile ──────────────────────────────────────────────────────────
+
+struct HardwareProfile {
+    /// Bidirectional peak device memory bandwidth from the D2D memcpy test.
+    peak_bw_gib_s: f64,
+    /// GFLOPs/s per unit AI predicted by the roofline model for a mem-bound gate.
+    /// Derived from peak_bw_gib_s: BW_bytes_s / (2 × scalar_size) / 1e9.
+    gflops_per_ai: f64,
+    /// Best GFLOPs/s observed across all compute-bound (or transition) probes.
+    peak_gflops_s: f64,
+    /// Theoretical crossover AI = peak_gflops_s / gflops_per_ai.
+    theoretical_crossover_ai: f64,
+}
+
+// ── Adaptive exploration ──────────────────────────────────────────────────────
+
+fn explore(args: &Args) -> Result<(HardwareProfile, Vec<Measurement>)> {
+    let spec = args.spec();
+    let mgr = CudaKernelManager::new();
+    let mut sv = CudaStatevector::new(args.profile_n_qubits() as u32, spec.precision)?;
+    sv.zero()?;
+
+    let sv_mib = args.profile_sv_bytes() / (1 << 20);
+    eprintln!(
+        "Profile SV: {} qubits = {} MiB ({:?}),  sm_{}{},  budget {:.0}s",
+        args.profile_n_qubits(),
+        sv_mib,
+        args.precision,
+        args.sm.major,
+        args.sm.minor,
+        args.budget_secs,
+    );
+    eprintln!();
+
+    // ── Phase 1a: BW calibration (D2D memcpy, no gate) ───────────────────────
+
+    eprintln!(
+        "Phase 1a: BW calibration (D2D memcpy, {} warmup + {} timed)",
+        args.bw_warmup, args.bw_iters
+    );
+    eprint!("  {} × {} MiB ... ", args.bw_iters, sv_mib);
+    let peak_bw_gib_s =
+        measure_peak_bw_gib_s(args.profile_sv_bytes(), args.bw_warmup, args.bw_iters)?;
+    // gflops_per_ai: from the roofline model (see cuda_roofline_model memory entry).
+    // T_mem_bound = 2 × sv_bytes / BW_bytes_s
+    // GFLOPs/s    = ai × 2^n_sv × 2 / T / 1e9
+    //             = ai × BW_bytes_s / (2 × scalar_size) / 1e9
+    let gflops_per_ai =
+        peak_bw_gib_s * (1u64 << 30) as f64 / (2.0 * args.scalar_size() as f64) / 1e9;
+    eprintln!(
+        "{:.1} GiB/s  →  {:.2} GFLOPs/s per unit AI",
+        peak_bw_gib_s, gflops_per_ai
+    );
+    eprintln!();
+
+    // ── Phase 1b: Heuristic escalation to find the compute-bound regime ───────
+
+    eprintln!("Phase 1b: Heuristic escalation (AI = 2, 4, 8, … until non-mem-bound)");
+    let mut measurements: Vec<Measurement> = Vec::new();
+    let max_ai = 1usize << MAX_GATE_QUBITS;
+
+    // Budget for Phase 1b: ~20% of total, split evenly over log2(max_ai) steps.
+    let n_escalation_steps = MAX_GATE_QUBITS as f64;
+    let escalation_budget_per = args.budget_secs * 0.20 / n_escalation_steps;
+
+    let mut ai_probe = 2usize;
+    let mut escalation_anchor_gflops: f64 = 0.0;
+    while ai_probe <= max_ai {
+        let k = gate_qubits_for_ai(ai_probe);
+        eprint!("  ai={ai_probe:>4} k={k} ... ");
+        let m = measure_at(ai_probe, &mgr, &mut sv, args, escalation_budget_per)?;
+        let r = classify(&m, gflops_per_ai);
+        eprintln!(
+            "{:.3} ms  {:.1} GiB/s  {:.1}/{:.1} GFLOPs/s  [{r:?}]",
+            m.timing.mean_s * 1e3,
+            m.gib_s,
+            m.gflops_s,
+            gflops_per_ai * m.ai,
+        );
+        let found_non_mem = r != Regime::MemBound;
+        escalation_anchor_gflops = escalation_anchor_gflops.max(m.gflops_s);
+        measurements.push(m);
+        if found_non_mem {
+            break;
+        }
+        if ai_probe >= max_ai {
+            break;
+        }
+        ai_probe = (ai_probe * 2).min(max_ai);
+    }
+
+    if classify(measurements.last().unwrap(), gflops_per_ai) == Regime::MemBound {
+        eprintln!(
+            "  Warning: still mem-bound at ai={}. Crossover may be above ai={}.",
+            ai_probe, max_ai,
+        );
+        eprintln!("  Consider increasing MAX_GATE_QUBITS or using a GPU with higher peak FLOPS.");
+    }
+    eprintln!();
+
+    let peak_gflops_s = escalation_anchor_gflops;
+    let theoretical_crossover_ai = if peak_gflops_s > 0.0 {
+        peak_gflops_s / gflops_per_ai
+    } else {
+        f64::INFINITY
+    };
+    let profile = HardwareProfile {
+        peak_bw_gib_s,
+        gflops_per_ai,
+        peak_gflops_s,
+        theoretical_crossover_ai,
+    };
+
+    eprintln!(
+        "  Theoretical crossover: ai ≈ {:.1}",
+        theoretical_crossover_ai
+    );
+    eprintln!();
+
+    // ── Phase 2: Coarse sweep — fill in remaining power-of-2 AI points ───────
+
+    eprintln!("Phase 2: Coarse sweep (remaining power-of-2 AI values)");
+    let already_measured: std::collections::HashSet<usize> =
+        measurements.iter().map(|m| m.ai_target).collect();
+    let coarse_ais: Vec<usize> = (1..=MAX_GATE_QUBITS)
+        .map(|e| 1usize << e)
+        .filter(|&ai| !already_measured.contains(&ai))
+        .collect();
+
+    // Budget: remaining after Phase 1b, divided over coarse + bisection probes.
+    // Allocate ~55% of total to coarse and ~25% to bisection.
+    let coarse_budget_per = if coarse_ais.is_empty() {
+        0.0
+    } else {
+        args.budget_secs * 0.55 / coarse_ais.len() as f64
+    };
+
+    for &ai in &coarse_ais {
+        let k = gate_qubits_for_ai(ai);
+        eprint!("  ai={ai:>4} k={k} ... ");
+        let m = measure_at(ai, &mgr, &mut sv, args, coarse_budget_per)?;
+        let r = classify(&m, gflops_per_ai);
+        eprintln!(
+            "{:.3} ms  {:.1} GiB/s  {:.1}/{:.1} GFLOPs/s  [{r:?}]",
+            m.timing.mean_s * 1e3,
+            m.gib_s,
+            m.gflops_s,
+            gflops_per_ai * m.ai,
+        );
+        measurements.push(m);
+    }
+    eprintln!();
+
+    // ── Phase 3: Integer bisection to refine the crossover ───────────────────
+
+    eprintln!("Phase 3: Bisection refinement");
+
+    // Sort to find the tightest mem-bound / non-mem-bound bracket.
+    measurements.sort_by(|a, b| a.ai_target.cmp(&b.ai_target));
+    let mut bracket_lo = measurements.first().unwrap().ai_target;
+    let mut bracket_hi = measurements.last().unwrap().ai_target;
+
+    for pair in measurements.windows(2) {
+        if classify(&pair[0], gflops_per_ai) == Regime::MemBound
+            && classify(&pair[1], gflops_per_ai) != Regime::MemBound
+        {
+            bracket_lo = pair[0].ai_target;
+            bracket_hi = pair[1].ai_target;
+            break;
+        }
+    }
+
+    let bisect_budget_per = args.budget_secs * 0.25 / 5.0;
+    for _ in 0..5 {
+        if bracket_hi - bracket_lo <= 1 {
+            break;
+        }
+        let ai_mid = (bracket_lo + bracket_hi) / 2;
+        let k = gate_qubits_for_ai(ai_mid);
+        eprint!("  ai={ai_mid:>4} k={k} [{bracket_lo}..{bracket_hi}] ... ");
+        let m = measure_at(ai_mid, &mgr, &mut sv, args, bisect_budget_per)?;
+        let r = classify(&m, gflops_per_ai);
+        eprintln!(
+            "{:.3} ms  {:.1} GFLOPs/s  [{r:?}]",
+            m.timing.mean_s * 1e3,
+            m.gflops_s,
+        );
+        if r == Regime::MemBound {
+            bracket_lo = ai_mid;
+        } else {
+            bracket_hi = ai_mid;
+        }
+        measurements.push(m);
+    }
+    eprintln!();
+
+    Ok((profile, measurements))
+}
+
 // ── Report ────────────────────────────────────────────────────────────────────
 
-fn print_report(rows: &[Row], args: &Args) {
-    let sv_mib = args.sv_bytes(args.n_qubits) / (1 << 20);
-
-    let bar = "═".repeat(100);
-    let line = "─".repeat(100);
+fn print_report(profile: &HardwareProfile, rows: &[Measurement], args: &Args) {
+    let sv_mib = args.profile_sv_bytes() / (1 << 20);
+    let bar = "═".repeat(105);
+    let line = "─".repeat(105);
 
     println!();
     println!("  {bar}");
-    println!("  CUDA Computation-Memory Balance Report");
+    println!("  CUDA Roofline Profile Report");
     println!("  {bar}");
     println!(
-        "  statevector  : {} qubits = 2^{} amplitudes = {} MiB  ({:?})",
-        args.n_qubits, args.n_qubits, sv_mib, args.precision,
+        "  target simulation  : {} qubits ({:?})",
+        args.n_qubits, args.precision,
     );
-    println!("  target       : sm_{}{}", args.sm.major, args.sm.minor);
     println!(
-        "  time budget  : {:.0} s total / {:.1} s per gate",
-        args.budget_secs,
-        args.budget_secs / rows.len() as f64,
+        "  profile SV         : {} qubits = {} MiB  (clamped to avoid cache/alloc artifacts)",
+        args.profile_n_qubits(),
+        sv_mib,
     );
-    println!("  FLOPs/scalar : 2 real  (1×mul + 1×add per nonzero scalar component)");
-    println!("  ai           : scalar_nnz(M) / edge_size(M) — re and im parts counted separately");
-    println!("  CV           : stddev / mean — scale-free timing noise");
     println!(
-        "  note         : each sample includes cuStreamSynchronize; reflects true GPU wall time"
+        "  CUDA SM target     : sm_{}{}",
+        args.sm.major, args.sm.minor
+    );
+    println!(
+        "  budget             : {:.0} s gate sweep  +  BW test",
+        args.budget_secs
+    );
+    println!();
+    println!(
+        "  ── Hardware calibration (D2D memcpy) ─────────────────────────────────────────────────"
+    );
+    println!(
+        "  Peak memory BW          : {:.1} GiB/s",
+        profile.peak_bw_gib_s
+    );
+    println!(
+        "  GFLOPs/s per unit AI    : {:.2}  (= BW_bytes_s / (2 × scalar_size) / 1e9)",
+        profile.gflops_per_ai
+    );
+    println!(
+        "  Peak compute (observed) : {:.1} GFLOPs/s",
+        profile.peak_gflops_s
+    );
+    println!(
+        "  Theoretical crossover   : ai ≈ {:.1}",
+        profile.theoretical_crossover_ai
     );
     println!();
 
     // ── Performance table ─────────────────────────────────────────────────────
+
+    let mut sorted: Vec<&Measurement> = rows.iter().collect();
+    sorted.sort_by(|a, b| a.ai_target.cmp(&b.ai_target).then(a.k.cmp(&b.k)));
+
     println!(
-        "  {:<32}  {:>2}  {:>5}  {:>7}  {:>10}  {:>9}  {:>10}  {:>8}",
-        "gate", "k", "snnz", "ai", "mean (ms)", "GiB/s", "GFLOPs/s", "regime",
+        "  {:<7}  {:>2}  {:>5}  {:>7}  {:>11}  {:>9}  {:>11}  {:>11}  {:>7}  {:>10}",
+        "ai",
+        "k",
+        "snnz",
+        "ai_meas",
+        "mean GPU ms",
+        "GiB/s",
+        "GFLOPs/s",
+        "expected",
+        "ratio",
+        "regime",
     );
     println!("  {line}");
 
-    let buckets = ai_buckets(rows);
-    let first = buckets.first().unwrap();
-    let gflops_per_ai = first.mean_gflops_s / first.ai;
-
-    for row in rows {
-        let expected_linear = gflops_per_ai * row.ai;
-        let regime = if row.gflops_s >= expected_linear * 0.85 {
-            "mem-bound"
-        } else {
-            "compute↑"
+    for m in &sorted {
+        let expected = profile.gflops_per_ai * m.ai;
+        let ratio = m.gflops_s / expected;
+        let regime_str = match classify(m, profile.gflops_per_ai) {
+            Regime::MemBound => "mem-bound",
+            Regime::Transition => "transit.",
+            Regime::CompBound => "comp-bnd",
         };
-
         println!(
-            "  {:<32}  {:>2}  {:>5}  {:>7.1}  {:>10.2}  {:>9.1}  {:>10.1}  {:>8}",
-            row.label,
-            row.k,
-            row.nnz,
-            row.ai,
-            row.timing.mean_s * 1e3,
-            row.gib_s,
-            row.gflops_s,
-            regime,
+            "  {:<7}  {:>2}  {:>5}  {:>7.1}  {:>11.4}  {:>9.1}  {:>11.1}  {:>11.1}  {:>7.3}  {:>10}",
+            m.ai_target, m.k, m.nnz, m.ai,
+            m.timing.mean_s * 1e3,
+            m.gib_s,
+            m.gflops_s,
+            expected,
+            ratio,
+            regime_str,
         );
     }
 
     println!("  {line}");
 
     // ── Variance table ────────────────────────────────────────────────────────
+
     println!();
     println!(
-        "  {:<32}  {:>7}  {:>10}  {:>10}  {:>10}  {:>8}  {:>6}",
-        "gate", "n_iters", "mean (ms)", "stddev", "min (ms)", "max (ms)", "CV %",
+        "  {:<7}  {:>2}  {:>7}  {:>11}  {:>11}  {:>11}  {:>11}  {:>6}",
+        "ai", "k", "n_iters", "mean GPU ms", "stddev ms", "min ms", "max ms", "CV %",
     );
     println!("  {line}");
-
-    for row in rows {
-        let t = &row.timing;
+    for m in &sorted {
+        let t = &m.timing;
         println!(
-            "  {:<32}  {:>7}  {:>10.3}  {:>10.3}  {:>10.3}  {:>8.3}  {:>5.2}%",
-            row.label,
+            "  {:<7}  {:>2}  {:>7}  {:>11.4}  {:>11.4}  {:>11.4}  {:>11.4}  {:>5.2}%",
+            m.ai_target,
+            m.k,
             t.n_iters,
             t.mean_s * 1e3,
             t.stddev_s * 1e3,
@@ -441,44 +650,57 @@ fn print_report(rows: &[Row], args: &Args) {
             t.cv * 100.0,
         );
     }
-
     println!("  {line}");
 
-    // ── Summary ───────────────────────────────────────────────────────────────
-    let peak_gib = rows.iter().map(|r| r.gib_s).fold(0.0_f64, f64::max);
-    let peak_gflops = rows.iter().map(|r| r.gflops_s).fold(0.0_f64, f64::max);
-    let crossover_ai = peak_gflops / gflops_per_ai;
+    // ── Crossover summary ─────────────────────────────────────────────────────
 
-    let mut prev_bucket_regime = "";
-    let mut prev_bucket_ai = 0.0_f64;
-    let mut crossover: Option<(f64, f64, usize)> = None;
-    for bucket in &buckets {
-        let expected_linear = gflops_per_ai * bucket.ai;
-        let regime = if bucket.mean_gflops_s >= expected_linear * 0.85 {
-            "mem-bound"
-        } else {
-            "compute↑"
-        };
-        if prev_bucket_regime == "mem-bound" && regime == "compute↑" && crossover.is_none() {
-            crossover = Some((prev_bucket_ai, bucket.ai, bucket.max_k));
+    let mut crossover_lo: Option<usize> = None;
+    let mut crossover_hi: Option<usize> = None;
+    for pair in sorted.windows(2) {
+        if classify(pair[0], profile.gflops_per_ai) == Regime::MemBound
+            && classify(pair[1], profile.gflops_per_ai) != Regime::MemBound
+            && crossover_lo.is_none()
+        {
+            crossover_lo = Some(pair[0].ai_target);
+            crossover_hi = Some(pair[1].ai_target);
         }
-        prev_bucket_regime = regime;
-        prev_bucket_ai = bucket.ai;
     }
 
     println!();
-    println!("  Peak memory bandwidth  : {peak_gib:.1} GiB/s");
-    println!("  Peak compute observed  : {peak_gflops:.1} GFLOPs/s");
-    println!("  Roofline crossover (est.) : ai ≈ {crossover_ai:.1}");
-
-    if let Some((ai_before, ai_after, k)) = crossover {
-        println!();
-        println!(
-            "  ⚑ Crossover: mem-bound → compute-bound between ai {ai_before:.0}–{ai_after:.0} ({k}-qubit gate)",
-        );
-    } else {
-        println!();
-        println!("  ⚑ All measured gates are memory-bound; increase gate size to see crossover.");
+    println!(
+        "  ── Crossover summary ─────────────────────────────────────────────────────────────────"
+    );
+    match (crossover_lo, crossover_hi) {
+        (Some(lo), Some(hi)) => {
+            println!("  Observed crossover    : ai between {lo} and {hi}");
+            println!(
+                "  Theoretical crossover : ai ≈ {:.1}",
+                profile.theoretical_crossover_ai
+            );
+            let mid = (lo + hi) as f64 / 2.0;
+            let deviation =
+                (mid - profile.theoretical_crossover_ai).abs() / profile.theoretical_crossover_ai;
+            if deviation < 0.30 {
+                println!(
+                    "  Model accuracy        : good (theory and observation agree within 30%)"
+                );
+            } else {
+                println!(
+                    "  Model accuracy        : fair (theory: {:.1}, observed midpoint: {mid:.1})",
+                    profile.theoretical_crossover_ai,
+                );
+            }
+        }
+        _ => {
+            let last = sorted.last().unwrap();
+            if classify(last, profile.gflops_per_ai) == Regime::MemBound {
+                println!("  No crossover observed — all gates are memory-bound.");
+                println!("  Increase MAX_GATE_QUBITS or use a GPU with higher peak FLOPS.");
+            } else {
+                println!("  No mem-bound baseline found — all probes appear compute-bound.");
+                println!("  This is unexpected; check that PROFILE_N_QUBITS is large enough.");
+            }
+        }
     }
     println!();
 }
@@ -487,42 +709,8 @@ fn print_report(rows: &[Row], args: &Args) {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-
-    let cases = gate_sweep();
-    let per_gate_budget = args.budget_secs / cases.len() as f64;
-    let sv_mib = args.sv_bytes(args.n_qubits) / (1 << 20);
-
-    eprintln!(
-        "CUDA balance sweep: n_qubits={} ({} MiB, {:?}), sm_{}{}",
-        args.n_qubits, sv_mib, args.precision, args.sm.major, args.sm.minor,
-    );
-    eprintln!(
-        "Budget: {:.0}s total → {:.1}s per gate  (≥{} iters, {} warmup)",
-        args.budget_secs, per_gate_budget, args.min_iters, args.n_warmup,
-    );
-    eprintln!();
-
-    let mut rows: Vec<Row> = Vec::new();
-    for case in &cases {
-        eprint!("  {:<40} ", case.label);
-        let row = measure(case, &args, per_gate_budget)?;
-        eprintln!(
-            "{:>6} iters  {:.2} ms ± {:.3} ms  CV={:.2}%  {:>7.1} GiB/s  {:>7.1} GFLOPs/s",
-            row.timing.n_iters,
-            row.timing.mean_s * 1e3,
-            row.timing.stddev_s * 1e3,
-            row.timing.cv * 100.0,
-            row.gib_s,
-            row.gflops_s,
-        );
-        rows.push(row);
-    }
-
-    rows.sort_by(|a, b| {
-        a.ai.total_cmp(&b.ai)
-            .then_with(|| a.k.cmp(&b.k))
-            .then_with(|| a.label.cmp(&b.label))
-    });
-    print_report(&rows, &args);
+    let (profile, mut measurements) = explore(&args)?;
+    measurements.sort_by(|a, b| a.ai_target.cmp(&b.ai_target).then(a.k.cmp(&b.k)));
+    print_report(&profile, &measurements, &args);
     Ok(())
 }

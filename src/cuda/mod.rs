@@ -132,6 +132,29 @@ pub(super) mod ffi {
             err_buf_len: usize,
         ) -> i32;
 
+        // ── Stateless device memory (also declared in statevector::ffi) ────
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_sv_alloc(
+            n_elements: usize,
+            precision: u8,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> u64;
+
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_sv_free(dptr: u64);
+
+        // ── Device-to-device async memcpy ─────────────────────────────────
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_memcpy_dtod_async(
+            dst: u64,
+            src: u64,
+            n_bytes: usize,
+            stream: *mut std::ffi::c_void,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+
         // ── CUDA timing events ────────────────────────────────────────────────
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_event_create(
@@ -186,6 +209,200 @@ pub fn device_sm() -> anyhow::Result<(u32, u32)> {
             Err(anyhow::anyhow!(error_from_buf(&err_buf)))
         }
     }
+}
+
+/// Measure device peak memory bandwidth via repeated D2D async copies.
+///
+/// Allocates two device buffers of `n_bytes` each, runs `n_warmup` un-timed
+/// copies to prime the memory subsystem, then times `n_iters` copies with
+/// CUDA events.  Returns bandwidth in GiB/s, counting both the read and the
+/// write (i.e. 2 × `n_bytes` per iteration).
+///
+/// `n_bytes` should match the statevector size that gate kernels will operate
+/// on so the bandwidth figure is representative.
+#[cfg(feature = "cuda")]
+pub fn measure_peak_bw_gib_s(
+    n_bytes: usize,
+    n_warmup: usize,
+    n_iters: usize,
+) -> anyhow::Result<f64> {
+    use types::ERR_BUF_LEN;
+
+    let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+
+    // Allocate two F64-backed device buffers of the right byte size.
+    // cast_cuda_sv_alloc(n_elements, precision=1) allocates n_elements × 8 bytes.
+    let n_f64 = n_bytes / 8;
+    let src = unsafe { ffi::cast_cuda_sv_alloc(n_f64, 1, err_buf.as_mut_ptr(), err_buf.len()) };
+    if src == 0 {
+        return Err(anyhow::anyhow!(
+            "bw alloc src: {}",
+            error_from_buf(&err_buf)
+        ));
+    }
+    let dst = unsafe { ffi::cast_cuda_sv_alloc(n_f64, 1, err_buf.as_mut_ptr(), err_buf.len()) };
+    if dst == 0 {
+        unsafe { ffi::cast_cuda_sv_free(src) };
+        return Err(anyhow::anyhow!(
+            "bw alloc dst: {}",
+            error_from_buf(&err_buf)
+        ));
+    }
+
+    // Create a dedicated stream for the BW test.
+    let stream = unsafe { ffi::cast_cuda_stream_create(err_buf.as_mut_ptr(), err_buf.len()) };
+    if stream.is_null() {
+        unsafe {
+            ffi::cast_cuda_sv_free(src);
+            ffi::cast_cuda_sv_free(dst)
+        };
+        return Err(anyhow::anyhow!("bw stream: {}", error_from_buf(&err_buf)));
+    }
+
+    // Helper: free all resources and return an error.
+    let cleanup_err = |msg: String| -> anyhow::Error {
+        unsafe {
+            ffi::cast_cuda_stream_destroy(stream);
+            ffi::cast_cuda_sv_free(dst);
+            ffi::cast_cuda_sv_free(src);
+        }
+        anyhow::anyhow!("{}", msg)
+    };
+
+    // Warmup copies.
+    for _ in 0..n_warmup {
+        let rc = unsafe {
+            ffi::cast_cuda_memcpy_dtod_async(
+                dst,
+                src,
+                n_bytes,
+                stream,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if rc != 0 {
+            return Err(cleanup_err(format!(
+                "bw warmup memcpy: {}",
+                error_from_buf(&err_buf)
+            )));
+        }
+    }
+    let rc = unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) };
+    if rc != 0 {
+        return Err(cleanup_err(format!(
+            "bw warmup sync: {}",
+            error_from_buf(&err_buf)
+        )));
+    }
+
+    // Create timing events.
+    let ev_start = unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
+    if ev_start.is_null() {
+        return Err(cleanup_err(format!(
+            "bw ev_start: {}",
+            error_from_buf(&err_buf)
+        )));
+    }
+    let ev_end = unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
+    if ev_end.is_null() {
+        unsafe { ffi::cast_cuda_event_destroy(ev_start) };
+        return Err(cleanup_err(format!(
+            "bw ev_end: {}",
+            error_from_buf(&err_buf)
+        )));
+    }
+
+    // Record start, issue timed copies, record end, sync.
+    let mut rc = unsafe {
+        ffi::cast_cuda_event_record(ev_start, stream, err_buf.as_mut_ptr(), err_buf.len())
+    };
+    if rc != 0 {
+        unsafe {
+            ffi::cast_cuda_event_destroy(ev_start);
+            ffi::cast_cuda_event_destroy(ev_end)
+        };
+        return Err(cleanup_err(format!(
+            "bw record start: {}",
+            error_from_buf(&err_buf)
+        )));
+    }
+    for _ in 0..n_iters {
+        rc = unsafe {
+            ffi::cast_cuda_memcpy_dtod_async(
+                dst,
+                src,
+                n_bytes,
+                stream,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if rc != 0 {
+            unsafe {
+                ffi::cast_cuda_event_destroy(ev_start);
+                ffi::cast_cuda_event_destroy(ev_end)
+            };
+            return Err(cleanup_err(format!(
+                "bw timed memcpy: {}",
+                error_from_buf(&err_buf)
+            )));
+        }
+    }
+    rc =
+        unsafe { ffi::cast_cuda_event_record(ev_end, stream, err_buf.as_mut_ptr(), err_buf.len()) };
+    if rc != 0 {
+        unsafe {
+            ffi::cast_cuda_event_destroy(ev_start);
+            ffi::cast_cuda_event_destroy(ev_end)
+        };
+        return Err(cleanup_err(format!(
+            "bw record end: {}",
+            error_from_buf(&err_buf)
+        )));
+    }
+    rc = unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) };
+    if rc != 0 {
+        unsafe {
+            ffi::cast_cuda_event_destroy(ev_start);
+            ffi::cast_cuda_event_destroy(ev_end)
+        };
+        return Err(cleanup_err(format!(
+            "bw sync: {}",
+            error_from_buf(&err_buf)
+        )));
+    }
+
+    let mut ms = 0.0f32;
+    rc = unsafe {
+        ffi::cast_cuda_event_elapsed_ms(
+            ev_start,
+            ev_end,
+            &mut ms,
+            err_buf.as_mut_ptr(),
+            err_buf.len(),
+        )
+    };
+    unsafe {
+        ffi::cast_cuda_event_destroy(ev_start);
+        ffi::cast_cuda_event_destroy(ev_end)
+    };
+    unsafe {
+        ffi::cast_cuda_stream_destroy(stream);
+        ffi::cast_cuda_sv_free(dst);
+        ffi::cast_cuda_sv_free(src)
+    };
+    if rc != 0 {
+        return Err(anyhow::anyhow!(
+            "bw elapsed_ms: {}",
+            error_from_buf(&err_buf)
+        ));
+    }
+
+    // GiB/s = 2 × n_bytes × n_iters / total_time_s / 2^30
+    // Factor 2: each copy reads src AND writes dst.
+    let total_s = ms as f64 / 1000.0;
+    Ok(2.0 * n_bytes as f64 * n_iters as f64 / total_s / (1u64 << 30) as f64)
 }
 
 pub(super) fn error_from_buf(buf: &[c_char]) -> String {
