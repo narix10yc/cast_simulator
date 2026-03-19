@@ -141,15 +141,19 @@ export CXX=/path/to/your/c++
 cargo test
 ```
 
-## CPU Tools
+## Hardware Profiling
 
-The main CPU profiling and crossover sweep lives in [`src/bin/cpu_crossover.rs`](src/bin/cpu_crossover.rs).
-
-Examples:
+The roofline profiler measures the memory/compute crossover for gate simulation
+kernels on CPU and CUDA backends at F32 and F64 precision.  See
+[`src/bin/profile_hw.rs`](src/bin/profile_hw.rs).
 
 ```sh
-cargo run --bin cpu_crossover --release -- --help
-cargo run --bin cpu_crossover --release -- --n-qubits 30 --threads 10 --budget-secs 120
+cargo run --bin profile_hw --release -- --help
+cargo run --bin profile_hw --release                                    # CPU F32+F64
+cargo run --bin profile_hw --features cuda --release                    # CPU + CUDA, F32+F64
+cargo run --bin profile_hw --features cuda --release -- \
+      --backend cuda --precision f32 --budget 60                        # CUDA F32 only
+CAST_NUM_THREADS=32 cargo run --bin profile_hw --release -- --output profile.json
 ```
 
 ## CUDA Build And Test
@@ -165,24 +169,16 @@ Build or test with CUDA enabled:
 
 ```sh
 cargo test --features cuda --test cpu_cuda_compare -- --ignored
-cargo run --features cuda --bin cuda_crossover --release -- --help
 ```
 
 Relevant entry points:
 
 - [`tests/cpu_cuda_compare.rs`](tests/cpu_cuda_compare.rs)
-- [`src/bin/cuda_crossover.rs`](src/bin/cuda_crossover.rs)
 
 The CUDA comparison tests are `#[ignore]` by default because they require a CUDA-capable GPU. You can override the SM target for the tests with:
 
 ```sh
 CUDA_SM=80 cargo test --features cuda --test cpu_cuda_compare -- --ignored
-```
-
-For the crossover binary, use `--sm`:
-
-```sh
-cargo run --features cuda --bin cuda_crossover --release -- --sm 80
 ```
 
 ## Citing

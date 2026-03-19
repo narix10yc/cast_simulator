@@ -8,9 +8,6 @@ pub use statevector::CPUStatevector;
 mod kernel;
 pub use kernel::{CPUKernelGenSpec, CpuKernelManager, KernelId};
 
-mod cost_model;
-pub use cost_model::measure_cpu_profile;
-
 #[cfg(test)]
 mod tests;
 
