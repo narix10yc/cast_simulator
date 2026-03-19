@@ -110,6 +110,32 @@ struct PendingApply {
     precision: CudaPrecision,
 }
 
+/// CUDA event pair bracketing a single kernel launch, plus the metadata needed
+/// to build a [`KernelExecTime`] after the stream is synchronised.
+///
+/// Events are destroyed automatically on drop, so error paths never need
+/// explicit cleanup loops — they just let the `Vec<EventPair>` go out of scope.
+#[cfg(feature = "cuda")]
+struct EventPair {
+    kernel_id: CudaKernelId,
+    n_gate_qubits: u32,
+    precision: CudaPrecision,
+    ptx_compile_time: Duration,
+    jit_compile_time: Duration,
+    start_ev: *mut std::ffi::c_void,
+    end_ev: *mut std::ffi::c_void,
+}
+
+#[cfg(feature = "cuda")]
+impl Drop for EventPair {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::cast_cuda_event_destroy(self.start_ev);
+            ffi::cast_cuda_event_destroy(self.end_ev);
+        }
+    }
+}
+
 // ── ManagerInner ─────────────────────────────────────────────────────────────
 
 struct ManagerInner {
@@ -255,12 +281,26 @@ impl ManagerInner {
         Ok(cu_function)
     }
 
-    /// Launches every pending apply request in order, using the 2-slot LRU
-    /// module cache.  `stream` must have been obtained from [`ensure_stream`].
-    fn drain_pending(&mut self, stream: *mut std::ffi::c_void) -> anyhow::Result<()> {
+    /// Launches every pending apply request in order, bracketing each launch
+    /// with a start/end CUDA event for later GPU time measurement.
+    /// Returns one [`EventPair`] per launch; events are destroyed via [`Drop`]
+    /// when the returned `Vec` goes out of scope.
+    fn drain_pending(&mut self, stream: *mut std::ffi::c_void) -> anyhow::Result<Vec<EventPair>> {
         let pending: Vec<PendingApply> = self.pending.drain(..).collect();
+        self.launch_all(stream, &pending)
+    }
+
+    /// Enqueues one kernel per item, bracketed by CUDA events.
+    /// On failure, already-accumulated [`EventPair`]s are destroyed via [`Drop`];
+    /// the current item's partially-created events are destroyed before returning.
+    fn launch_all(
+        &mut self,
+        stream: *mut std::ffi::c_void,
+        pending: &[PendingApply],
+    ) -> anyhow::Result<Vec<EventPair>> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
-        for item in &pending {
+        let mut pairs: Vec<EventPair> = Vec::with_capacity(pending.len());
+        for item in pending {
             // Clone the Arc so the immutable borrow on self.kernels ends before
             // ensure_module takes &mut self.
             let kernel = self
@@ -271,6 +311,27 @@ impl ManagerInner {
 
             let cu_function = self.ensure_module(&*kernel, item.kernel_id)?;
 
+            // ── start event ──────────────────────────────────────────────────
+            let start_ev =
+                unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
+            if start_ev.is_null() {
+                return Err(anyhow::anyhow!(
+                    "event_create (start) failed: {}",
+                    error_from_buf(err_buf)
+                ));
+            }
+            let status = unsafe {
+                ffi::cast_cuda_event_record(start_ev, stream, err_buf.as_mut_ptr(), err_buf.len())
+            };
+            if status != 0 {
+                unsafe { ffi::cast_cuda_event_destroy(start_ev) };
+                return Err(anyhow::anyhow!(
+                    "event_record (start) failed: {}",
+                    error_from_buf(err_buf)
+                ));
+            }
+
+            // ── kernel launch ─────────────────────────────────────────────────
             let status = unsafe {
                 ffi::cast_cuda_kernel_launch(
                     cu_function,
@@ -284,12 +345,36 @@ impl ManagerInner {
                 )
             };
             if status != 0 {
+                unsafe { ffi::cast_cuda_event_destroy(start_ev) };
                 return Err(anyhow::anyhow!(
                     "kernel {} launch failed: {}",
                     item.kernel_id,
-                    error_from_buf(&err_buf)
+                    error_from_buf(err_buf)
                 ));
             }
+
+            // ── end event ─────────────────────────────────────────────────────
+            let end_ev =
+                unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
+            if end_ev.is_null() {
+                unsafe { ffi::cast_cuda_event_destroy(start_ev) };
+                return Err(anyhow::anyhow!(
+                    "event_create (end) failed: {}",
+                    error_from_buf(err_buf)
+                ));
+            }
+            let status = unsafe {
+                ffi::cast_cuda_event_record(end_ev, stream, err_buf.as_mut_ptr(), err_buf.len())
+            };
+            if status != 0 {
+                unsafe { ffi::cast_cuda_event_destroy(start_ev) };
+                unsafe { ffi::cast_cuda_event_destroy(end_ev) };
+                return Err(anyhow::anyhow!(
+                    "event_record (end) failed: {}",
+                    error_from_buf(err_buf)
+                ));
+            }
+
             log::debug!(
                 "cuda: launched kernel {} ({} gate qubits, {} sv qubits, {:?})",
                 item.kernel_id,
@@ -297,9 +382,45 @@ impl ManagerInner {
                 item.sv_n_qubits,
                 item.precision,
             );
+
+            pairs.push(EventPair {
+                kernel_id: item.kernel_id,
+                n_gate_qubits: kernel.n_gate_qubits(),
+                precision: kernel.precision(),
+                ptx_compile_time: kernel.ptx_compile_time(),
+                jit_compile_time: kernel.jit_compile_time(),
+                start_ev,
+                end_ev,
+            });
         }
-        Ok(())
+        Ok(pairs)
     }
+}
+
+// ── Public timing types ───────────────────────────────────────────────────────
+
+/// Timing metadata for a single kernel launch within a [`CudaKernelManager::sync`] call.
+#[cfg(feature = "cuda")]
+pub struct KernelExecTime {
+    pub kernel_id: CudaKernelId,
+    pub n_gate_qubits: u32,
+    pub precision: CudaPrecision,
+    /// Wall time for the LLVM IR → PTX stage, recorded at `generate` time.
+    pub ptx_compile_time: Duration,
+    /// Wall time for the PTX → cubin JIT stage, recorded at `generate` time.
+    pub jit_compile_time: Duration,
+    /// GPU execution time for this launch, measured by CUDA events.
+    pub gpu_time: Duration,
+}
+
+/// Returned by [`CudaKernelManager::sync`].
+#[cfg(feature = "cuda")]
+pub struct SyncStats {
+    /// One entry per [`apply`](CudaKernelManager::apply) call flushed in this sync, in order.
+    /// Empty if nothing was queued.
+    pub kernels: Vec<KernelExecTime>,
+    /// CPU wall time for the entire `sync()` call (dispatch + GPU wait).
+    pub wall_time: Duration,
 }
 
 // ── CudaKernelManager ────────────────────────────────────────────────────────
@@ -544,28 +665,84 @@ impl CudaKernelManager {
     /// policy — enqueues all pending kernel launches onto the internal CUDA stream,
     /// then blocks until the stream is idle.
     ///
-    /// Returns immediately if nothing has been queued and no stream was ever created.
+    /// Returns a [`SyncStats`] with per-kernel GPU execution times (measured via
+    /// CUDA events) and the total CPU wall time for the call.
+    /// Returns immediately with empty stats if nothing has been queued and no
+    /// stream was ever created.
     #[cfg(feature = "cuda")]
-    pub fn sync(&self) -> anyhow::Result<()> {
-        let stream = {
+    pub fn sync(&self) -> anyhow::Result<SyncStats> {
+        let wall_t0 = Instant::now();
+
+        let (stream, pairs) = {
             let mut guard = self.inner.lock().unwrap();
 
             if guard.pending.is_empty() && guard.stream.is_none() {
-                return Ok(());
+                return Ok(SyncStats {
+                    kernels: vec![],
+                    wall_time: Duration::ZERO,
+                });
             }
 
             let stream = guard.ensure_stream()?;
-            guard.drain_pending(stream)?;
-            stream
+            let pairs = guard.drain_pending(stream)?;
+            (stream, pairs)
         }; // lock released here — stream_sync runs without holding the mutex
 
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let status =
             unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) };
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+        if status != 0 {
+            // pairs drops here, destroying all events via Drop.
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
         }
+
+        let wall_time = wall_t0.elapsed();
+
+        // Query GPU elapsed time for each launch. Events are destroyed when
+        // `pairs` drops at the end of this function.
+        let mut query_err: Option<anyhow::Error> = None;
+        let mut kernels = Vec::with_capacity(pairs.len());
+        for pair in &pairs {
+            let mut ms = 0.0f32;
+            if query_err.is_none() {
+                let status = unsafe {
+                    ffi::cast_cuda_event_elapsed_ms(
+                        pair.start_ev,
+                        pair.end_ev,
+                        &mut ms,
+                        err_buf.as_mut_ptr(),
+                        err_buf.len(),
+                    )
+                };
+                if status != 0 {
+                    query_err = Some(anyhow::anyhow!(
+                        "event_elapsed_ms: {}",
+                        error_from_buf(&err_buf)
+                    ));
+                } else {
+                    kernels.push(KernelExecTime {
+                        kernel_id: pair.kernel_id,
+                        n_gate_qubits: pair.n_gate_qubits,
+                        precision: pair.precision,
+                        ptx_compile_time: pair.ptx_compile_time,
+                        jit_compile_time: pair.jit_compile_time,
+                        gpu_time: Duration::from_secs_f64(ms as f64 / 1000.0),
+                    });
+                }
+            }
+        }
+        // pairs drops here, destroying all events via Drop.
+
+        if let Some(e) = query_err {
+            return Err(e);
+        }
+
+        log::debug!(
+            "cuda: sync complete — {} kernels, wall {:?}",
+            kernels.len(),
+            wall_time,
+        );
+
+        Ok(SyncStats { kernels, wall_time })
     }
 }

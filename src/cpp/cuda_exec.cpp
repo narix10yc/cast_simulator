@@ -308,6 +308,62 @@ extern "C" int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t
   return 0;
 }
 
+// ── CUDA timing events ────────────────────────────────────────────────────────
+
+extern "C" void *cast_cuda_event_create(char *err_buf, size_t err_buf_len) {
+  std::string err;
+  if (!ensure_cuda(err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return nullptr;
+  }
+  CUevent ev = nullptr;
+  CUresult rc = cuEventCreate(&ev, CU_EVENT_DEFAULT);
+  if (!cu_check(rc, "cuEventCreate", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return nullptr;
+  }
+  clear_error_buffer(err_buf, err_buf_len);
+  return static_cast<void *>(ev);
+}
+
+extern "C" int cast_cuda_event_record(void *event, void *stream, char *err_buf,
+                                      size_t err_buf_len) {
+  if (!event || !stream) {
+    write_error_message(err_buf, err_buf_len, "event and stream must not be null");
+    return 1;
+  }
+  std::string err;
+  CUresult rc = cuEventRecord(static_cast<CUevent>(event), static_cast<CUstream>(stream));
+  if (!cu_check(rc, "cuEventRecord", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  clear_error_buffer(err_buf, err_buf_len);
+  return 0;
+}
+
+extern "C" void cast_cuda_event_destroy(void *event) {
+  if (event)
+    cuEventDestroy(static_cast<CUevent>(event));
+}
+
+extern "C" int cast_cuda_event_elapsed_ms(void *start_event, void *end_event, float *out_ms,
+                                          char *err_buf, size_t err_buf_len) {
+  if (!start_event || !end_event || !out_ms) {
+    write_error_message(err_buf, err_buf_len, "arguments must not be null");
+    return 1;
+  }
+  std::string err;
+  CUresult rc =
+      cuEventElapsedTime(out_ms, static_cast<CUevent>(start_event), static_cast<CUevent>(end_event));
+  if (!cu_check(rc, "cuEventElapsedTime", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  clear_error_buffer(err_buf, err_buf_len);
+  return 0;
+}
+
 // ── Stateless device memory ───────────────────────────────────────────────────
 
 extern "C" uint64_t cast_cuda_sv_alloc(size_t n_elements, uint8_t precision, char *err_buf,
