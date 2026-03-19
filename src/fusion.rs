@@ -526,7 +526,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(1, 2));
         cg.insert_gate(QuantumGate::cx(2, 3));
         cg.insert_gate(QuantumGate::cx(3, 4));
-        optimize(&mut cg, &FusionConfig::balanced());
+        optimize(&mut cg, &FusionConfig::default());
         assert!(cg.n_rows() < 4);
         assert!(cg.check_consistency().is_ok());
     }
@@ -734,7 +734,7 @@ mod tests {
         let mut cg = CircuitGraph::new();
         cg.insert_gate(QuantumGate::h(0));
         cg.insert_gate(QuantumGate::cx(0, 1));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -744,7 +744,7 @@ mod tests {
         cg.insert_gate(QuantumGate::h(0));
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::cx(0, 2));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -754,7 +754,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::cx(0, 2));
         cg.insert_gate(QuantumGate::cx(0, 3));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -767,7 +767,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(1, 2));
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::cx(2, 3));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -786,7 +786,7 @@ mod tests {
         for &(a, b) in &[(0u32, 1u32), (2, 3)] {
             cg.insert_gate(QuantumGate::cx(a, b));
         }
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -796,7 +796,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::rz(0.6, 1));
         cg.insert_gate(QuantumGate::cx(0, 1));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -809,7 +809,7 @@ mod tests {
         cg.insert_gate(QuantumGate::rx(1.1, 1));
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::ry(0.2, 0));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -820,7 +820,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::u3(PI / 4.0, PI / 6.0, PI / 8.0, 1));
         cg.insert_gate(QuantumGate::cx(0, 1));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -829,7 +829,7 @@ mod tests {
         cg.insert_gate(QuantumGate::h(2));
         cg.insert_gate(QuantumGate::ccx(0, 1, 2));
         cg.insert_gate(QuantumGate::h(2));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -839,7 +839,7 @@ mod tests {
         cg.insert_gate(QuantumGate::swap(0, 1));
         cg.insert_gate(QuantumGate::cx(1, 2));
         cg.insert_gate(QuantumGate::swap(1, 2));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -847,7 +847,7 @@ mod tests {
         // A single gate: fusion should be a no-op but unitary still correct.
         let mut cg = CircuitGraph::new();
         cg.insert_gate(QuantumGate::cx(0, 1));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
@@ -858,7 +858,7 @@ mod tests {
         cg.insert_gate(QuantumGate::h(0));
         cg.insert_gate(QuantumGate::z(1));
         cg.insert_gate(QuantumGate::rz(0.4, 0));
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -927,8 +927,7 @@ mod tests {
         let configs: &[(&str, FusionConfig)] = &[
             ("size_only(3)", FusionConfig::size_only(3)),
             ("size_only(4)", FusionConfig::size_only(4)),
-            ("mild", FusionConfig::mild()),
-            ("balanced", FusionConfig::balanced()),
+            ("default", FusionConfig::default()),
             ("aggressive", FusionConfig::aggressive()),
         ];
 
@@ -961,55 +960,55 @@ mod tests {
     #[test]
     fn random_3qubit_10gates_seed0() {
         let cg = random_circuit(3, 10, 0);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
     fn random_3qubit_10gates_seed1() {
         let cg = random_circuit(3, 10, 1);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
     fn random_4qubit_15gates_seed0() {
         let cg = random_circuit(4, 15, 0);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
     fn random_4qubit_15gates_seed1() {
         let cg = random_circuit(4, 15, 1);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
     fn random_4qubit_15gates_seed2() {
         let cg = random_circuit(4, 15, 2);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
     fn random_4qubit_20gates_seed42() {
         let cg = random_circuit(4, 20, 42);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
     fn random_5qubit_20gates_seed0() {
         let cg = random_circuit(5, 20, 0);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
     fn random_5qubit_20gates_seed7() {
         let cg = random_circuit(5, 20, 7);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]
     fn random_5qubit_30gates_seed99() {
         let cg = random_circuit(5, 30, 99);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::balanced()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     // Same circuits through mild and aggressive to cover different size limits.
@@ -1017,7 +1016,7 @@ mod tests {
     #[test]
     fn random_4qubit_20gates_mild() {
         let cg = random_circuit(4, 20, 17);
-        check_fusion(&cg, |g| optimize(g, &FusionConfig::mild()));
+        check_fusion(&cg, |g| optimize(g, &FusionConfig::default()));
     }
 
     #[test]

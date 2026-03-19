@@ -71,9 +71,7 @@ fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let spec = cpu_spec();
 
     let mgr = CpuKernelManager::new();
-    let kid = mgr
-        .generate(&spec, gate)
-        .expect("cpu: generate kernel");
+    let kid = mgr.generate(&spec, gate).expect("cpu: generate kernel");
 
     let mut sv = CPUStatevector::new(n_sv_qubits, spec.precision, spec.simd_width);
     for (idx, &(re, im)) in init.iter().enumerate() {
@@ -403,9 +401,7 @@ fn apply_cpu_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
         otol: 1e-6,
     };
     let mgr = CpuKernelManager::new();
-    let kid = mgr
-        .generate(&spec, gate)
-        .expect("cpu f32: generate kernel");
+    let kid = mgr.generate(&spec, gate).expect("cpu f32: generate kernel");
     let mut sv = CPUStatevector::new(n_sv_qubits, spec.precision, spec.simd_width);
     for (idx, &(re, im)) in init.iter().enumerate() {
         sv.set_amp(idx, Complex::new(re, im));

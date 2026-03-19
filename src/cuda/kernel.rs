@@ -201,7 +201,7 @@ impl ManagerInner {
         let hit_idx = self
             .loaded
             .iter()
-            .position(|s| s.as_ref().map_or(false, |m| m.kernel_id == id));
+            .position(|s| s.as_ref().is_some_and(|m| m.kernel_id == id));
         if let Some(idx) = hit_idx {
             self.lru_tick += 1;
             let tick = self.lru_tick;
@@ -309,7 +309,7 @@ impl ManagerInner {
                 .ok_or_else(|| anyhow::anyhow!("kernel {} missing during drain", item.kernel_id))?
                 .clone();
 
-            let cu_function = self.ensure_module(&*kernel, item.kernel_id)?;
+            let cu_function = self.ensure_module(&kernel, item.kernel_id)?;
 
             // ── start event ──────────────────────────────────────────────────
             let start_ev =
@@ -458,6 +458,12 @@ impl fmt::Debug for CudaKernelManager {
         f.debug_struct("CudaKernelManager")
             .field("n_kernels", &n)
             .finish_non_exhaustive()
+    }
+}
+
+impl Default for CudaKernelManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -744,5 +750,28 @@ impl CudaKernelManager {
         );
 
         Ok(SyncStats { kernels, wall_time })
+    }
+
+    /// Times a single-kernel apply+sync cycle adaptively within `budget_s`.
+    ///
+    /// Delegates to [`crate::timing::time_adaptive_with`].  Each iteration
+    /// queues one kernel launch, syncs the stream, and reports the **GPU event
+    /// time** (not wall-clock) as the sample duration.  This excludes launch
+    /// overhead and gives the most accurate measure of kernel execution cost.
+    #[cfg(feature = "cuda")]
+    pub fn time_adaptive(
+        &self,
+        id: CudaKernelId,
+        sv: &mut CudaStatevector,
+        budget_s: f64,
+    ) -> anyhow::Result<crate::timing::TimingStats> {
+        crate::timing::time_adaptive_with(
+            || {
+                self.apply(id, sv)?;
+                let stats = self.sync()?;
+                Ok(stats.kernels[0].gpu_time)
+            },
+            budget_s,
+        )
     }
 }

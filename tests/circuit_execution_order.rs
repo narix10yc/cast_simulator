@@ -116,10 +116,7 @@ fn run_cpu(gates: &[QuantumGate], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f6
     let mgr = CpuKernelManager::new();
     let kids: Vec<_> = gates
         .iter()
-        .map(|g| {
-            mgr.generate(&spec, g)
-                .expect("cpu: generate")
-        })
+        .map(|g| mgr.generate(&spec, g).expect("cpu: generate"))
         .collect();
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
@@ -271,9 +268,7 @@ fn lru_repeating_3kernel_pattern_12q() {
     let cpu_mgr = CpuKernelManager::new();
     let cpu_kids: Vec<_> = gates
         .iter()
-        .map(|g| {
-            cpu_mgr.generate(&spec, g).unwrap()
-        })
+        .map(|g| cpu_mgr.generate(&spec, g).unwrap())
         .collect();
     let mut cpu_sv = CPUStatevector::new(n, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
