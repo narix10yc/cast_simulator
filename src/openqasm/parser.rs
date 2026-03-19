@@ -478,7 +478,7 @@ fn tokenize(input: &str) -> anyhow::Result<Vec<Token>> {
                 chars.next();
                 if matches!(chars.peek(), Some('/')) {
                     chars.next();
-                    while let Some(c) = chars.next() {
+                    for c in chars.by_ref() {
                         if c == '\n' {
                             break;
                         }

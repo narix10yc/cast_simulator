@@ -18,6 +18,7 @@
 //! [`PROFILE_N_QUBITS`] qubits regardless of `--n-qubits`, because:
 //!   - Too small → LLC dominates, masking the true DRAM bandwidth.
 //!   - Too large → allocation + first-touch time dominates the budget.
+//!
 //! The `--n-qubits` argument is recorded in the report header only.
 //!
 //! ## Usage
@@ -30,7 +31,7 @@
 //! ```
 
 use anyhow::Result;
-use cast::cpu::{self, CPUKernelGenSpec, CPUKernelGenerator, CPUStatevector};
+use cast::cpu::{self, CPUKernelGenSpec, CpuKernelManager, CPUStatevector};
 use cast::types::{Complex, ComplexSquareMatrix, Precision, QuantumGate};
 use clap::{Parser, ValueEnum};
 use rand::Rng;
@@ -180,11 +181,10 @@ fn measure_at(
     let ai = gate.arithmatic_intensity(spec.ztol);
     let nnz = gate.scalar_nnz(spec.ztol);
 
-    let mut gen = CPUKernelGenerator::new()?;
-    let kid = gen.generate(&spec, gate.matrix().data(), gate.qubits())?;
-    let mut jit = gen.init_jit()?;
+    let mgr = CpuKernelManager::new();
+    let kid = mgr.generate(&spec, gate.matrix().data(), gate.qubits())?;
 
-    let timing = jit.time_adaptive(kid, sv, args.n_threads(), budget_s)?;
+    let timing = mgr.time_adaptive(kid, sv, args.n_threads(), budget_s)?;
 
     let sv_bytes = args.profile_sv_bytes();
     let n_sv = args.profile_n_qubits();

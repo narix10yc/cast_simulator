@@ -22,7 +22,7 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use cast::{
     cost_model::FusionConfig,
-    cpu::{CPUKernelGenSpec, CPUKernelGenerator, CPUStatevector, MatrixLoadMode, SimdWidth},
+    cpu::{CPUKernelGenSpec, CpuKernelManager, CPUStatevector, MatrixLoadMode, SimdWidth},
     cuda::{device_sm, CudaKernelGenSpec, CudaKernelManager, CudaPrecision, CudaStatevector},
     fusion,
     types::{Complex, ComplexSquareMatrix, Precision, QuantumGate},
@@ -113,22 +113,21 @@ fn ordered_gates(cg: &CircuitGraph) -> Vec<QuantumGate> {
 /// Apply `gates` sequentially on the CPU JIT backend.
 fn run_cpu(gates: &[QuantumGate], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let spec = cpu_spec();
-    let mut gen = CPUKernelGenerator::new().expect("cpu: generator");
+    let mgr = CpuKernelManager::new();
     let kids: Vec<_> = gates
         .iter()
         .map(|g| {
-            gen.generate(&spec, g.matrix().data(), g.qubits())
+            mgr.generate(&spec, g.matrix().data(), g.qubits())
                 .expect("cpu: generate")
         })
         .collect();
-    let mut jit = gen.init_jit().expect("cpu: init_jit");
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         sv.set_amp(i, Complex::new(re, im));
     }
     for kid in kids {
-        jit.apply(kid, &mut sv, 1).expect("cpu: apply");
+        mgr.apply(kid, &mut sv, 1).expect("cpu: apply");
     }
     sv.amplitudes().into_iter().map(|c| (c.re, c.im)).collect()
 }
@@ -269,18 +268,17 @@ fn lru_repeating_3kernel_pattern_12q() {
 
     // ── CPU reference ─────────────────────────────────────────────────────────
     let spec = cpu_spec();
-    let mut gen = CPUKernelGenerator::new().unwrap();
+    let cpu_mgr = CpuKernelManager::new();
     let cpu_kids: Vec<_> = gates
         .iter()
-        .map(|g| gen.generate(&spec, g.matrix().data(), g.qubits()).unwrap())
+        .map(|g| cpu_mgr.generate(&spec, g.matrix().data(), g.qubits()).unwrap())
         .collect();
-    let mut jit = gen.init_jit().unwrap();
     let mut cpu_sv = CPUStatevector::new(n, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
     }
     for &idx in &seq {
-        jit.apply(cpu_kids[idx], &mut cpu_sv, 1).unwrap();
+        cpu_mgr.apply(cpu_kids[idx], &mut cpu_sv, 1).unwrap();
     }
     let cpu: Vec<(f64, f64)> = cpu_sv
         .amplitudes()

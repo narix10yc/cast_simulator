@@ -39,6 +39,7 @@ impl ComplexSquareMatrix {
     /// written with valid [`Complex`] values before calling any safe method
     /// that reads matrix contents (for example [`Self::data`], [`Self::get`],
     /// [`Self::matmul`], `Clone`, `Debug`, or `PartialEq`).
+    #[allow(clippy::uninit_vec)]
     pub unsafe fn uninit(edge_size: usize) -> Self {
         let len = Self::len_for_edge_size(edge_size);
         let mut data = Vec::with_capacity(len);
@@ -322,6 +323,11 @@ impl ComplexSquareMatrix {
     /// Returns the total number of elements (`n²`).
     pub fn len(&self) -> usize {
         self.data.len()
+    }
+
+    /// Returns `true` if the matrix has zero elements.
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
     }
 
     /// Returns a shared slice over the flat, row-major element buffer.

@@ -3,24 +3,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const CPU_FFI_SOURCES: &[&str] = &[
-    "src/cpp/cpu.h",
-    "src/cpp/cpu.cpp",
-    "src/cpp/cpu_gen.h",
-    "src/cpp/cpu_gen.cpp",
-    "src/cpp/cpu_jit.h",
-    "src/cpp/cpu_jit.cpp",
-    "src/cpp/cpu_util.h",
+    "src/cpp/cpu/cpu.h",
+    "src/cpp/cpu/cpu.cpp",
+    "src/cpp/cpu/cpu_gen.h",
+    "src/cpp/cpu/cpu_gen.cpp",
+    "src/cpp/cpu/cpu_jit.h",
+    "src/cpp/cpu/cpu_jit.cpp",
+    "src/cpp/cpu/cpu_util.h",
 ];
 
 const CUDA_FFI_SOURCES: &[&str] = &[
-    "src/cpp/cuda.h",
-    "src/cpp/cuda.cpp",
-    "src/cpp/cuda_gen.h",
-    "src/cpp/cuda_gen.cpp",
-    "src/cpp/cuda_jit.h",
-    "src/cpp/cuda_jit.cpp",
-    "src/cpp/cuda_util.h",
-    "src/cpp/cuda_exec.cpp",
+    "src/cpp/cuda/cuda.h",
+    "src/cpp/cuda/cuda.cpp",
+    "src/cpp/cuda/cuda_gen.h",
+    "src/cpp/cuda/cuda_gen.cpp",
+    "src/cpp/cuda/cuda_jit.h",
+    "src/cpp/cuda/cuda_jit.cpp",
+    "src/cpp/cuda/cuda_util.h",
+    "src/cpp/cuda/cuda_exec.cpp",
 ];
 
 const CPU_LLVM_COMPONENTS: &[&str] = &["core", "orcjit", "native", "passes"];
@@ -47,9 +47,9 @@ fn build_cpu_ffi(out_dir: &Path, llvm_config: &Path) {
     let archive = compile_cpp_archive(
         out_dir,
         &[
-            "src/cpp/cpu.cpp",
-            "src/cpp/cpu_gen.cpp",
-            "src/cpp/cpu_jit.cpp",
+            "src/cpp/cpu/cpu.cpp",
+            "src/cpp/cpu/cpu_gen.cpp",
+            "src/cpp/cpu/cpu_jit.cpp",
         ],
         "libcast_cpu_ffi.a",
         "",
@@ -73,10 +73,10 @@ fn build_cuda_ffi(out_dir: &Path, llvm_config: &Path) {
     let archive = compile_cpp_archive(
         out_dir,
         &[
-            "src/cpp/cuda.cpp",
-            "src/cpp/cuda_gen.cpp",
-            "src/cpp/cuda_jit.cpp",
-            "src/cpp/cuda_exec.cpp",
+            "src/cpp/cuda/cuda.cpp",
+            "src/cpp/cuda/cuda_gen.cpp",
+            "src/cpp/cuda/cuda_jit.cpp",
+            "src/cpp/cuda/cuda_exec.cpp",
         ],
         "libcast_cuda_ffi.a",
         "_cuda",
@@ -210,12 +210,11 @@ fn emit_platform_link_search_fallbacks(linked_libs: &[String], search_paths: &[P
         return;
     }
 
-    for candidate in macos_library_search_candidates("zstd") {
+    if let Some(candidate) = macos_library_search_candidates("zstd").into_iter().next() {
         if search_paths.iter().any(|existing| existing == &candidate) {
             return;
         }
         println!("cargo:rustc-link-search=native={}", candidate.display());
-        return;
     }
 }
 
