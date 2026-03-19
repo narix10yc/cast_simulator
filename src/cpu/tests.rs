@@ -2,6 +2,7 @@
 mod tests {
 
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     use crate::cost_model::FusionConfig;
     use crate::cpu::*;
@@ -49,13 +50,14 @@ mod tests {
         n_threads: u32,
         tol: f64,
     ) {
+        let gate = Arc::new(gate.clone());
         let mgr = CpuKernelManager::new();
-        let kernel_id = mgr.generate(&spec, gate).expect("generate kernel");
+        let kernel_id = mgr.generate(&spec, &gate).expect("generate kernel");
 
         let mut sv_jit = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
         let mut sv_ref = sv_jit.clone();
 
-        sv_ref.apply_gate(gate);
+        sv_ref.apply_gate(&gate);
         mgr.apply(kernel_id, &mut sv_jit, n_threads)
             .expect("apply kernel");
 
@@ -95,7 +97,7 @@ mod tests {
         );
     }
 
-    fn circuit_gates_in_row_order(graph: &CircuitGraph) -> Vec<QuantumGate> {
+    fn circuit_gates_in_row_order(graph: &CircuitGraph) -> Vec<Arc<QuantumGate>> {
         let mut gates = Vec::new();
         let mut seen = HashSet::new();
         for row in 0..graph.n_rows() {
@@ -104,7 +106,7 @@ mod tests {
                     if seen.insert(gate_id) {
                         gates.push(
                             graph
-                                .gate(gate_id)
+                                .gate_arc(gate_id)
                                 .expect("live gate id should resolve")
                                 .clone(),
                         );
@@ -194,7 +196,7 @@ mod tests {
 
     #[test]
     fn jit_applies_single_qubit_gate() {
-        let gate = QuantumGate::h(0);
+        let gate = Arc::new(QuantumGate::h(0));
         let mgr = CpuKernelManager::new();
         let kernel_id = mgr
             .generate(&CPUKernelGenSpec::f64(), &gate)
@@ -277,7 +279,7 @@ mod tests {
     // the numerical result must be identical to ImmValue for the same gate.
     #[test]
     fn jit_stack_load_matches_imm_value() {
-        let gate = QuantumGate::cx(0, 2);
+        let gate = Arc::new(QuantumGate::cx(0, 2));
         let n_qubits_sv = 4;
         let precision = Precision::F64;
         let simd_width = SimdWidth::W128;
@@ -372,8 +374,8 @@ mod tests {
     #[test]
     fn jit_multiple_kernels_in_one_manager() {
         let spec = default_spec(Precision::F64, SimdWidth::W128);
-        let h_gate = QuantumGate::h(0);
-        let cx_gate = QuantumGate::cx(0, 1);
+        let h_gate = Arc::new(QuantumGate::h(0));
+        let cx_gate = Arc::new(QuantumGate::cx(0, 1));
 
         let mgr = CpuKernelManager::new();
         let kid_h = mgr.generate(&spec, &h_gate).expect("generate H kernel");
@@ -400,7 +402,7 @@ mod tests {
         let kid = mgr
             .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
-                &QuantumGate::h(0),
+                &Arc::new(QuantumGate::h(0)),
                 true,
                 false,
             )
@@ -422,7 +424,7 @@ mod tests {
         let kid = mgr
             .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
-                &QuantumGate::x(0),
+                &Arc::new(QuantumGate::x(0)),
                 true,
                 false,
             )
@@ -437,7 +439,7 @@ mod tests {
     #[test]
     fn emit_ir_with_diagnostics_still_produces_correct_kernel() {
         // Diagnostics capture must not corrupt the kernel.
-        let gate = QuantumGate::h(1);
+        let gate = Arc::new(QuantumGate::h(1));
         let spec = default_spec(Precision::F64, SimdWidth::W128);
 
         let mgr = CpuKernelManager::new();
@@ -460,8 +462,8 @@ mod tests {
     fn emit_ir_per_kernel_independent() {
         // Each kernel_id returns its own IR; they must differ (H ≠ CX).
         let spec = default_spec(Precision::F64, SimdWidth::W128);
-        let h_gate = QuantumGate::h(0);
-        let cx_gate = QuantumGate::cx(0, 1);
+        let h_gate = Arc::new(QuantumGate::h(0));
+        let cx_gate = Arc::new(QuantumGate::cx(0, 1));
 
         let mgr = CpuKernelManager::new();
         let kid_h = mgr
@@ -483,7 +485,7 @@ mod tests {
         let kid = mgr
             .generate(
                 &default_spec(Precision::F64, SimdWidth::W128),
-                &QuantumGate::h(0),
+                &Arc::new(QuantumGate::h(0)),
             )
             .expect("generate kernel");
         assert!(
@@ -504,7 +506,7 @@ mod tests {
     // ── emit_asm ──────────────────────────────────────────────────────────────
 
     fn compile_h_manager_with_asm() -> (CpuKernelManager, KernelId) {
-        let gate = QuantumGate::h(0);
+        let gate = Arc::new(QuantumGate::h(0));
         let mgr = CpuKernelManager::new();
         let kid = mgr
             .generate_with_diagnostics(
@@ -542,8 +544,8 @@ mod tests {
     #[test]
     fn emit_asm_per_kernel_independent() {
         let spec = default_spec(Precision::F64, SimdWidth::W128);
-        let h_gate = QuantumGate::h(0);
-        let cx_gate = QuantumGate::cx(0, 1);
+        let h_gate = Arc::new(QuantumGate::h(0));
+        let cx_gate = Arc::new(QuantumGate::cx(0, 1));
 
         let mgr = CpuKernelManager::new();
         let kid_h = mgr
@@ -564,7 +566,7 @@ mod tests {
     #[test]
     fn emit_asm_consistent_with_emit_ir() {
         let spec = default_spec(Precision::F64, SimdWidth::W128);
-        let gate = QuantumGate::h(0);
+        let gate = Arc::new(QuantumGate::h(0));
 
         let mgr = CpuKernelManager::new();
         let kid = mgr
@@ -583,7 +585,7 @@ mod tests {
 
     #[test]
     fn emit_asm_returns_none_without_diagnostics() {
-        let gate = QuantumGate::h(0);
+        let gate = Arc::new(QuantumGate::h(0));
         let mgr = CpuKernelManager::new();
         let kid = mgr
             .generate(&default_spec(Precision::F64, SimdWidth::W128), &gate)
