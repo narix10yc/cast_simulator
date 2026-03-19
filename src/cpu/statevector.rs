@@ -554,6 +554,8 @@ fn scalar_len_for(n_qubits: u32, simd_s: u32) -> usize {
 }
 
 /// Returns `simd_s = log2(simd_register_scalars)` for the given width and precision.
+/// For example, for an 256-bit `YMM` register, `simd_s` is 3 for f32 (i.e. <8 x float>)
+/// and 2 for f64 (i.e. <4 x double>).
 pub(crate) fn get_simd_s(simd_width: SimdWidth, precision: Precision) -> u32 {
     match precision {
         Precision::F32 => match simd_width {

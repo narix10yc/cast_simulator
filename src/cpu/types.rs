@@ -6,7 +6,7 @@
 /// The corresponding `simd_s` exponent (register holds `2^simd_s` scalars of
 /// the given precision) determines the statevector memory layout.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimdWidth {
     W128 = 128,
     W256 = 256,

@@ -31,7 +31,7 @@
 //! ```
 
 use anyhow::Result;
-use cast::cpu::{self, CPUKernelGenSpec, CpuKernelManager, CPUStatevector};
+use cast::cpu::{self, CPUKernelGenSpec, CPUStatevector, CpuKernelManager};
 use cast::types::{Complex, ComplexSquareMatrix, Precision, QuantumGate};
 use clap::{Parser, ValueEnum};
 use rand::Rng;
@@ -164,7 +164,7 @@ struct Measurement {
     k: usize,
     ai: f64,
     nnz: usize,
-    timing: cpu::TimingStats,
+    timing: cast::timing::TimingStats,
     gib_s: f64,
     gflops_s: f64,
 }
@@ -182,7 +182,7 @@ fn measure_at(
     let nnz = gate.scalar_nnz(spec.ztol);
 
     let mgr = CpuKernelManager::new();
-    let kid = mgr.generate(&spec, gate.matrix().data(), gate.qubits())?;
+    let kid = mgr.generate(&spec, &gate)?;
 
     let timing = mgr.time_adaptive(kid, sv, args.n_threads(), budget_s)?;
 

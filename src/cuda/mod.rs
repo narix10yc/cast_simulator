@@ -26,25 +26,27 @@ pub use kernel::{KernelExecTime, SyncStats};
 pub use statevector::CudaStatevector;
 pub use types::{CudaKernelGenSpec, CudaKernelId, CudaPrecision};
 
-// ── FFI declarations ──────────────────────────────────────────────────────────
-
+/// Mirrors the "Exported to Rust" section of `src/cpp/cuda/cuda.h`.
+///
+/// Statevector memory functions (`sv_zero`, `sv_upload`, `sv_download`) are
+/// declared separately in `statevector.rs::mod ffi`.
 pub(super) mod ffi {
     use super::CudaKernelGenSpec;
     use std::ffi::c_char;
 
-    /// Matches `cast_cuda_complex64_t` in `cuda.h`.
+    // ── Types ────────────────────────────────────────────────────────────────
+
+    /// `cast_cuda_complex64_t`
     #[repr(C)]
     pub struct FfiComplex64 {
         pub re: f64,
         pub im: f64,
     }
 
+    // ── Functions ────────────────────────────────────────────────────────────
+
     unsafe extern "C" {
-        // ── Gate PTX compilation ───────────────────────────────────────────────
-        /// Compile a gate matrix to PTX.
-        /// On success writes C-string pointers into *out_ptx and *out_func_name
-        /// (both must be freed with cast_cuda_str_free), metadata into the
-        /// remaining out-params.  Returns 0 on success, non-zero on failure.
+        // -- Gate PTX compilation --
         pub fn cast_cuda_compile_gate_ptx(
             spec: *const CudaKernelGenSpec,
             matrix: *const FfiComplex64,
@@ -60,7 +62,7 @@ pub(super) mod ffi {
         ) -> i32;
         pub fn cast_cuda_str_free(s: *mut c_char);
 
-        // ── Device capability query ────────────────────────────────────────────
+        // -- Device capability query --
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_device_sm(
             out_major: *mut u32,
@@ -69,16 +71,14 @@ pub(super) mod ffi {
             err_buf_len: usize,
         ) -> i32;
 
-        // ── CUDA stream ───────────────────────────────────────────────────────
+        // -- CUDA stream --
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_stream_create(
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> *mut std::ffi::c_void;
-
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_stream_destroy(stream: *mut std::ffi::c_void);
-
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_stream_sync(
             stream: *mut std::ffi::c_void,
@@ -86,8 +86,7 @@ pub(super) mod ffi {
             err_buf_len: usize,
         ) -> i32;
 
-        // ── PTX → cubin compilation ───────────────────────────────────────────
-        /// Compile PTX to device-native cubin; caller frees with `cast_cuda_cubin_free`.
+        // -- PTX → cubin JIT compilation --
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_ptx_to_cubin(
             ptx_data: *const c_char,
@@ -96,11 +95,10 @@ pub(super) mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_cubin_free(cubin: *mut u8);
 
-        // ── CUDA module loading ────────────────────────────────────────────────
+        // -- Module loading and kernel launch --
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_cubin_load(
             cubin_data: *const u8,
@@ -108,10 +106,8 @@ pub(super) mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> *mut std::ffi::c_void;
-
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_module_unload(cu_module: *mut std::ffi::c_void);
-
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_module_get_function(
             cu_module: *mut std::ffi::c_void,
@@ -119,7 +115,6 @@ pub(super) mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> *mut std::ffi::c_void;
-
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_kernel_launch(
             cu_function: *mut std::ffi::c_void,
@@ -132,19 +127,31 @@ pub(super) mod ffi {
             err_buf_len: usize,
         ) -> i32;
 
-        // ── Stateless device memory (also declared in statevector::ffi) ────
+        // -- CUDA timing events --
         #[cfg(feature = "cuda")]
-        pub fn cast_cuda_sv_alloc(
-            n_elements: usize,
-            precision: u8,
+        pub fn cast_cuda_event_create(
             err_buf: *mut c_char,
             err_buf_len: usize,
-        ) -> u64;
-
+        ) -> *mut std::ffi::c_void;
         #[cfg(feature = "cuda")]
-        pub fn cast_cuda_sv_free(dptr: u64);
+        pub fn cast_cuda_event_record(
+            event: *mut std::ffi::c_void,
+            stream: *mut std::ffi::c_void,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_event_destroy(event: *mut std::ffi::c_void);
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_event_elapsed_ms(
+            start_event: *mut std::ffi::c_void,
+            end_event: *mut std::ffi::c_void,
+            out_ms: *mut f32,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
 
-        // ── Device-to-device async memcpy ─────────────────────────────────
+        // -- Device-to-device async memcpy --
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_memcpy_dtod_async(
             dst: u64,
@@ -155,33 +162,16 @@ pub(super) mod ffi {
             err_buf_len: usize,
         ) -> i32;
 
-        // ── CUDA timing events ────────────────────────────────────────────────
+        // -- Device memory (statevector) --
         #[cfg(feature = "cuda")]
-        pub fn cast_cuda_event_create(
+        pub fn cast_cuda_sv_alloc(
+            n_elements: usize,
+            precision: u8,
             err_buf: *mut c_char,
             err_buf_len: usize,
-        ) -> *mut std::ffi::c_void;
-
+        ) -> u64;
         #[cfg(feature = "cuda")]
-        pub fn cast_cuda_event_record(
-            event: *mut std::ffi::c_void,
-            stream: *mut std::ffi::c_void,
-            err_buf: *mut c_char,
-            err_buf_len: usize,
-        ) -> i32;
-
-        #[cfg(feature = "cuda")]
-        pub fn cast_cuda_event_destroy(event: *mut std::ffi::c_void);
-
-        #[cfg(feature = "cuda")]
-        pub fn cast_cuda_event_elapsed_ms(
-            start_event: *mut std::ffi::c_void,
-            end_event: *mut std::ffi::c_void,
-            out_ms: *mut f32,
-            err_buf: *mut c_char,
-            err_buf_len: usize,
-        ) -> i32;
-
+        pub fn cast_cuda_sv_free(dptr: u64);
     }
 }
 

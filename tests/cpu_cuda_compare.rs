@@ -14,7 +14,7 @@
 #![cfg(feature = "cuda")]
 
 use cast::{
-    cpu::{CPUKernelGenSpec, CpuKernelManager, CPUStatevector, MatrixLoadMode, SimdWidth},
+    cpu::{CPUKernelGenSpec, CPUStatevector, CpuKernelManager, MatrixLoadMode, SimdWidth},
     cuda::{device_sm, CudaKernelGenSpec, CudaKernelManager, CudaPrecision, CudaStatevector},
     types::{Complex, ComplexSquareMatrix, Precision, QuantumGate},
 };
@@ -72,7 +72,7 @@ fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
 
     let mgr = CpuKernelManager::new();
     let kid = mgr
-        .generate(&spec, gate.matrix().data(), gate.qubits())
+        .generate(&spec, gate)
         .expect("cpu: generate kernel");
 
     let mut sv = CPUStatevector::new(n_sv_qubits, spec.precision, spec.simd_width);
@@ -244,12 +244,10 @@ fn compare_sequential_h_then_x() {
     // CPU: H then X on qubit 0.
     let h_spec = cpu_spec();
     let cpu_mgr = CpuKernelManager::new();
-    let h_cpu = cpu_mgr
-        .generate(&h_spec, QuantumGate::h(0).matrix().data(), &[0])
-        .unwrap();
-    let x_cpu = cpu_mgr
-        .generate(&h_spec, QuantumGate::x(0).matrix().data(), &[0])
-        .unwrap();
+    let h_gate = QuantumGate::h(0);
+    let x_gate = QuantumGate::x(0);
+    let h_cpu = cpu_mgr.generate(&h_spec, &h_gate).unwrap();
+    let x_cpu = cpu_mgr.generate(&h_spec, &x_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, h_spec.precision, h_spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -284,9 +282,8 @@ fn compare_h_squared_is_identity() {
     // CPU: H^2
     let spec = cpu_spec();
     let cpu_mgr = CpuKernelManager::new();
-    let kid = cpu_mgr
-        .generate(&spec, QuantumGate::h(0).matrix().data(), &[0])
-        .unwrap();
+    let h_gate = QuantumGate::h(0);
+    let kid = cpu_mgr.generate(&spec, &h_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -357,12 +354,10 @@ fn compare_multi_kernel_same_manager() {
     // CPU: H on q0, then CX(0,1).
     let spec = cpu_spec();
     let cpu_mgr = CpuKernelManager::new();
-    let h_cpu = cpu_mgr
-        .generate(&spec, QuantumGate::h(0).matrix().data(), &[0])
-        .unwrap();
-    let cx_cpu = cpu_mgr
-        .generate(&spec, QuantumGate::cx(0, 1).matrix().data(), &[0, 1])
-        .unwrap();
+    let h_gate = QuantumGate::h(0);
+    let cx_gate = QuantumGate::cx(0, 1);
+    let h_cpu = cpu_mgr.generate(&spec, &h_gate).unwrap();
+    let cx_cpu = cpu_mgr.generate(&spec, &cx_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -409,7 +404,7 @@ fn apply_cpu_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     };
     let mgr = CpuKernelManager::new();
     let kid = mgr
-        .generate(&spec, gate.matrix().data(), gate.qubits())
+        .generate(&spec, gate)
         .expect("cpu f32: generate kernel");
     let mut sv = CPUStatevector::new(n_sv_qubits, spec.precision, spec.simd_width);
     for (idx, &(re, im)) in init.iter().enumerate() {

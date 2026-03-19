@@ -7,13 +7,11 @@
 //!    [`CpuKernelManager::apply`].
 
 use super::*;
-use crate::types::{Complex, Precision};
+use crate::types::{Complex, Precision, QuantumGate};
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
-use std::fmt;
 use std::ptr::NonNull;
-use std::time::Instant;
 
 /// Configuration passed to the kernel generator for each gate.
 #[repr(C)]
@@ -29,22 +27,22 @@ pub struct CPUKernelGenSpec {
 }
 
 impl CPUKernelGenSpec {
-    /// Sensible defaults for single-precision (F32, W128, ImmValue).
+    /// Sensible defaults for single-precision (F32, W256, ImmValue).
     pub fn f32() -> Self {
         Self {
             precision: Precision::F32,
-            simd_width: SimdWidth::W128,
+            simd_width: SimdWidth::W256,
             mode: MatrixLoadMode::ImmValue,
             ztol: 1e-6,
             otol: 1e-6,
         }
     }
 
-    /// Sensible defaults for double-precision (F64, W128, ImmValue).
+    /// Sensible defaults for double-precision (F64, W256, ImmValue).
     pub fn f64() -> Self {
         Self {
             precision: Precision::F64,
-            simd_width: SimdWidth::W128,
+            simd_width: SimdWidth::W256,
             mode: MatrixLoadMode::ImmValue,
             ztol: 1e-12,
             otol: 1e-12,
@@ -58,50 +56,29 @@ pub type KernelId = u64;
 
 const ERR_BUF_LEN: usize = 1024;
 
-// ── TimingStats ───────────────────────────────────────────────────────────────
-
-/// Statistics returned by [`CpuKernelManager::time_adaptive`].
-#[derive(Debug, Clone)]
-pub struct TimingStats {
-    pub n_iters: usize,
-    pub mean_s: f64,
-    pub stddev_s: f64,
-    /// Coefficient of variation: `stddev / mean` (scale-free noise metric).
-    pub cv: f64,
-    pub min_s: f64,
-    pub max_s: f64,
-}
-
 // ── FFI declarations ──────────────────────────────────────────────────────────
 
-/// Raw C FFI bindings to the LLVM JIT kernel generator (`src/cpp/cpu.h`).
+/// Mirrors the "Exported to Rust" section of `src/cpp/cpu/cpu.h`.
+///
+/// Types not listed here (`cast_cpu_launch_args_t`, `cast_cpu_kernel_entry_t`)
+/// are internal to C++; their Rust mirrors live outside this module (see
+/// `CastCpuLaunchArgs`).
 mod ffi {
     use super::{CPUKernelGenSpec, KernelId, Precision, SimdWidth};
+    use crate::cpu::MatrixLoadMode;
     use std::ffi::{c_char, c_void};
 
-    use crate::cpu::MatrixLoadMode;
+    // ── Types ────────────────────────────────────────────────────────────────
 
-    /// Opaque C++ `cast_cpu_kernel_generator_t`.
-    #[repr(C)]
-    pub struct CastCpuKernelGenerator {
-        _private: [u8; 0],
-    }
-
-    /// Opaque C++ `cast_cpu_jit_session_t`.
-    #[repr(C)]
-    pub struct CastCpuJitSession {
-        _private: [u8; 0],
-    }
-
-    /// Matches `cast_cpu_complex64_t` in `cpu.h` (always f64 re/im regardless of precision).
+    /// `cast_cpu_complex64_t`
     #[repr(C)]
     #[derive(Clone, Copy)]
-    pub struct FfiComplex64 {
+    pub struct c64 {
         pub re: f64,
         pub im: f64,
     }
 
-    /// Matches `cast_cpu_kernel_metadata_t` in `cpu.h`.
+    /// `cast_cpu_kernel_metadata_t`
     #[repr(C)]
     pub struct KernelMetadata {
         pub kernel_id: KernelId,
@@ -111,27 +88,40 @@ mod ffi {
         pub n_gate_qubits: u32,
     }
 
-    /// Matches `cast_cpu_jit_kernel_record_t` in `cpu.h`.
+    /// `cast_cpu_jit_kernel_record_t`
     #[repr(C)]
-    pub struct FfiKernelRecord {
+    pub struct KernelRecord {
         pub metadata: KernelMetadata,
-        /// JIT-compiled function pointer; always non-null on a successful finish.
         pub entry: Option<unsafe extern "C" fn(*mut c_void)>,
-        /// NULL for ImmValue mode; malloc'd otherwise.
-        pub matrix: *mut FfiComplex64,
+        pub matrix: *mut c64,
         pub matrix_len: usize,
-        /// NULL if request_asm was not called; malloc'd otherwise.
         pub asm_text: *mut c_char,
     }
 
+    /// `cast_cpu_kernel_generator_t` (opaque)
+    #[repr(C)]
+    pub struct KernelGenerator {
+        _private: [u8; 0],
+    }
+
+    /// `cast_cpu_jit_session_t` (opaque)
+    #[repr(C)]
+    pub struct JitSession {
+        _private: [u8; 0],
+    }
+
+    // ── Functions ────────────────────────────────────────────────────────────
+
     unsafe extern "C" {
-        pub fn cast_cpu_kernel_generator_new() -> *mut CastCpuKernelGenerator;
-        pub fn cast_cpu_kernel_generator_delete(generator: *mut CastCpuKernelGenerator);
-        /// Returns 0 on success; writes a human-readable message into `err_buf` on failure.
+        // -- Generator lifecycle --
+        pub fn cast_cpu_kernel_generator_new() -> *mut KernelGenerator;
+        pub fn cast_cpu_kernel_generator_delete(generator: *mut KernelGenerator);
+
+        // -- Kernel generation --
         pub fn cast_cpu_kernel_generator_generate(
-            generator: *mut CastCpuKernelGenerator,
+            generator: *mut KernelGenerator,
             spec: *const CPUKernelGenSpec,
-            matrix: *const FfiComplex64,
+            matrix: *const c64,
             matrix_len: usize,
             qubits: *const u32,
             n_qubits: usize,
@@ -139,17 +129,16 @@ mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        /// Marks `kernel_id` for assembly capture during `finish`. Returns 0 on success.
+
+        // -- Diagnostics --
         pub fn cast_cpu_kernel_generator_request_asm(
-            generator: *mut CastCpuKernelGenerator,
+            generator: *mut KernelGenerator,
             kernel_id: KernelId,
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        /// Runs O1 on the kernel and returns its optimized IR text (two-call pattern).
-        /// Returns 0 on success.
         pub fn cast_cpu_kernel_generator_emit_ir(
-            generator: *mut CastCpuKernelGenerator,
+            generator: *mut KernelGenerator,
             kernel_id: KernelId,
             out_ir: *mut c_char,
             ir_buf_len: usize,
@@ -157,20 +146,20 @@ mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        /// Compiles all kernels into a JIT session and returns per-kernel records.
-        /// On success, deletes the generator and returns 0.
-        /// Caller must call `cast_cpu_jit_kernel_records_free` after use.
+
+        // -- JIT compilation --
         pub fn cast_cpu_kernel_generator_finish(
-            generator: *mut CastCpuKernelGenerator,
-            out_session: *mut *mut CastCpuJitSession,
-            out_records: *mut *mut FfiKernelRecord,
+            generator: *mut KernelGenerator,
+            out_session: *mut *mut JitSession,
+            out_records: *mut *mut KernelRecord,
             out_n_records: *mut usize,
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
-        /// Frees the records array returned by `cast_cpu_kernel_generator_finish`.
-        pub fn cast_cpu_jit_kernel_records_free(records: *mut FfiKernelRecord, n: usize);
-        pub fn cast_cpu_jit_session_delete(session: *mut CastCpuJitSession);
+        pub fn cast_cpu_jit_kernel_records_free(records: *mut KernelRecord, n: usize);
+
+        // -- Session lifecycle --
+        pub fn cast_cpu_jit_session_delete(session: *mut JitSession);
     }
 }
 
@@ -179,7 +168,7 @@ mod ffi {
 /// Matches `cast_cpu_launch_args_t` in `cpu.h`.
 /// Each JIT-compiled kernel reads its work range and matrix pointer from this struct.
 #[repr(C)]
-struct CastCpuLaunchArgs {
+struct CpuLaunchArgs {
     sv: *mut c_void,
     ctr_begin: u64,
     ctr_end: u64,
@@ -188,24 +177,8 @@ struct CastCpuLaunchArgs {
 
 // ── RustJittedKernel ──────────────────────────────────────────────────────────
 
-/// Rust-owned data for a single compiled kernel.
-/// The `entry` pointer is valid for the lifetime of the owning `KernelEntry`
-/// (the C++ LLJIT session inside the entry keeps the code pages alive).
-struct RustJittedKernel {
-    entry: unsafe extern "C" fn(*mut c_void),
-    precision: Precision,
-    simd_width: SimdWidth,
-    mode: MatrixLoadMode,
-    n_gate_qubits: u32,
-    /// Non-empty only for StackLoad mode.
-    matrix: Vec<ffi::FfiComplex64>,
-    /// Some only if `request_asm` was called before `init_jit`.
-    asm_text: Option<String>,
-}
-
-// ── MatrixBuffer ──────────────────────────────────────────────────────────────
-
 /// Typed matrix buffer for StackLoad dispatch; ensures correct scalar alignment.
+/// Built once at kernel construction time and reused across all `apply` calls.
 enum MatrixBuffer {
     F32(Vec<f32>),
     F64(Vec<f64>),
@@ -213,6 +186,25 @@ enum MatrixBuffer {
 }
 
 impl MatrixBuffer {
+    fn from_ffi(mode: MatrixLoadMode, precision: Precision, ffi_data: &[ffi::c64]) -> Self {
+        if !matches!(mode, MatrixLoadMode::StackLoad) || ffi_data.is_empty() {
+            return MatrixBuffer::Empty;
+        }
+        match precision {
+            Precision::F32 => {
+                let v: Vec<f32> = ffi_data
+                    .iter()
+                    .flat_map(|c| [c.re as f32, c.im as f32])
+                    .collect();
+                MatrixBuffer::F32(v)
+            }
+            Precision::F64 => {
+                let v: Vec<f64> = ffi_data.iter().flat_map(|c| [c.re, c.im]).collect();
+                MatrixBuffer::F64(v)
+            }
+        }
+    }
+
     fn as_ptr(&self) -> *const c_void {
         match self {
             MatrixBuffer::F32(v) => v.as_ptr().cast(),
@@ -222,117 +214,106 @@ impl MatrixBuffer {
     }
 }
 
-fn build_matrix_buffer(kernel: &RustJittedKernel) -> MatrixBuffer {
-    if !matches!(kernel.mode, MatrixLoadMode::StackLoad) || kernel.matrix.is_empty() {
-        return MatrixBuffer::Empty;
-    }
-    match kernel.precision {
-        Precision::F32 => {
-            let v: Vec<f32> = kernel
-                .matrix
-                .iter()
-                .flat_map(|c| [c.re as f32, c.im as f32])
-                .collect();
-            MatrixBuffer::F32(v)
-        }
-        Precision::F64 => {
-            let v: Vec<f64> = kernel.matrix.iter().flat_map(|c| [c.re, c.im]).collect();
-            MatrixBuffer::F64(v)
-        }
-    }
+// ── RustJittedKernel ──────────────────────────────────────────────────────────
+
+/// Rust-owned data for a single compiled kernel.
+/// The `func` pointer is valid for the lifetime of the owning `KernelEntry`
+/// (the C++ LLJIT session inside the entry keeps the code pages alive).
+struct RustJittedKernel {
+    func: unsafe extern "C" fn(*mut c_void),
+    precision: Precision,
+    simd_width: SimdWidth,
+    n_gate_qubits: u32,
+    /// Pre-built matrix buffer for StackLoad dispatch (Empty for ImmValue).
+    matrix_buf: MatrixBuffer,
+    /// Some only if `request_asm` was called before JIT compilation.
+    asm_text: Option<String>,
 }
 
-/// Applies a single JIT-compiled kernel to `statevector` in-place using a thread pool.
-///
-/// `n_threads`: number of worker threads. Pass `0` to use the hardware thread count.
-///
-/// The kernel's precision and SIMD width must match those of the statevector, and the
-/// statevector must have at least `n_gate_qubits + simd_s` qubits.
-fn apply_kernel(
-    kernel: &RustJittedKernel,
-    statevector: &mut CPUStatevector,
-    n_threads: u32,
-) -> anyhow::Result<()> {
-    if statevector.precision() as u32 != kernel.precision as u32 {
-        return Err(anyhow::anyhow!(
-            "statevector precision does not match kernel"
-        ));
-    }
-    if statevector.simd_width() as u32 != kernel.simd_width as u32 {
-        return Err(anyhow::anyhow!(
-            "statevector SIMD width does not match kernel"
-        ));
-    }
-
-    let n_qubits = statevector.n_qubits();
-    let simd_s = get_simd_s(kernel.simd_width, kernel.precision);
-    let n_task_bits = n_qubits
-        .checked_sub(kernel.n_gate_qubits + simd_s)
-        .ok_or_else(|| anyhow::anyhow!("statevector has too few qubits for this kernel"))?;
-
-    let n_tasks: u64 = 1 << n_task_bits;
-    let n_threads = if n_threads == 0 {
-        super::get_num_threads()
-    } else {
-        n_threads
-    };
-    // Clamp so every thread gets at least one task.
-    let n_threads = (n_threads as u64).min(n_tasks).max(1) as u32;
-    let n_tasks_per_thread = n_tasks / n_threads as u64;
-
-    log::debug!(
-        "cpu: apply kernel ({} gate qubits, {} tasks, {} thread(s))",
-        kernel.n_gate_qubits,
-        n_tasks,
-        n_threads,
-    );
-
-    let matrix_buf = build_matrix_buffer(kernel);
-
-    let entry = kernel.entry;
-    let sv_addr = statevector.raw_mut_ptr() as usize;
-    let p_mat_addr = matrix_buf.as_ptr() as usize;
-
-    // SAFETY:
-    // - `entry` is a valid JIT-compiled function pointer backed by the LLJIT that owns
-    //   the code pages (the caller must ensure the owning session/manager is alive).
-    // - `sv_addr` points to a valid, aligned statevector buffer with the correct precision
-    //   and SIMD width; the `&mut statevector` borrow ensures exclusive access.
-    // - Each thread receives a disjoint `[ctr_begin, ctr_end)` counter range, so there are
-    //   no data races on the statevector buffer.
-    // - `p_mat_addr` is either null (ImmValue) or points to `matrix_buf` which lives for
-    //   the duration of the `thread::scope` call.
-    std::thread::scope(|s| {
-        for i in 0..n_threads {
-            let ctr_begin = n_tasks_per_thread * i as u64;
-            let ctr_end = if i + 1 == n_threads {
-                n_tasks
-            } else {
-                n_tasks_per_thread * (i as u64 + 1)
-            };
-            s.spawn(move || {
-                let mut args = CastCpuLaunchArgs {
-                    sv: sv_addr as *mut c_void,
-                    ctr_begin,
-                    ctr_end,
-                    p_mat: p_mat_addr as *mut c_void,
-                };
-                unsafe { entry(&mut args as *mut CastCpuLaunchArgs as *mut c_void) };
-            });
+impl RustJittedKernel {
+    /// Applies a single JIT-compiled kernel to `statevector` in-place using a thread pool.
+    ///
+    /// `n_threads`: number of worker threads. Pass `0` to use the hardware thread count.
+    ///
+    /// The kernel's precision and SIMD width must match those of the statevector, and the
+    /// statevector must have at least `n_gate_qubits + simd_s` qubits.
+    fn apply_kernel(&self, statevector: &mut CPUStatevector, n_threads: u32) -> anyhow::Result<()> {
+        if statevector.precision() != self.precision {
+            return Err(anyhow::anyhow!(
+                "statevector precision does not match kernel"
+            ));
         }
-    });
+        if statevector.simd_width() != self.simd_width {
+            return Err(anyhow::anyhow!(
+                "statevector SIMD width does not match kernel"
+            ));
+        }
 
-    Ok(())
+        let n_qubits = statevector.n_qubits();
+        let simd_s = get_simd_s(self.simd_width, self.precision);
+        let n_task_bits = n_qubits
+            .checked_sub(self.n_gate_qubits + simd_s)
+            .ok_or_else(|| anyhow::anyhow!("statevector has too few qubits for this kernel"))?;
+
+        let n_tasks: u64 = 1 << n_task_bits;
+        let n_threads = if n_threads == 0 {
+            super::get_num_threads()
+        } else {
+            n_threads
+        };
+        // Clamp so every thread gets at least one task.
+        let n_threads = (n_threads as u64).min(n_tasks).max(1) as u32;
+        let n_tasks_per_thread = n_tasks / n_threads as u64;
+
+        log::debug!(
+            "cpu: apply kernel ({} gate qubits, {} tasks, {} thread(s))",
+            self.n_gate_qubits,
+            n_tasks,
+            n_threads,
+        );
+
+        let entry = self.func;
+        let sv_addr = statevector.raw_mut_ptr() as usize;
+        let p_mat_addr = self.matrix_buf.as_ptr() as usize;
+
+        // SAFETY:
+        // - `entry` is a valid JIT-compiled function pointer backed by the LLJIT that owns
+        //   the code pages (the caller must ensure the owning session/manager is alive).
+        // - `sv_addr` points to a valid, aligned statevector buffer with the correct precision
+        //   and SIMD width; the `&mut statevector` borrow ensures exclusive access.
+        // - Each thread receives a disjoint `[ctr_begin, ctr_end)` counter range, so there are
+        //   no data races on the statevector buffer.
+        // - `p_mat_addr` is either null (ImmValue) or points to `self.matrix_buf` which lives
+        //   for the lifetime of the kernel entry.
+        std::thread::scope(|s| {
+            for i in 0..n_threads {
+                let ctr_begin = n_tasks_per_thread * i as u64;
+                let ctr_end = if i + 1 == n_threads {
+                    n_tasks
+                } else {
+                    n_tasks_per_thread * (i as u64 + 1)
+                };
+                s.spawn(move || {
+                    let mut args = CpuLaunchArgs {
+                        sv: sv_addr as *mut c_void,
+                        ctr_begin,
+                        ctr_end,
+                        p_mat: p_mat_addr as *mut c_void,
+                    };
+                    unsafe { entry(&mut args as *mut CpuLaunchArgs as *mut c_void) };
+                });
+            }
+        });
+
+        Ok(())
+    }
 }
 
 // ── FFI helpers ───────────────────────────────────────────────────────────
 
 /// Runs O1 optimisation on the kernel and returns the LLVM IR text (two-call
 /// pattern: first call queries length, second fills the buffer).
-fn ffi_emit_ir(
-    gen: *mut ffi::CastCpuKernelGenerator,
-    kernel_id: KernelId,
-) -> anyhow::Result<String> {
+fn ffi_emit_ir(gen: *mut ffi::KernelGenerator, kernel_id: KernelId) -> anyhow::Result<String> {
     let mut err_buf = [0 as c_char; ERR_BUF_LEN];
 
     let mut ir_len: usize = 0;
@@ -380,7 +361,7 @@ fn ffi_emit_ir(
 struct KernelEntry {
     /// C++ LLJIT session; keeps the JIT-compiled code pages alive.
     /// Destroyed via `cast_cpu_jit_session_delete` on drop.
-    jit_session: NonNull<ffi::CastCpuJitSession>,
+    jit_session: NonNull<ffi::JitSession>,
     /// Compiled kernel data (entry pointer, matrix, metadata).
     kernel: RustJittedKernel,
     /// Cached LLVM IR text (only if generated with diagnostics).
@@ -408,7 +389,7 @@ struct CpuManagerInner {
 ///
 /// ```ignore
 /// let mgr = CpuKernelManager::new();
-/// let kid = mgr.generate(&spec, gate.matrix().data(), gate.qubits())?;
+/// let kid = mgr.generate(&spec, &gate)?;
 /// mgr.apply(kid, &mut statevector, n_threads)?;
 /// ```
 ///
@@ -420,19 +401,6 @@ struct CpuManagerInner {
 /// [`apply`](Self::apply) dispatches work across a thread pool synchronously.
 pub struct CpuKernelManager {
     inner: std::sync::Mutex<CpuManagerInner>,
-}
-
-impl fmt::Debug for CpuKernelManager {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let n = self
-            .inner
-            .lock()
-            .map(|g| g.entries.len())
-            .unwrap_or(0);
-        f.debug_struct("CpuKernelManager")
-            .field("n_kernels", &n)
-            .finish_non_exhaustive()
-    }
 }
 
 impl Default for CpuKernelManager {
@@ -456,25 +424,33 @@ impl CpuKernelManager {
     ///
     /// Runs the full LLVM pipeline on the calling thread, then briefly locks
     /// to store the result. Multiple threads may call `generate` concurrently.
+    ///
+    /// To inspect the optimised LLVM IR or native assembly after compilation,
+    /// use [`generate_with_diagnostics`](Self::generate_with_diagnostics)
+    /// instead.
     pub fn generate(
         &self,
         spec: &CPUKernelGenSpec,
-        matrix: &[Complex],
-        qubits: &[u32],
+        gate: &QuantumGate,
     ) -> anyhow::Result<KernelId> {
-        self.generate_inner(spec, matrix, qubits, false)
+        self.generate_inner(spec, gate.matrix().data(), gate.qubits(), false, false)
     }
 
-    /// Like [`generate`](Self::generate), but also captures LLVM IR and
-    /// native assembly for later retrieval via [`emit_ir`](Self::emit_ir)
-    /// and [`emit_asm`](Self::emit_asm).
+    /// Like [`generate`](Self::generate), but also captures diagnostics for
+    /// later retrieval.
+    ///
+    /// - `request_llvm_ir`: if `true`, the optimised LLVM IR text is captured
+    ///   and can be retrieved via [`emit_ir`](Self::emit_ir).
+    /// - `request_asm`: if `true`, native assembly is captured and can be
+    ///   retrieved via [`emit_asm`](Self::emit_asm).
     pub fn generate_with_diagnostics(
         &self,
         spec: &CPUKernelGenSpec,
-        matrix: &[Complex],
-        qubits: &[u32],
+        gate: &QuantumGate,
+        request_llvm_ir: bool,
+        request_asm: bool,
     ) -> anyhow::Result<KernelId> {
-        self.generate_inner(spec, matrix, qubits, true)
+        self.generate_inner(spec, gate.matrix().data(), gate.qubits(), request_llvm_ir, request_asm)
     }
 
     fn generate_inner(
@@ -482,7 +458,8 @@ impl CpuKernelManager {
         spec: &CPUKernelGenSpec,
         matrix: &[Complex],
         qubits: &[u32],
-        diagnostics: bool,
+        request_llvm_ir: bool,
+        request_asm: bool,
     ) -> anyhow::Result<KernelId> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
 
@@ -492,9 +469,9 @@ impl CpuKernelManager {
             .ok_or_else(|| anyhow::anyhow!("failed to create CPU kernel generator"))?;
 
         // ── Generate LLVM IR for the gate ─────────────────────────────────
-        let ffi_matrix: Vec<ffi::FfiComplex64> = matrix
+        let ffi_matrix: Vec<ffi::c64> = matrix
             .iter()
-            .map(|c| ffi::FfiComplex64 { re: c.re, im: c.im })
+            .map(|c| ffi::c64 { re: c.re, im: c.im })
             .collect();
 
         let mut raw_kid: KernelId = 0;
@@ -517,12 +494,12 @@ impl CpuKernelManager {
         }
 
         // ── Diagnostics (IR + asm capture) ────────────────────────────────
-        let ir_text = if diagnostics {
+        let ir_text = if request_llvm_ir {
             Some(ffi_emit_ir(raw_gen.as_ptr(), raw_kid)?)
         } else {
             None
         };
-        if diagnostics {
+        if request_asm {
             let status = unsafe {
                 ffi::cast_cpu_kernel_generator_request_asm(
                     raw_gen.as_ptr(),
@@ -542,8 +519,8 @@ impl CpuKernelManager {
         // generator is left intact — but we give up ownership either way
         // to avoid a double-free, so we do NOT call generator_delete after
         // this point regardless of the outcome.
-        let mut raw_session: *mut ffi::CastCpuJitSession = std::ptr::null_mut();
-        let mut raw_records: *mut ffi::FfiKernelRecord = std::ptr::null_mut();
+        let mut raw_session: *mut ffi::JitSession = std::ptr::null_mut();
+        let mut raw_records: *mut ffi::KernelRecord = std::ptr::null_mut();
         let mut n_records: usize = 0;
 
         let status = unsafe {
@@ -589,13 +566,17 @@ impl CpuKernelManager {
             )
         };
 
+        let matrix_buf = MatrixBuffer::from_ffi(
+            record.metadata.mode,
+            record.metadata.precision,
+            &matrix_data,
+        );
         let kernel = RustJittedKernel {
-            entry: entry_fn,
+            func: entry_fn,
             precision: record.metadata.precision,
             simd_width: record.metadata.simd_width,
-            mode: record.metadata.mode,
             n_gate_qubits: record.metadata.n_gate_qubits,
-            matrix: matrix_data,
+            matrix_buf,
             asm_text,
         };
 
@@ -651,76 +632,24 @@ impl CpuKernelManager {
             .entries
             .get(&id)
             .ok_or_else(|| anyhow::anyhow!("kernel id {} not found", id))?;
-        apply_kernel(&entry.kernel, statevector, n_threads)
+        entry.kernel.apply_kernel(statevector, n_threads)
     }
 
     /// Times a kernel adaptively within `budget_s` seconds.
     ///
-    /// A single probe run starts the clock and estimates per-iteration cost.
-    /// If that one run already exceeds `1.5 × budget_s`, it is returned as the
-    /// sole sample. Otherwise the budget is split: ~1/4 for warmup, ~3/4 for
-    /// timed measurements.
+    /// Delegates to [`crate::timing::time_adaptive`]; see that function for
+    /// details on the warmup / measurement budget split.
     pub fn time_adaptive(
         &self,
         id: KernelId,
         statevector: &mut CPUStatevector,
         n_threads: u32,
         budget_s: f64,
-    ) -> anyhow::Result<TimingStats> {
-        const WARMUP_FRACTION: f64 = 0.25;
-        const OVER_BUDGET_FACTOR: f64 = 1.5;
-
-        // Phase 1: single probe — warmup and cost estimate.
-        let t_start = Instant::now();
-        let t = Instant::now();
-        self.apply(id, statevector, n_threads)?;
-        let probe_time = t.elapsed().as_secs_f64();
-        let est_per_iter = probe_time.max(1e-9);
-
-        if probe_time > budget_s * OVER_BUDGET_FACTOR {
-            return Ok(TimingStats {
-                n_iters: 1,
-                mean_s: probe_time,
-                stddev_s: 0.0,
-                cv: 0.0,
-                min_s: probe_time,
-                max_s: probe_time,
-            });
-        }
-
-        // Phase 2: fill remaining warmup budget with un-timed iterations.
-        let warmup_budget = budget_s * WARMUP_FRACTION;
-        let remaining_warmup = (warmup_budget - probe_time).max(0.0);
-        let n_extra_warmup = (remaining_warmup / est_per_iter) as u32;
-        for _ in 0..n_extra_warmup {
-            self.apply(id, statevector, n_threads)?;
-        }
-
-        // Phase 3: timed measurements over the remaining ~3/4 of budget.
-        let elapsed = t_start.elapsed().as_secs_f64();
-        let remaining = (budget_s - elapsed).max(0.0);
-        let n_timed = ((remaining / est_per_iter) as u32).max(1);
-        let mut samples: Vec<f64> = Vec::with_capacity(n_timed as usize);
-        for _ in 0..n_timed {
-            let t = Instant::now();
-            self.apply(id, statevector, n_threads)?;
-            samples.push(t.elapsed().as_secs_f64());
-        }
-
-        let n = samples.len() as f64;
-        let mean = samples.iter().copied().sum::<f64>() / n;
-        let var = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / n;
-        let stddev = var.sqrt();
-        let min = samples.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-        Ok(TimingStats {
-            n_iters: samples.len(),
-            mean_s: mean,
-            stddev_s: stddev,
-            cv: stddev / mean,
-            min_s: min,
-            max_s: max,
-        })
+    ) -> anyhow::Result<crate::timing::TimingStats> {
+        crate::timing::time_adaptive(
+            || self.apply(id, statevector, n_threads),
+            budget_s,
+        )
     }
 }
 

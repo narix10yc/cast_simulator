@@ -22,7 +22,7 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use cast::{
     cost_model::FusionConfig,
-    cpu::{CPUKernelGenSpec, CpuKernelManager, CPUStatevector, MatrixLoadMode, SimdWidth},
+    cpu::{CPUKernelGenSpec, CPUStatevector, CpuKernelManager, MatrixLoadMode, SimdWidth},
     cuda::{device_sm, CudaKernelGenSpec, CudaKernelManager, CudaPrecision, CudaStatevector},
     fusion,
     types::{Complex, ComplexSquareMatrix, Precision, QuantumGate},
@@ -117,7 +117,7 @@ fn run_cpu(gates: &[QuantumGate], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f6
     let kids: Vec<_> = gates
         .iter()
         .map(|g| {
-            mgr.generate(&spec, g.matrix().data(), g.qubits())
+            mgr.generate(&spec, g)
                 .expect("cpu: generate")
         })
         .collect();
@@ -271,7 +271,9 @@ fn lru_repeating_3kernel_pattern_12q() {
     let cpu_mgr = CpuKernelManager::new();
     let cpu_kids: Vec<_> = gates
         .iter()
-        .map(|g| cpu_mgr.generate(&spec, g.matrix().data(), g.qubits()).unwrap())
+        .map(|g| {
+            cpu_mgr.generate(&spec, g).unwrap()
+        })
         .collect();
     let mut cpu_sv = CPUStatevector::new(n, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {

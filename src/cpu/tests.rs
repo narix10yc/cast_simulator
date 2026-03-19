@@ -51,7 +51,7 @@ mod tests {
     ) {
         let mgr = CpuKernelManager::new();
         let kernel_id = mgr
-            .generate(&spec, gate.matrix().data(), gate.qubits())
+            .generate(&spec, gate)
             .expect("generate kernel");
 
         let mut sv_jit = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
@@ -141,7 +141,7 @@ mod tests {
         let mut kernel_ids = Vec::with_capacity(gates.len());
         for gate in &gates {
             let kernel_id = mgr
-                .generate(&spec, gate.matrix().data(), gate.qubits())
+                .generate(&spec, gate)
                 .expect("generate kernel");
             kernel_ids.push(kernel_id);
         }
@@ -201,22 +201,19 @@ mod tests {
         let gate = QuantumGate::h(0);
         let mgr = CpuKernelManager::new();
         let kernel_id = mgr
-            .generate(
-                &CPUKernelGenSpec::f64(),
-                gate.matrix().data(),
-                gate.qubits(),
-            )
+            .generate(&CPUKernelGenSpec::f64(), &gate)
             .expect("generate kernel");
 
-        let mut sv = CPUStatevector::new(2, Precision::F64, SimdWidth::W128);
+        let mut sv = CPUStatevector::new(3, Precision::F64, SimdWidth::W256);
         sv.initialize();
         mgr.apply(kernel_id, &mut sv, 1).expect("apply kernel");
 
         let expected = std::f64::consts::FRAC_1_SQRT_2;
         assert!((sv.amp(0) - Complex::new(expected, 0.0)).norm() < 1e-10);
         assert!((sv.amp(1) - Complex::new(expected, 0.0)).norm() < 1e-10);
-        assert!((sv.amp(2) - Complex::new(0.0, 0.0)).norm() < 1e-10);
-        assert!((sv.amp(3) - Complex::new(0.0, 0.0)).norm() < 1e-10);
+        for idx in 2..sv.len() {
+            assert!((sv.amp(idx) - Complex::new(0.0, 0.0)).norm() < 1e-10);
+        }
         assert!((sv.norm() - 1.0).abs() < 1e-10);
     }
 
@@ -301,15 +298,14 @@ mod tests {
 
         let mgr = CpuKernelManager::new();
         let kid_imm = mgr
-            .generate(&spec_imm, gate.matrix().data(), gate.qubits())
+            .generate(&spec_imm, &gate)
             .expect("generate imm kernel");
         mgr.apply(kid_imm, &mut sv_imm, 1).expect("apply imm");
 
         let kid_stack = mgr
-            .generate(&spec_stack, gate.matrix().data(), gate.qubits())
+            .generate(&spec_stack, &gate)
             .expect("generate stack kernel");
-        mgr.apply(kid_stack, &mut sv_stack, 1)
-            .expect("apply stack");
+        mgr.apply(kid_stack, &mut sv_stack, 1).expect("apply stack");
 
         assert_statevectors_close(&sv_imm, &sv_stack, tol);
     }
@@ -387,10 +383,10 @@ mod tests {
 
         let mgr = CpuKernelManager::new();
         let kid_h = mgr
-            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .generate(&spec, &h_gate)
             .expect("generate H kernel");
         let kid_cx = mgr
-            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .generate(&spec, &cx_gate)
             .expect("generate CX kernel");
 
         let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
@@ -414,8 +410,8 @@ mod tests {
         let kid = mgr
             .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
-                QuantumGate::h(0).matrix().data(),
-                QuantumGate::h(0).qubits(),
+                &QuantumGate::h(0),
+                true, false,
             )
             .expect("generate kernel");
 
@@ -435,8 +431,8 @@ mod tests {
         let kid = mgr
             .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
-                QuantumGate::x(0).matrix().data(),
-                QuantumGate::x(0).qubits(),
+                &QuantumGate::x(0),
+                true, false,
             )
             .expect("generate kernel");
 
@@ -454,7 +450,7 @@ mod tests {
 
         let mgr = CpuKernelManager::new();
         let kid = mgr
-            .generate_with_diagnostics(&spec, gate.matrix().data(), gate.qubits())
+            .generate_with_diagnostics(&spec, &gate, true, false)
             .expect("generate kernel");
 
         let ir = mgr.emit_ir(kid).expect("emit_ir should be Some");
@@ -477,10 +473,10 @@ mod tests {
 
         let mgr = CpuKernelManager::new();
         let kid_h = mgr
-            .generate_with_diagnostics(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .generate_with_diagnostics(&spec, &h_gate, true, false)
             .expect("H kernel");
         let kid_cx = mgr
-            .generate_with_diagnostics(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .generate_with_diagnostics(&spec, &cx_gate, true, false)
             .expect("CX kernel");
 
         let ir_h = mgr.emit_ir(kid_h).expect("H IR");
@@ -495,29 +491,34 @@ mod tests {
         let kid = mgr
             .generate(
                 &default_spec(Precision::F64, SimdWidth::W128),
-                QuantumGate::h(0).matrix().data(),
-                QuantumGate::h(0).qubits(),
+                &QuantumGate::h(0),
             )
             .expect("generate kernel");
-        assert!(mgr.emit_ir(kid).is_none(), "IR should be None without diagnostics");
+        assert!(
+            mgr.emit_ir(kid).is_none(),
+            "IR should be None without diagnostics"
+        );
     }
 
     #[test]
     fn emit_ir_returns_none_for_unknown_kernel_id() {
         let mgr = CpuKernelManager::new();
-        assert!(mgr.emit_ir(9999).is_none(), "unknown kernel_id should return None");
+        assert!(
+            mgr.emit_ir(9999).is_none(),
+            "unknown kernel_id should return None"
+        );
     }
 
     // ── emit_asm ──────────────────────────────────────────────────────────────
 
-    fn compile_h_manager_with_diagnostics() -> (CpuKernelManager, KernelId) {
+    fn compile_h_manager_with_asm() -> (CpuKernelManager, KernelId) {
         let gate = QuantumGate::h(0);
         let mgr = CpuKernelManager::new();
         let kid = mgr
             .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
-                gate.matrix().data(),
-                gate.qubits(),
+                &gate,
+                false, true,
             )
             .expect("generate kernel");
         (mgr, kid)
@@ -525,21 +526,21 @@ mod tests {
 
     #[test]
     fn emit_asm_returns_nonempty_text() {
-        let (mgr, kid) = compile_h_manager_with_diagnostics();
+        let (mgr, kid) = compile_h_manager_with_asm();
         let asm = mgr.emit_asm(kid).expect("emit_asm should be Some");
         assert!(!asm.is_empty(), "assembly should not be empty");
     }
 
     #[test]
     fn emit_asm_is_ascii() {
-        let (mgr, kid) = compile_h_manager_with_diagnostics();
+        let (mgr, kid) = compile_h_manager_with_asm();
         let asm = mgr.emit_asm(kid).expect("emit_asm should be Some");
         assert!(asm.is_ascii(), "assembly should be ASCII text");
     }
 
     #[test]
     fn emit_asm_is_idempotent() {
-        let (mgr, kid) = compile_h_manager_with_diagnostics();
+        let (mgr, kid) = compile_h_manager_with_asm();
         let first = mgr.emit_asm(kid).expect("first emit_asm");
         let second = mgr.emit_asm(kid).expect("second emit_asm");
         assert_eq!(first, second);
@@ -553,10 +554,10 @@ mod tests {
 
         let mgr = CpuKernelManager::new();
         let kid_h = mgr
-            .generate_with_diagnostics(&spec, h_gate.matrix().data(), h_gate.qubits())
+            .generate_with_diagnostics(&spec, &h_gate, false, true)
             .expect("H kernel");
         let kid_cx = mgr
-            .generate_with_diagnostics(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+            .generate_with_diagnostics(&spec, &cx_gate, false, true)
             .expect("CX kernel");
 
         let asm_h = mgr.emit_asm(kid_h).expect("H asm");
@@ -574,7 +575,7 @@ mod tests {
 
         let mgr = CpuKernelManager::new();
         let kid = mgr
-            .generate_with_diagnostics(&spec, gate.matrix().data(), gate.qubits())
+            .generate_with_diagnostics(&spec, &gate, true, true)
             .expect("generate");
         let ir = mgr.emit_ir(kid).expect("emit_ir should be Some");
         let asm = mgr.emit_asm(kid).expect("emit_asm should be Some");
@@ -592,11 +593,7 @@ mod tests {
         let gate = QuantumGate::h(0);
         let mgr = CpuKernelManager::new();
         let kid = mgr
-            .generate(
-                &default_spec(Precision::F64, SimdWidth::W128),
-                gate.matrix().data(),
-                gate.qubits(),
-            )
+            .generate(&default_spec(Precision::F64, SimdWidth::W128), &gate)
             .expect("generate kernel");
         assert!(
             mgr.emit_asm(kid).is_none(),
