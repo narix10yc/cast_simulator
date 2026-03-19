@@ -18,6 +18,8 @@ use crate::types::QuantumGate;
 /// Owned by [`CudaKernelManager`]; obtained via [`CudaKernelManager::generate`].
 /// CUDA module handles are not stored here — they live in the manager's LRU cache.
 pub struct CudaKernel {
+    /// The source gate this kernel was compiled from.
+    gate: Arc<QuantumGate>,
     n_gate_qubits: u32,
     precision: CudaPrecision,
     /// PTX assembly text produced by the LLVM NVPTX backend.
@@ -38,6 +40,11 @@ pub struct CudaKernel {
 }
 
 impl CudaKernel {
+    /// Returns the source gate this kernel was compiled from.
+    pub fn gate(&self) -> &Arc<QuantumGate> {
+        &self.gate
+    }
+
     /// Returns the number of qubits in the gate this kernel implements.
     pub fn n_gate_qubits(&self) -> u32 {
         self.n_gate_qubits
@@ -430,12 +437,18 @@ pub struct SyncStats {
 /// # Workflow
 ///
 /// ```ignore
+/// use std::sync::Arc;
+///
 /// let mgr = CudaKernelManager::new();
+/// let gate = Arc::new(QuantumGate::h(0));
 /// let kid = mgr.generate(&gate, spec)?;   // LLVM IR → PTX (→ cubin with cuda feature)
 /// mgr.apply(kid, &mut statevector)?;      // queue for launch (non-blocking)
 /// mgr.sync()?;                            // flush queue, then wait for GPU
 /// let amps = statevector.download()?;
 /// ```
+///
+/// Each [`CudaKernel`] stores the source `Arc<QuantumGate>` alongside the
+/// compiled PTX/cubin, accessible via [`CudaKernel::gate`].
 ///
 /// `generate` can be called from multiple threads concurrently; each call runs
 /// the full LLVM pipeline independently before briefly locking to insert the result.
@@ -495,9 +508,10 @@ impl CudaKernelManager {
     /// the manager lock is only held briefly at the end to insert the result.
     pub fn generate(
         &self,
-        gate: &QuantumGate,
+        gate: &Arc<QuantumGate>,
         spec: CudaKernelGenSpec,
     ) -> anyhow::Result<CudaKernelId> {
+        let gate = gate.clone();
         let ffi_matrix: Vec<ffi::FfiComplex64> = gate
             .matrix()
             .data()
@@ -590,6 +604,7 @@ impl CudaKernelManager {
         };
 
         let kernel = Arc::new(CudaKernel {
+            gate,
             n_gate_qubits,
             precision,
             ptx,

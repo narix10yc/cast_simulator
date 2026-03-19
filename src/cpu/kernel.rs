@@ -7,11 +7,12 @@
 //!    [`CpuKernelManager::apply`].
 
 use super::*;
-use crate::types::{Complex, Precision, QuantumGate};
+use crate::types::{Precision, QuantumGate};
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::ptr::NonNull;
+use std::sync::Arc;
 
 /// Configuration passed to the kernel generator for each gate.
 #[repr(C)]
@@ -175,7 +176,7 @@ struct CpuLaunchArgs {
     p_mat: *mut c_void,
 }
 
-// ── RustJittedKernel ──────────────────────────────────────────────────────────
+// ── MatrixBuffer ─────────────────────────────────────────────────────────────
 
 /// Typed matrix buffer for StackLoad dispatch; ensures correct scalar alignment.
 /// Built once at kernel construction time and reused across all `apply` calls.
@@ -211,101 +212,6 @@ impl MatrixBuffer {
             MatrixBuffer::F64(v) => v.as_ptr().cast(),
             MatrixBuffer::Empty => std::ptr::null(),
         }
-    }
-}
-
-// ── RustJittedKernel ──────────────────────────────────────────────────────────
-
-/// Rust-owned data for a single compiled kernel.
-/// The `func` pointer is valid for the lifetime of the owning `KernelEntry`
-/// (the C++ LLJIT session inside the entry keeps the code pages alive).
-struct RustJittedKernel {
-    func: unsafe extern "C" fn(*mut c_void),
-    precision: Precision,
-    simd_width: SimdWidth,
-    n_gate_qubits: u32,
-    /// Pre-built matrix buffer for StackLoad dispatch (Empty for ImmValue).
-    matrix_buf: MatrixBuffer,
-    /// Some only if `request_asm` was called before JIT compilation.
-    asm_text: Option<String>,
-}
-
-impl RustJittedKernel {
-    /// Applies a single JIT-compiled kernel to `statevector` in-place using a thread pool.
-    ///
-    /// `n_threads`: number of worker threads. Pass `0` to use the hardware thread count.
-    ///
-    /// The kernel's precision and SIMD width must match those of the statevector, and the
-    /// statevector must have at least `n_gate_qubits + simd_s` qubits.
-    fn apply_kernel(&self, statevector: &mut CPUStatevector, n_threads: u32) -> anyhow::Result<()> {
-        if statevector.precision() != self.precision {
-            return Err(anyhow::anyhow!(
-                "statevector precision does not match kernel"
-            ));
-        }
-        if statevector.simd_width() != self.simd_width {
-            return Err(anyhow::anyhow!(
-                "statevector SIMD width does not match kernel"
-            ));
-        }
-
-        let n_qubits = statevector.n_qubits();
-        let simd_s = get_simd_s(self.simd_width, self.precision);
-        let n_task_bits = n_qubits
-            .checked_sub(self.n_gate_qubits + simd_s)
-            .ok_or_else(|| anyhow::anyhow!("statevector has too few qubits for this kernel"))?;
-
-        let n_tasks: u64 = 1 << n_task_bits;
-        let n_threads = if n_threads == 0 {
-            super::get_num_threads()
-        } else {
-            n_threads
-        };
-        // Clamp so every thread gets at least one task.
-        let n_threads = (n_threads as u64).min(n_tasks).max(1) as u32;
-        let n_tasks_per_thread = n_tasks / n_threads as u64;
-
-        log::debug!(
-            "cpu: apply kernel ({} gate qubits, {} tasks, {} thread(s))",
-            self.n_gate_qubits,
-            n_tasks,
-            n_threads,
-        );
-
-        let entry = self.func;
-        let sv_addr = statevector.raw_mut_ptr() as usize;
-        let p_mat_addr = self.matrix_buf.as_ptr() as usize;
-
-        // SAFETY:
-        // - `entry` is a valid JIT-compiled function pointer backed by the LLJIT that owns
-        //   the code pages (the caller must ensure the owning session/manager is alive).
-        // - `sv_addr` points to a valid, aligned statevector buffer with the correct precision
-        //   and SIMD width; the `&mut statevector` borrow ensures exclusive access.
-        // - Each thread receives a disjoint `[ctr_begin, ctr_end)` counter range, so there are
-        //   no data races on the statevector buffer.
-        // - `p_mat_addr` is either null (ImmValue) or points to `self.matrix_buf` which lives
-        //   for the lifetime of the kernel entry.
-        std::thread::scope(|s| {
-            for i in 0..n_threads {
-                let ctr_begin = n_tasks_per_thread * i as u64;
-                let ctr_end = if i + 1 == n_threads {
-                    n_tasks
-                } else {
-                    n_tasks_per_thread * (i as u64 + 1)
-                };
-                s.spawn(move || {
-                    let mut args = CpuLaunchArgs {
-                        sv: sv_addr as *mut c_void,
-                        ctr_begin,
-                        ctr_end,
-                        p_mat: p_mat_addr as *mut c_void,
-                    };
-                    unsafe { entry(&mut args as *mut CpuLaunchArgs as *mut c_void) };
-                });
-            }
-        });
-
-        Ok(())
     }
 }
 
@@ -354,18 +260,99 @@ fn ffi_emit_ir(gen: *mut ffi::KernelGenerator, kernel_id: KernelId) -> anyhow::R
 
 // ── CpuKernelManager ──────────────────────────────────────────────────────
 
-/// A single kernel entry owned by the manager.
+/// A single compiled kernel owned by the manager.
 ///
-/// Holds the LLJIT session pointer (to keep the compiled code pages alive)
-/// alongside the Rust-owned kernel data needed for dispatch.
+/// Holds the LLJIT session pointer (to keep the compiled code pages alive),
+/// the JIT-compiled function pointer, the source gate, and optional
+/// diagnostics (LLVM IR / native assembly text).
 struct KernelEntry {
     /// C++ LLJIT session; keeps the JIT-compiled code pages alive.
     /// Destroyed via `cast_cpu_jit_session_delete` on drop.
     jit_session: NonNull<ffi::JitSession>,
-    /// Compiled kernel data (entry pointer, matrix, metadata).
-    kernel: RustJittedKernel,
+    /// The source gate this kernel was compiled from.  Also used to query
+    /// `n_gate_qubits` at apply time (avoids storing a redundant copy).
+    gate: Arc<QuantumGate>,
+    /// JIT-compiled entry point.
+    func: unsafe extern "C" fn(*mut c_void),
+    precision: Precision,
+    simd_width: SimdWidth,
+    /// Pre-built matrix buffer for StackLoad dispatch (Empty for ImmValue).
+    matrix_buf: MatrixBuffer,
     /// Cached LLVM IR text (only if generated with diagnostics).
     ir_text: Option<String>,
+    /// Cached native assembly text (only if generated with diagnostics).
+    asm_text: Option<String>,
+}
+
+impl KernelEntry {
+    /// Applies this kernel to `statevector` in-place using a thread pool.
+    fn apply_kernel(&self, statevector: &mut CPUStatevector, n_threads: u32) -> anyhow::Result<()> {
+        if statevector.precision() != self.precision {
+            return Err(anyhow::anyhow!(
+                "statevector precision does not match kernel"
+            ));
+        }
+        if statevector.simd_width() != self.simd_width {
+            return Err(anyhow::anyhow!(
+                "statevector SIMD width does not match kernel"
+            ));
+        }
+
+        let n_gate_qubits = self.gate.n_qubits() as u32;
+        let n_qubits = statevector.n_qubits();
+        let simd_s = get_simd_s(self.simd_width, self.precision);
+        let n_task_bits = n_qubits
+            .checked_sub(n_gate_qubits + simd_s)
+            .ok_or_else(|| anyhow::anyhow!("statevector has too few qubits for this kernel"))?;
+
+        let n_tasks: u64 = 1 << n_task_bits;
+        let n_threads = if n_threads == 0 {
+            super::get_num_threads()
+        } else {
+            n_threads
+        };
+        let n_threads = (n_threads as u64).min(n_tasks).max(1) as u32;
+        let n_tasks_per_thread = n_tasks / n_threads as u64;
+
+        log::debug!(
+            "cpu: apply kernel ({} gate qubits, {} tasks, {} thread(s))",
+            n_gate_qubits,
+            n_tasks,
+            n_threads,
+        );
+
+        let entry = self.func;
+        let sv_addr = statevector.raw_mut_ptr() as usize;
+        let p_mat_addr = self.matrix_buf.as_ptr() as usize;
+
+        // SAFETY:
+        // - `entry` is a valid JIT-compiled function pointer backed by the LLJIT session.
+        // - `sv_addr` points to a valid, aligned statevector buffer; the `&mut` borrow
+        //   ensures exclusive access.
+        // - Each thread receives a disjoint `[ctr_begin, ctr_end)` counter range.
+        // - `p_mat_addr` is either null (ImmValue) or points to `self.matrix_buf`.
+        std::thread::scope(|s| {
+            for i in 0..n_threads {
+                let ctr_begin = n_tasks_per_thread * i as u64;
+                let ctr_end = if i + 1 == n_threads {
+                    n_tasks
+                } else {
+                    n_tasks_per_thread * (i as u64 + 1)
+                };
+                s.spawn(move || {
+                    let mut args = CpuLaunchArgs {
+                        sv: sv_addr as *mut c_void,
+                        ctr_begin,
+                        ctr_end,
+                        p_mat: p_mat_addr as *mut c_void,
+                    };
+                    unsafe { entry(&mut args as *mut CpuLaunchArgs as *mut c_void) };
+                });
+            }
+        });
+
+        Ok(())
+    }
 }
 
 impl Drop for KernelEntry {
@@ -388,16 +375,21 @@ struct CpuManagerInner {
 /// # Workflow
 ///
 /// ```ignore
+/// use std::sync::Arc;
+///
 /// let mgr = CpuKernelManager::new();
-/// let kid = mgr.generate(&spec, &gate)?;
+/// let gate = Arc::new(QuantumGate::h(0));
+/// let kid = mgr.generate(&spec, &gate)?;   // LLVM IR → O1 → native JIT
 /// mgr.apply(kid, &mut statevector, n_threads)?;
 /// ```
 ///
 /// Each [`generate`](Self::generate) call runs the full LLVM pipeline
-/// (IR generation → O1 optimisation → native JIT compilation) independently
-/// before briefly locking to insert the result. Multiple threads may call
-/// `generate` concurrently.
+/// independently before briefly locking to insert the result.  The compiled
+/// [`KernelEntry`] stores the source `Arc<QuantumGate>` alongside the
+/// JIT-compiled function pointer, so the gate can be inspected later via
+/// [`gate`](Self::gate).
 ///
+/// Multiple threads may call `generate` concurrently.
 /// [`apply`](Self::apply) dispatches work across a thread pool synchronously.
 pub struct CpuKernelManager {
     inner: std::sync::Mutex<CpuManagerInner>,
@@ -423,62 +415,55 @@ impl CpuKernelManager {
     /// Generates, optimises, and JIT-compiles a gate kernel.
     ///
     /// Runs the full LLVM pipeline on the calling thread, then briefly locks
-    /// to store the result. Multiple threads may call `generate` concurrently.
+    /// to store the result.  The `Arc<QuantumGate>` is cloned and stored
+    /// alongside the compiled code so the source gate remains accessible via
+    /// [`gate`](Self::gate).
     ///
-    /// To inspect the optimised LLVM IR or native assembly after compilation,
-    /// use [`generate_with_diagnostics`](Self::generate_with_diagnostics)
-    /// instead.
+    /// Multiple threads may call `generate` concurrently.
     pub fn generate(
         &self,
         spec: &CPUKernelGenSpec,
-        gate: &QuantumGate,
+        gate: &Arc<QuantumGate>,
     ) -> anyhow::Result<KernelId> {
-        self.generate_inner(spec, gate.matrix().data(), gate.qubits(), false, false)
+        self.generate_inner(spec, gate.clone(), false, false)
     }
 
-    /// Like [`generate`](Self::generate), but also captures diagnostics for
-    /// later retrieval.
+    /// Like [`generate`](Self::generate), but also captures diagnostics.
     ///
-    /// - `request_llvm_ir`: if `true`, the optimised LLVM IR text is captured
-    ///   and can be retrieved via [`emit_ir`](Self::emit_ir).
-    /// - `request_asm`: if `true`, native assembly is captured and can be
-    ///   retrieved via [`emit_asm`](Self::emit_asm).
+    /// - `request_llvm_ir`: capture optimised LLVM IR (retrieve via [`emit_ir`](Self::emit_ir)).
+    /// - `request_asm`: capture native assembly (retrieve via [`emit_asm`](Self::emit_asm)).
     pub fn generate_with_diagnostics(
         &self,
         spec: &CPUKernelGenSpec,
-        gate: &QuantumGate,
+        gate: &Arc<QuantumGate>,
         request_llvm_ir: bool,
         request_asm: bool,
     ) -> anyhow::Result<KernelId> {
-        self.generate_inner(
-            spec,
-            gate.matrix().data(),
-            gate.qubits(),
-            request_llvm_ir,
-            request_asm,
-        )
+        self.generate_inner(spec, gate.clone(), request_llvm_ir, request_asm)
     }
 
     fn generate_inner(
         &self,
         spec: &CPUKernelGenSpec,
-        matrix: &[Complex],
-        qubits: &[u32],
+        gate: Arc<QuantumGate>,
         request_llvm_ir: bool,
         request_asm: bool,
     ) -> anyhow::Result<KernelId> {
+        // Extract FFI data upfront so the borrow on `gate` is released
+        // before we move the Arc into KernelEntry.
+        let ffi_matrix: Vec<ffi::c64> = gate
+            .matrix()
+            .data()
+            .iter()
+            .map(|c| ffi::c64 { re: c.re, im: c.im })
+            .collect();
+        let qubits = gate.qubits().to_vec();
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
 
         // ── Create generator ──────────────────────────────────────────────
         let raw_gen = unsafe { ffi::cast_cpu_kernel_generator_new() };
         let raw_gen = NonNull::new(raw_gen)
             .ok_or_else(|| anyhow::anyhow!("failed to create CPU kernel generator"))?;
-
-        // ── Generate LLVM IR for the gate ─────────────────────────────────
-        let ffi_matrix: Vec<ffi::c64> = matrix
-            .iter()
-            .map(|c| ffi::c64 { re: c.re, im: c.im })
-            .collect();
 
         let mut raw_kid: KernelId = 0;
         let status = unsafe {
@@ -572,20 +557,9 @@ impl CpuKernelManager {
             )
         };
 
-        let matrix_buf = MatrixBuffer::from_ffi(
-            record.metadata.mode,
-            record.metadata.precision,
-            &matrix_data,
-        );
-        let kernel = RustJittedKernel {
-            func: entry_fn,
-            precision: record.metadata.precision,
-            simd_width: record.metadata.simd_width,
-            n_gate_qubits: record.metadata.n_gate_qubits,
-            matrix_buf,
-            asm_text,
-        };
-
+        let precision = record.metadata.precision;
+        let simd_width = record.metadata.simd_width;
+        let matrix_buf = MatrixBuffer::from_ffi(record.metadata.mode, precision, &matrix_data);
         unsafe { ffi::cast_cpu_jit_kernel_records_free(raw_records, n_records) };
 
         // ── Insert under lock (brief) ─────────────────────────────────────
@@ -596,8 +570,13 @@ impl CpuKernelManager {
             id,
             KernelEntry {
                 jit_session,
-                kernel,
+                gate,
+                func: entry_fn,
+                precision,
+                simd_width,
+                matrix_buf,
                 ir_text,
+                asm_text,
             },
         );
         log::info!(
@@ -620,7 +599,13 @@ impl CpuKernelManager {
     /// diagnostics.
     pub fn emit_asm(&self, id: KernelId) -> Option<String> {
         let guard = self.inner.lock().unwrap();
-        guard.entries.get(&id)?.kernel.asm_text.clone()
+        guard.entries.get(&id)?.asm_text.clone()
+    }
+
+    /// Returns the source gate for the kernel identified by `id`.
+    pub fn gate(&self, id: KernelId) -> Option<Arc<QuantumGate>> {
+        let guard = self.inner.lock().unwrap();
+        guard.entries.get(&id).map(|e| e.gate.clone())
     }
 
     /// Applies the kernel identified by `id` to `statevector` in-place.
@@ -638,7 +623,7 @@ impl CpuKernelManager {
             .entries
             .get(&id)
             .ok_or_else(|| anyhow::anyhow!("kernel id {} not found", id))?;
-        entry.kernel.apply_kernel(statevector, n_threads)
+        entry.apply_kernel(statevector, n_threads)
     }
 
     /// Times a kernel adaptively within `budget_s` seconds.

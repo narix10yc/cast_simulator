@@ -1,6 +1,7 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
-use crate::{cost_model::FusionConfig, CircuitGraph, GateId};
+use crate::{cost_model::FusionConfig, types::QuantumGate, CircuitGraph, GateId};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 1: size-2 canonicalization (unchanged)
@@ -40,7 +41,7 @@ fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> 
         None => return false,
     };
 
-    let gate = match cg.gate(gate_id) {
+    let gate = match cg.gate_arc(gate_id) {
         Some(gate) if gate.n_qubits() == 1 => gate.clone(),
         _ => return false,
     };
@@ -166,7 +167,7 @@ fn start_fusion(
     let Some(seed_id) = cg.gate_id_at(start_row, start_qubit) else {
         return 0;
     };
-    let seed_gate = cg.gate(seed_id).unwrap().clone();
+    let seed_gate = cg.gate_arc(seed_id).unwrap().clone();
 
     // Only process a gate from its lowest qubit to avoid duplicate seeds.
     if seed_gate.qubits()[0] as usize != start_qubit {
@@ -175,10 +176,7 @@ fn start_fusion(
 
     // `tentative` tracks every original gate (and its row) that is part of the
     // candidate cluster. Index 0 is always the seed.
-    let mut tentative: Vec<(
-        /* original gate */ crate::types::QuantumGate,
-        /* row */ usize,
-    )> = vec![(seed_gate.clone(), start_row)];
+    let mut tentative: Vec<(Arc<QuantumGate>, usize)> = vec![(seed_gate.clone(), start_row)];
     let mut absorbed_ids: HashSet<GateId> = HashSet::from([seed_id]);
 
     let mut prod_id = seed_id;
@@ -193,7 +191,7 @@ fn start_fusion(
         if absorbed_ids.contains(&cand_id) {
             continue;
         }
-        let cand_gate = cg.gate(cand_id).unwrap().clone();
+        let cand_gate = cg.gate_arc(cand_id).unwrap().clone();
         if union_qubit_count(prod_gate.qubits(), cand_gate.qubits()) > cdd_size {
             continue;
         }
@@ -208,7 +206,7 @@ fn start_fusion(
         // it with itself (same gate_id on both sides → fuse_gates_in_same_row
         // returns None and the unwrap panics).
         absorbed_ids.insert(prod_id);
-        prod_gate = cg.gate(prod_id).unwrap().clone();
+        prod_gate = cg.gate_arc(prod_id).unwrap().clone();
     }
 
     // ── Step C: cross-row loop ────────────────────────────────────────────────
@@ -228,7 +226,7 @@ fn start_fusion(
             if absorbed_ids.contains(&cand_id) {
                 continue;
             }
-            let cand_gate = cg.gate(cand_id).unwrap().clone();
+            let cand_gate = cg.gate_arc(cand_id).unwrap().clone();
             if union_qubit_count(prod_gate.qubits(), cand_gate.qubits()) > cdd_size {
                 continue;
             }
@@ -243,7 +241,7 @@ fn start_fusion(
             prod_id = new_id;
             prod_row = new_row;
             absorbed_ids.insert(prod_id);
-            prod_gate = cg.gate(prod_id).unwrap().clone();
+            prod_gate = cg.gate_arc(prod_id).unwrap().clone();
             continue 'outer;
         }
         break;

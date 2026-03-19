@@ -8,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 use std::ops::{Index, IndexMut};
+use std::sync::Arc;
 
 use crate::{
     openqasm,
@@ -121,7 +122,7 @@ impl IndexMut<usize> for CircuitRow {
 pub struct CircuitGraph {
     n_qubits: usize,
     rows: Vec<CircuitRow>,
-    gates: Vec<Option<QuantumGate>>,
+    gates: Vec<Option<Arc<QuantumGate>>>,
 }
 
 impl CircuitGraph {
@@ -156,9 +157,8 @@ impl CircuitGraph {
     }
 
     /// All gate slots, indexed by [`GateId`]. Entries are `Some` for live gates
-    /// and `None` for removed ones (removal is not yet implemented but the slot
-    /// type leaves room for it).
-    pub fn gates(&self) -> &[Option<QuantumGate>] {
+    /// and `None` for removed ones.
+    pub fn gates(&self) -> &[Option<Arc<QuantumGate>>] {
         &self.gates
     }
 
@@ -246,6 +246,14 @@ impl CircuitGraph {
     /// Returns a reference to the gate with the given [`GateId`], or `None` if
     /// the id is out of range or the slot has been vacated.
     pub fn gate(&self, gate_id: GateId) -> Option<&QuantumGate> {
+        self.gates.get(gate_id).and_then(|gate| gate.as_deref())
+    }
+
+    /// Returns a reference to the `Arc<QuantumGate>` for the given [`GateId`].
+    ///
+    /// Use this when you need to cheaply clone the gate (e.g. to hand it to a
+    /// kernel manager) without deep-copying the matrix data.
+    pub fn gate_arc(&self, gate_id: GateId) -> Option<&Arc<QuantumGate>> {
         self.gates.get(gate_id).and_then(|gate| gate.as_ref())
     }
 
@@ -288,7 +296,8 @@ impl CircuitGraph {
     /// qubits are free. If no such row exists, a new row is appended. The
     /// graph's qubit count is expanded if the gate addresses qubits beyond the
     /// current width.
-    pub fn insert_gate(&mut self, gate: QuantumGate) -> GateId {
+    pub fn insert_gate(&mut self, gate: impl Into<Arc<QuantumGate>>) -> GateId {
+        let gate: Arc<QuantumGate> = gate.into();
         let required_qubits = gate
             .qubits()
             .iter()
@@ -306,7 +315,12 @@ impl CircuitGraph {
         gate_id
     }
 
-    pub(crate) fn insert_gate_at_row(&mut self, row_index: usize, gate: QuantumGate) -> GateId {
+    pub(crate) fn insert_gate_at_row(
+        &mut self,
+        row_index: usize,
+        gate: impl Into<Arc<QuantumGate>>,
+    ) -> GateId {
+        let gate: Arc<QuantumGate> = gate.into();
         assert!(row_index < self.rows.len(), "row index out of bounds");
         let required_qubits = gate
             .qubits()
@@ -328,7 +342,7 @@ impl CircuitGraph {
         gate_id
     }
 
-    pub(crate) fn remove_gate_at(&mut self, row: usize, qubit: usize) -> Option<QuantumGate> {
+    pub(crate) fn remove_gate_at(&mut self, row: usize, qubit: usize) -> Option<Arc<QuantumGate>> {
         let gate_id = self.gate_id_at(row, qubit)?;
         let qubits = self.gate(gate_id)?.qubits().to_vec();
         self.rows[row].clear_gate(&qubits);
@@ -393,8 +407,8 @@ impl CircuitGraph {
         if gate_id_a == gate_id_b {
             return None;
         }
-        let gate_a = self.gate(gate_id_a)?.clone();
-        let gate_b = self.gate(gate_id_b)?.clone();
+        let gate_a = self.gate_arc(gate_id_a)?.clone();
+        let gate_b = self.gate_arc(gate_id_b)?.clone();
         self.remove_gate_at(row, qa);
         self.remove_gate_at(row, qb);
         let fused = gate_a.matmul(&gate_b);
@@ -422,8 +436,8 @@ impl CircuitGraph {
         );
         let gate_id_a = self.gate_id_at(row_a, qa)?;
         let gate_id_b = self.gate_id_at(row_b, qb)?;
-        let gate_a = self.gate(gate_id_a)?.clone();
-        let gate_b = self.gate(gate_id_b)?.clone();
+        let gate_a = self.gate_arc(gate_id_a)?.clone();
+        let gate_b = self.gate_arc(gate_id_b)?.clone();
         self.remove_gate_at(row_a, qa);
         self.remove_gate_at(row_b, qb);
         let fused = gate_b.matmul(&gate_a);
@@ -506,7 +520,7 @@ fn rational_pi_to_f64(r: Rational) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{CircuitGraph, CircuitRow};
+    use super::{Arc, CircuitGraph, CircuitRow};
     use crate::{
         openqasm::{parse_qasm, Angle, Circuit, Gate},
         types::QuantumGate,
@@ -541,7 +555,7 @@ mod tests {
     fn check_consistency_rejects_live_gate_missing_from_rows() {
         let mut graph = CircuitGraph::new();
         graph.insert_gate(QuantumGate::x(0));
-        graph.gates[0] = Some(QuantumGate::x(0));
+        graph.gates[0] = Some(Arc::new(QuantumGate::x(0)));
         graph.rows[0].clear_gate(&[0]);
 
         let err = graph.check_consistency().unwrap_err();

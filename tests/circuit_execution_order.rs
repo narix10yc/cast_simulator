@@ -17,6 +17,7 @@
 #![cfg(feature = "cuda")]
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -95,14 +96,14 @@ fn random_circuit(n_qubits: u32, n_gates: usize, seed: u64) -> CircuitGraph {
 }
 
 /// Extract gates in row-major order, deduplicating multi-qubit gates.
-fn ordered_gates(cg: &CircuitGraph) -> Vec<QuantumGate> {
+fn ordered_gates(cg: &CircuitGraph) -> Vec<Arc<QuantumGate>> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for row in 0..cg.n_rows() {
         for qubit in 0..cg.n_qubits() {
             if let Some(gid) = cg.gate_id_at(row, qubit) {
                 if seen.insert(gid) {
-                    out.push(cg.gate(gid).unwrap().clone());
+                    out.push(cg.gate_arc(gid).unwrap().clone());
                 }
             }
         }
@@ -111,7 +112,7 @@ fn ordered_gates(cg: &CircuitGraph) -> Vec<QuantumGate> {
 }
 
 /// Apply `gates` sequentially on the CPU JIT backend.
-fn run_cpu(gates: &[QuantumGate], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
+fn run_cpu(gates: &[Arc<QuantumGate>], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let spec = cpu_spec();
     let mgr = CpuKernelManager::new();
     let kids: Vec<_> = gates
@@ -130,7 +131,7 @@ fn run_cpu(gates: &[QuantumGate], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f6
 }
 
 /// Apply `gates` via the CUDA manager (all queued then synced in one shot).
-fn run_cuda(gates: &[QuantumGate], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
+fn run_cuda(gates: &[Arc<QuantumGate>], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mgr = CudaKernelManager::new();
     let spec = cuda_spec();
     let kids: Vec<_> = gates
@@ -249,12 +250,12 @@ fn lru_repeating_3kernel_pattern_12q() {
     let n = 12_u32;
     let mut rng = StdRng::seed_from_u64(1337);
     // Three 1-qubit gates, each on a distinct qubit so they commute spatially.
-    let gates: Vec<QuantumGate> = (0..3_u32)
+    let gates: Vec<Arc<QuantumGate>> = (0..3_u32)
         .map(|q| {
-            QuantumGate::new(
+            Arc::new(QuantumGate::new(
                 ComplexSquareMatrix::random_unitary_with_rng(2, &mut rng),
                 vec![q],
-            )
+            ))
         })
         .collect();
 

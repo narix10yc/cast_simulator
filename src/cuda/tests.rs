@@ -1,13 +1,15 @@
+use std::sync::Arc;
+
 use crate::types::QuantumGate;
 
 use super::{CudaKernelGenSpec, CudaKernelManager, CudaPrecision, CudaStatevector};
 
-fn hadamard() -> QuantumGate {
-    QuantumGate::h(0)
+fn hadamard() -> Arc<QuantumGate> {
+    Arc::new(QuantumGate::h(0))
 }
 
-fn cnot() -> QuantumGate {
-    QuantumGate::cx(0, 1)
+fn cnot() -> Arc<QuantumGate> {
+    Arc::new(QuantumGate::cx(0, 1))
 }
 
 fn default_spec() -> CudaKernelGenSpec {
@@ -135,7 +137,7 @@ fn test_h_gate_apply_to_zero_state() {
 fn test_x_gate_apply_to_zero_state() {
     let mgr = CudaKernelManager::new();
     let kid = mgr
-        .generate(&QuantumGate::x(0), default_spec())
+        .generate(&Arc::new(QuantumGate::x(0)), default_spec())
         .expect("generate X kernel");
 
     let mut sv = CudaStatevector::new(1, CudaPrecision::F64).expect("alloc statevector");
@@ -178,7 +180,7 @@ fn test_sequential_apply() {
     // X|0⟩ = |1⟩, then H|1⟩ = |−⟩ = (1/√2)|0⟩ − (1/√2)|1⟩.
     let mgr = CudaKernelManager::new();
     let x_kid = mgr
-        .generate(&QuantumGate::x(0), default_spec())
+        .generate(&Arc::new(QuantumGate::x(0)), default_spec())
         .expect("generate X");
     let h_kid = mgr
         .generate(&hadamard(), default_spec())
