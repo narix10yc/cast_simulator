@@ -225,6 +225,10 @@ impl CPUStatevector {
         Self { inner }
     }
 
+    /// # Safety
+    ///
+    /// The returned statevector has uninitialized amplitude data. The caller
+    /// must write all amplitudes before reading any.
     pub unsafe fn uninit(n_qubits: u32, precision: Precision, simd_width: SimdWidth) -> Self {
         let simd_s = get_simd_s(simd_width, precision);
         let scalar_len = scalar_len_for(n_qubits, simd_s);
@@ -278,6 +282,11 @@ impl CPUStatevector {
     /// Number of amplitudes: `2^n_qubits`.
     pub fn len(&self) -> usize {
         1usize << self.n_qubits()
+    }
+
+    /// Always returns `false` (a statevector always has at least one amplitude).
+    pub fn is_empty(&self) -> bool {
+        false
     }
 
     /// Number of scalar values in the internal buffer (≥ `2 * len()`).
@@ -360,7 +369,7 @@ impl CPUStatevector {
         inner.norm_sqr()
     }
 
-    /// Applies `gate` using the scalar (non-JIT) path. Use [`CpuJitSession::apply`] for
+    /// Applies `gate` using the scalar (non-JIT) path. Use [`CpuKernelManager::apply`] for
     /// performance-critical paths.
     pub fn apply_gate(&mut self, gate: &QuantumGate) {
         self.with_data_mut(|data| data.apply_gate(gate));
@@ -487,6 +496,7 @@ impl<T: CpuScalar> CPUStatevectorData<T> {
                 *amp_index = deposited_task | pdep_usize(amp_id, target_mask);
             }
 
+            #[allow(clippy::needless_range_loop)]
             for row in 0..gate_dim {
                 let mut acc = Complex::default();
                 for col in 0..gate_dim {

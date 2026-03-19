@@ -42,6 +42,12 @@ pub struct Circuit {
     pub gates: Vec<Gate>,
 }
 
+impl Default for Circuit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Circuit {
     pub fn new() -> Self {
         Self { gates: Vec::new() }

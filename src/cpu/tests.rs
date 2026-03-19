@@ -49,17 +49,16 @@ mod tests {
         n_threads: u32,
         tol: f64,
     ) {
-        let mut generator = CPUKernelGenerator::new().expect("create generator");
-        let kernel_id = generator
+        let mgr = CpuKernelManager::new();
+        let kernel_id = mgr
             .generate(&spec, gate.matrix().data(), gate.qubits())
             .expect("generate kernel");
-        let mut jit = generator.init_jit().expect("init jit");
 
         let mut sv_jit = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
         let mut sv_ref = sv_jit.clone();
 
         sv_ref.apply_gate(gate);
-        jit.apply(kernel_id, &mut sv_jit, n_threads)
+        mgr.apply(kernel_id, &mut sv_jit, n_threads)
             .expect("apply kernel");
 
         assert_statevectors_close(&sv_jit, &sv_ref, tol);
@@ -138,18 +137,17 @@ mod tests {
         n_threads: u32,
     ) -> CPUStatevector {
         let gates = circuit_gates_in_row_order(graph);
-        let mut generator = CPUKernelGenerator::new().expect("create generator");
+        let mgr = CpuKernelManager::new();
         let mut kernel_ids = Vec::with_capacity(gates.len());
         for gate in &gates {
-            let kernel_id = generator
+            let kernel_id = mgr
                 .generate(&spec, gate.matrix().data(), gate.qubits())
                 .expect("generate kernel");
             kernel_ids.push(kernel_id);
         }
-        let mut jit = generator.init_jit().expect("init jit");
         let mut sv = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
         for kernel_id in kernel_ids {
-            jit.apply(kernel_id, &mut sv, n_threads)
+            mgr.apply(kernel_id, &mut sv, n_threads)
                 .expect("apply circuit kernel");
         }
         sv
@@ -201,19 +199,18 @@ mod tests {
     #[test]
     fn jit_applies_single_qubit_gate() {
         let gate = QuantumGate::h(0);
-        let mut generator = CPUKernelGenerator::new().expect("create generator");
-        let kernel_id = generator
+        let mgr = CpuKernelManager::new();
+        let kernel_id = mgr
             .generate(
                 &CPUKernelGenSpec::f64(),
                 gate.matrix().data(),
                 gate.qubits(),
             )
             .expect("generate kernel");
-        let mut jit = generator.init_jit().expect("init jit");
 
         let mut sv = CPUStatevector::new(2, Precision::F64, SimdWidth::W128);
         sv.initialize();
-        jit.apply(kernel_id, &mut sv, 1).expect("apply kernel");
+        mgr.apply(kernel_id, &mut sv, 1).expect("apply kernel");
 
         let expected = std::f64::consts::FRAC_1_SQRT_2;
         assert!((sv.amp(0) - Complex::new(expected, 0.0)).norm() < 1e-10);
@@ -302,20 +299,16 @@ mod tests {
             ..spec_imm
         };
 
-        let mut gen_imm = CPUKernelGenerator::new().expect("create generator");
-        let kid_imm = gen_imm
+        let mgr = CpuKernelManager::new();
+        let kid_imm = mgr
             .generate(&spec_imm, gate.matrix().data(), gate.qubits())
             .expect("generate imm kernel");
-        let mut jit_imm = gen_imm.init_jit().expect("init jit");
-        jit_imm.apply(kid_imm, &mut sv_imm, 1).expect("apply imm");
+        mgr.apply(kid_imm, &mut sv_imm, 1).expect("apply imm");
 
-        let mut gen_stack = CPUKernelGenerator::new().expect("create generator");
-        let kid_stack = gen_stack
+        let kid_stack = mgr
             .generate(&spec_stack, gate.matrix().data(), gate.qubits())
             .expect("generate stack kernel");
-        let mut jit_stack = gen_stack.init_jit().expect("init jit");
-        jit_stack
-            .apply(kid_stack, &mut sv_stack, 1)
+        mgr.apply(kid_stack, &mut sv_stack, 1)
             .expect("apply stack");
 
         assert_statevectors_close(&sv_imm, &sv_stack, tol);
@@ -387,19 +380,18 @@ mod tests {
     // Generates H and CX kernels in one session and applies them sequentially;
     // verifies that the session correctly dispatches by kernel id.
     #[test]
-    fn jit_multiple_kernels_in_one_session() {
+    fn jit_multiple_kernels_in_one_manager() {
         let spec = default_spec(Precision::F64, SimdWidth::W128);
         let h_gate = QuantumGate::h(0);
         let cx_gate = QuantumGate::cx(0, 1);
 
-        let mut generator = CPUKernelGenerator::new().expect("create generator");
-        let kid_h = generator
+        let mgr = CpuKernelManager::new();
+        let kid_h = mgr
             .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
             .expect("generate H kernel");
-        let kid_cx = generator
+        let kid_cx = mgr
             .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
             .expect("generate CX kernel");
-        let mut jit = generator.init_jit().expect("init jit");
 
         let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
         let mut sv_ref = sv_jit.clone();
@@ -407,8 +399,8 @@ mod tests {
         sv_ref.apply_gate(&h_gate);
         sv_ref.apply_gate(&cx_gate);
 
-        jit.apply(kid_h, &mut sv_jit, 1).expect("apply H");
-        jit.apply(kid_cx, &mut sv_jit, 1).expect("apply CX");
+        mgr.apply(kid_h, &mut sv_jit, 1).expect("apply H");
+        mgr.apply(kid_cx, &mut sv_jit, 1).expect("apply CX");
 
         assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
         assert!((sv_jit.norm() - 1.0).abs() < 1e-10);
@@ -418,16 +410,16 @@ mod tests {
 
     #[test]
     fn emit_ir_returns_valid_llvm_ir() {
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid = gen
-            .generate(
+        let mgr = CpuKernelManager::new();
+        let kid = mgr
+            .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
                 QuantumGate::h(0).matrix().data(),
                 QuantumGate::h(0).qubits(),
             )
             .expect("generate kernel");
 
-        let ir = gen.emit_ir(kid).expect("emit_ir");
+        let ir = mgr.emit_ir(kid).expect("emit_ir should be Some");
 
         // The IR must be a non-empty LLVM text module.
         assert!(!ir.is_empty(), "IR should not be empty");
@@ -439,44 +431,39 @@ mod tests {
 
     #[test]
     fn emit_ir_is_idempotent() {
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid = gen
-            .generate(
+        let mgr = CpuKernelManager::new();
+        let kid = mgr
+            .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
                 QuantumGate::x(0).matrix().data(),
                 QuantumGate::x(0).qubits(),
             )
             .expect("generate kernel");
 
-        let ir_first = gen.emit_ir(kid).expect("first emit_ir");
-        let ir_second = gen.emit_ir(kid).expect("second emit_ir");
+        let ir_first = mgr.emit_ir(kid).expect("first emit_ir");
+        let ir_second = mgr.emit_ir(kid).expect("second emit_ir");
 
-        // The O1 pass runs only once; a second call returns the cached text.
         assert_eq!(ir_first, ir_second, "emit_ir should be idempotent");
     }
 
     #[test]
-    fn emit_ir_before_init_jit_still_produces_correct_kernel() {
-        // emit_ir must not corrupt the module: the kernel compiled afterward
-        // must still produce results matching the scalar reference path.
+    fn emit_ir_with_diagnostics_still_produces_correct_kernel() {
+        // Diagnostics capture must not corrupt the kernel.
         let gate = QuantumGate::h(1);
         let spec = default_spec(Precision::F64, SimdWidth::W128);
 
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid = gen
-            .generate(&spec, gate.matrix().data(), gate.qubits())
+        let mgr = CpuKernelManager::new();
+        let kid = mgr
+            .generate_with_diagnostics(&spec, gate.matrix().data(), gate.qubits())
             .expect("generate kernel");
 
-        // Trigger optimization + IR snapshot before JIT compilation.
-        let ir = gen.emit_ir(kid).expect("emit_ir");
+        let ir = mgr.emit_ir(kid).expect("emit_ir should be Some");
         assert!(!ir.is_empty());
-
-        let mut jit = gen.init_jit().expect("init jit");
 
         let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
         let mut sv_ref = sv_jit.clone();
         sv_ref.apply_gate(&gate);
-        jit.apply(kid, &mut sv_jit, 1).expect("apply kernel");
+        mgr.apply(kid, &mut sv_jit, 1).expect("apply kernel");
 
         assert_statevectors_close(&sv_jit, &sv_ref, 1e-10);
     }
@@ -488,87 +475,92 @@ mod tests {
         let h_gate = QuantumGate::h(0);
         let cx_gate = QuantumGate::cx(0, 1);
 
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid_h = gen
-            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+        let mgr = CpuKernelManager::new();
+        let kid_h = mgr
+            .generate_with_diagnostics(&spec, h_gate.matrix().data(), h_gate.qubits())
             .expect("H kernel");
-        let kid_cx = gen
-            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+        let kid_cx = mgr
+            .generate_with_diagnostics(&spec, cx_gate.matrix().data(), cx_gate.qubits())
             .expect("CX kernel");
 
-        let ir_h = gen.emit_ir(kid_h).expect("H IR");
-        let ir_cx = gen.emit_ir(kid_cx).expect("CX IR");
+        let ir_h = mgr.emit_ir(kid_h).expect("H IR");
+        let ir_cx = mgr.emit_ir(kid_cx).expect("CX IR");
 
         assert_ne!(ir_h, ir_cx, "different gates must produce different IR");
     }
 
     #[test]
-    fn emit_ir_rejects_unknown_kernel_id() {
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let result = gen.emit_ir(9999);
-        assert!(result.is_err(), "unknown kernel_id should return an error");
+    fn emit_ir_returns_none_without_diagnostics() {
+        let mgr = CpuKernelManager::new();
+        let kid = mgr
+            .generate(
+                &default_spec(Precision::F64, SimdWidth::W128),
+                QuantumGate::h(0).matrix().data(),
+                QuantumGate::h(0).qubits(),
+            )
+            .expect("generate kernel");
+        assert!(mgr.emit_ir(kid).is_none(), "IR should be None without diagnostics");
+    }
+
+    #[test]
+    fn emit_ir_returns_none_for_unknown_kernel_id() {
+        let mgr = CpuKernelManager::new();
+        assert!(mgr.emit_ir(9999).is_none(), "unknown kernel_id should return None");
     }
 
     // ── emit_asm ──────────────────────────────────────────────────────────────
 
-    fn compile_h_session_with_asm() -> (CpuJitSession, KernelId) {
+    fn compile_h_manager_with_diagnostics() -> (CpuKernelManager, KernelId) {
         let gate = QuantumGate::h(0);
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid = gen
-            .generate(
+        let mgr = CpuKernelManager::new();
+        let kid = mgr
+            .generate_with_diagnostics(
                 &default_spec(Precision::F64, SimdWidth::W128),
                 gate.matrix().data(),
                 gate.qubits(),
             )
             .expect("generate kernel");
-        gen.request_asm(kid).expect("request_asm");
-        (gen.init_jit().expect("init jit"), kid)
+        (mgr, kid)
     }
 
     #[test]
     fn emit_asm_returns_nonempty_text() {
-        let (session, kid) = compile_h_session_with_asm();
-        let asm = session.emit_asm(kid).expect("emit_asm");
+        let (mgr, kid) = compile_h_manager_with_diagnostics();
+        let asm = mgr.emit_asm(kid).expect("emit_asm should be Some");
         assert!(!asm.is_empty(), "assembly should not be empty");
     }
 
     #[test]
     fn emit_asm_is_ascii() {
-        // Native assembly must be printable ASCII (no embedded binary).
-        let (session, kid) = compile_h_session_with_asm();
-        let asm = session.emit_asm(kid).expect("emit_asm");
+        let (mgr, kid) = compile_h_manager_with_diagnostics();
+        let asm = mgr.emit_asm(kid).expect("emit_asm should be Some");
         assert!(asm.is_ascii(), "assembly should be ASCII text");
     }
 
     #[test]
     fn emit_asm_is_idempotent() {
-        // The assembly is cached; repeated calls return the same text.
-        let (session, kid) = compile_h_session_with_asm();
-        let first = session.emit_asm(kid).expect("first emit_asm");
-        let second = session.emit_asm(kid).expect("second emit_asm");
+        let (mgr, kid) = compile_h_manager_with_diagnostics();
+        let first = mgr.emit_asm(kid).expect("first emit_asm");
+        let second = mgr.emit_asm(kid).expect("second emit_asm");
         assert_eq!(first, second);
     }
 
     #[test]
     fn emit_asm_per_kernel_independent() {
-        // H and CX are structurally different gates — their assembly must differ.
         let spec = default_spec(Precision::F64, SimdWidth::W128);
         let h_gate = QuantumGate::h(0);
         let cx_gate = QuantumGate::cx(0, 1);
 
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid_h = gen
-            .generate(&spec, h_gate.matrix().data(), h_gate.qubits())
+        let mgr = CpuKernelManager::new();
+        let kid_h = mgr
+            .generate_with_diagnostics(&spec, h_gate.matrix().data(), h_gate.qubits())
             .expect("H kernel");
-        let kid_cx = gen
-            .generate(&spec, cx_gate.matrix().data(), cx_gate.qubits())
+        let kid_cx = mgr
+            .generate_with_diagnostics(&spec, cx_gate.matrix().data(), cx_gate.qubits())
             .expect("CX kernel");
-        gen.request_asm(kid_h).expect("request H asm");
-        gen.request_asm(kid_cx).expect("request CX asm");
-        let session = gen.init_jit().expect("init jit");
 
-        let asm_h = session.emit_asm(kid_h).expect("H asm");
-        let asm_cx = session.emit_asm(kid_cx).expect("CX asm");
+        let asm_h = mgr.emit_asm(kid_h).expect("H asm");
+        let asm_cx = mgr.emit_asm(kid_cx).expect("CX asm");
         assert_ne!(
             asm_h, asm_cx,
             "different gates must produce different assembly"
@@ -577,23 +569,18 @@ mod tests {
 
     #[test]
     fn emit_asm_consistent_with_emit_ir() {
-        // Both are available from the same compilation; neither should be empty
-        // and the IR text must not appear inside the assembly output.
         let spec = default_spec(Precision::F64, SimdWidth::W128);
         let gate = QuantumGate::h(0);
 
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid = gen
-            .generate(&spec, gate.matrix().data(), gate.qubits())
+        let mgr = CpuKernelManager::new();
+        let kid = mgr
+            .generate_with_diagnostics(&spec, gate.matrix().data(), gate.qubits())
             .expect("generate");
-        let ir = gen.emit_ir(kid).expect("emit_ir");
-        gen.request_asm(kid).expect("request_asm");
-        let session = gen.init_jit().expect("init jit");
-        let asm = session.emit_asm(kid).expect("emit_asm");
+        let ir = mgr.emit_ir(kid).expect("emit_ir should be Some");
+        let asm = mgr.emit_asm(kid).expect("emit_asm should be Some");
 
         assert!(!ir.is_empty());
         assert!(!asm.is_empty());
-        // The IR uses `define` keyword; native asm must not contain it.
         assert!(
             !asm.contains("define"),
             "assembly should not contain LLVM IR syntax"
@@ -601,40 +588,28 @@ mod tests {
     }
 
     #[test]
-    fn emit_asm_errors_without_request() {
-        // Kernels not opted in must return an error rather than silently empty text.
+    fn emit_asm_returns_none_without_diagnostics() {
         let gate = QuantumGate::h(0);
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        let kid = gen
+        let mgr = CpuKernelManager::new();
+        let kid = mgr
             .generate(
                 &default_spec(Precision::F64, SimdWidth::W128),
                 gate.matrix().data(),
                 gate.qubits(),
             )
             .expect("generate kernel");
-        // Deliberately skip request_asm.
-        let session = gen.init_jit().expect("init jit");
         assert!(
-            session.emit_asm(kid).is_err(),
-            "emit_asm should fail without request_asm"
+            mgr.emit_asm(kid).is_none(),
+            "emit_asm should be None without diagnostics"
         );
     }
 
     #[test]
-    fn emit_asm_rejects_unknown_kernel_id() {
-        let (session, _) = compile_h_session_with_asm();
+    fn emit_asm_returns_none_for_unknown_kernel_id() {
+        let mgr = CpuKernelManager::new();
         assert!(
-            session.emit_asm(9999).is_err(),
-            "unknown kernel_id should return an error"
-        );
-    }
-
-    #[test]
-    fn request_asm_rejects_unknown_kernel_id() {
-        let mut gen = CPUKernelGenerator::new().expect("create generator");
-        assert!(
-            gen.request_asm(9999).is_err(),
-            "unknown kernel_id should return an error"
+            mgr.emit_asm(9999).is_none(),
+            "unknown kernel_id should return None"
         );
     }
 

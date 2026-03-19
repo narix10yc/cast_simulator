@@ -183,6 +183,7 @@ impl MulAssign for Rational {
 impl Div for Rational {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)]
     fn div(self, rhs: Self) -> Self::Output {
         self * rhs.reciprocal()
     }

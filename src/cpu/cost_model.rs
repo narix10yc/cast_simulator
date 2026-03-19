@@ -93,13 +93,12 @@ fn probe_ai(
     let n_qubits =
         n_qubits_sv.max(gate.n_qubits() as u32 + get_simd_s(spec.simd_width, spec.precision) + 1);
 
-    let mut gen = CPUKernelGenerator::new()?;
-    let kid = gen.generate(spec, gate.matrix().data(), gate.qubits())?;
-    let mut jit = gen.init_jit()?;
+    let mgr = CpuKernelManager::new();
+    let kid = mgr.generate(spec, gate.matrix().data(), gate.qubits())?;
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     sv.initialize();
-    let timing = jit.time_adaptive(kid, &mut sv, n_threads, budget_s)?;
+    let timing = mgr.time_adaptive(kid, &mut sv, n_threads, budget_s)?;
 
     let gib_s = 2.0 * sv.byte_len() as f64 / timing.mean_s / (1u64 << 30) as f64;
     let gflops_s = actual_ai * sv.len() as f64 * 2.0 / timing.mean_s / 1e9;
@@ -119,7 +118,7 @@ fn k_for_target_ai(target_ai: u32) -> u32 {
 /// in the memory-bound regime. The crossover is `peak_gflops / c_slope`.
 fn fit_crossover(sweep: &[(f64, f64, f64)]) -> (f64, f64) {
     let n = sweep.len();
-    let lower = &sweep[..(n + 1) / 2];
+    let lower = &sweep[..n.div_ceil(2)];
     let mut ratios: Vec<f64> = lower.iter().map(|(ai, g, _)| g / ai).collect();
     ratios.sort_by(|a, b| a.total_cmp(b));
     let c_slope = ratios[ratios.len() / 2]; // median
