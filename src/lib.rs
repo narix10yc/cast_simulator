@@ -17,4 +17,4 @@ pub mod cpu;
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
-pub use circuit::{CircuitGraph, CircuitRow, GateId};
+pub use circuit::{CircuitGraph, CircuitGraphRow, GateId};

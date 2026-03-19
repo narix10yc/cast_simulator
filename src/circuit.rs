@@ -21,11 +21,11 @@ pub type GateId = usize;
 /// One row of the circuit grid: a slot per qubit, containing the [`GateId`] of
 /// the gate occupying that qubit in this row, or `None` if the qubit is idle.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct CircuitRow {
+pub struct CircuitGraphRow {
     cells: Vec<Option<GateId>>,
 }
 
-impl CircuitRow {
+impl CircuitGraphRow {
     pub fn new(width: usize) -> Self {
         Self {
             cells: vec![None; width],
@@ -94,7 +94,7 @@ impl CircuitRow {
     }
 }
 
-impl Index<usize> for CircuitRow {
+impl Index<usize> for CircuitGraphRow {
     type Output = Option<GateId>;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -102,7 +102,7 @@ impl Index<usize> for CircuitRow {
     }
 }
 
-impl IndexMut<usize> for CircuitRow {
+impl IndexMut<usize> for CircuitGraphRow {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.cells[index]
     }
@@ -110,7 +110,7 @@ impl IndexMut<usize> for CircuitRow {
 
 /// A quantum circuit represented as a 2-D gate grid.
 ///
-/// The grid has dimensions `n_rows × n_qubits`. Each [`CircuitRow`] is a
+/// The grid has dimensions `n_rows × n_qubits`. Each [`CircuitGraphRow`] is a
 /// `Vec<Option<GateId>>` indexed by qubit. When a multi-qubit gate occupies
 /// qubits `q0..qk` in row `r`, every one of those qubit slots stores the same
 /// [`GateId`], so you can look up any participant qubit's gate in O(1).
@@ -121,7 +121,7 @@ impl IndexMut<usize> for CircuitRow {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CircuitGraph {
     n_qubits: usize,
-    rows: Vec<CircuitRow>,
+    rows: Vec<CircuitGraphRow>,
     gates: Vec<Option<Arc<QuantumGate>>>,
 }
 
@@ -152,7 +152,7 @@ impl CircuitGraph {
     }
 
     /// All rows of the circuit grid, in order.
-    pub fn rows(&self) -> &[CircuitRow] {
+    pub fn rows(&self) -> &[CircuitGraphRow] {
         &self.rows
     }
 
@@ -279,7 +279,7 @@ impl CircuitGraph {
 
     /// Appends a new, fully-empty row and returns its index.
     pub fn append_empty_row(&mut self) -> usize {
-        self.rows.push(CircuitRow::new(self.n_qubits));
+        self.rows.push(CircuitGraphRow::new(self.n_qubits));
         self.rows.len() - 1
     }
 
@@ -351,7 +351,7 @@ impl CircuitGraph {
 
     pub(crate) fn squeeze(&mut self) {
         let live_gate_ids = self.live_gate_ids_in_row_order();
-        let mut new_rows: Vec<CircuitRow> = Vec::new();
+        let mut new_rows: Vec<CircuitGraphRow> = Vec::new();
         // Tracks the last new-row index in which each qubit was placed.
         // A gate on qubits Q must be placed in a row strictly after all of Q's
         // last-placed rows, so that causal ordering (time order from the
@@ -376,7 +376,7 @@ impl CircuitGraph {
             let row_index = (min_row..new_rows.len())
                 .find(|&r| new_rows[r].is_vacant(gate.qubits()))
                 .unwrap_or_else(|| {
-                    new_rows.push(CircuitRow::new(self.n_qubits));
+                    new_rows.push(CircuitGraphRow::new(self.n_qubits));
                     new_rows.len() - 1
                 });
 
@@ -449,7 +449,7 @@ impl CircuitGraph {
         } else if self.is_row_vacant(row_a, fused.qubits()) {
             row_a
         } else {
-            self.rows.insert(row_b, CircuitRow::new(self.n_qubits));
+            self.rows.insert(row_b, CircuitGraphRow::new(self.n_qubits));
             row_b
         };
         let new_id = self.insert_gate_at_row(target_row, fused);
@@ -520,7 +520,7 @@ fn rational_pi_to_f64(r: Rational) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arc, CircuitGraph, CircuitRow};
+    use super::{Arc, CircuitGraph, CircuitGraphRow};
     use crate::{
         openqasm::{parse_qasm, Angle, Circuit, Gate},
         types::QuantumGate,
@@ -574,7 +574,7 @@ mod tests {
 
     #[test]
     fn row_place_clear_and_gate_ids_work() {
-        let mut row = CircuitRow::new(4);
+        let mut row = CircuitGraphRow::new(4);
         row.place_gate(7, &[0, 2]);
         row.place_gate(8, &[1]);
 
