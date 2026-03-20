@@ -202,6 +202,47 @@ impl ComplexSquareMatrix {
         out
     }
 
+    /// Returns the single-qubit Pauli matrix for `index`: 0 = I, 1 = X, 2 = Y, 3 = Z.
+    ///
+    /// # Panics
+    /// Panics if `index` is not in `0..=3`.
+    pub fn pauli(index: usize) -> Self {
+        match index {
+            0 => Self::eye(2),
+            1 => Self::x(),
+            2 => Self::y(),
+            3 => Self::z(),
+            _ => panic!("Pauli index must be 0–3, got {index}"),
+        }
+    }
+
+    /// Returns the Kronecker (tensor) product `self ⊗ other`.
+    ///
+    /// If `self` is `m×m` and `other` is `n×n`, the result is `(mn)×(mn)` with entries:
+    ///
+    /// ```text
+    /// (self ⊗ other)[i·n + k, j·n + l] = self[i,j] · other[k,l]
+    /// ```
+    pub fn kron(&self, other: &Self) -> Self {
+        let m = self.edge_size;
+        let n = other.edge_size;
+        let mut out = Self::zeros(m * n);
+        for i in 0..m {
+            for j in 0..m {
+                let a = self.get(i, j);
+                if a == Complex::default() {
+                    continue;
+                }
+                for k in 0..n {
+                    for l in 0..n {
+                        out.set(i * n + k, j * n + l, a * other.get(k, l));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Generates a Haar-random unitary matrix of size `n×n` using the system RNG.
     ///
     /// Delegates to [`Self::random_unitary_with_rng`].

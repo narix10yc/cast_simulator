@@ -1,20 +1,32 @@
 use rand::Rng;
 
-use super::{Complex, ComplexSquareMatrix};
+use super::{channel::KrausChannel, Complex, ComplexSquareMatrix};
 
-/// A unitary quantum gate: a `2ⁿ × 2ⁿ` complex matrix paired with `n` target qubit indices.
+/// A quantum gate or channel: a complex matrix paired with `n` physical target qubit indices.
+///
+/// **Unitary gates** (`channel` is `None`): `matrix` is `2ⁿ × 2ⁿ` and represents a unitary
+/// operation on the `n` target qubits.
+///
+/// **Channel gates** (`channel` is `Some`): `matrix` is `4ⁿ × 4ⁿ` and holds the precomputed
+/// superoperator `S = Σ_i Kᵢ ⊗ Kᵢ*` of the Kraus channel. The `n` physical qubit indices
+/// in `qubits` refer to the ket degrees of freedom; the simulation dispatch layer is responsible
+/// for mapping them to the `2n`-qubit virtual statevector that represents a density matrix.
 ///
 /// Qubits are always stored in ascending order. If the caller supplies them in a different
 /// order, [`QuantumGate::new`] permutes the matrix rows/columns to match the canonical ordering.
 /// Bit `k` of a basis index corresponds to the `k`-th entry of `qubits`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuantumGate {
+    /// Gate matrix (2ⁿ×2ⁿ for unitary) or superoperator (4ⁿ×4ⁿ for channel).
     matrix: ComplexSquareMatrix,
+    /// Physical qubit indices, sorted ascending. Always `n` entries regardless of gate kind.
     qubits: Vec<u32>,
+    /// `Some` for noisy channel gates; `None` for unitary gates.
+    channel: Option<KrausChannel>,
 }
 
 impl QuantumGate {
-    /// Creates a gate from a unitary matrix and a list of target qubits.
+    /// Creates a unitary gate from a matrix and a list of target qubits.
     ///
     /// The matrix dimension must equal `2^n` where `n = qubits.len()`.
     /// If the qubits are not in ascending order, the matrix is permuted so that
@@ -31,7 +43,23 @@ impl QuantumGate {
         );
 
         let (matrix, qubits) = canonicalize_qubits_and_matrix(matrix, qubits);
-        Self { matrix, qubits }
+        Self { matrix, qubits, channel: None }
+    }
+
+    /// Creates a channel gate from a [`KrausChannel`].
+    ///
+    /// The superoperator matrix `S = Σ_i Kᵢ ⊗ Kᵢ*` is computed eagerly and stored in
+    /// `matrix` as a `4ⁿ × 4ⁿ` matrix. The `n` physical qubit indices from the channel
+    /// are stored in `qubits`.
+    ///
+    /// The simulation dispatch layer is responsible for mapping the physical qubits to
+    /// the correct ket/bra virtual qubit positions in the density-matrix statevector.
+    pub fn from_channel(channel: KrausChannel) -> Self {
+        let matrix = channel.superoperator_matrix();
+        let qubits = channel.qubits().to_vec();
+        // Bypass Self::new: the superoperator is 4^n x 4^n but qubits.len() == n,
+        // so the 2^n size assertion would fail.
+        Self { matrix, qubits, channel: Some(channel) }
     }
 
     /// Creates a gate from real-valued matrix entries (imaginary parts are zero).
@@ -113,8 +141,19 @@ impl QuantumGate {
         self.qubits.len()
     }
 
+    /// Returns `true` if this gate is unitary (no embedded Kraus channel).
+    pub fn is_unitary(&self) -> bool {
+        self.channel.is_none()
+    }
+
+    /// Returns the embedded [`KrausChannel`] for noisy gates, or `None` for unitary gates.
+    pub fn channel(&self) -> Option<&KrausChannel> {
+        self.channel.as_ref()
+    }
+
     /// The number of non-zero entries in the gate matrix. Real and imag parts are counted
-    /// indepdently. So a k-qubit gate can have up to `2 ** (2k+1)` non-zeros.
+    /// independently. For a unitary k-qubit gate the matrix is `2ᵏ×2ᵏ` (up to `2^(2k+1)`
+    /// non-zeros); for a channel gate it is `4ᵏ×4ᵏ`.
     pub fn scalar_nnz(&self, ztol: f64) -> usize {
         self.matrix
             .data()
@@ -123,7 +162,7 @@ impl QuantumGate {
             .sum::<usize>()
     }
 
-    /// Arithmetic intensity of the gate: `M.scalar_nnz(ztol) / M.edge_size()`.
+    /// Arithmetic intensity of the gate: `scalar_nnz(ztol) / matrix.edge_size()`.
     pub fn arithmatic_intensity(&self, ztol: f64) -> f64 {
         self.scalar_nnz(ztol) as f64 / self.matrix.edge_size() as f64
     }
@@ -132,7 +171,14 @@ impl QuantumGate {
     /// of their qubit sets before multiplying.
     ///
     /// The gate acts as identity on qubits not originally in its target set.
+    ///
+    /// # Panics
+    /// Panics if either gate is a channel gate (`is_unitary()` is `false`).
     pub fn matmul(&self, other: &Self) -> Self {
+        assert!(
+            self.is_unitary() && other.is_unitary(),
+            "matmul is only defined for unitary gates"
+        );
         let qubits = union_qubits(&self.qubits, &other.qubits);
         let lhs = self.expand_to(&qubits);
         let rhs = other.expand_to(&qubits);
