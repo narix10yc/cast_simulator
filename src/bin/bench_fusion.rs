@@ -29,7 +29,6 @@ use cast::timing::{fmt_duration, TimingStats};
 use cast::types::QuantumGate;
 use cast::CircuitGraph;
 use clap::{Parser, ValueEnum};
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -82,18 +81,7 @@ struct Args {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn gates_in_order(graph: &CircuitGraph) -> Vec<Arc<QuantumGate>> {
-    let mut gates = Vec::new();
-    let mut seen = HashSet::new();
-    for row in 0..graph.n_rows() {
-        for qubit in 0..graph.n_qubits() {
-            if let Some(gid) = graph.gate_id_at(row, qubit) {
-                if seen.insert(gid) {
-                    gates.push(graph.gate_arc(gid).unwrap().clone());
-                }
-            }
-        }
-    }
-    gates
+    graph.gates_in_row_order()
 }
 
 struct BenchResult {

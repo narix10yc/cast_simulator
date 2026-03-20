@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashSet;
     use std::sync::Arc;
 
     use crate::cost_model::FusionConfig;
@@ -98,23 +97,7 @@ mod tests {
     }
 
     fn circuit_gates_in_row_order(graph: &CircuitGraph) -> Vec<Arc<QuantumGate>> {
-        let mut gates = Vec::new();
-        let mut seen = HashSet::new();
-        for row in 0..graph.n_rows() {
-            for qubit in 0..graph.n_qubits() {
-                if let Some(gate_id) = graph.gate_id_at(row, qubit) {
-                    if seen.insert(gate_id) {
-                        gates.push(
-                            graph
-                                .gate_arc(gate_id)
-                                .expect("live gate id should resolve")
-                                .clone(),
-                        );
-                    }
-                }
-            }
-        }
-        gates
+        graph.gates_in_row_order()
     }
 
     fn run_circuit_scalar(

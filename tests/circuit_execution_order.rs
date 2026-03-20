@@ -16,7 +16,6 @@
 
 #![cfg(feature = "cuda")]
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -97,18 +96,7 @@ fn random_circuit(n_qubits: u32, n_gates: usize, seed: u64) -> CircuitGraph {
 
 /// Extract gates in row-major order, deduplicating multi-qubit gates.
 fn ordered_gates(cg: &CircuitGraph) -> Vec<Arc<QuantumGate>> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for row in 0..cg.n_rows() {
-        for qubit in 0..cg.n_qubits() {
-            if let Some(gid) = cg.gate_id_at(row, qubit) {
-                if seen.insert(gid) {
-                    out.push(cg.gate_arc(gid).unwrap().clone());
-                }
-            }
-        }
-    }
-    out
+    cg.gates_in_row_order()
 }
 
 /// Apply `gates` sequentially on the CPU JIT backend.

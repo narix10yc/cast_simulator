@@ -359,9 +359,7 @@ llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
 
   // Fast-math enables FMA contraction, constant folding of 0/±1 multiplies,
   // and reassociation — eliminating the need to special-case matrix elements.
-  llvm::FastMathFlags fmf;
-  fmf.setFast();
-  builder.setFastMathFlags(fmf);
+  builder.setFastMathFlags(llvm::FastMathFlags::getFast());
 
   auto *scalar_ty =
       (spec.precision == CAST_CPU_PRECISION_F32) ? builder.getFloatTy() : builder.getDoubleTy();

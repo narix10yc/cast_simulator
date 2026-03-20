@@ -2,10 +2,10 @@
 
 #include "cpu_gen.h"
 #include "cpu_jit.h"
+#include "cpu_util.h"
 
 #include <llvm/Support/Error.h>
 
-#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -15,24 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace {
-
-void write_error_message(char *err_buf, size_t err_buf_len, const std::string &msg) {
-  if (err_buf == nullptr || err_buf_len == 0) {
-    return;
-  }
-  const size_t n = std::min(err_buf_len - 1, msg.size());
-  std::memcpy(err_buf, msg.data(), n);
-  err_buf[n] = '\0';
-}
-
-void clear_error_buffer(char *err_buf, size_t err_buf_len) {
-  if (err_buf != nullptr && err_buf_len > 0) {
-    err_buf[0] = '\0';
-  }
-}
-
-} // namespace
+using namespace cast_cpu_detail;
 
 struct cast_cpu_kernel_generator_t {
   std::vector<CastCpuGeneratedKernel> kernels{};
@@ -223,8 +206,7 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
   }
 }
 
-extern "C" void cast_cpu_jit_kernel_records_free(cast_cpu_jit_kernel_record_t *records,
-                                                 size_t n) {
+extern "C" void cast_cpu_jit_kernel_records_free(cast_cpu_jit_kernel_record_t *records, size_t n) {
   if (records == nullptr)
     return;
   for (size_t i = 0; i < n; ++i) {

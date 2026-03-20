@@ -20,7 +20,6 @@ use crate::types::QuantumGate;
 pub struct CudaKernel {
     /// The source gate this kernel was compiled from.
     gate: Arc<QuantumGate>,
-    n_gate_qubits: u32,
     precision: CudaPrecision,
     /// PTX assembly text produced by the LLVM NVPTX backend.
     ptx: String,
@@ -47,7 +46,7 @@ impl CudaKernel {
 
     /// Returns the number of qubits in the gate this kernel implements.
     pub fn n_gate_qubits(&self) -> u32 {
-        self.n_gate_qubits
+        self.gate.n_qubits() as u32
     }
 
     /// Returns the floating-point precision this kernel operates on.
@@ -80,7 +79,7 @@ impl CudaKernel {
 impl fmt::Debug for CudaKernel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut s = f.debug_struct("CudaKernel");
-        s.field("n_gate_qubits", &self.n_gate_qubits)
+        s.field("n_gate_qubits", &self.n_gate_qubits())
             .field("precision", &self.precision)
             .field("func_name", &self.func_name)
             .field("ptx_bytes", &self.ptx.len())
@@ -605,7 +604,6 @@ impl CudaKernelManager {
 
         let kernel = Arc::new(CudaKernel {
             gate,
-            n_gate_qubits,
             precision,
             ptx,
             func_name,
