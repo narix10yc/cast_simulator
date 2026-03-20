@@ -60,6 +60,8 @@ static Value *genOptFMul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B) {
 
 // ── getMatDataCUDA ──────────────────────────────────────────────────────────
 
+/// Classifies each matrix element as zero, ±1, or general, and returns the
+/// corresponding LLVM constant value alongside its ScalarKind tag.
 static std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<> &B,
                                                  const cast_cuda_kernel_gen_spec_t &spec,
                                                  const cast_cuda_complex64_t *matrix,
@@ -70,89 +72,30 @@ static std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<> &B,
   const auto zTol = spec.ztol / static_cast<double>(K);
   const auto oTol = spec.otol / static_cast<double>(K);
 
-  auto data = std::vector<IRMatDataCUDA>(KK);
-
   const bool fp32 = (spec.precision == CAST_CUDA_PRECISION_F32);
-
-  // Classify kinds
-  for (unsigned r = 0; r < K; ++r) {
-    for (unsigned c = 0; c < K; ++c) {
-      unsigned idx = r * K + c;
-      double re = matrix[idx].re;
-      double im = matrix[idx].im;
-
-      // reKind
-      if (spec.ztol > 0.0 && std::abs(re) < zTol)
-        data[idx].reKind = SK_Zero;
-      else if (spec.otol > 0.0 && std::abs(re - 1.0) < oTol)
-        data[idx].reKind = SK_One;
-      else if (spec.otol > 0.0 && std::abs(re + 1.0) < oTol)
-        data[idx].reKind = SK_MinusOne;
-      else
-        data[idx].reKind = SK_ImmValue;
-
-      // imKind
-      if (spec.ztol > 0.0 && std::abs(im) < zTol)
-        data[idx].imKind = SK_Zero;
-      else if (spec.otol > 0.0 && std::abs(im - 1.0) < oTol)
-        data[idx].imKind = SK_One;
-      else if (spec.otol > 0.0 && std::abs(im + 1.0) < oTol)
-        data[idx].imKind = SK_MinusOne;
-      else
-        data[idx].imKind = SK_ImmValue;
-    }
-  }
-
-  // Build LLVM constant values
   Type *scalarTy = fp32 ? B.getFloatTy() : B.getDoubleTy();
-  auto zeroVal = ConstantFP::get(scalarTy, 0.0);
-  auto oneVal = ConstantFP::get(scalarTy, 1.0);
-  auto minusOneVal = ConstantFP::get(scalarTy, -1.0);
+  auto *zeroVal = ConstantFP::get(scalarTy, 0.0);
+  auto *oneVal = ConstantFP::get(scalarTy, 1.0);
+  auto *minusOneVal = ConstantFP::get(scalarTy, -1.0);
 
-  for (unsigned r = 0; r < K; ++r) {
-    for (unsigned c = 0; c < K; ++c) {
-      unsigned idx = r * K + c;
-      double re = matrix[idx].re;
-      double im = matrix[idx].im;
+  // Classify kind and build LLVM constant for a single scalar.
+  auto classify = [&](double v) -> std::pair<Value *, ScalarKind> {
+    if (spec.ztol > 0.0 && std::abs(v) < zTol)
+      return {zeroVal, SK_Zero};
+    if (spec.otol > 0.0 && std::abs(v - 1.0) < oTol)
+      return {oneVal, SK_One};
+    if (spec.otol > 0.0 && std::abs(v + 1.0) < oTol)
+      return {minusOneVal, SK_MinusOne};
+    return {ConstantFP::get(scalarTy, fp32 ? static_cast<double>(static_cast<float>(v)) : v),
+            SK_ImmValue};
+  };
 
-      switch (data[idx].reKind) {
-      case SK_Zero:
-        data[idx].reVal = zeroVal;
-        break;
-      case SK_One:
-        data[idx].reVal = oneVal;
-        break;
-      case SK_MinusOne:
-        data[idx].reVal = minusOneVal;
-        break;
-      case SK_ImmValue:
-        data[idx].reVal =
-            ConstantFP::get(scalarTy, fp32 ? static_cast<double>(static_cast<float>(re)) : re);
-        break;
-      default:
-        break;
-      }
-
-      switch (data[idx].imKind) {
-      case SK_Zero:
-        data[idx].imVal = zeroVal;
-        break;
-      case SK_One:
-        data[idx].imVal = oneVal;
-        break;
-      case SK_MinusOne:
-        data[idx].imVal = minusOneVal;
-        break;
-      case SK_ImmValue:
-        data[idx].imVal =
-            ConstantFP::get(scalarTy, fp32 ? static_cast<double>(static_cast<float>(im)) : im);
-        break;
-      default:
-        break;
-      }
-    }
+  std::vector<IRMatDataCUDA> data(KK);
+  for (unsigned i = 0; i < KK; ++i) {
+    auto [reVal, reKind] = classify(matrix[i].re);
+    auto [imVal, imKind] = classify(matrix[i].im);
+    data[i] = {reVal, imVal, reKind, imKind};
   }
-
   return data;
 }
 
@@ -307,19 +250,9 @@ static void genMatrixVectorMultiply_InlineImm(IRBuilder<> &B, const uint32_t *qu
 
 static void genMatVecMul_Imm(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
                              const std::vector<IRMatDataCUDA> &matData, Value *svRoot,
-                             Type *scalarTy) {
+                             Value *combosV, Type *scalarTy) {
   auto *func = B.GetInsertBlock()->getParent();
   auto &C = B.getContext();
-
-  // Retrieve p.combos argument by name.
-  Argument *combosV = nullptr;
-  for (auto &A : func->args()) {
-    if (A.getName() == "p.combos") {
-      combosV = &A;
-      break;
-    }
-  }
-  assert(combosV && "Missing kernel arg 'p.combos'");
 
   // NVPTX thread-index intrinsics.
   auto *tid = B.CreateIntrinsic(B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_tid_x, {});
@@ -400,7 +333,7 @@ llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
 
   auto matData = getMatDataCUDA(B, spec, matrix, static_cast<unsigned>(n_qubits));
 
-  genMatVecMul_Imm(B, qubits, n_qubits, matData, args.pSvArg, scalarTy);
+  genMatVecMul_Imm(B, qubits, n_qubits, matData, args.pSvArg, args.pCombos, scalarTy);
 
   B.CreateRetVoid();
 

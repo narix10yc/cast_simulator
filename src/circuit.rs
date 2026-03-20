@@ -467,6 +467,15 @@ impl CircuitGraph {
         self.append_empty_row()
     }
 
+    /// Returns the gates in row-major order, deduplicating multi-qubit gates
+    /// that span several qubit slots within the same row.
+    pub fn gates_in_row_order(&self) -> Vec<Arc<QuantumGate>> {
+        self.live_gate_ids_in_row_order()
+            .iter()
+            .filter_map(|&gid| self.gate_arc(gid).cloned())
+            .collect()
+    }
+
     fn live_gate_ids_in_row_order(&self) -> Vec<GateId> {
         let mut out = Vec::new();
         for row in &self.rows {
