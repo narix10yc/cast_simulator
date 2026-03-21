@@ -6,6 +6,7 @@ target/
 
 analysis/
 examples/
+external/
 profiles/
 tmp/
 
