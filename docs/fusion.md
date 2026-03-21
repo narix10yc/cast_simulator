@@ -144,6 +144,44 @@ When fusing a DM circuit:
 - Max practical fusion size for DM gates is 6 virtual qubits (3 physical
   qubits).  Size 8 puts too much pressure on kernel generation and JIT.
 
+## Compile Time vs Execution Time Scaling
+
+JIT compilation cost and kernel execution cost scale differently with
+statevector size, and this has practical implications for when fusion pays off.
+
+**Compile time** depends on the circuit structure — number of gates and the
+matrix size of each fused gate.  It is independent of the statevector qubit
+count.  A 3-qubit fused gate generates the same LLVM IR whether the
+statevector has 28 or 40 qubits.
+
+**Execution time** is proportional to the statevector size.  Each kernel
+touches all 2^n amplitudes, so every additional qubit doubles the per-gate
+cost.
+
+At small statevector sizes (e.g. 28-qubit DM for 14 physical qubits), compile
+time can dominate total wall time — the CUDA hw-adaptive config compiles in
+~2.6 s but executes in ~360 ms, a 7x compile/exec ratio.  Aggressive fusion
+(fused(6)) is even worse: 8.9 s compile for 465 ms execution, making it a net
+loss in single-shot mode.
+
+The crossover where execution overtakes compilation is around **30-32
+statevector qubits** (15-16 physical qubits for DM simulation).  Beyond that
+point compile cost becomes negligible and the fusion speedups translate
+directly to wall-time savings:
+
+| SV qubits | Compile/Exec ratio | Fusion wall-time impact |
+|-----------|--------------------:|------------------------|
+| 28        | ~7x                 | Compile dominates; aggressive fusion hurts total time |
+| 30        | ~2x                 | Roughly balanced; moderate fusion breaks even |
+| 32        | ~0.5x               | Execution dominates; fusion speedups fully realized |
+| 36+       | negligible          | Compile is noise; optimize purely for kernel throughput |
+
+**Implication for the cost model:** the current roofline-based cost model
+optimizes kernel execution throughput, which is the right objective for
+large-scale simulations (30+ SV qubits) where compile cost is amortized.  For
+few-shot workloads at smaller scales, total wall time (compile + exec) may be
+the better metric.
+
 ## Public API
 
 ```rust

@@ -133,7 +133,7 @@ cargo run --bin bench_noisy_qft --release -- -n 8
 cargo run --bin bench_noisy_qft --features cuda --release -- -n 10
 
 # Custom noise and budget
-cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --budget 10
+cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --bench-budget 10
 ```
 
 ### Options
@@ -142,7 +142,7 @@ cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --budget 10
 |------|---------|-------------|
 | `-n, --n-qubits <N>` | `14` | Physical qubits in the QFT (DM SV has 2N qubits) |
 | `--noise-p <P>` | `0.005` | Depolarizing error probability per gate |
-| `--budget <S>` | `20` | Time budget per benchmark run (seconds) |
+| `--bench-budget <S>` | `20` | Time budget per benchmark run (seconds) |
 | `--max-size <N>` | `6` | Max virtual-qubit gate size for fusion |
 | `--profile <PATH>` | — | Cached HardwareProfile JSON |
 | `--profile-budget <S>` | `20` | Profiling budget (seconds) |
