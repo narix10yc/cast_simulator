@@ -141,6 +141,15 @@ impl QuantumGate {
         self.qubits.len()
     }
 
+    /// Returns the effective qubit count for kernel sizing and cost estimation.
+    ///
+    /// For unitary gates this equals [`Self::n_qubits`]. For channel gates the
+    /// superoperator acts on `2 × n_qubits` virtual qubits (ket + bra copies),
+    /// so that value is returned instead.
+    pub fn effective_n_qubits(&self) -> usize {
+        if self.is_unitary() { self.qubits.len() } else { 2 * self.qubits.len() }
+    }
+
     /// Returns `true` if this gate is unitary (no embedded Kraus channel).
     pub fn is_unitary(&self) -> bool {
         self.channel.is_none()
