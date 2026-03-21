@@ -17,7 +17,7 @@
 //! cargo run --bin bench_noisy_qft --release -- --profile profiles/cpu_f64.json
 //!
 //! # Override noise probability and per-run time budget:
-//! cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --budget 10
+//! cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --bench-budget 10
 //! ```
 
 use std::sync::Arc;
@@ -50,9 +50,10 @@ struct Args {
     #[arg(long, default_value_t = 0.005)]
     noise_p: f64,
 
-    /// Time budget per benchmark run in seconds (split between warmup and measurement).
+    /// Time budget per benchmark run in seconds.  Adaptive timing splits this
+    /// between warmup and measurement automatically.
     #[arg(long, default_value_t = 20.0)]
-    budget: f64,
+    bench_budget: f64,
 
     /// Maximum gate size (in virtual qubits) for hardware-adaptive fusion.
     /// DM gates have even qubit counts (2k for k physical qubits), so this
@@ -159,9 +160,9 @@ fn run_cpu(graph: &CircuitGraph, n_sv: u32, budget_s: f64) -> Result<(f64, Timin
     let gates = graph.gates_in_row_order();
 
     let t0 = Instant::now();
-    let mut kids = Vec::with_capacity(gates.len());
-    for g in &gates {
-        kids.push(mgr.generate(&spec, g)?);
+    let mut kernel_ids = Vec::with_capacity(gates.len());
+    for gate in &gates {
+        kernel_ids.push(mgr.generate(&spec, gate)?);
     }
     let compile_s = t0.elapsed().as_secs_f64();
 
@@ -169,7 +170,7 @@ fn run_cpu(graph: &CircuitGraph, n_sv: u32, budget_s: f64) -> Result<(f64, Timin
     let timing = time_adaptive(
         || -> anyhow::Result<()> {
             sv.initialize();
-            for &kid in &kids {
+            for &kid in &kernel_ids {
                 mgr.apply(kid, &mut sv, n_threads)?;
             }
             Ok(())
@@ -202,9 +203,9 @@ fn run_cuda(graph: &CircuitGraph, n_sv: u32, budget_s: f64) -> Result<(f64, Timi
     let gates = graph.gates_in_row_order();
 
     let t0 = Instant::now();
-    let mut kids = Vec::with_capacity(gates.len());
-    for g in &gates {
-        kids.push(mgr.generate(g, spec)?);
+    let mut kernel_ids = Vec::with_capacity(gates.len());
+    for gate in &gates {
+        kernel_ids.push(mgr.generate(gate, spec)?);
     }
     let compile_s = t0.elapsed().as_secs_f64();
 
@@ -212,7 +213,7 @@ fn run_cuda(graph: &CircuitGraph, n_sv: u32, budget_s: f64) -> Result<(f64, Timi
     let timing = time_adaptive_with(
         || -> anyhow::Result<std::time::Duration> {
             sv.zero()?;
-            for &kid in &kids {
+            for &kid in &kernel_ids {
                 mgr.apply(kid, &mut sv)?;
             }
             let stats = mgr.sync()?;
@@ -226,8 +227,8 @@ fn run_cuda(graph: &CircuitGraph, n_sv: u32, budget_s: f64) -> Result<(f64, Timi
 
 #[cfg(not(feature = "cuda"))]
 #[allow(dead_code)]
-fn run_cuda(_: &CircuitGraph, _: u32, _: f64) -> Result<(f64, TimingStats)> {
-    anyhow::bail!("requires --features cuda")
+fn run_cuda(_graph: &CircuitGraph, _n_sv: u32, _budget_s: f64) -> Result<(f64, TimingStats)> {
+    anyhow::bail!("CUDA backend requires the `cuda` feature")
 }
 
 // ── Hardware profiling ────────────────────────────────────────────────────────
@@ -295,16 +296,16 @@ fn get_cuda_profile(args: &Args, n_dm: u32) -> Result<HardwareProfile> {
 
 fn print_header() {
     println!(
-        "  {:<16} {:>7} {:>6}  {:>10}  {:>22}  {:>7}",
+        "{:<14} {:>7} {:>6} {:>10} {:>22} {:>8}",
         "Config", "Gates", "Depth", "Compile", "Exec time", "Speedup"
     );
-    println!("  {}", "─".repeat(77));
+    println!("{}", "-".repeat(72));
 }
 
 fn print_row(
     label: &str,
     n_gates: usize,
-    depth: usize,
+    n_rows: usize,
     compile_s: f64,
     t: &TimingStats,
     baseline_mean: f64,
@@ -315,10 +316,10 @@ fn print_row(
         1.0
     };
     println!(
-        "  {:<16} {:>7} {:>6}  {:>10}  {:>22}  {:>6.2}x",
+        "{:<14} {:>7} {:>6} {:>10} {:>22} {:>7.2}x",
         label,
         n_gates,
-        depth,
+        n_rows,
         fmt_duration(compile_s),
         t,
         speedup
@@ -348,13 +349,14 @@ fn main() -> Result<()> {
     let (uni, ch) = gate_stats(&noisy);
     let n_gates_raw = dm_gates.len();
 
-    println!();
-    println!(
-        "  {n}-qubit noisy QFT — density-matrix circuit (n_sv={n_dm}, SV≈{sv_gib:.1} GiB F64)"
+    eprintln!();
+    eprintln!(
+        "{n}-qubit noisy QFT — density-matrix circuit (n_sv={n_dm}, SV\u{2248}{sv_gib:.1} GiB F64)"
     );
-    println!("  Physical circuit: {uni} unitary + {ch} channel gates  →  {n_gates_raw} DM gates");
-    println!("  Noise: depolarizing p={}", args.noise_p);
-    println!();
+    eprintln!(
+        "  Physical circuit: {uni} unitary + {ch} channel gates  \u{2192}  {n_gates_raw} DM gates"
+    );
+    eprintln!("  Noise: depolarizing p={}\n", args.noise_p);
 
     let base_graph = to_graph(&dm_gates);
 
@@ -371,24 +373,24 @@ fn main() -> Result<()> {
         label: String,
         graph: CircuitGraph,
         n_gates: usize,
-        depth: usize,
+        n_rows: usize,
     }
 
     fn fuse(label: &str, base: &CircuitGraph, config: &FusionConfig) -> FusedCircuit {
         let mut g = base.clone();
         fusion::optimize(&mut g, config);
         let n_gates = g.gates_in_row_order().len();
-        let depth = g.n_rows();
+        let n_rows = g.n_rows();
         FusedCircuit {
             label: label.to_string(),
             graph: g,
             n_gates,
-            depth,
+            n_rows,
         }
     }
 
     let unfused_n_gates = base_graph.gates_in_row_order().len();
-    let unfused_depth = base_graph.n_rows();
+    let unfused_n_rows = base_graph.n_rows();
 
     let mut circuits: Vec<FusedCircuit> = vec![
         // "unfused" = raw circuit, no fusion at all.
@@ -396,37 +398,36 @@ fn main() -> Result<()> {
             label: "unfused".into(),
             graph: base_graph.clone(),
             n_gates: unfused_n_gates,
-            depth: unfused_depth,
+            n_rows: unfused_n_rows,
         },
         fuse("fused(4)", &base_graph, &FusionConfig::size_only(4)),
         fuse("fused(6)", &base_graph, &FusionConfig::size_only(6)),
     ];
 
     // ── CPU ──────────────────────────────────────────────────────────────────
-    println!("  ══ CPU ══════════════════════════════════════════════════════════════════");
     {
         let hw = get_cpu_profile(&args, n_dm)?;
-        println!(
-            "  Profile: {}  BW={:.1} GiB/s  Compute={:.1} GFLOPs/s  Crossover AI={:.1}",
+        eprintln!(
+            "  Profile: {}  BW={:.1} GiB/s  Compute={:.1} GFLOPs/s  Crossover AI={:.1}\n",
             hw.config.device, hw.peak_bw_gib_s, hw.peak_gflops_s, hw.crossover_ai,
         );
-        println!();
-        print_header();
 
-        // Append hw-adaptive circuit for this backend.
         let hw_cfg = FusionConfig::hardware_adaptive(&hw, args.max_size);
         circuits.push(fuse("hw-adaptive", &base_graph, &hw_cfg));
 
+        println!("CPU");
+        print_header();
+
         let mut baseline_mean = 0.0_f64;
         for fc in &circuits {
-            let (compile_s, timing) = run_cpu(&fc.graph, n_dm, args.budget)?;
+            let (compile_s, timing) = run_cpu(&fc.graph, n_dm, args.bench_budget)?;
             if fc.label == "unfused" {
                 baseline_mean = timing.mean_s;
             }
             print_row(
                 &fc.label,
                 fc.n_gates,
-                fc.depth,
+                fc.n_rows,
                 compile_s,
                 &timing,
                 baseline_mean,
@@ -439,31 +440,31 @@ fn main() -> Result<()> {
     circuits.pop();
 
     // ── CUDA ─────────────────────────────────────────────────────────────────
-    println!("  ══ CUDA ═════════════════════════════════════════════════════════════════");
 
     #[cfg(feature = "cuda")]
     {
         let hw = get_cuda_profile(&args, n_dm)?;
-        println!(
-            "  Profile: {}  BW={:.1} GiB/s  Compute={:.1} GFLOPs/s  Crossover AI={:.1}",
+        eprintln!(
+            "  Profile: {}  BW={:.1} GiB/s  Compute={:.1} GFLOPs/s  Crossover AI={:.1}\n",
             hw.config.device, hw.peak_bw_gib_s, hw.peak_gflops_s, hw.crossover_ai,
         );
-        println!();
-        print_header();
 
         let hw_cfg = FusionConfig::hardware_adaptive(&hw, args.max_size);
         circuits.push(fuse("hw-adaptive", &base_graph, &hw_cfg));
 
+        println!("CUDA");
+        print_header();
+
         let mut baseline_mean = 0.0_f64;
         for fc in &circuits {
-            let (compile_s, timing) = run_cuda(&fc.graph, n_dm, args.budget)?;
+            let (compile_s, timing) = run_cuda(&fc.graph, n_dm, args.bench_budget)?;
             if fc.label == "unfused" {
                 baseline_mean = timing.mean_s;
             }
             print_row(
                 &fc.label,
                 fc.n_gates,
-                fc.depth,
+                fc.n_rows,
                 compile_s,
                 &timing,
                 baseline_mean,
@@ -473,7 +474,7 @@ fn main() -> Result<()> {
     }
 
     #[cfg(not(feature = "cuda"))]
-    println!("  (skipped — rerun with --features cuda to include CUDA results)\n");
+    eprintln!("(skipped — rerun with --features cuda to include CUDA results)\n");
 
     Ok(())
 }
