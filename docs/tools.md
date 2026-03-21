@@ -57,6 +57,19 @@ physical qubits, the statevector has 2n virtual qubits — use `-n 2N`.
 If omitted, profile_hw auto-detects available memory and picks the largest
 feasible n (clamped to 30).
 
+**Why size matters for profile accuracy:**  The roofline parameters —
+especially effective memory bandwidth — depend on working set size because
+of cache effects.  A 28-qubit statevector (4 GiB) can partially fit in GPU
+L2 cache (modern GPUs have 48-96 MB L2), which raises effective bandwidth
+for low-AI gates and shifts the crossover AI downward compared to a
+30-qubit statevector (16 GiB) that streams entirely from HBM.
+
+At large scales (30+ SV qubits), the statevector far exceeds any cache and
+the roofline stabilises — profiles at 30 and 32 qubits will agree closely.
+But in the transition zone (24-30 qubits), cache effects can meaningfully
+shift the crossover, so the profile qubit count should match the target
+simulation size for best results.
+
 ### Saved Profiles
 
 Profiles are saved as JSON and can be loaded by `bench_fusion` and
@@ -134,6 +147,10 @@ cargo run --bin bench_noisy_qft --features cuda --release -- -n 10
 
 # Custom noise and budget
 cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --bench-budget 10
+
+# With per-backend cached profiles
+cargo run --bin bench_noisy_qft --features cuda --release -- \
+      --cpu-profile profiles/cpu_f64.json --cuda-profile profiles/cuda_f64.json
 ```
 
 ### Options
@@ -144,7 +161,8 @@ cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --bench-budget 10
 | `--noise-p <P>` | `0.005` | Depolarizing error probability per gate |
 | `--bench-budget <S>` | `20` | Time budget per benchmark run (seconds) |
 | `--max-size <N>` | `6` | Max virtual-qubit gate size for fusion |
-| `--profile <PATH>` | — | Cached HardwareProfile JSON |
+| `--cpu-profile <PATH>` | — | Cached CPU HardwareProfile JSON |
+| `--cuda-profile <PATH>` | — | Cached CUDA HardwareProfile JSON |
 | `--profile-budget <S>` | `20` | Profiling budget (seconds) |
 | `--profile-qubits <N>` | auto (= 2n) | SV qubits for profiling |
 

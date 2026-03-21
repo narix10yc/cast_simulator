@@ -123,6 +123,21 @@ cost(gate) = max(1.0,  AI(gate) / crossover_AI)
 The crossover AI comes from the roofline profile and represents the hardware's
 memory bandwidth / compute throughput balance point.
 
+**Profile matching:** the hardware-adaptive model is only as good as its
+profile.  Two conditions must hold for accurate cost decisions:
+
+1. **Backend match** — a CPU profile must be used for CPU simulation and a
+   CUDA profile for CUDA.  CPU and GPU have fundamentally different
+   bandwidth/compute ratios and crossover points.
+
+2. **Working-set size match** — the profile should be measured at the same
+   statevector qubit count as the target simulation.  Effective memory
+   bandwidth varies with working-set size due to cache effects (see
+   [Choosing Statevector Size](tools.md#choosing-statevector-size) in the
+   tools documentation).  A mismatched profile can cause the optimizer to
+   accept fusions that are actually compute-bound (crossover too high) or
+   reject beneficial fusions (crossover too low).
+
 ## Effective Qubit Counting
 
 For density-matrix simulation, channel gates act on 2k virtual qubits for k
