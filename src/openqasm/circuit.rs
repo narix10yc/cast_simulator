@@ -1,5 +1,6 @@
 use crate::types::Rational;
 
+#[derive(Clone, Copy)]
 pub enum Angle {
     RationalPi(Rational),
     Number(f64),

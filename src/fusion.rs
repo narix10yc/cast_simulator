@@ -42,7 +42,7 @@ fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> 
     };
 
     let gate = match cg.gate_arc(gate_id) {
-        Some(gate) if gate.n_qubits() == 1 => gate.clone(),
+        Some(gate) if gate.n_qubits() == 1 && gate.is_unitary() => gate.clone(),
         _ => return false,
     };
 
@@ -53,6 +53,10 @@ fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> 
         let Some(next_gate) = cg.gate(next_gate_id) else {
             continue;
         };
+        // A channel gate on this qubit is a causal barrier; cannot fuse past it.
+        if !next_gate.is_unitary() {
+            break;
+        }
         let fused = next_gate.matmul(&gate);
         cg.remove_gate_at(row, qubit);
         cg.remove_gate_at(next_row, qubit);
@@ -67,6 +71,9 @@ fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> 
         let Some(prev_gate) = cg.gate(prev_gate_id) else {
             continue;
         };
+        if !prev_gate.is_unitary() {
+            break;
+        }
         let fused = gate.matmul(prev_gate);
         cg.remove_gate_at(row, qubit);
         cg.remove_gate_at(prev_row, qubit);
@@ -104,7 +111,10 @@ fn fuse_adjacent_two_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize)
     let Some(left_gate) = cg.gate(left_gate_id) else {
         return false;
     };
-    if left_gate.n_qubits() != 2 || left_gate.qubits()[0] as usize != qubit {
+    if left_gate.n_qubits() != 2
+        || !left_gate.is_unitary()
+        || left_gate.qubits()[0] as usize != qubit
+    {
         return false;
     }
 
@@ -114,7 +124,10 @@ fn fuse_adjacent_two_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize)
     let Some(right_gate) = cg.gate(right_gate_id) else {
         return false;
     };
-    if right_gate.n_qubits() != 2 || right_gate.qubits() != left_gate.qubits() {
+    if right_gate.n_qubits() != 2
+        || !right_gate.is_unitary()
+        || right_gate.qubits() != left_gate.qubits()
+    {
         return false;
     }
 
@@ -170,7 +183,8 @@ fn start_fusion(
     let seed_gate = cg.gate_arc(seed_id).unwrap().clone();
 
     // Only process a gate from its lowest qubit to avoid duplicate seeds.
-    if seed_gate.qubits()[0] as usize != start_qubit {
+    // Channel gates cannot participate in matmul-based fusion.
+    if seed_gate.qubits()[0] as usize != start_qubit || !seed_gate.is_unitary() {
         return 0;
     }
 
@@ -192,6 +206,9 @@ fn start_fusion(
             continue;
         }
         let cand_gate = cg.gate_arc(cand_id).unwrap().clone();
+        if !cand_gate.is_unitary() {
+            continue;
+        }
         if union_qubit_count(prod_gate.qubits(), cand_gate.qubits()) > cdd_size {
             continue;
         }
@@ -227,6 +244,9 @@ fn start_fusion(
                 continue;
             }
             let cand_gate = cg.gate_arc(cand_id).unwrap().clone();
+            if !cand_gate.is_unitary() {
+                continue;
+            }
             if union_qubit_count(prod_gate.qubits(), cand_gate.qubits()) > cdd_size {
                 continue;
             }
@@ -560,7 +580,7 @@ mod tests {
         cg.insert_gate(QuantumGate::h(0));
         cg.insert_gate(QuantumGate::x(0));
         cg.insert_gate(QuantumGate::h(0));
-        check_fusion(&cg, |g| apply_size_two_fusion(g));
+        check_fusion(&cg, apply_size_two_fusion);
     }
 
     #[test]
@@ -568,7 +588,7 @@ mod tests {
         let mut cg = CircuitGraph::new();
         cg.insert_gate(QuantumGate::x(0));
         cg.insert_gate(QuantumGate::cx(0, 1));
-        check_fusion(&cg, |g| apply_size_two_fusion(g));
+        check_fusion(&cg, apply_size_two_fusion);
     }
 
     #[test]
@@ -576,7 +596,7 @@ mod tests {
         let mut cg = CircuitGraph::new();
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::h(1));
-        check_fusion(&cg, |g| apply_size_two_fusion(g));
+        check_fusion(&cg, apply_size_two_fusion);
     }
 
     #[test]
@@ -586,7 +606,7 @@ mod tests {
         cg.insert_gate(QuantumGate::h(0));
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::h(0));
-        check_fusion(&cg, |g| apply_size_two_fusion(g));
+        check_fusion(&cg, apply_size_two_fusion);
     }
 
     #[test]
@@ -595,7 +615,7 @@ mod tests {
         let mut cg = CircuitGraph::new();
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::cz(0, 1));
-        check_fusion(&cg, |g| apply_size_two_fusion(g));
+        check_fusion(&cg, apply_size_two_fusion);
     }
 
     #[test]
@@ -604,7 +624,7 @@ mod tests {
         let mut cg = CircuitGraph::new();
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::cx(0, 1));
-        let fused = check_fusion(&cg, |g| apply_size_two_fusion(g));
+        let fused = check_fusion(&cg, apply_size_two_fusion);
         // Structural: collapsed to one gate.
         assert_eq!(fused.n_rows(), 1);
         // Mathematical: that gate is the 2×2 identity on {0,1}.
@@ -625,7 +645,7 @@ mod tests {
         cg.insert_gate(QuantumGate::h(1));
         cg.insert_gate(QuantumGate::cx(1, 2));
         cg.insert_gate(QuantumGate::x(2));
-        check_fusion(&cg, |g| apply_size_two_fusion(g));
+        check_fusion(&cg, apply_size_two_fusion);
     }
 
     #[test]
@@ -635,7 +655,7 @@ mod tests {
         cg.insert_gate(QuantumGate::rz(0.3, 0));
         cg.insert_gate(QuantumGate::rz(0.7, 0));
         cg.insert_gate(QuantumGate::rz(1.1, 0));
-        check_fusion(&cg, |g| apply_size_two_fusion(g));
+        check_fusion(&cg, apply_size_two_fusion);
     }
 
     #[test]
@@ -644,7 +664,7 @@ mod tests {
         let mut cg = CircuitGraph::new();
         cg.insert_gate(QuantumGate::swap(0, 1));
         cg.insert_gate(QuantumGate::swap(0, 1));
-        let fused = check_fusion(&cg, |g| apply_size_two_fusion(g));
+        let fused = check_fusion(&cg, apply_size_two_fusion);
         assert_eq!(fused.n_rows(), 1);
         let u = circuit_unitary(&fused);
         assert!(u.matrix().maximum_norm_diff(&ComplexSquareMatrix::eye(4)) < 1e-10);

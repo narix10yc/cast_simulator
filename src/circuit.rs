@@ -456,10 +456,24 @@ impl CircuitGraph {
         Some((new_id, target_row))
     }
 
-    /// Returns the index of the first row where `gate` can be placed, creating
-    /// a new empty row if every existing row has a conflict.
+    /// Returns the index of the earliest row where `gate` can be placed while
+    /// preserving causal ordering: the row must come after every existing row
+    /// that already contains a gate on any of `gate`'s qubits.
     fn find_or_create_row(&mut self, gate: &QuantumGate) -> usize {
-        for row_index in 0..self.rows.len() {
+        // Minimum row: one past the last row that uses any of our qubits.
+        let min_row = gate
+            .qubits()
+            .iter()
+            .filter_map(|&q| {
+                (0..self.rows.len())
+                    .rev()
+                    .find(|&r| self.rows[r].gate_id_at(q as usize).is_some())
+            })
+            .max()
+            .map(|last| last + 1)
+            .unwrap_or(0);
+
+        for row_index in min_row..self.rows.len() {
             if self.is_row_vacant(row_index, gate.qubits()) {
                 return row_index;
             }

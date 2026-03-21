@@ -62,7 +62,10 @@ impl KrausChannel {
     /// - Any qubit appears more than once, or qubits are not sorted ascending.
     /// - Any operator's dimension is not `2^n`.
     pub fn new(operators: Vec<ComplexSquareMatrix>, qubits: Vec<u32>) -> Self {
-        assert!(!operators.is_empty(), "KrausChannel requires at least one Kraus operator");
+        assert!(
+            !operators.is_empty(),
+            "KrausChannel requires at least one Kraus operator"
+        );
         assert!(
             qubits.windows(2).all(|w| w[0] < w[1]),
             "channel qubits must be distinct and in ascending order"
@@ -278,7 +281,10 @@ impl KrausChannel {
     /// # Panics
     /// Panics if `p` is outside `[0, 1]`, qubits are not sorted/distinct, or `n > 10`.
     pub fn symmetric_depolarizing(qubits: &[u32], p: f64) -> Self {
-        assert!(!qubits.is_empty(), "symmetric_depolarizing requires at least one qubit");
+        assert!(
+            !qubits.is_empty(),
+            "symmetric_depolarizing requires at least one qubit"
+        );
         assert!(
             (0.0..=1.0).contains(&p),
             "symmetric_depolarizing probability p must be in [0, 1], got {p}"
@@ -288,7 +294,11 @@ impl KrausChannel {
             "qubits must be distinct and in ascending order"
         );
         let n = qubits.len();
-        assert!(n <= 10, "symmetric_depolarizing: n > 10 would produce {} Kraus operators", 4usize.pow(n as u32));
+        assert!(
+            n <= 10,
+            "symmetric_depolarizing: n > 10 would produce {} Kraus operators",
+            4usize.pow(n as u32)
+        );
 
         let n_paulis = 4usize.pow(n as u32); // 4^n
         let non_id = (n_paulis - 1) as f64;
@@ -302,7 +312,10 @@ impl KrausChannel {
             })
             .collect();
 
-        Self { operators, qubits: qubits.to_vec() }
+        Self {
+            operators,
+            qubits: qubits.to_vec(),
+        }
     }
 
     /// General single-qubit Pauli channel.
@@ -322,9 +335,11 @@ impl KrausChannel {
     /// Panics if any probability is negative or `p_x + p_y + p_z > 1`.
     pub fn pauli_channel(qubit: u32, p_x: f64, p_y: f64, p_z: f64) -> Self {
         let p_i = 1.0 - p_x - p_y - p_z;
-        assert!(p_x >= 0.0 && p_y >= 0.0 && p_z >= 0.0 && p_i >= -1e-12,
+        assert!(
+            p_x >= 0.0 && p_y >= 0.0 && p_z >= 0.0 && p_i >= -1e-12,
             "pauli_channel: probabilities must be non-negative and sum to at most 1 \
-             (got p_x={p_x}, p_y={p_y}, p_z={p_z}, implied p_I={p_i})");
+             (got p_x={p_x}, p_y={p_y}, p_z={p_z}, implied p_I={p_i})"
+        );
         let p_i = p_i.max(0.0);
         Self {
             operators: vec![
@@ -344,7 +359,10 @@ impl KrausChannel {
     /// # Panics
     /// Panics if `p` is outside `[0, 1]`.
     pub fn bit_flip(qubit: u32, p: f64) -> Self {
-        assert!((0.0..=1.0).contains(&p), "bit_flip probability p must be in [0, 1], got {p}");
+        assert!(
+            (0.0..=1.0).contains(&p),
+            "bit_flip probability p must be in [0, 1], got {p}"
+        );
         Self::pauli_channel(qubit, p, 0.0, 0.0)
     }
 
@@ -355,7 +373,10 @@ impl KrausChannel {
     /// # Panics
     /// Panics if `p` is outside `[0, 1]`.
     pub fn phase_flip(qubit: u32, p: f64) -> Self {
-        assert!((0.0..=1.0).contains(&p), "phase_flip probability p must be in [0, 1], got {p}");
+        assert!(
+            (0.0..=1.0).contains(&p),
+            "phase_flip probability p must be in [0, 1], got {p}"
+        );
         Self::pauli_channel(qubit, 0.0, 0.0, p)
     }
 
@@ -381,29 +402,55 @@ impl KrausChannel {
     /// Panics if `p` or `gamma` is outside `[0, 1]`.
     pub fn generalized_amplitude_damping(qubit: u32, p: f64, gamma: f64) -> Self {
         assert!((0.0..=1.0).contains(&p), "p must be in [0, 1], got {p}");
-        assert!((0.0..=1.0).contains(&gamma), "gamma must be in [0, 1], got {gamma}");
+        assert!(
+            (0.0..=1.0).contains(&gamma),
+            "gamma must be in [0, 1], got {gamma}"
+        );
         let sg = gamma.sqrt();
         let s1g = (1.0 - gamma).sqrt();
         let sp = p.sqrt();
         let s1p = (1.0 - p).sqrt();
 
-        let k0 = ComplexSquareMatrix::from_vec(2, vec![
-            Complex::new(s1p, 0.0), Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0), Complex::new(s1p * s1g, 0.0),
-        ]);
-        let k1 = ComplexSquareMatrix::from_vec(2, vec![
-            Complex::new(0.0, 0.0), Complex::new(s1p * sg, 0.0),
-            Complex::new(0.0, 0.0), Complex::new(0.0, 0.0),
-        ]);
-        let k2 = ComplexSquareMatrix::from_vec(2, vec![
-            Complex::new(sp * s1g, 0.0), Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),      Complex::new(sp, 0.0),
-        ]);
-        let k3 = ComplexSquareMatrix::from_vec(2, vec![
-            Complex::new(0.0, 0.0), Complex::new(0.0, 0.0),
-            Complex::new(sp * sg, 0.0), Complex::new(0.0, 0.0),
-        ]);
-        Self { operators: vec![k0, k1, k2, k3], qubits: vec![qubit] }
+        let k0 = ComplexSquareMatrix::from_vec(
+            2,
+            vec![
+                Complex::new(s1p, 0.0),
+                Complex::new(0.0, 0.0),
+                Complex::new(0.0, 0.0),
+                Complex::new(s1p * s1g, 0.0),
+            ],
+        );
+        let k1 = ComplexSquareMatrix::from_vec(
+            2,
+            vec![
+                Complex::new(0.0, 0.0),
+                Complex::new(s1p * sg, 0.0),
+                Complex::new(0.0, 0.0),
+                Complex::new(0.0, 0.0),
+            ],
+        );
+        let k2 = ComplexSquareMatrix::from_vec(
+            2,
+            vec![
+                Complex::new(sp * s1g, 0.0),
+                Complex::new(0.0, 0.0),
+                Complex::new(0.0, 0.0),
+                Complex::new(sp, 0.0),
+            ],
+        );
+        let k3 = ComplexSquareMatrix::from_vec(
+            2,
+            vec![
+                Complex::new(0.0, 0.0),
+                Complex::new(0.0, 0.0),
+                Complex::new(sp * sg, 0.0),
+                Complex::new(0.0, 0.0),
+            ],
+        );
+        Self {
+            operators: vec![k0, k1, k2, k3],
+            qubits: vec![qubit],
+        }
     }
 
     /// Wraps this channel as a [`QuantumGate`].
@@ -506,7 +553,10 @@ mod tests {
     }
 
     /// Compute K ρ K† directly.
-    fn apply_kraus_direct(k: &ComplexSquareMatrix, rho: &ComplexSquareMatrix) -> ComplexSquareMatrix {
+    fn apply_kraus_direct(
+        k: &ComplexSquareMatrix,
+        rho: &ComplexSquareMatrix,
+    ) -> ComplexSquareMatrix {
         let n = rho.edge_size();
         // (K ρ K†)[i,j] = Σ_{a,b} K[i,a] ρ[a,b] conj(K[j,b])
         let mut out = ComplexSquareMatrix::zeros(n);
@@ -641,8 +691,8 @@ mod tests {
     #[test]
     fn pauli_channel_recovers_depolarizing() {
         let p = 0.6_f64;
-        let via_pauli = KrausChannel::pauli_channel(0, p / 3.0, p / 3.0, p / 3.0)
-            .superoperator_matrix();
+        let via_pauli =
+            KrausChannel::pauli_channel(0, p / 3.0, p / 3.0, p / 3.0).superoperator_matrix();
         let via_dep = KrausChannel::depolarizing(0, p).superoperator_matrix();
         assert!(via_pauli.maximum_norm_diff(&via_dep) < TOL);
     }
@@ -683,8 +733,8 @@ mod tests {
     #[test]
     fn generalized_amplitude_damping_p0_matches_amplitude_damping() {
         for &gamma in &[0.0, 0.3, 1.0] {
-            let gen = KrausChannel::generalized_amplitude_damping(0, 0.0, gamma)
-                .superoperator_matrix();
+            let gen =
+                KrausChannel::generalized_amplitude_damping(0, 0.0, gamma).superoperator_matrix();
             let std = KrausChannel::amplitude_damping(0, gamma).superoperator_matrix();
             assert!(
                 gen.maximum_norm_diff(&std) < TOL,

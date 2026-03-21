@@ -27,3 +27,7 @@ path = "src/bin/profile_hw.rs"
 [[bin]]
 name = "bench_fusion"
 path = "src/bin/bench_fusion.rs"
+
+[[bin]]
+name = "bench_noisy_qft"
+path = "src/bin/bench_noisy_qft.rs"
