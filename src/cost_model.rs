@@ -26,7 +26,7 @@ impl CostModel for SizeOnlyCostModel {
         if gate.effective_n_qubits() > self.max_size {
             return 1.0;
         }
-        if gate.arithmatic_intensity(self.zero_tol) > self.max_ai as f64 {
+        if gate.arithmetic_intensity(self.zero_tol) > self.max_ai as f64 {
             return 1.0;
         }
         1e-10
@@ -242,7 +242,7 @@ impl CostModel for HardwareAdaptiveCostModel {
         if gate.effective_n_qubits() > self.max_size {
             return f64::INFINITY;
         }
-        (gate.arithmatic_intensity(self.zero_tol) / self.crossover_ai).max(1.0)
+        (gate.arithmetic_intensity(self.zero_tol) / self.crossover_ai).max(1.0)
     }
 }
 

@@ -362,8 +362,8 @@ pub fn measure(
 
     adaptive_sweep(
         |target_ai, per_point_budget| {
-            let gate = QuantumGate::random_arithmatic_intensity(n_qubits, target_ai, ztol);
-            let actual_ai = gate.arithmatic_intensity(ztol);
+            let gate = QuantumGate::random_arithmetic_intensity(n_qubits, target_ai, ztol);
+            let actual_ai = gate.arithmetic_intensity(ztol);
             let mean_s = time_kernel(&gate, per_point_budget)?;
 
             let gib_s = 2.0 * sv_bytes as f64 / mean_s / (1u64 << 30) as f64;
