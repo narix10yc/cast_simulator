@@ -16,9 +16,10 @@
 //! cargo run --bin profile_hw --release -- --save-profiles ./profiles
 //! ```
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cast::cost_model::HardwareProfile;
 use cast::profile;
+use cast::sysinfo::{self, MAX_DEFAULT_QUBITS, MIN_DEFAULT_QUBITS};
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
@@ -58,9 +59,12 @@ struct Args {
     #[arg(long = "threads", default_value_t = 0)]
     threads: u32,
 
-    /// Number of statevector qubits for profiling kernels.
-    #[arg(long, short, default_value_t = 30)]
-    n_qubits: u32,
+    /// Number of statevector qubits.
+    ///
+    /// Omit to auto-detect: queries free GPU/CPU memory and picks the largest n ≤ 30
+    /// whose statevector fits within 80% of available memory.
+    #[arg(long, short)]
+    n_qubits: Option<u32>,
 
     /// Wall-time budget per profile run (seconds).
     #[arg(long, default_value_t = 30.0)]
@@ -85,6 +89,84 @@ impl Args {
     fn do_f64(&self) -> bool {
         matches!(self.precision, CliPrecision::F64 | CliPrecision::All)
     }
+}
+
+// ── Memory helpers ───────────────────────────────────────────────────────────
+
+const GIB: f64 = (1u64 << 30) as f64;
+
+/// Statevector size in GiB for `n_qubits` complex scalars of `scalar_bytes` each.
+fn sv_gib(n_qubits: u32, scalar_bytes: usize) -> f64 {
+    (1u64 << n_qubits) as f64 * 2.0 * scalar_bytes as f64 / GIB
+}
+
+/// Resolves the effective n_qubits: returns the user-supplied value if given,
+/// otherwise queries free memory on every backend being profiled and picks the
+/// largest n ≤ 30 that fits (with an 80% safety margin on the worst-case
+/// precision, f64).  Prints one informational line per backend queried.
+fn resolve_n_qubits(args: &Args) -> u32 {
+    if let Some(n) = args.n_qubits {
+        return n;
+    }
+
+    // Use f64 scalar_bytes (worst case) so the chosen n works for all precisions.
+    const SCALAR_BYTES: usize = 8;
+    let mut n = MAX_DEFAULT_QUBITS;
+
+    // ── GPU memory ───────────────────────────────────────────────────────────
+    #[cfg(feature = "cuda")]
+    if args.do_cuda() {
+        match cast::cuda::cuda_free_memory_bytes() {
+            Ok((free, total)) => {
+                let max_n = sysinfo::max_feasible_n_qubits(free, SCALAR_BYTES);
+                println!(
+                    "  [auto] GPU memory: {:.1} GiB free / {:.1} GiB total  →  n_qubits ≤ {}",
+                    free as f64 / GIB,
+                    total as f64 / GIB,
+                    max_n,
+                );
+                if max_n < n {
+                    n = max_n;
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "  Warning: could not query GPU memory ({e}).\n  \
+                     Defaulting to n_qubits={n}; use -n to set explicitly."
+                );
+            }
+        }
+    }
+
+    // ── CPU / system memory ──────────────────────────────────────────────────
+    if args.do_cpu() {
+        match sysinfo::cpu_free_memory_bytes() {
+            Some(free) => {
+                let max_n = sysinfo::max_feasible_n_qubits(free, SCALAR_BYTES);
+                println!(
+                    "  [auto] System memory: {:.1} GiB free  →  n_qubits ≤ {}",
+                    free as f64 / GIB,
+                    max_n,
+                );
+                if max_n < n {
+                    n = max_n;
+                }
+            }
+            None => {
+                eprintln!(
+                    "  Warning: could not query system memory.\n  \
+                     Defaulting to n_qubits={n}; use -n to set explicitly."
+                );
+            }
+        }
+    }
+
+    n = n.max(MIN_DEFAULT_QUBITS);
+    println!(
+        "  [auto] Selected n_qubits={n}  ({:.1} GiB statevector, F64)\n",
+        sv_gib(n, SCALAR_BYTES),
+    );
+    n
 }
 
 // ── Output formatting ────────────────────────────────────────────────────────
@@ -132,6 +214,18 @@ fn print_table(profiles: &[(HardwareProfile, f64)]) {
     println!("  {line}\n");
 }
 
+// ── Error helpers ────────────────────────────────────────────────────────────
+
+fn oom_hint(backend: &str, precision: &str, n_qubits: u32) -> String {
+    let scalar_bytes = if precision == "F64" { 8 } else { 4 };
+    format!(
+        "Failed to allocate {n_qubits}-qubit statevector ({:.1} GiB) for {backend} {precision} profile.\n  \
+         Hint: lower the qubit count with -n <N> (e.g. -n {}).",
+        sv_gib(n_qubits, scalar_bytes),
+        n_qubits.saturating_sub(1),
+    )
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
@@ -144,6 +238,8 @@ fn main() -> Result<()> {
 
     println!();
 
+    let n_qubits = resolve_n_qubits(&args);
+
     // ── CPU profiles ─────────────────────────────────────────────────────────
 
     if args.do_cpu() {
@@ -151,14 +247,16 @@ fn main() -> Result<()> {
 
         if args.do_f64() {
             let t0 = std::time::Instant::now();
-            let p = profile::measure_cpu(&CPUKernelGenSpec::f64(), args.n_qubits, args.budget)?;
+            let p = profile::measure_cpu(&CPUKernelGenSpec::f64(), n_qubits, args.budget)
+                .with_context(|| oom_hint("CPU", "F64", n_qubits))?;
             let wall_s = t0.elapsed().as_secs_f64();
             print_short(&p, wall_s);
             profiles.push((p, wall_s));
         }
         if args.do_f32() {
             let t0 = std::time::Instant::now();
-            let p = profile::measure_cpu(&CPUKernelGenSpec::f32(), args.n_qubits, args.budget)?;
+            let p = profile::measure_cpu(&CPUKernelGenSpec::f32(), n_qubits, args.budget)
+                .with_context(|| oom_hint("CPU", "F32", n_qubits))?;
             let wall_s = t0.elapsed().as_secs_f64();
             print_short(&p, wall_s);
             profiles.push((p, wall_s));
@@ -182,7 +280,8 @@ fn main() -> Result<()> {
                 sm_minor,
             };
             let t0 = std::time::Instant::now();
-            let p = profile::measure_cuda(&spec, args.n_qubits, args.budget)?;
+            let p = profile::measure_cuda(&spec, n_qubits, args.budget)
+                .with_context(|| oom_hint("CUDA", "F64", n_qubits))?;
             let wall_s = t0.elapsed().as_secs_f64();
             print_short(&p, wall_s);
             profiles.push((p, wall_s));
@@ -196,7 +295,8 @@ fn main() -> Result<()> {
                 sm_minor,
             };
             let t0 = std::time::Instant::now();
-            let p = profile::measure_cuda(&spec, args.n_qubits, args.budget)?;
+            let p = profile::measure_cuda(&spec, n_qubits, args.budget)
+                .with_context(|| oom_hint("CUDA", "F32", n_qubits))?;
             let wall_s = t0.elapsed().as_secs_f64();
             print_short(&p, wall_s);
             profiles.push((p, wall_s));

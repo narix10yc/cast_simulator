@@ -127,6 +127,27 @@ extern "C" int cast_cuda_device_sm(uint32_t *out_major, uint32_t *out_minor, cha
   return 0;
 }
 
+extern "C" int cast_cuda_free_memory(uint64_t *out_free_bytes, uint64_t *out_total_bytes,
+                                     char *err_buf, size_t err_buf_len) {
+  std::string err;
+  if (!ensure_cuda(err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  size_t free_bytes = 0, total_bytes = 0;
+  CUresult rc = cuMemGetInfo(&free_bytes, &total_bytes);
+  if (!cu_check(rc, "cuMemGetInfo", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  if (out_free_bytes)
+    *out_free_bytes = static_cast<uint64_t>(free_bytes);
+  if (out_total_bytes)
+    *out_total_bytes = static_cast<uint64_t>(total_bytes);
+  clear_error_buffer(err_buf, err_buf_len);
+  return 0;
+}
+
 // ── PTX → cubin compilation ───────────────────────────────────────────────────
 
 extern "C" int cast_cuda_ptx_to_cubin(const char *ptx_data, uint8_t **out_cubin,

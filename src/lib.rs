@@ -1,5 +1,7 @@
 pub mod types;
 
+pub mod sysinfo;
+
 pub mod timing;
 
 pub mod circuit;
