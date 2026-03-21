@@ -43,7 +43,11 @@ impl QuantumGate {
         );
 
         let (matrix, qubits) = canonicalize_qubits_and_matrix(matrix, qubits);
-        Self { matrix, qubits, channel: None }
+        Self {
+            matrix,
+            qubits,
+            channel: None,
+        }
     }
 
     /// Creates a channel gate from a [`KrausChannel`].
@@ -59,7 +63,11 @@ impl QuantumGate {
         let qubits = channel.qubits().to_vec();
         // Bypass Self::new: the superoperator is 4^n x 4^n but qubits.len() == n,
         // so the 2^n size assertion would fail.
-        Self { matrix, qubits, channel: Some(channel) }
+        Self {
+            matrix,
+            qubits,
+            channel: Some(channel),
+        }
     }
 
     /// Creates a gate from real-valued matrix entries (imaginary parts are zero).
@@ -147,7 +155,11 @@ impl QuantumGate {
     /// superoperator acts on `2 × n_qubits` virtual qubits (ket + bra copies),
     /// so that value is returned instead.
     pub fn effective_n_qubits(&self) -> usize {
-        if self.is_unitary() { self.qubits.len() } else { 2 * self.qubits.len() }
+        if self.is_unitary() {
+            self.qubits.len()
+        } else {
+            2 * self.qubits.len()
+        }
     }
 
     /// Returns `true` if this gate is unitary (no embedded Kraus channel).
@@ -158,6 +170,41 @@ impl QuantumGate {
     /// Returns the embedded [`KrausChannel`] for noisy gates, or `None` for unitary gates.
     pub fn channel(&self) -> Option<&KrausChannel> {
         self.channel.as_ref()
+    }
+
+    /// Returns a gate suitable for density-matrix simulation.
+    ///
+    /// The n-qubit density matrix ρ is stored as a vectorized `2n`-qubit statevector with
+    /// index layout `virtual_idx = ket_idx | (bra_idx << n)`. This method returns a plain
+    /// (non-channel) gate that acts on that `2n`-qubit statevector:
+    ///
+    /// - **Unitary** gate `U`: the superoperator `S = U ⊗ conj(U)` (so that
+    ///   `vec(UρU†) = S · vec(ρ)`) is computed and applied to virtual qubits
+    ///   `[q_0, …, q_{k−1}, q_0+n, …, q_{k−1}+n]`.
+    /// - **Channel** gate: the precomputed superoperator stored in `self.matrix` is
+    ///   reused directly, targeting the same `2k` virtual qubits.
+    ///
+    /// # Panics
+    /// Panics if any physical qubit index `≥ n_total`.
+    pub fn to_density_matrix_gate(&self, n_total: usize) -> Self {
+        for &q in &self.qubits {
+            assert!(
+                (q as usize) < n_total,
+                "qubit {q} is out of range for n_total={n_total}"
+            );
+        }
+        let super_mat = if self.is_unitary() {
+            KrausChannel::from_gate(self).superoperator_matrix()
+        } else {
+            self.matrix.clone()
+        };
+        // Virtual qubit list: ket copies first (same indices), then bra copies at q+n.
+        // Already sorted since every q_i < n_total ≤ q_j + n_total.
+        let mut virtual_qubits: Vec<u32> = self.qubits.clone();
+        virtual_qubits.extend(self.qubits.iter().map(|&q| q + n_total as u32));
+        // The superoperator is 4^k × 4^k and virtual_qubits.len() == 2k, so
+        // edge_size_for_n_qubits(2k) = 2^(2k) = 4^k — the QuantumGate::new assertion holds.
+        Self::new(super_mat, virtual_qubits)
     }
 
     /// The number of non-zero entries in the gate matrix. Real and imag parts are counted

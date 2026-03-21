@@ -362,7 +362,11 @@ mod tests {
         let ch2 = crate::types::KrausChannel::symmetric_depolarizing(&[0, 1], 0.1).to_gate();
         assert_eq!(ch2.n_qubits(), 2);
         assert_eq!(ch2.effective_n_qubits(), 4);
-        assert_eq!(m.cost_of(&ch2), 1.0, "2-qubit channel must be rejected by max_size=3");
+        assert_eq!(
+            m.cost_of(&ch2),
+            1.0,
+            "2-qubit channel must be rejected by max_size=3"
+        );
     }
 
     #[test]
@@ -370,7 +374,10 @@ mod tests {
         let m = size_model(2);
         let ch = crate::types::KrausChannel::depolarizing(0, 0.1).to_gate();
         assert_eq!(ch.effective_n_qubits(), 2);
-        assert!(m.cost_of(&ch) < 1e-9, "1-qubit channel fits within max_size=2");
+        assert!(
+            m.cost_of(&ch) < 1e-9,
+            "1-qubit channel fits within max_size=2"
+        );
     }
 
     // ── HardwareAdaptiveCostModel ────────────────────────────────────────────
