@@ -30,6 +30,8 @@ pub enum Gate {
     CX(u32, u32),
     /// ctrl, targ
     CZ(u32, u32),
+    /// angle, ctrl, targ
+    CP(Angle, u32, u32),
     /// q0, q1
     SWAP(u32, u32),
 
@@ -98,7 +100,9 @@ fn max_qubit_in_gate(gate: &Gate) -> Option<u32> {
     match gate {
         Gate::X(q) | Gate::Y(q) | Gate::Z(q) | Gate::H(q) | Gate::S(q) | Gate::T(q) => Some(*q),
         Gate::RX(_, q) | Gate::RY(_, q) | Gate::RZ(_, q) | Gate::U3(_, _, _, q) => Some(*q),
-        Gate::CX(ctrl, targ) | Gate::CZ(ctrl, targ) => Some((*ctrl).max(*targ)),
+        Gate::CX(ctrl, targ) | Gate::CZ(ctrl, targ) | Gate::CP(_, ctrl, targ) => {
+            Some((*ctrl).max(*targ))
+        }
         Gate::SWAP(q0, q1) => Some((*q0).max(*q1)),
         Gate::CCX(ctrl1, ctrl2, targ) => Some((*ctrl1).max(*ctrl2).max(*targ)),
     }
@@ -128,6 +132,12 @@ fn serialize_gate(gate: &Gate) -> String {
         ),
         Gate::CX(ctrl, targ) => format!("cx {},{};", qubit_ref(*ctrl), qubit_ref(*targ)),
         Gate::CZ(ctrl, targ) => format!("cz {},{};", qubit_ref(*ctrl), qubit_ref(*targ)),
+        Gate::CP(angle, ctrl, targ) => format!(
+            "cp({}) {},{};",
+            serialize_angle(angle),
+            qubit_ref(*ctrl),
+            qubit_ref(*targ)
+        ),
         Gate::SWAP(q0, q1) => format!("swap {},{};", qubit_ref(*q0), qubit_ref(*q1)),
         Gate::CCX(ctrl1, ctrl2, targ) => format!(
             "ccx {},{},{};",

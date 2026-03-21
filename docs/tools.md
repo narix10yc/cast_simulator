@@ -1,6 +1,6 @@
 # CLI Tools
 
-CAST ships three command-line binaries for hardware profiling and benchmarking.
+CAST ships four command-line binaries for hardware profiling and benchmarking.
 All require `LLVM_CONFIG` to be set (see the README).
 
 ## profile_hw — Hardware Profiler
@@ -72,8 +72,9 @@ simulation size for best results.
 
 ### Saved Profiles
 
-Profiles are saved as JSON and can be loaded by `bench_fusion` and
-`bench_noisy_qft` via `--profile <path>` to skip re-profiling.
+Profiles are saved as JSON and can be loaded by `bench_fusion`,
+`bench_ablation`, and `bench_noisy_qft` via `--profile <path>` to skip
+re-profiling.
 
 ---
 
@@ -109,6 +110,8 @@ cargo run --bin bench_fusion --features cuda --release -- \
 | `--profile-budget <S>` | `20` | Profiling time budget (seconds) |
 | `--max-size <N>` | `4` | Max gate size for hw-adaptive fusion |
 | `--bench-budget <S>` | `5` | Time budget per benchmark run (seconds) |
+| `--force-dense` | off | Disable sparsity-aware codegen (ztol=0) |
+| `--fusion-log` | off | Print per-decision fusion log for hw-adaptive |
 | Files (positional) | required | One or more `.qasm` files |
 
 ### Fusion Configs Compared
@@ -124,6 +127,48 @@ cargo run --bin bench_fusion --features cuda --release -- \
 
 A table per circuit with columns: Config, Gates, Depth, Cold-Start (kernel
 compilation time), GPU/Exec time (with ± stddev), and iteration count.
+
+---
+
+## bench_ablation — Dense vs Sparse Kernel Ablation
+
+For each input circuit, applies the selected fusion strategy, then runs the
+fused circuit twice — once with sparsity-aware kernels (default) and once
+with dense kernels (ztol=0). Reports per-gate sparsity statistics and the
+speedup from sparsity exploitation.
+
+### Quick Start
+
+```sh
+# CUDA backend, hw-adaptive fusion
+cargo run --bin bench_ablation --features cuda --release -- \
+      --backend cuda --profile profiles/cuda_f64.json \
+      examples/journal_examples/*-30.qasm
+
+# No fusion (measure raw per-gate sparsity benefit)
+cargo run --bin bench_ablation --features cuda --release -- \
+      --backend cuda --profile profiles/cuda_f64.json \
+      --fusion no-fusion examples/journal_examples/mexp-20.qasm
+```
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--backend {cpu,cuda}` | `cuda` | Simulation backend |
+| `--fusion {no-fusion,default,aggressive,hw-adaptive}` | `hw-adaptive` | Fusion strategy |
+| `--profile <PATH>` | — | Cached HardwareProfile JSON |
+| `--profile-qubits <N>` | `30` | SV qubits for profiling |
+| `--profile-budget <S>` | `20` | Profiling time budget (seconds) |
+| `--max-size <N>` | `4` | Max gate size for hw-adaptive fusion |
+| `--bench-budget <S>` | `5` | Time budget per benchmark run (seconds) |
+| Files (positional) | required | One or more `.qasm` files |
+
+### Output
+
+A table per circuit with columns: Qubits, Gates, Depth, mean AI,
+AI range, Sparse time, Dense time, Speedup (dense/sparse), JIT compile
+times for both modes, and JIT ratio.
 
 ---
 

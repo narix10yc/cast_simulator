@@ -32,7 +32,7 @@ use cast::{
     cost_model::{FusionConfig, HardwareProfile},
     fusion,
     timing::{fmt_duration, time_adaptive, TimingStats},
-    types::{Complex, ComplexSquareMatrix, KrausChannel, QuantumGate},
+    types::{KrausChannel, QuantumGate},
     CircuitGraph,
 };
 use clap::Parser;
@@ -87,33 +87,6 @@ struct Args {
 
 // ── Circuit builders ──────────────────────────────────────────────────────────
 
-/// Controlled-phase gate: diag(1, 1, 1, e^{iθ}).
-fn controlled_phase(theta: f64, ctrl: u32, targ: u32) -> QuantumGate {
-    let e = Complex::new(theta.cos(), theta.sin());
-    let mat = ComplexSquareMatrix::from_vec(
-        4,
-        vec![
-            Complex::new(1.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(1.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(1.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            Complex::new(0.0, 0.0),
-            e,
-        ],
-    );
-    QuantumGate::new(mat, vec![ctrl, targ])
-}
-
 /// QFT gate list (H + controlled-phases + bit-reversal SWAPs).
 fn qft_gates(n: u32) -> Vec<QuantumGate> {
     let mut gates = Vec::new();
@@ -121,7 +94,7 @@ fn qft_gates(n: u32) -> Vec<QuantumGate> {
         gates.push(QuantumGate::h(q));
         for k in 1..(n - q) {
             let theta = std::f64::consts::PI / (1u64 << k) as f64;
-            gates.push(controlled_phase(theta, q, q + k));
+            gates.push(QuantumGate::cp(theta, q, q + k));
         }
     }
     for q in 0..(n / 2) {

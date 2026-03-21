@@ -44,6 +44,7 @@ src/
 └── bin/
     ├── profile_hw.rs       CLI: roofline hardware profiler
     ├── bench_fusion.rs     CLI: benchmark fusion strategies on QASM files
+    ├── bench_ablation.rs   CLI: dense vs sparse kernel ablation
     └── bench_noisy_qft.rs  CLI: benchmark noisy QFT density-matrix simulation
 ```
 
@@ -122,7 +123,7 @@ loaded from the cached cubin.
 
 ### 5. Statevector Layout
 
-Statevectors use a **split real/imaginary, SIMD-interleaved** layout:
+**CPU** — split real/imaginary, SIMD-grouped:
 
 ```
 [re_0, re_1, ..., re_{2^s-1}, im_0, im_1, ..., im_{2^s-1}, re_{2^s}, ...]
@@ -134,6 +135,14 @@ imaginaries.  Memory is aligned to the SIMD vector width.
 
 A kernel requires `n_sv_qubits >= n_gate_qubits + s` to have enough task bits
 for the inner loop.
+
+**CUDA** — interleaved real/imaginary:
+
+```
+[re_0, im_0, re_1, im_1, ...]
+```
+
+Standard complex interleaved layout on device memory.
 
 ## Density-Matrix Simulation
 
