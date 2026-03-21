@@ -440,12 +440,9 @@ mod tests {
         // 4-qubit unitary. A max_size=3 model must reject it.
         let m = size_model(3);
         // A 2-qubit gate with noise has effective_n_qubits = 4.
-        let ch2 = crate::types::QuantumGate::new(
-            crate::types::ComplexSquareMatrix::eye(4),
-            vec![0, 1],
-        ).with_noise(vec![
-            (1.0, crate::types::ComplexSquareMatrix::eye(4)),
-        ]);
+        let ch2 =
+            crate::types::QuantumGate::new(crate::types::ComplexSquareMatrix::eye(4), vec![0, 1])
+                .with_noise(vec![(1.0, crate::types::ComplexSquareMatrix::eye(4))]);
         assert_eq!(ch2.n_qubits(), 2);
         assert_eq!(ch2.effective_n_qubits(), 4);
         assert_eq!(

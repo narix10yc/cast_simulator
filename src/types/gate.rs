@@ -194,8 +194,7 @@ impl QuantumGate {
 
     /// Single-qubit depolarizing noise (identity gate + depolarizing channel).
     pub fn depolarizing(qubit: u32, p: f64) -> Self {
-        Self::new(ComplexSquareMatrix::eye(2), vec![qubit])
-            .with_noise(depolarizing_noise(p))
+        Self::new(ComplexSquareMatrix::eye(2), vec![qubit]).with_noise(depolarizing_noise(p))
     }
 
     /// Single-qubit bit-flip noise (X error with probability `p`).

@@ -59,10 +59,10 @@ typedef struct cast_cpu_kernel_metadata_t {
 /// cast_cpu_jit_kernel_records_free to release them after copying the data.
 typedef struct cast_cpu_jit_kernel_record_t {
   cast_cpu_kernel_metadata_t metadata;
-  void (*entry)(void *);            ///< JIT-compiled function pointer.
-  cast_cpu_complex64_t *matrix;     ///< NULL for ImmValue mode.
+  void (*entry)(void *);        ///< JIT-compiled function pointer.
+  cast_cpu_complex64_t *matrix; ///< NULL for ImmValue mode.
   size_t matrix_len;
-  char *asm_text;                   ///< NULL if request_asm was not called.
+  char *asm_text; ///< NULL if request_asm was not called.
 } cast_cpu_jit_kernel_record_t;
 
 typedef struct cast_cpu_kernel_generator_t cast_cpu_kernel_generator_t;
