@@ -99,6 +99,17 @@ int cast_cuda_sv_upload(uint64_t dptr, const double *host_data, size_t n_element
 int cast_cuda_sv_download(uint64_t dptr, double *host_data, size_t n_elements, uint8_t precision,
                           char *err_buf, size_t err_buf_len);
 
+// -- Device-side reductions (cuda feature) --
+
+/// Compute sum of squares of all n_elements scalars at dptr.
+/// precision: 0 = F32, 1 = F64.  Result is always returned as f64.
+int cast_cuda_norm_squared(uint64_t dptr, size_t n_elements, uint8_t precision,
+                           double *out_norm_sq, char *err_buf, size_t err_buf_len);
+
+/// Scale all n_elements scalars at dptr by `scale`.
+int cast_cuda_scale(uint64_t dptr, size_t n_elements, uint8_t precision,
+                    double scale, char *err_buf, size_t err_buf_len);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

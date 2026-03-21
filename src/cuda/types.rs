@@ -22,25 +22,29 @@ pub struct CudaKernelGenSpec {
 }
 
 impl CudaKernelGenSpec {
-    /// Single-precision defaults targeting sm_80.
-    pub fn f32_sm80() -> Self {
+    /// Single-precision defaults with auto-detected SM version.
+    /// Falls back to sm_86 if device query fails (e.g. no `cuda` feature).
+    pub fn f32() -> Self {
+        let (sm_major, sm_minor) = super::device_sm().unwrap_or((8, 6));
         Self {
             precision: CudaPrecision::F32,
             ztol: 1e-6,
             otol: 1e-6,
-            sm_major: 8,
-            sm_minor: 0,
+            sm_major,
+            sm_minor,
         }
     }
 
-    /// Double-precision defaults targeting sm_80.
-    pub fn f64_sm80() -> Self {
+    /// Double-precision defaults with auto-detected SM version.
+    /// Falls back to sm_86 if device query fails (e.g. no `cuda` feature).
+    pub fn f64() -> Self {
+        let (sm_major, sm_minor) = super::device_sm().unwrap_or((8, 6));
         Self {
             precision: CudaPrecision::F64,
             ztol: 1e-12,
             otol: 1e-12,
-            sm_major: 8,
-            sm_minor: 0,
+            sm_major,
+            sm_minor,
         }
     }
 }

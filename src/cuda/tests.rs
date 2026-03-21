@@ -13,7 +13,7 @@ fn cnot() -> Arc<QuantumGate> {
 }
 
 fn default_spec() -> CudaKernelGenSpec {
-    CudaKernelGenSpec::f64_sm80()
+    CudaKernelGenSpec::f64()
 }
 
 // ── PTX generation (no CUDA device required) ──────────────────────────────────
