@@ -76,6 +76,15 @@ struct Args {
     /// between warmup and measurement automatically.
     #[arg(long, default_value_t = 5.0)]
     bench_budget: f64,
+
+    /// Force dense kernels: set zero-tolerance to 0 so no matrix entries are
+    /// skipped.  Useful for ablation studies comparing sparse vs dense kernels.
+    #[arg(long)]
+    force_dense: bool,
+
+    /// Print a per-decision fusion log for the hw-adaptive config.
+    #[arg(long)]
+    fusion_log: bool,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -94,10 +103,19 @@ struct BenchResult {
 
 // ── CPU runner ───────────────────────────────────────────────────────────────
 
-fn run_cpu(graph: &CircuitGraph, n_qubits: u32, budget_s: f64) -> Result<(f64, TimingStats)> {
+fn run_cpu(
+    graph: &CircuitGraph,
+    n_qubits: u32,
+    budget_s: f64,
+    force_dense: bool,
+) -> Result<(f64, TimingStats)> {
     use cast::cpu::{get_num_threads, CPUKernelGenSpec, CPUStatevector, CpuKernelManager};
 
-    let spec = CPUKernelGenSpec::f64();
+    let mut spec = CPUKernelGenSpec::f64();
+    if force_dense {
+        spec.ztol = 0.0;
+        spec.otol = 0.0;
+    }
     let n_threads = get_num_threads();
     let mgr = CpuKernelManager::new();
     let gates = gates_in_order(graph);
@@ -127,16 +145,26 @@ fn run_cpu(graph: &CircuitGraph, n_qubits: u32, budget_s: f64) -> Result<(f64, T
 // ── CUDA runner ──────────────────────────────────────────────────────────────
 
 #[cfg(feature = "cuda")]
-fn run_cuda(graph: &CircuitGraph, n_qubits: u32, budget_s: f64) -> Result<(f64, TimingStats)> {
+fn run_cuda(
+    graph: &CircuitGraph,
+    n_qubits: u32,
+    budget_s: f64,
+    force_dense: bool,
+) -> Result<(f64, TimingStats)> {
     use cast::cuda::{
         device_sm, CudaKernelGenSpec, CudaKernelManager, CudaPrecision, CudaStatevector,
     };
 
     let (sm_major, sm_minor) = device_sm()?;
+    let (ztol, otol) = if force_dense {
+        (0.0, 0.0)
+    } else {
+        (1e-12, 1e-12)
+    };
     let spec = CudaKernelGenSpec {
         precision: CudaPrecision::F64,
-        ztol: 1e-12,
-        otol: 1e-12,
+        ztol,
+        otol,
         sm_major,
         sm_minor,
     };
@@ -168,7 +196,12 @@ fn run_cuda(graph: &CircuitGraph, n_qubits: u32, budget_s: f64) -> Result<(f64, 
 }
 
 #[cfg(not(feature = "cuda"))]
-fn run_cuda(_graph: &CircuitGraph, _n_qubits: u32, _budget_s: f64) -> Result<(f64, TimingStats)> {
+fn run_cuda(
+    _graph: &CircuitGraph,
+    _n_qubits: u32,
+    _budget_s: f64,
+    _force_dense: bool,
+) -> Result<(f64, TimingStats)> {
     anyhow::bail!("CUDA backend requires the `cuda` feature");
 }
 
@@ -181,6 +214,7 @@ fn bench_one_config(
     n_qubits: u32,
     backend: Backend,
     budget_s: f64,
+    force_dense: bool,
 ) -> Result<BenchResult> {
     let mut graph = original.clone();
     fusion::optimize(&mut graph, config);
@@ -189,8 +223,8 @@ fn bench_one_config(
     let n_rows = graph.n_rows();
 
     let (compile_s, timing) = match backend {
-        Backend::Cpu => run_cpu(&graph, n_qubits, budget_s)?,
-        Backend::Cuda => run_cuda(&graph, n_qubits, budget_s)?,
+        Backend::Cpu => run_cpu(&graph, n_qubits, budget_s, force_dense)?,
+        Backend::Cuda => run_cuda(&graph, n_qubits, budget_s, force_dense)?,
     };
 
     Ok(BenchResult {
@@ -291,6 +325,11 @@ fn main() -> Result<()> {
         let n_qubits = graph.n_qubits() as u32;
 
         for (label, config) in &configs {
+            if args.fusion_log && *label == "hw-adaptive" {
+                let mut g = graph.clone();
+                let log = fusion::optimize_with_log(&mut g, config);
+                log.print_summary();
+            }
             let r = bench_one_config(
                 label,
                 &graph,
@@ -298,6 +337,7 @@ fn main() -> Result<()> {
                 n_qubits,
                 args.backend,
                 args.bench_budget,
+                args.force_dense,
             )?;
             println!(
                 "{:<16} {:<14} {:>7} {:>6} {:>10} {:>16}",
