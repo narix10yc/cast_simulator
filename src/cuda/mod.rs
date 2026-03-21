@@ -70,6 +70,13 @@ pub(super) mod ffi {
             err_buf: *mut c_char,
             err_buf_len: usize,
         ) -> i32;
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_free_memory(
+            out_free_bytes: *mut u64,
+            out_total_bytes: *mut u64,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
 
         // -- CUDA stream --
         #[cfg(feature = "cuda")]
@@ -177,6 +184,25 @@ pub fn device_sm() -> anyhow::Result<(u32, u32)> {
         } else {
             Err(anyhow::anyhow!(error_from_buf(&err_buf)))
         }
+    }
+}
+
+/// Query free and total GPU device memory in bytes.
+///
+/// Returns `(free_bytes, total_bytes)`. Requires the `cuda` feature and an
+/// initialised CUDA context (device 0).
+#[cfg(feature = "cuda")]
+pub fn cuda_free_memory_bytes() -> anyhow::Result<(u64, u64)> {
+    let mut err_buf = [0 as c_char; types::ERR_BUF_LEN];
+    let mut free: u64 = 0;
+    let mut total: u64 = 0;
+    let status = unsafe {
+        ffi::cast_cuda_free_memory(&mut free, &mut total, err_buf.as_mut_ptr(), err_buf.len())
+    };
+    if status == 0 {
+        Ok((free, total))
+    } else {
+        Err(anyhow::anyhow!(error_from_buf(&err_buf)))
     }
 }
 

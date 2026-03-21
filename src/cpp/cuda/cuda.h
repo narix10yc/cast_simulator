@@ -48,6 +48,8 @@ void cast_cuda_str_free(char *s);
 
 int cast_cuda_device_sm(uint32_t *out_major, uint32_t *out_minor, char *err_buf,
                         size_t err_buf_len);
+int cast_cuda_free_memory(uint64_t *out_free_bytes, uint64_t *out_total_bytes, char *err_buf,
+                          size_t err_buf_len);
 
 // -- CUDA stream (cuda feature) --
 
