@@ -127,6 +127,10 @@ impl QuantumGate {
         Self::new(ComplexSquareMatrix::cz(), vec![ctrl, targ])
     }
 
+    pub fn cp(theta: f64, ctrl: u32, targ: u32) -> Self {
+        Self::new(ComplexSquareMatrix::cp(theta), vec![ctrl, targ])
+    }
+
     pub fn swap(q0: u32, q1: u32) -> Self {
         Self::new(ComplexSquareMatrix::swap(), vec![q0, q1])
     }

@@ -181,6 +181,13 @@ impl ComplexSquareMatrix {
         )
     }
 
+    /// Controlled-phase gate: `diag(1, 1, 1, e^{iθ})`.
+    pub fn cp(theta: f64) -> Self {
+        let mut m = Self::eye(4);
+        m.set(3, 3, Complex::new(theta.cos(), theta.sin()));
+        m
+    }
+
     pub fn swap() -> Self {
         Self::from_reals(
             4,

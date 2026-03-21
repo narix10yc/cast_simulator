@@ -2,10 +2,14 @@
 
 ## Code Tasks
 
-- [ ] NWQSim/SV-Sim/DM-Sim benchmarks — build Ang Li et al. simulators, run head-to-head on same circuits (R2)
+- [x] Fusion decision logging — instrument fusion optimizer to log accept/reject with cost/AI values (R1, R3)
+- [x] `--force-dense` flag — set ztol=0 to disable sparsity optimization (R3)
+- [x] NWQSim/SV-Sim benchmarks — built NWQ-Sim, head-to-head GPU on all 30q circuits (CAST 1.4-9.6x faster), single-gate kernel comparison (2.2x at scale). Results in `docs/nwqsim_baseline.md` (R2)
+- [x] `cp` gate support — QASM parser handles controlled-phase; qft-cp-30 now works (6.8x vs NWQ-Sim)
+- [x] Dense vs sparse ablation tool — `bench_ablation` binary, verified on mexp-14/17/20 (R3)
+- [ ] Dense vs sparse ablation data — run full ablation on all benchmark circuits across fusion strategies (R3)
 - [ ] Benchmark reproducibility scripts — wrap bench binaries in scripts that produce paper tables, document fusion configs/flags/threading per baseline (R3)
-- [ ] Wider qubit range — extend benchmarks beyond 30-34 qubits (R2)
-- [ ] Dense vs sparse ablation — run benchmarks with --force-dense, compare against default sparsity-aware kernels (R3)
+- [ ] Wider qubit range — extend benchmarks beyond 30-34 qubits; 5090 max 32q/GPU for F64 (R2)
 - [ ] Open-source preparation — license, contribution guide, public README (R1)
 
 ## Paper Tasks

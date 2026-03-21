@@ -224,6 +224,13 @@ impl Parser {
                 let targ = self.parse_qubit_operand()?;
                 Gate::CZ(ctrl, targ)
             }
+            "cp" => {
+                let angle = self.parse_angle_argument()?;
+                let ctrl = self.parse_qubit_operand()?;
+                self.expect(Token::Comma)?;
+                let targ = self.parse_qubit_operand()?;
+                Gate::CP(angle, ctrl, targ)
+            }
             "swap" => {
                 let q0 = self.parse_qubit_operand()?;
                 self.expect(Token::Comma)?;
@@ -811,6 +818,7 @@ mod tests {
             Gate::U3(..) => "u3",
             Gate::CX(..) => "cx",
             Gate::CZ(..) => "cz",
+            Gate::CP(..) => "cp",
             Gate::SWAP(..) => "swap",
             Gate::CCX(..) => "ccx",
         }
