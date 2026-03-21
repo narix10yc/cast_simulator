@@ -1,28 +1,30 @@
 use rand::Rng;
 
-use super::{channel::KrausChannel, Complex, ComplexSquareMatrix};
+use super::{Complex, ComplexSquareMatrix};
 
-/// A quantum gate or channel: a complex matrix paired with `n` physical target qubit indices.
+/// A quantum gate: a unitary matrix paired with target qubit indices, optionally
+/// carrying a noise model.
 ///
-/// **Unitary gates** (`channel` is `None`): `matrix` is `2ⁿ × 2ⁿ` and represents a unitary
-/// operation on the `n` target qubits.
+/// The `matrix` field is always a `2ⁿ × 2ⁿ` unitary. The optional `noise` field
+/// describes a probability-weighted unitary noise channel:
 ///
-/// **Channel gates** (`channel` is `Some`): `matrix` is `4ⁿ × 4ⁿ` and holds the precomputed
-/// superoperator `S = Σ_i Kᵢ ⊗ Kᵢ*` of the Kraus channel. The `n` physical qubit indices
-/// in `qubits` refer to the ket degrees of freedom; the simulation dispatch layer is responsible
-/// for mapping them to the `2n`-qubit virtual statevector that represents a density matrix.
+/// - **Noiseless gate** (`noise` is empty): applies `matrix` to the statevector.
+/// - **Noisy gate** (`noise` has entries `[(p_i, U_i)]`): in trajectory simulation,
+///   one noise branch is sampled and the composed unitary `U_i · matrix` is applied.
+///   In density-matrix simulation, the effective channel
+///   `E(ρ) = Σ_i p_i · (U_i·U) ρ (U_i·U)†` is computed as a superoperator.
 ///
-/// Qubits are always stored in ascending order. If the caller supplies them in a different
-/// order, [`QuantumGate::new`] permutes the matrix rows/columns to match the canonical ordering.
-/// Bit `k` of a basis index corresponds to the `k`-th entry of `qubits`.
+/// Qubits are always stored in ascending order. If the caller supplies them in a
+/// different order, [`QuantumGate::new`] permutes the matrix to match.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuantumGate {
-    /// Gate matrix (2ⁿ×2ⁿ for unitary) or superoperator (4ⁿ×4ⁿ for channel).
+    /// Gate unitary matrix (2ⁿ × 2ⁿ).
     matrix: ComplexSquareMatrix,
-    /// Physical qubit indices, sorted ascending. Always `n` entries regardless of gate kind.
+    /// Physical qubit indices, sorted ascending.
     qubits: Vec<u32>,
-    /// `Some` for noisy channel gates; `None` for unitary gates.
-    channel: Option<KrausChannel>,
+    /// Probability-weighted unitary noise branches `(p_i, U_i)`.
+    /// Empty for noiseless gates. Probabilities must sum to 1.0.
+    noise: Vec<(f64, ComplexSquareMatrix)>,
 }
 
 impl QuantumGate {
@@ -46,27 +48,7 @@ impl QuantumGate {
         Self {
             matrix,
             qubits,
-            channel: None,
-        }
-    }
-
-    /// Creates a channel gate from a [`KrausChannel`].
-    ///
-    /// The superoperator matrix `S = Σ_i Kᵢ ⊗ Kᵢ*` is computed eagerly and stored in
-    /// `matrix` as a `4ⁿ × 4ⁿ` matrix. The `n` physical qubit indices from the channel
-    /// are stored in `qubits`.
-    ///
-    /// The simulation dispatch layer is responsible for mapping the physical qubits to
-    /// the correct ket/bra virtual qubit positions in the density-matrix statevector.
-    pub fn from_channel(channel: KrausChannel) -> Self {
-        let matrix = channel.superoperator_matrix();
-        let qubits = channel.qubits().to_vec();
-        // Bypass Self::new: the superoperator is 4^n x 4^n but qubits.len() == n,
-        // so the 2^n size assertion would fail.
-        Self {
-            matrix,
-            qubits,
-            channel: Some(channel),
+            noise: Vec::new(),
         }
     }
 
@@ -155,9 +137,9 @@ impl QuantumGate {
 
     /// Returns the effective qubit count for kernel sizing and cost estimation.
     ///
-    /// For unitary gates this equals [`Self::n_qubits`]. For channel gates the
-    /// superoperator acts on `2 × n_qubits` virtual qubits (ket + bra copies),
-    /// so that value is returned instead.
+    /// For noiseless gates this equals [`Self::n_qubits`]. For noisy gates in
+    /// density-matrix mode the superoperator acts on `2 × n_qubits` virtual
+    /// qubits, so that value is returned instead.
     pub fn effective_n_qubits(&self) -> usize {
         if self.is_unitary() {
             self.qubits.len()
@@ -166,27 +148,90 @@ impl QuantumGate {
         }
     }
 
-    /// Returns `true` if this gate is unitary (no embedded Kraus channel).
+    /// Returns `true` if this gate has no noise (pure unitary).
     pub fn is_unitary(&self) -> bool {
-        self.channel.is_none()
+        self.noise.is_empty()
     }
 
-    /// Returns the embedded [`KrausChannel`] for noisy gates, or `None` for unitary gates.
-    pub fn channel(&self) -> Option<&KrausChannel> {
-        self.channel.as_ref()
+    /// Returns the noise branches `[(probability, unitary)]`, empty for noiseless gates.
+    pub fn noise(&self) -> &[(f64, ComplexSquareMatrix)] {
+        &self.noise
+    }
+
+    /// Attach a noise model to this gate.
+    ///
+    /// Each entry `(p_i, U_i)` is a probability and a unitary operator of the same
+    /// dimension as the gate matrix. Probabilities must sum to 1.0.
+    pub fn with_noise(mut self, noise: Vec<(f64, ComplexSquareMatrix)>) -> Self {
+        let edge = self.matrix.edge_size();
+        let mut prob_sum = 0.0f64;
+        for (p, u) in &noise {
+            assert!(*p >= 0.0, "noise probability must be non-negative, got {p}");
+            assert_eq!(
+                u.edge_size(),
+                edge,
+                "noise operator dimension must match gate dimension"
+            );
+            prob_sum += p;
+        }
+        assert!(
+            (prob_sum - 1.0).abs() < 1e-10,
+            "noise probabilities must sum to 1.0, got {prob_sum}"
+        );
+        self.noise = noise;
+        self
+    }
+
+    /// Attach single-qubit depolarizing noise with error probability `p`.
+    ///
+    /// The noise model is `[(1-p, I), (p/3, X), (p/3, Y), (p/3, Z)]`.
+    pub fn with_depolarizing(self, p: f64) -> Self {
+        assert_eq!(self.n_qubits(), 1, "depolarizing noise is single-qubit");
+        self.with_noise(depolarizing_noise(p))
+    }
+
+    // ── Noise-only gate factories ────────────────────────────────────────
+
+    /// Single-qubit depolarizing noise (identity gate + depolarizing channel).
+    pub fn depolarizing(qubit: u32, p: f64) -> Self {
+        Self::new(ComplexSquareMatrix::eye(2), vec![qubit])
+            .with_noise(depolarizing_noise(p))
+    }
+
+    /// Single-qubit bit-flip noise (X error with probability `p`).
+    pub fn bit_flip(qubit: u32, p: f64) -> Self {
+        Self::new(ComplexSquareMatrix::eye(2), vec![qubit]).with_noise(vec![
+            (1.0 - p, ComplexSquareMatrix::eye(2)),
+            (p, ComplexSquareMatrix::x()),
+        ])
+    }
+
+    /// Single-qubit phase-flip noise (Z error with probability `p`).
+    pub fn phase_flip(qubit: u32, p: f64) -> Self {
+        Self::new(ComplexSquareMatrix::eye(2), vec![qubit]).with_noise(vec![
+            (1.0 - p, ComplexSquareMatrix::eye(2)),
+            (p, ComplexSquareMatrix::z()),
+        ])
+    }
+
+    /// Single-qubit Pauli channel: X with probability `px`, Y with `py`, Z with `pz`.
+    pub fn pauli_channel(qubit: u32, px: f64, py: f64, pz: f64) -> Self {
+        let pi = 1.0 - px - py - pz;
+        Self::new(ComplexSquareMatrix::eye(2), vec![qubit]).with_noise(vec![
+            (pi, ComplexSquareMatrix::eye(2)),
+            (px, ComplexSquareMatrix::x()),
+            (py, ComplexSquareMatrix::y()),
+            (pz, ComplexSquareMatrix::z()),
+        ])
     }
 
     /// Returns a gate suitable for density-matrix simulation.
     ///
-    /// The n-qubit density matrix ρ is stored as a vectorized `2n`-qubit statevector with
-    /// index layout `virtual_idx = ket_idx | (bra_idx << n)`. This method returns a plain
-    /// (non-channel) gate that acts on that `2n`-qubit statevector:
+    /// The n-qubit density matrix ρ is stored as a vectorized `2n`-qubit statevector.
     ///
-    /// - **Unitary** gate `U`: the superoperator `S = U ⊗ conj(U)` (so that
-    ///   `vec(UρU†) = S · vec(ρ)`) is computed and applied to virtual qubits
-    ///   `[q_0, …, q_{k−1}, q_0+n, …, q_{k−1}+n]`.
-    /// - **Channel** gate: the precomputed superoperator stored in `self.matrix` is
-    ///   reused directly, targeting the same `2k` virtual qubits.
+    /// - **Noiseless** gate `U`: superoperator `S = U ⊗ conj(U)`.
+    /// - **Noisy** gate with branches `[(p_i, U_i)]`: superoperator
+    ///   `S = Σ_i p_i · (U_i·U) ⊗ conj(U_i·U)`.
     ///
     /// # Panics
     /// Panics if any physical qubit index `≥ n_total`.
@@ -197,17 +242,23 @@ impl QuantumGate {
                 "qubit {q} is out of range for n_total={n_total}"
             );
         }
+
         let super_mat = if self.is_unitary() {
-            KrausChannel::from_gate(self).superoperator_matrix()
+            // Pure unitary: S = U ⊗ conj(U)
+            superoperator_of(&self.matrix)
         } else {
-            self.matrix.clone()
+            // Noisy: S = Σ_i p_i · (U_i·U) ⊗ conj(U_i·U)
+            let super_dim = self.matrix.edge_size().pow(2);
+            let mut s = ComplexSquareMatrix::zeros(super_dim);
+            for (p, u_noise) in &self.noise {
+                let composed = u_noise.matmul(&self.matrix);
+                s += &(&superoperator_of(&composed) * *p);
+            }
+            s
         };
-        // Virtual qubit list: ket copies first (same indices), then bra copies at q+n.
-        // Already sorted since every q_i < n_total ≤ q_j + n_total.
+
         let mut virtual_qubits: Vec<u32> = self.qubits.clone();
         virtual_qubits.extend(self.qubits.iter().map(|&q| q + n_total as u32));
-        // The superoperator is 4^k × 4^k and virtual_qubits.len() == 2k, so
-        // edge_size_for_n_qubits(2k) = 2^(2k) = 4^k — the QuantumGate::new assertion holds.
         Self::new(super_mat, virtual_qubits)
     }
 
@@ -237,7 +288,7 @@ impl QuantumGate {
     pub fn matmul(&self, other: &Self) -> Self {
         assert!(
             self.is_unitary() && other.is_unitary(),
-            "matmul is only defined for unitary gates"
+            "matmul is only defined for noiseless gates"
         );
         let qubits = union_qubits(&self.qubits, &other.qubits);
         let lhs = self.expand_to(&qubits);
@@ -580,6 +631,39 @@ fn permute_basis_index(index: usize, new_to_old_positions: &[usize]) -> usize {
         out |= bit << old_position;
     }
     out
+}
+
+/// Compute the superoperator `S = U ⊗ conj(U)` for a matrix `U`.
+///
+/// `S[r, c] = U[i_ket, j_ket] * conj(U[i_bra, j_bra])`
+/// where `i_ket = r % dim, i_bra = r / dim, j_ket = c % dim, j_bra = c / dim`.
+fn superoperator_of(u: &ComplexSquareMatrix) -> ComplexSquareMatrix {
+    let dim = u.edge_size();
+    let super_dim = dim * dim;
+    let mut data = vec![Complex::new(0.0, 0.0); super_dim * super_dim];
+
+    for r in 0..super_dim {
+        let i_ket = r & (dim - 1);
+        let i_bra = r >> dim.trailing_zeros();
+        for c in 0..super_dim {
+            let j_ket = c & (dim - 1);
+            let j_bra = c >> dim.trailing_zeros();
+            let val = u.get(i_ket, j_ket) * u.get(i_bra, j_bra).conj();
+            data[r * super_dim + c] = val;
+        }
+    }
+
+    ComplexSquareMatrix::from_vec(super_dim, data)
+}
+
+/// Returns the noise branches for single-qubit depolarizing noise with probability `p`.
+fn depolarizing_noise(p: f64) -> Vec<(f64, ComplexSquareMatrix)> {
+    vec![
+        (1.0 - p, ComplexSquareMatrix::eye(2)),
+        (p / 3.0, ComplexSquareMatrix::x()),
+        (p / 3.0, ComplexSquareMatrix::y()),
+        (p / 3.0, ComplexSquareMatrix::z()),
+    ]
 }
 
 #[cfg(test)]

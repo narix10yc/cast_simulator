@@ -32,7 +32,7 @@ use cast::{
     cost_model::{FusionConfig, HardwareProfile},
     fusion,
     timing::{fmt_duration, time_adaptive, TimingStats},
-    types::{KrausChannel, QuantumGate},
+    types::QuantumGate,
     CircuitGraph,
 };
 use clap::Parser;
@@ -109,7 +109,7 @@ fn add_depolarizing_noise(gates: &[QuantumGate], p: f64) -> Vec<QuantumGate> {
     for gate in gates {
         noisy.push(gate.clone());
         for &q in gate.qubits() {
-            noisy.push(KrausChannel::depolarizing(q, p).to_gate());
+            noisy.push(QuantumGate::depolarizing(q, p));
         }
     }
     noisy

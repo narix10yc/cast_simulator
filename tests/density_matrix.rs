@@ -10,7 +10,7 @@ use cast::{
     cost_model::FusionConfig,
     cpu::{CPUKernelGenSpec, CPUStatevector, CpuKernelManager, MatrixLoadMode, SimdWidth},
     fusion,
-    types::{Complex, KrausChannel, Precision, QuantumGate},
+    types::{Complex, Precision, QuantumGate},
     CircuitGraph,
 };
 
@@ -88,7 +88,7 @@ fn depolarizing_on_zero_state_trace_and_populations() {
     let p = 0.15;
     let n_phys: u32 = 2; // pad to 2 physical qubits so DM SV has 4 virtual qubits
 
-    let channel_gate = KrausChannel::depolarizing(0, p).to_gate();
+    let channel_gate = QuantumGate::depolarizing(0, p);
     let dm_gates = to_dm_gates(&[channel_gate], n_phys);
     let result = run_dm(&dm_gates, n_phys);
 
@@ -115,7 +115,7 @@ fn depolarizing_on_zero_state_trace_and_populations() {
 fn depolarizing_p0_is_identity() {
     // p=0 channel should leave |0⟩⟨0| unchanged.
     let n_phys: u32 = 2;
-    let dm_gates = to_dm_gates(&[KrausChannel::depolarizing(0, 0.0).to_gate()], n_phys);
+    let dm_gates = to_dm_gates(&[QuantumGate::depolarizing(0, 0.0)], n_phys);
     let result = run_dm(&dm_gates, n_phys);
 
     let diag = dm_diagonal(&result, n_phys);
@@ -123,90 +123,6 @@ fn depolarizing_p0_is_identity() {
     for (i, &d) in diag.iter().enumerate().skip(1) {
         assert!(d.abs() < TOL, "ρ[{i},{i}] = {d}");
     }
-}
-
-// ── Amplitude damping ────────────────────────────────────────────────────────
-
-#[test]
-fn amplitude_damping_on_excited_state() {
-    // Start in |1⟩⟨1| (qubit 0 excited, qubit 1 = |0⟩), apply amplitude_damping(γ=0.5).
-    // Expected: ρ[0,0]+ρ[2,2] = γ = 0.5,  ρ[1,1]+ρ[3,3] = 1−γ = 0.5.
-    let gamma = 0.5;
-    let n_phys: u32 = 2;
-
-    // Prepare |1⟩ on qubit 0 with an X gate, then apply amplitude damping.
-    let gates = vec![
-        QuantumGate::x(0),
-        KrausChannel::amplitude_damping(0, gamma).to_gate(),
-    ];
-    let dm_gates = to_dm_gates(&gates, n_phys);
-    let result = run_dm(&dm_gates, n_phys);
-
-    let trace = dm_trace(&result, n_phys);
-    assert!((trace - 1.0).abs() < TOL, "trace = {trace}");
-
-    let diag = dm_diagonal(&result, n_phys);
-    let p0 = diag[0b00] + diag[0b10]; // qubit0=0
-    let p1 = diag[0b01] + diag[0b11]; // qubit0=1
-    assert!((p0 - gamma).abs() < TOL, "P(q0=0) = {p0}, expected {gamma}");
-    assert!(
-        (p1 - (1.0 - gamma)).abs() < TOL,
-        "P(q0=1) = {p1}, expected {}",
-        1.0 - gamma
-    );
-}
-
-#[test]
-fn amplitude_damping_full_decay() {
-    // γ=1: |1⟩⟨1| → |0⟩⟨0| completely.
-    let n_phys: u32 = 2;
-    let gates = vec![
-        QuantumGate::x(0),
-        KrausChannel::amplitude_damping(0, 1.0).to_gate(),
-    ];
-    let dm_gates = to_dm_gates(&gates, n_phys);
-    let result = run_dm(&dm_gates, n_phys);
-
-    let diag = dm_diagonal(&result, n_phys);
-    assert!((diag[0] - 1.0).abs() < TOL, "ρ[0,0] = {}", diag[0]);
-    assert!((dm_trace(&result, n_phys) - 1.0).abs() < TOL);
-}
-
-// ── Phase damping ────────────────────────────────────────────────────────────
-
-#[test]
-fn phase_damping_preserves_populations() {
-    // Phase damping kills coherences but leaves populations unchanged.
-    // Start in H|0⟩ = |+⟩, apply phase_damping(λ).
-    // Populations: ρ[0,0] = ρ[1,1] = 0.5 (unchanged).
-    // Coherence: ρ[0,1] = 0.5·√(1−λ).
-    let lambda = 0.4;
-    let n_phys: u32 = 2;
-    let gates = vec![
-        QuantumGate::h(0),
-        KrausChannel::phase_damping(0, lambda).to_gate(),
-    ];
-    let dm_gates = to_dm_gates(&gates, n_phys);
-    let result = run_dm(&dm_gates, n_phys);
-
-    let trace = dm_trace(&result, n_phys);
-    assert!((trace - 1.0).abs() < TOL, "trace = {trace}");
-
-    let diag = dm_diagonal(&result, n_phys);
-    let p0 = diag[0b00] + diag[0b10];
-    let p1 = diag[0b01] + diag[0b11];
-    assert!((p0 - 0.5).abs() < TOL, "P(q0=0) = {p0}");
-    assert!((p1 - 0.5).abs() < TOL, "P(q0=1) = {p1}");
-
-    // Check coherence ρ_full[00, 01] = ρ_q0[0,1] · ρ_q1[0,0] = √(1−λ)/2.
-    // DM SV index: ket=0b00=0, bra=0b01=1 → idx = 0 | (1 << n_phys).
-    let idx = 0b01 << n_phys;
-    let coherence_re = result[idx].0;
-    let expected = 0.5 * (1.0 - lambda).sqrt();
-    assert!(
-        (coherence_re - expected).abs() < TOL,
-        "coherence = {coherence_re}, expected {expected}"
-    );
 }
 
 // ── Noiseless DM agrees with pure statevector ────────────────────────────────
@@ -251,10 +167,10 @@ fn channel_gates_survive_fusion() {
     // Fusion must not absorb channel gates.
     let gates: Vec<QuantumGate> = vec![
         QuantumGate::h(0),
-        KrausChannel::depolarizing(0, 0.1).to_gate(),
+        QuantumGate::depolarizing(0, 0.1),
         QuantumGate::cx(0, 1),
-        KrausChannel::depolarizing(0, 0.1).to_gate(),
-        KrausChannel::depolarizing(1, 0.1).to_gate(),
+        QuantumGate::depolarizing(0, 0.1),
+        QuantumGate::depolarizing(1, 0.1),
     ];
 
     let n_channels_before = gates.iter().filter(|g| !g.is_unitary()).count();
@@ -280,12 +196,12 @@ fn fused_noisy_circuit_preserves_trace() {
     let n_phys: u32 = 3;
     let gates: Vec<QuantumGate> = vec![
         QuantumGate::h(0),
-        KrausChannel::depolarizing(0, 0.1).to_gate(),
+        QuantumGate::depolarizing(0, 0.1),
         QuantumGate::cx(0, 1),
-        KrausChannel::depolarizing(0, 0.05).to_gate(),
-        KrausChannel::depolarizing(1, 0.05).to_gate(),
+        QuantumGate::depolarizing(0, 0.05),
+        QuantumGate::depolarizing(1, 0.05),
         QuantumGate::h(1),
-        KrausChannel::depolarizing(1, 0.1).to_gate(),
+        QuantumGate::depolarizing(1, 0.1),
     ];
 
     // Unfused DM result.
