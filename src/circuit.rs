@@ -63,10 +63,6 @@ impl CircuitGraphRow {
         })
     }
 
-    pub fn is_vacent(&self, qubits: &[u32]) -> bool {
-        self.is_vacant(qubits)
-    }
-
     pub fn place_gate(&mut self, gate_id: GateId, qubits: &[u32]) {
         assert!(
             self.is_vacant(qubits),
