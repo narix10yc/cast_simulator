@@ -294,6 +294,86 @@ impl FusionConfig {
     }
 }
 
+// ── Fusion log ───────────────────────────────────────────────────────────
+
+/// A single recorded fusion decision from the agglomerative optimizer.
+#[derive(Debug, Clone)]
+pub struct FusionDecision {
+    /// Size level at which this decision was made (cdd_size).
+    pub cdd_size: usize,
+    /// Number of candidate gates in the cluster (including the seed).
+    pub n_candidates: usize,
+    /// Per-candidate: (n_qubits, arithmetic_intensity).
+    pub candidates: Vec<(usize, f64)>,
+    /// Number of qubits in the product gate.
+    pub product_n_qubits: usize,
+    /// Arithmetic intensity of the product gate.
+    pub product_ai: f64,
+    /// Sum of individual candidate costs.
+    pub old_cost: f64,
+    /// Cost of the product gate.
+    pub new_cost: f64,
+    /// Benefit ratio: old_cost / (new_cost + eps) - 1.
+    pub benefit: f64,
+    /// Whether the fusion was accepted.
+    pub accepted: bool,
+}
+
+/// Accumulates fusion decisions during optimization for analysis and
+/// reproducibility.  Pass to [`crate::fusion::optimize_with_log`] to collect.
+#[derive(Debug, Clone, Default)]
+pub struct FusionLog {
+    pub decisions: Vec<FusionDecision>,
+}
+
+impl FusionLog {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Number of accepted fusions.
+    pub fn n_accepted(&self) -> usize {
+        self.decisions.iter().filter(|d| d.accepted).count()
+    }
+
+    /// Number of rejected fusions.
+    pub fn n_rejected(&self) -> usize {
+        self.decisions.iter().filter(|d| !d.accepted).count()
+    }
+
+    /// Print a human-readable summary to stderr.
+    pub fn print_summary(&self) {
+        let accepted = self.n_accepted();
+        let rejected = self.n_rejected();
+        eprintln!(
+            "  Fusion log: {} decisions ({} accepted, {} rejected)",
+            self.decisions.len(),
+            accepted,
+            rejected,
+        );
+        if self.decisions.is_empty() {
+            return;
+        }
+        eprintln!(
+            "  {:>8} {:>6} {:>8} {:>10} {:>10} {:>10} {:>8}",
+            "Size", "NCand", "ProdQ", "OldCost", "NewCost", "Benefit", "Accept"
+        );
+        eprintln!("  {}", "-".repeat(68));
+        for d in &self.decisions {
+            eprintln!(
+                "  {:>8} {:>6} {:>8} {:>10.3} {:>10.3} {:>10.3} {:>8}",
+                d.cdd_size,
+                d.n_candidates,
+                d.product_n_qubits,
+                d.old_cost,
+                d.new_cost,
+                d.benefit,
+                if d.accepted { "yes" } else { "no" },
+            );
+        }
+    }
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

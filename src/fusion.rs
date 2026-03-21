@@ -1,7 +1,11 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::{cost_model::FusionConfig, types::QuantumGate, CircuitGraph, GateId};
+use crate::{
+    cost_model::{FusionConfig, FusionDecision, FusionLog},
+    types::QuantumGate,
+    CircuitGraph, GateId,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 1: size-2 canonicalization (unchanged)
@@ -176,6 +180,7 @@ fn start_fusion(
     cdd_size: usize,
     start_row: usize,
     start_qubit: usize,
+    log: Option<&mut FusionLog>,
 ) -> usize {
     let Some(seed_id) = cg.gate_id_at(start_row, start_qubit) else {
         return 0;
@@ -273,14 +278,34 @@ fn start_fusion(
     }
 
     // ── Step D: cost-model decision ───────────────────────────────────────────
+    let ztol = 1e-12;
     let old_cost: f64 = tentative
         .iter()
         .map(|(g, _)| config.cost_model.cost_of(g))
         .sum();
-    let new_cost = config.cost_model.cost_of(cg.gate(prod_id).unwrap());
+    let prod_gate_ref = cg.gate(prod_id).unwrap();
+    let new_cost = config.cost_model.cost_of(prod_gate_ref);
     let benefit = old_cost / (new_cost + 1e-10) - 1.0;
+    let accepted = benefit >= config.benefit_margin;
 
-    if benefit < config.benefit_margin {
+    if let Some(log) = log {
+        log.decisions.push(FusionDecision {
+            cdd_size,
+            n_candidates: tentative.len(),
+            candidates: tentative
+                .iter()
+                .map(|(g, _)| (g.effective_n_qubits(), g.arithmatic_intensity(ztol)))
+                .collect(),
+            product_n_qubits: prod_gate_ref.effective_n_qubits(),
+            product_ai: prod_gate_ref.arithmatic_intensity(ztol),
+            old_cost,
+            new_cost,
+            benefit,
+            accepted,
+        });
+    }
+
+    if !accepted {
         // Rollback: remove the product gate and restore all originals.
         let anchor = prod_gate.qubits()[0] as usize;
         cg.remove_gate_at(prod_row, anchor);
@@ -301,7 +326,12 @@ fn start_fusion(
 /// calls [`CircuitGraph::squeeze`] to compact the graph.
 ///
 /// Returns the total number of gates consumed (0 = graph unchanged).
-pub fn apply_gate_fusion(cg: &mut CircuitGraph, config: &FusionConfig, cdd_size: usize) -> usize {
+pub fn apply_gate_fusion(
+    cg: &mut CircuitGraph,
+    config: &FusionConfig,
+    cdd_size: usize,
+    mut log: Option<&mut FusionLog>,
+) -> usize {
     let mut n_fused = 0;
     // Snapshot n_rows / n_qubits: start_fusion mutates the graph but never
     // adds or removes rows, so the dimensions are stable for this pass.
@@ -309,7 +339,7 @@ pub fn apply_gate_fusion(cg: &mut CircuitGraph, config: &FusionConfig, cdd_size:
     let n_qubits = cg.n_qubits();
     for row in 0..n_rows {
         for qubit in 0..n_qubits {
-            n_fused += start_fusion(cg, config, cdd_size, row, qubit);
+            n_fused += start_fusion(cg, config, cdd_size, row, qubit, log.as_deref_mut());
         }
     }
     if n_fused > 0 {
@@ -326,8 +356,19 @@ pub fn apply_gate_fusion(cg: &mut CircuitGraph, config: &FusionConfig, cdd_size:
 pub fn optimize(cg: &mut CircuitGraph, config: &FusionConfig) {
     apply_size_two_fusion(cg);
     for cdd_size in 3..=config.size_max {
-        while apply_gate_fusion(cg, config, cdd_size) > 0 {}
+        while apply_gate_fusion(cg, config, cdd_size, None) > 0 {}
     }
+}
+
+/// Like [`optimize`], but records every Phase-2 accept/reject decision in
+/// the returned [`FusionLog`].
+pub fn optimize_with_log(cg: &mut CircuitGraph, config: &FusionConfig) -> FusionLog {
+    apply_size_two_fusion(cg);
+    let mut log = FusionLog::new();
+    for cdd_size in 3..=config.size_max {
+        while apply_gate_fusion(cg, config, cdd_size, Some(&mut log)) > 0 {}
+    }
+    log
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -515,7 +556,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(1, 2));
         cg.insert_gate(QuantumGate::cx(2, 3));
         let config = FusionConfig::size_only(4);
-        apply_gate_fusion(&mut cg, &config, 4);
+        apply_gate_fusion(&mut cg, &config, 4, None);
         assert_eq!(cg.n_rows(), 1);
         assert_eq!(cg.gate(cg.gate_id_at(0, 0).unwrap()).unwrap().n_qubits(), 4);
         assert!(cg.check_consistency().is_ok());
@@ -532,7 +573,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(2, 3));
         let n_before = cg.n_rows();
         let config = FusionConfig::size_only(2);
-        apply_gate_fusion(&mut cg, &config, 2);
+        apply_gate_fusion(&mut cg, &config, 2, None);
         assert_eq!(cg.n_rows(), n_before);
         assert!(cg.check_consistency().is_ok());
     }
@@ -564,7 +605,7 @@ mod tests {
             }),
         };
         let n_before = cg.n_rows();
-        apply_gate_fusion(&mut cg, &config, 3);
+        apply_gate_fusion(&mut cg, &config, 3, None);
         assert_eq!(cg.n_rows(), n_before);
         assert!(cg.check_consistency().is_ok());
     }
@@ -680,7 +721,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(0, 1));
         cg.insert_gate(QuantumGate::cx(1, 2));
         check_fusion(&cg, |g| {
-            apply_gate_fusion(g, &FusionConfig::size_only(3), 3);
+            apply_gate_fusion(g, &FusionConfig::size_only(3), 3, None);
         });
     }
 
@@ -691,7 +732,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(1, 2));
         cg.insert_gate(QuantumGate::cx(2, 3));
         check_fusion(&cg, |g| {
-            apply_gate_fusion(g, &FusionConfig::size_only(4), 4);
+            apply_gate_fusion(g, &FusionConfig::size_only(4), 4, None);
         });
     }
 
@@ -704,7 +745,7 @@ mod tests {
         cg.insert_gate(QuantumGate::cx(2, 3));
         cg.insert_gate(QuantumGate::cx(1, 2));
         check_fusion(&cg, |g| {
-            apply_gate_fusion(g, &FusionConfig::size_only(4), 4);
+            apply_gate_fusion(g, &FusionConfig::size_only(4), 4, None);
         });
     }
 
@@ -715,7 +756,7 @@ mod tests {
         cg.insert_gate(QuantumGate::h(0));
         cg.insert_gate(QuantumGate::cx(0, 1));
         check_fusion(&cg, |g| {
-            apply_gate_fusion(g, &FusionConfig::size_only(2), 3);
+            apply_gate_fusion(g, &FusionConfig::size_only(2), 3, None);
         });
     }
 
@@ -726,7 +767,7 @@ mod tests {
         cg.insert_gate(QuantumGate::ccx(0, 1, 2));
         cg.insert_gate(QuantumGate::ccx(1, 2, 3));
         check_fusion(&cg, |g| {
-            apply_gate_fusion(g, &FusionConfig::size_only(4), 4);
+            apply_gate_fusion(g, &FusionConfig::size_only(4), 4, None);
         });
     }
 
@@ -739,7 +780,7 @@ mod tests {
         cg.insert_gate(QuantumGate::rz(-0.4, 1));
         cg.insert_gate(QuantumGate::cx(0, 1));
         check_fusion(&cg, |g| {
-            apply_gate_fusion(g, &FusionConfig::size_only(3), 3);
+            apply_gate_fusion(g, &FusionConfig::size_only(3), 3, None);
         });
     }
 
@@ -900,7 +941,7 @@ mod tests {
         };
         // Phase 2 rollback: unitary must be unchanged.
         check_fusion(&cg, |g| {
-            apply_gate_fusion(g, &config, 6);
+            apply_gate_fusion(g, &config, 6, None);
         });
     }
 
@@ -920,7 +961,7 @@ mod tests {
         };
         let n_before = cg.n_rows();
         let fused = check_fusion(&cg, |g| {
-            apply_gate_fusion(g, &config, 3);
+            apply_gate_fusion(g, &config, 3, None);
         });
         // Row count unchanged (rollback restored all gates).
         assert_eq!(fused.n_rows(), n_before);
