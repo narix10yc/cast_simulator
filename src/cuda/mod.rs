@@ -134,6 +134,37 @@ pub(super) mod ffi {
             err_buf_len: usize,
         ) -> i32;
 
+        // -- Device-side reductions --
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_norm_squared(
+            dptr: u64,
+            n_elements: usize,
+            precision: u8,
+            out_norm_sq: *mut f64,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_scale(
+            dptr: u64,
+            n_elements: usize,
+            precision: u8,
+            scale: f64,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+
+        // -- Device-to-device async memcpy --
+        #[cfg(feature = "cuda")]
+        pub fn cast_cuda_memcpy_dtod_async(
+            dst: u64,
+            src: u64,
+            n_bytes: usize,
+            stream: *mut std::ffi::c_void,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+
         // -- CUDA timing events --
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_event_create(

@@ -19,4 +19,6 @@ pub mod cpu;
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
+pub mod simulator;
+
 pub use circuit::{CircuitGraph, CircuitGraphRow, GateId};

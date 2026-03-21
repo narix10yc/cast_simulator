@@ -21,6 +21,7 @@ const CUDA_FFI_SOURCES: &[&str] = &[
     "src/cpp/cuda/cuda_jit.cpp",
     "src/cpp/cuda/cuda_util.h",
     "src/cpp/cuda/cuda_exec.cpp",
+    "src/cpp/cuda/cuda_kernels.cu",
 ];
 
 const CPU_LLVM_COMPONENTS: &[&str] = &["core", "orcjit", "native", "passes"];
@@ -84,11 +85,15 @@ fn build_cuda_ffi(out_dir: &Path, llvm_config: &Path) {
         &extra_includes,
     );
 
+    // Compile CUDA kernels with nvcc.
+    compile_cuda_kernels(out_dir);
+
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static={archive}");
+    println!("cargo:rustc-link-lib=static=cast_cuda_kernels");
     emit_llvm_link_flags(&llvm.link_flags);
 
-    // The CUDA driver does not come from llvm-config; find it via toolkit path.
+    // The CUDA driver/runtime do not come from llvm-config; find via toolkit.
     if let Some(cuda_lib) = cuda_lib_dir() {
         println!("cargo:rustc-link-search=native={}", cuda_lib.display());
         let stubs_dir = cuda_lib.join("stubs");
@@ -98,7 +103,43 @@ fn build_cuda_ffi(out_dir: &Path, llvm_config: &Path) {
     }
 
     println!("cargo:rustc-link-lib=cuda");
+    println!("cargo:rustc-link-lib=cudart");
     println!("cargo:rustc-link-lib={}", cxx_stdlib_name());
+}
+
+fn compile_cuda_kernels(out_dir: &Path) {
+    let toolkit = cuda_toolkit_dir();
+    let nvcc = toolkit
+        .as_ref()
+        .map(|d| d.join("bin/nvcc"))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| PathBuf::from("nvcc"));
+
+    let source = "src/cpp/cuda/cuda_kernels.cu";
+    let object = out_dir.join("cuda_kernels.o");
+    let archive = out_dir.join("libcast_cuda_kernels.a");
+
+    let mut cmd = Command::new(&nvcc);
+    cmd.arg("-c")
+        .arg(source)
+        .arg("-o")
+        .arg(&object)
+        .arg("--compiler-options")
+        .arg("-fPIC")
+        .arg("-O2");
+
+    // Optional: target a specific GPU architecture (e.g. CUDA_ARCH=120 for
+    // sm_120). Without this, nvcc compiles for its default target and the CUDA
+    // driver JIT-compiles the embedded PTX for the actual device at load time.
+    if let Ok(arch) = env::var("CUDA_ARCH") {
+        cmd.arg(format!("-arch=sm_{arch}"));
+    }
+
+    run(&mut cmd);
+
+    let mut ar = Command::new("ar");
+    ar.arg("crus").arg(&archive).arg(&object);
+    run(&mut ar);
 }
 
 fn compile_cpp_archive(
@@ -310,34 +351,26 @@ fn llvm_config_flags(llvm_config: &Path, args: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// Returns the CUDA toolkit include directory.
-fn cuda_include_dir() -> Option<PathBuf> {
+/// Returns the CUDA toolkit root directory.
+fn cuda_toolkit_dir() -> Option<PathBuf> {
     if let Ok(path) = env::var("CUDA_PATH") {
-        return Some(PathBuf::from(path).join("include"));
+        return Some(PathBuf::from(path));
     }
-
-    for candidate in ["/usr/local/cuda/include", "/usr/cuda/include"] {
-        let candidate = PathBuf::from(candidate);
-        if candidate.exists() {
-            return Some(candidate);
+    for candidate in ["/usr/local/cuda", "/usr/cuda"] {
+        let p = PathBuf::from(candidate);
+        if p.exists() {
+            return Some(p);
         }
     }
     None
 }
 
-/// Returns the CUDA toolkit lib64 directory.
-fn cuda_lib_dir() -> Option<PathBuf> {
-    if let Ok(path) = env::var("CUDA_PATH") {
-        return Some(PathBuf::from(path).join("lib64"));
-    }
+fn cuda_include_dir() -> Option<PathBuf> {
+    cuda_toolkit_dir().map(|d| d.join("include")).filter(|p| p.exists())
+}
 
-    for candidate in ["/usr/local/cuda/lib64", "/usr/cuda/lib64"] {
-        let candidate = PathBuf::from(candidate);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
+fn cuda_lib_dir() -> Option<PathBuf> {
+    cuda_toolkit_dir().map(|d| d.join("lib64")).filter(|p| p.exists())
 }
 
 fn required_env_path(var: &str) -> PathBuf {

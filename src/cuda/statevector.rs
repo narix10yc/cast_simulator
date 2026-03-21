@@ -185,4 +185,71 @@ impl CudaStatevector {
         }
         Ok(flat.chunks_exact(2).map(|c| (c[0], c[1])).collect())
     }
+
+    /// Compute the squared norm of the statevector on device: Σ|a_i|².
+    pub fn norm_squared(&self) -> anyhow::Result<f64> {
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let mut result: f64 = 0.0;
+        let status = unsafe {
+            super::ffi::cast_cuda_norm_squared(
+                self.dptr,
+                self.n_elements,
+                self.precision as u8,
+                &mut result,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+        Ok(result)
+    }
+
+    /// Normalize the statevector in-place on device: a_i /= ||ψ||.
+    pub fn normalize(&mut self) -> anyhow::Result<()> {
+        let ns = self.norm_squared()?;
+        if ns <= 0.0 {
+            anyhow::bail!("cannot normalize zero-norm statevector");
+        }
+        let inv_norm = 1.0 / ns.sqrt();
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let status = unsafe {
+            super::ffi::cast_cuda_scale(
+                self.dptr,
+                self.n_elements,
+                self.precision as u8,
+                inv_norm,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+        Ok(())
+    }
+
+    /// Create a device-side copy of this statevector.
+    pub fn clone_device(&self) -> anyhow::Result<Self> {
+        let copy = Self::new(self.n_qubits, self.precision)?;
+        let n_bytes = self.n_elements * self.precision.scalar_bytes();
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+        let status = unsafe {
+            super::ffi::cast_cuda_memcpy_dtod_async(
+                copy.dptr,
+                self.dptr,
+                n_bytes,
+                std::ptr::null_mut(), // default stream
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+        // No sync needed: subsequent kernels on the default stream are
+        // guaranteed to execute after this memcpy completes.
+        Ok(copy)
+    }
 }

@@ -58,7 +58,7 @@ impl fmt::Display for TimingStats {
     }
 }
 
-fn stats_from_samples(samples: &[f64]) -> TimingStats {
+pub fn stats_from_samples(samples: &[f64]) -> TimingStats {
     let n = samples.len() as f64;
     let mean = samples.iter().copied().sum::<f64>() / n;
     let var = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / n;
