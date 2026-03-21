@@ -294,10 +294,10 @@ fn start_fusion(
             n_candidates: tentative.len(),
             candidates: tentative
                 .iter()
-                .map(|(g, _)| (g.effective_n_qubits(), g.arithmatic_intensity(ztol)))
+                .map(|(g, _)| (g.effective_n_qubits(), g.arithmetic_intensity(ztol)))
                 .collect(),
             product_n_qubits: prod_gate_ref.effective_n_qubits(),
-            product_ai: prod_gate_ref.arithmatic_intensity(ztol),
+            product_ai: prod_gate_ref.arithmetic_intensity(ztol),
             old_cost,
             new_cost,
             benefit,

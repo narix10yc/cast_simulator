@@ -223,7 +223,7 @@ impl QuantumGate {
     }
 
     /// Arithmetic intensity of the gate: `scalar_nnz(ztol) / matrix.edge_size()`.
-    pub fn arithmatic_intensity(&self, ztol: f64) -> f64 {
+    pub fn arithmetic_intensity(&self, ztol: f64) -> f64 {
         self.scalar_nnz(ztol) as f64 / self.matrix.edge_size() as f64
     }
 
@@ -355,13 +355,13 @@ impl QuantumGate {
     ///
     /// # Panics
     /// Panics if `n_qubits_sv` is too small for the required gate size.
-    pub fn random_arithmatic_intensity(n_qubits_sv: u32, ai: f64, ztol: f64) -> Self {
+    pub fn random_arithmetic_intensity(n_qubits_sv: u32, ai: f64, ztol: f64) -> Self {
         let rng = &mut rand::thread_rng();
-        Self::random_arithmatic_intensity_with_rng(n_qubits_sv, ai, ztol, rng)
+        Self::random_arithmetic_intensity_with_rng(n_qubits_sv, ai, ztol, rng)
     }
 
-    /// Seeded variant of [`Self::random_arithmatic_intensity`].
-    pub fn random_arithmatic_intensity_with_rng(
+    /// Seeded variant of [`Self::random_arithmetic_intensity`].
+    pub fn random_arithmetic_intensity_with_rng(
         n_qubits_sv: u32,
         ai: f64,
         ztol: f64,
