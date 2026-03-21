@@ -41,9 +41,8 @@ pub enum SimulationMode {
     /// Density-matrix simulation on 2n virtual qubits. Supports noise channels
     /// via superoperator lifting.
     DensityMatrix,
-    /// Monte Carlo wavefunction: pure-state simulation with stochastic Kraus
-    /// operator sampling at each noise channel. Memory cost is O(2^n) per
-    /// trajectory.
+    /// Monte Carlo wavefunction: pure-state simulation with stochastic noise
+    /// branch sampling at each noisy gate. Memory cost is O(2^n) per trajectory.
     Trajectory {
         n_trajectories: usize,
         seed: Option<u64>,
@@ -62,8 +61,8 @@ pub struct SimulationResult {
 
 /// Per-trajectory outcome data.
 pub struct TrajectoryResult {
-    /// Index of the Kraus operator sampled at each channel gate, in circuit
-    /// gate order. Only channel gates contribute entries.
+    /// Index of the noise branch sampled at each noisy gate, in circuit
+    /// gate order. Only noisy gates contribute entries.
     pub sampled_operators: Vec<usize>,
     /// Wall time for this trajectory (seconds).
     pub time_s: f64,
@@ -255,7 +254,7 @@ impl Simulator {
     // ── Kernel compilation ───────────────────────────────────────────────
 
     /// Compile kernels for all gates. For Trajectory mode, channel gates are
-    /// skipped (their Kraus operator kernels are compiled separately).
+    /// skipped (their noise-branch kernels are compiled separately).
     fn compile_gates(
         &self,
         gates: &[Arc<QuantumGate>],
@@ -336,23 +335,31 @@ impl Simulator {
         seed: Option<u64>,
         compile_time_s: f64,
     ) -> Result<SimulationResult> {
+        use rand::distributions::WeightedIndex;
         use rand::prelude::*;
         use rand::rngs::StdRng;
 
-        // Pre-compile Kraus operator kernels.
-        // For each gate index that is a channel, compile kernels for each K_i.
-        let mut kraus_kernels: Vec<Option<Vec<KernelId>>> = Vec::with_capacity(gates.len());
+        // Pre-compile noise-branch kernels and sampling distributions.
+        let mut noise_kernels: Vec<Option<Vec<KernelId>>> = Vec::with_capacity(gates.len());
+        let mut noise_dists: Vec<Option<WeightedIndex<f64>>> = Vec::with_capacity(gates.len());
         for gate in gates {
-            if let Some(channel) = gate.channel() {
+            if !gate.is_unitary() {
                 let mut kids = Vec::new();
-                for op in channel.operators() {
-                    let kraus_gate =
-                        Arc::new(QuantumGate::new(op.clone(), channel.qubits().to_vec()));
-                    kids.push(self.compile_one(&kraus_gate)?);
+                for (_, u_noise) in gate.noise() {
+                    let composed = u_noise.matmul(gate.matrix());
+                    let noise_gate =
+                        Arc::new(QuantumGate::new(composed, gate.qubits().to_vec()));
+                    kids.push(self.compile_one(&noise_gate)?);
                 }
-                kraus_kernels.push(Some(kids));
+                noise_kernels.push(Some(kids));
+
+                let weights: Vec<f64> = gate.noise().iter().map(|(p, _)| *p).collect();
+                let dist = WeightedIndex::new(&weights)
+                    .context("invalid noise probabilities")?;
+                noise_dists.push(Some(dist));
             } else {
-                kraus_kernels.push(None);
+                noise_kernels.push(None);
+                noise_dists.push(None);
             }
         }
 
@@ -368,7 +375,8 @@ impl Simulator {
             let sampled = self.run_one_trajectory(
                 gates,
                 gate_kernel_ids,
-                &kraus_kernels,
+                &noise_kernels,
+                &noise_dists,
                 n_sv,
                 &mut *rng,
             )?;
@@ -393,7 +401,8 @@ impl Simulator {
         &self,
         gates: &[Arc<QuantumGate>],
         gate_kernel_ids: &[Option<KernelId>],
-        kraus_kernels: &[Option<Vec<KernelId>>],
+        noise_kernels: &[Option<Vec<KernelId>>],
+        noise_dists: &[Option<rand::distributions::WeightedIndex<f64>>],
         n_sv: u32,
         rng: &mut dyn rand::RngCore,
     ) -> Result<Vec<usize>> {
@@ -406,7 +415,8 @@ impl Simulator {
                 *n_threads,
                 gates,
                 gate_kernel_ids,
-                kraus_kernels,
+                noise_kernels,
+                noise_dists,
                 n_sv,
                 rng,
             ),
@@ -416,7 +426,8 @@ impl Simulator {
                 spec,
                 gates,
                 gate_kernel_ids,
-                kraus_kernels,
+                noise_kernels,
+                noise_dists,
                 n_sv,
                 rng,
             ),
@@ -430,11 +441,12 @@ impl Simulator {
         n_threads: u32,
         gates: &[Arc<QuantumGate>],
         gate_kernel_ids: &[Option<KernelId>],
-        kraus_kernels: &[Option<Vec<KernelId>>],
+        noise_kernels: &[Option<Vec<KernelId>>],
+        noise_dists: &[Option<rand::distributions::WeightedIndex<f64>>],
         n_sv: u32,
         rng: &mut dyn rand::RngCore,
     ) -> Result<Vec<usize>> {
-        use rand::distributions::{Distribution, WeightedIndex};
+        use rand::distributions::Distribution;
 
         let mut sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
         sv.initialize();
@@ -445,25 +457,9 @@ impl Simulator {
             if gate.is_unitary() {
                 mgr.apply(gate_kernel_ids[i].unwrap().as_cpu(), &mut sv, n_threads)?;
             } else {
-                let kids = kraus_kernels[i]
-                    .as_ref()
-                    .expect("channel gate must have pre-compiled Kraus kernels");
-
-                // p_i = ||K_i|ψ⟩||² for each Kraus operator.
-                let mut probs = Vec::with_capacity(kids.len());
-                for kid in kids {
-                    let mut sv_copy = sv.clone();
-                    mgr.apply(kid.as_cpu(), &mut sv_copy, n_threads)?;
-                    probs.push(sv_copy.norm_squared());
-                }
-
-                let dist = WeightedIndex::new(&probs)
-                    .context("invalid Kraus probabilities (all zero or negative)")?;
-                let chosen = dist.sample(rng);
+                let chosen = noise_dists[i].as_ref().unwrap().sample(rng);
                 sampled_ops.push(chosen);
-
-                mgr.apply(kids[chosen].as_cpu(), &mut sv, n_threads)?;
-                sv.normalize();
+                mgr.apply(noise_kernels[i].as_ref().unwrap()[chosen].as_cpu(), &mut sv, n_threads)?;
             }
         }
 
@@ -477,11 +473,12 @@ impl Simulator {
         spec: &CudaKernelGenSpec,
         gates: &[Arc<QuantumGate>],
         gate_kernel_ids: &[Option<KernelId>],
-        kraus_kernels: &[Option<Vec<KernelId>>],
+        noise_kernels: &[Option<Vec<KernelId>>],
+        noise_dists: &[Option<rand::distributions::WeightedIndex<f64>>],
         n_sv: u32,
         rng: &mut dyn rand::RngCore,
     ) -> Result<Vec<usize>> {
-        use rand::distributions::{Distribution, WeightedIndex};
+        use rand::distributions::Distribution;
 
         let mut sv = CudaStatevector::new(n_sv, spec.precision)?;
         sv.zero()?;
@@ -492,33 +489,14 @@ impl Simulator {
             if gate.is_unitary() {
                 mgr.apply(gate_kernel_ids[i].unwrap().as_cuda(), &mut sv)?;
             } else {
-                // Flush pending unitary kernels before reading state.
                 mgr.sync()?;
-
-                let kids = kraus_kernels[i]
-                    .as_ref()
-                    .expect("channel gate must have pre-compiled Kraus kernels");
-
-                // p_i = ||K_i|ψ⟩||² for each Kraus operator.
-                let mut probs = Vec::with_capacity(kids.len());
-                for kid in kids {
-                    let mut sv_copy = sv.clone_device()?;
-                    mgr.apply(kid.as_cuda(), &mut sv_copy)?;
-                    mgr.sync()?;
-                    probs.push(sv_copy.norm_squared()?);
-                }
-
-                let dist = WeightedIndex::new(&probs)
-                    .context("invalid Kraus probabilities (all zero or negative)")?;
-                let chosen = dist.sample(rng);
+                let chosen = noise_dists[i].as_ref().unwrap().sample(rng);
                 sampled_ops.push(chosen);
-
-                mgr.apply(kids[chosen].as_cuda(), &mut sv)?;
-                mgr.sync()?;
-                sv.normalize()?;
+                mgr.apply(noise_kernels[i].as_ref().unwrap()[chosen].as_cuda(), &mut sv)?;
             }
         }
 
+        mgr.sync()?;
         Ok(sampled_ops)
     }
 }
@@ -526,7 +504,7 @@ impl Simulator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{KrausChannel, QuantumGate};
+    use crate::types::QuantumGate;
 
     // Minimum SV qubits for F64+W256 SIMD (simd_s=2): n_gate_qubits + 2.
     // Use 4 qubits to safely handle 1- and 2-qubit gates.
@@ -561,7 +539,7 @@ mod tests {
 
         let graph = test_graph_with_padding(vec![
             QuantumGate::h(0),
-            KrausChannel::depolarizing(0, 0.1).to_gate(),
+            QuantumGate::depolarizing(0, 0.1),
         ]);
         assert!(sim.run_graph(&graph).is_err());
     }
@@ -577,7 +555,7 @@ mod tests {
         let graph = test_graph_with_padding(vec![
             QuantumGate::h(0),
             QuantumGate::cx(0, 1),
-            KrausChannel::depolarizing(0, 0.05).to_gate(),
+            QuantumGate::depolarizing(0, 0.05),
         ]);
 
         // Use Simulator's prepare_gates to get the DM-lifted gate list.
@@ -615,7 +593,7 @@ mod tests {
         // Circuit: H(0) + depolarizing(0, 0.1), padded to TEST_QUBITS.
         let graph = test_graph_with_padding(vec![
             QuantumGate::h(0),
-            KrausChannel::depolarizing(0, 0.1).to_gate(),
+            QuantumGate::depolarizing(0, 0.1),
         ]);
 
         let sim = Simulator::cpu(spec)
@@ -627,7 +605,7 @@ mod tests {
         let traj_data = result.trajectory_data.unwrap();
         assert_eq!(traj_data.len(), 2000);
 
-        // Depolarizing(p=0.1) has 4 Kraus operators.
+        // Depolarizing(p=0.1) has 4 noise branches.
         // K_0 = √(1-p)·I with probability (1-p) = 0.9.
         let n_identity: usize = traj_data
             .iter()

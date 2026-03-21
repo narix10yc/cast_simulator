@@ -439,7 +439,13 @@ mod tests {
         // A 2-qubit channel has a 4^2=16×16 superoperator — equivalent to a
         // 4-qubit unitary. A max_size=3 model must reject it.
         let m = size_model(3);
-        let ch2 = crate::types::KrausChannel::symmetric_depolarizing(&[0, 1], 0.1).to_gate();
+        // A 2-qubit gate with noise has effective_n_qubits = 4.
+        let ch2 = crate::types::QuantumGate::new(
+            crate::types::ComplexSquareMatrix::eye(4),
+            vec![0, 1],
+        ).with_noise(vec![
+            (1.0, crate::types::ComplexSquareMatrix::eye(4)),
+        ]);
         assert_eq!(ch2.n_qubits(), 2);
         assert_eq!(ch2.effective_n_qubits(), 4);
         assert_eq!(
@@ -452,7 +458,7 @@ mod tests {
     #[test]
     fn single_qubit_channel_fits_within_size2_limit() {
         let m = size_model(2);
-        let ch = crate::types::KrausChannel::depolarizing(0, 0.1).to_gate();
+        let ch = crate::types::QuantumGate::depolarizing(0, 0.1);
         assert_eq!(ch.effective_n_qubits(), 2);
         assert!(
             m.cost_of(&ch) < 1e-9,
@@ -500,7 +506,7 @@ mod tests {
     #[test]
     fn adaptive_channel_gate_uses_effective_size() {
         // 1-qubit channel → effective size 2: fits in max_size=2, blocked at max_size=1.
-        let ch = crate::types::KrausChannel::depolarizing(0, 0.1).to_gate();
+        let ch = crate::types::QuantumGate::depolarizing(0, 0.1);
         let m_ok = adaptive_model(50.0, 200.0, 2);
         let m_blocked = adaptive_model(50.0, 200.0, 1);
         assert!(m_ok.cost_of(&ch).is_finite());
