@@ -182,8 +182,7 @@ impl Simulator {
         // 3. Execute based on mode.
         match &self.mode {
             SimulationMode::StateVector | SimulationMode::DensityMatrix => {
-                let ids: Vec<KernelId> =
-                    kernel_ids.iter().map(|k| k.unwrap()).collect();
+                let ids: Vec<KernelId> = kernel_ids.iter().map(|k| k.unwrap()).collect();
                 let timing = self.execute_standard(&ids, n_sv)?;
                 Ok(SimulationResult {
                     timing,
@@ -290,7 +289,10 @@ impl Simulator {
     fn execute_standard(&self, kernel_ids: &[KernelId], n_sv: u32) -> Result<TimingStats> {
         match &self.backend {
             Backend::Cpu {
-                mgr, n_threads, spec, ..
+                mgr,
+                n_threads,
+                spec,
+                ..
             } => {
                 let mut sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
                 let timing = crate::timing::time_adaptive(
@@ -347,15 +349,13 @@ impl Simulator {
                 let mut kids = Vec::new();
                 for (_, u_noise) in gate.noise() {
                     let composed = u_noise.matmul(gate.matrix());
-                    let noise_gate =
-                        Arc::new(QuantumGate::new(composed, gate.qubits().to_vec()));
+                    let noise_gate = Arc::new(QuantumGate::new(composed, gate.qubits().to_vec()));
                     kids.push(self.compile_one(&noise_gate)?);
                 }
                 noise_kernels.push(Some(kids));
 
                 let weights: Vec<f64> = gate.noise().iter().map(|(p, _)| *p).collect();
-                let dist = WeightedIndex::new(&weights)
-                    .context("invalid noise probabilities")?;
+                let dist = WeightedIndex::new(&weights).context("invalid noise probabilities")?;
                 noise_dists.push(Some(dist));
             } else {
                 noise_kernels.push(None);
@@ -408,7 +408,10 @@ impl Simulator {
     ) -> Result<Vec<usize>> {
         match &self.backend {
             Backend::Cpu {
-                mgr, spec, n_threads, ..
+                mgr,
+                spec,
+                n_threads,
+                ..
             } => self.trajectory_cpu(
                 mgr,
                 spec,
@@ -459,7 +462,11 @@ impl Simulator {
             } else {
                 let chosen = noise_dists[i].as_ref().unwrap().sample(rng);
                 sampled_ops.push(chosen);
-                mgr.apply(noise_kernels[i].as_ref().unwrap()[chosen].as_cpu(), &mut sv, n_threads)?;
+                mgr.apply(
+                    noise_kernels[i].as_ref().unwrap()[chosen].as_cpu(),
+                    &mut sv,
+                    n_threads,
+                )?;
             }
         }
 
@@ -492,7 +499,10 @@ impl Simulator {
                 mgr.sync()?;
                 let chosen = noise_dists[i].as_ref().unwrap().sample(rng);
                 sampled_ops.push(chosen);
-                mgr.apply(noise_kernels[i].as_ref().unwrap()[chosen].as_cuda(), &mut sv)?;
+                mgr.apply(
+                    noise_kernels[i].as_ref().unwrap()[chosen].as_cuda(),
+                    &mut sv,
+                )?;
             }
         }
 
@@ -523,8 +533,7 @@ mod tests {
     /// StateVector mode runs without error.
     #[test]
     fn statevector_h_gate() {
-        let sim = Simulator::cpu(CPUKernelGenSpec::f64())
-            .with_mode(SimulationMode::StateVector);
+        let sim = Simulator::cpu(CPUKernelGenSpec::f64()).with_mode(SimulationMode::StateVector);
 
         let graph = test_graph_with_padding(vec![QuantumGate::h(0)]);
         let result = sim.run_graph(&graph).unwrap();
@@ -534,13 +543,10 @@ mod tests {
     /// StateVector mode rejects channel gates.
     #[test]
     fn statevector_rejects_channels() {
-        let sim = Simulator::cpu(CPUKernelGenSpec::f64())
-            .with_mode(SimulationMode::StateVector);
+        let sim = Simulator::cpu(CPUKernelGenSpec::f64()).with_mode(SimulationMode::StateVector);
 
-        let graph = test_graph_with_padding(vec![
-            QuantumGate::h(0),
-            QuantumGate::depolarizing(0, 0.1),
-        ]);
+        let graph =
+            test_graph_with_padding(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
         assert!(sim.run_graph(&graph).is_err());
     }
 
@@ -559,11 +565,8 @@ mod tests {
         ]);
 
         // Use Simulator's prepare_gates to get the DM-lifted gate list.
-        let sim = Simulator::cpu(spec.clone())
-            .with_mode(SimulationMode::DensityMatrix);
-        let (gates, n_sv) = sim
-            .prepare_gates(&graph, TEST_QUBITS)
-            .unwrap();
+        let sim = Simulator::cpu(spec.clone()).with_mode(SimulationMode::DensityMatrix);
+        let (gates, n_sv) = sim.prepare_gates(&graph, TEST_QUBITS).unwrap();
 
         // Execute manually to read back the final state.
         let mgr = CpuKernelManager::new();
@@ -591,16 +594,13 @@ mod tests {
         let spec = CPUKernelGenSpec::f64();
 
         // Circuit: H(0) + depolarizing(0, 0.1), padded to TEST_QUBITS.
-        let graph = test_graph_with_padding(vec![
-            QuantumGate::h(0),
-            QuantumGate::depolarizing(0, 0.1),
-        ]);
+        let graph =
+            test_graph_with_padding(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
 
-        let sim = Simulator::cpu(spec)
-            .with_mode(SimulationMode::Trajectory {
-                n_trajectories: 2000,
-                seed: Some(42),
-            });
+        let sim = Simulator::cpu(spec).with_mode(SimulationMode::Trajectory {
+            n_trajectories: 2000,
+            seed: Some(42),
+        });
         let result = sim.run_graph(&graph).unwrap();
         let traj_data = result.trajectory_data.unwrap();
         assert_eq!(traj_data.len(), 2000);

@@ -79,8 +79,8 @@ int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t sv_dptr,
 void *cast_cuda_event_create(char *err_buf, size_t err_buf_len);
 int cast_cuda_event_record(void *event, void *stream, char *err_buf, size_t err_buf_len);
 void cast_cuda_event_destroy(void *event);
-int cast_cuda_event_elapsed_ms(void *start_event, void *end_event, float *out_ms,
-                               char *err_buf, size_t err_buf_len);
+int cast_cuda_event_elapsed_ms(void *start_event, void *end_event, float *out_ms, char *err_buf,
+                               size_t err_buf_len);
 
 // -- Device-to-device async memcpy (cuda feature) --
 
@@ -103,12 +103,12 @@ int cast_cuda_sv_download(uint64_t dptr, double *host_data, size_t n_elements, u
 
 /// Compute sum of squares of all n_elements scalars at dptr.
 /// precision: 0 = F32, 1 = F64.  Result is always returned as f64.
-int cast_cuda_norm_squared(uint64_t dptr, size_t n_elements, uint8_t precision,
-                           double *out_norm_sq, char *err_buf, size_t err_buf_len);
+int cast_cuda_norm_squared(uint64_t dptr, size_t n_elements, uint8_t precision, double *out_norm_sq,
+                           char *err_buf, size_t err_buf_len);
 
 /// Scale all n_elements scalars at dptr by `scale`.
-int cast_cuda_scale(uint64_t dptr, size_t n_elements, uint8_t precision,
-                    double scale, char *err_buf, size_t err_buf_len);
+int cast_cuda_scale(uint64_t dptr, size_t n_elements, uint8_t precision, double scale,
+                    char *err_buf, size_t err_buf_len);
 
 #ifdef __cplusplus
 } // extern "C"

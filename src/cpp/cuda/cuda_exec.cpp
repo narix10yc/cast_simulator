@@ -375,8 +375,8 @@ extern "C" int cast_cuda_event_elapsed_ms(void *start_event, void *end_event, fl
     return 1;
   }
   std::string err;
-  CUresult rc =
-      cuEventElapsedTime(out_ms, static_cast<CUevent>(start_event), static_cast<CUevent>(end_event));
+  CUresult rc = cuEventElapsedTime(out_ms, static_cast<CUevent>(start_event),
+                                   static_cast<CUevent>(end_event));
   if (!cu_check(rc, "cuEventElapsedTime", err)) {
     write_error_message(err_buf, err_buf_len, err);
     return 1;

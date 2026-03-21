@@ -366,11 +366,15 @@ fn cuda_toolkit_dir() -> Option<PathBuf> {
 }
 
 fn cuda_include_dir() -> Option<PathBuf> {
-    cuda_toolkit_dir().map(|d| d.join("include")).filter(|p| p.exists())
+    cuda_toolkit_dir()
+        .map(|d| d.join("include"))
+        .filter(|p| p.exists())
 }
 
 fn cuda_lib_dir() -> Option<PathBuf> {
-    cuda_toolkit_dir().map(|d| d.join("lib64")).filter(|p| p.exists())
+    cuda_toolkit_dir()
+        .map(|d| d.join("lib64"))
+        .filter(|p| p.exists())
 }
 
 fn required_env_path(var: &str) -> PathBuf {

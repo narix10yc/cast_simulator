@@ -519,9 +519,7 @@ fn quantum_gate_from_qasm_gate(gate: &openqasm::Gate) -> QuantumGate {
         ),
         openqasm::Gate::CX(ctrl, targ) => QuantumGate::cx(*ctrl, *targ),
         openqasm::Gate::CZ(ctrl, targ) => QuantumGate::cz(*ctrl, *targ),
-        openqasm::Gate::CP(theta, ctrl, targ) => {
-            QuantumGate::cp(angle_to_f64(theta), *ctrl, *targ)
-        }
+        openqasm::Gate::CP(theta, ctrl, targ) => QuantumGate::cp(angle_to_f64(theta), *ctrl, *targ),
         openqasm::Gate::SWAP(q0, q1) => QuantumGate::swap(*q0, *q1),
         openqasm::Gate::CCX(ctrl0, ctrl1, targ) => QuantumGate::ccx(*ctrl0, *ctrl1, *targ),
     }

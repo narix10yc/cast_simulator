@@ -299,19 +299,25 @@ fn main() -> Result<()> {
         FusionStrategy::NoFusion => FusionConfig::size_only(1),
         FusionStrategy::Default => FusionConfig::default(),
         FusionStrategy::Aggressive => FusionConfig::aggressive(),
-        FusionStrategy::HwAdaptive => {
-            FusionConfig::hardware_adaptive(&hw_profile, args.max_size)
-        }
+        FusionStrategy::HwAdaptive => FusionConfig::hardware_adaptive(&hw_profile, args.max_size),
     };
     eprintln!("  Fusion: {:?}\n", args.fusion);
 
     // ── Print header ────────────────────────────────────────────────────────
     println!(
         "{:<16} {:>5} {:>5} {:>5}  {:>8} {:>8}  {:>10} {:>10} {:>10}  {:>10} {:>10} {:>8}",
-        "Circuit", "Qubits", "Gates", "Depth",
-        "AI_mean", "AI_range",
-        "Sparse", "Dense", "Speedup",
-        "Sparse_JIT", "Dense_JIT", "JIT_ratio",
+        "Circuit",
+        "Qubits",
+        "Gates",
+        "Depth",
+        "AI_mean",
+        "AI_range",
+        "Sparse",
+        "Dense",
+        "Speedup",
+        "Sparse_JIT",
+        "Dense_JIT",
+        "JIT_ratio",
     );
     println!("{}", "-".repeat(130));
 

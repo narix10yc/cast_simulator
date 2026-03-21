@@ -7,10 +7,10 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
-#include <llvm/TargetParser/Host.h>
 #include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Target/TargetMachine.h>
+#include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
 
 #include <cstdlib>
@@ -72,8 +72,7 @@ llvm::Error cast_cpu_optimize_kernel_ir(CastCpuGeneratedKernel &generated) {
   return llvm::Error::success();
 }
 
-llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit,
-                                        CastCpuGeneratedKernel &generated,
+llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedKernel &generated,
                                         cast_cpu_jit_kernel_record_t &out) {
   // Optimize on the plain Module first so the IR is captured before the Module
   // is moved into the ThreadSafeModule and consumed by the JIT pipeline.
@@ -90,9 +89,8 @@ llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit,
       return llvm::createStringError("assembly emission: " + err_str);
 
     llvm::TargetOptions options;
-    auto tm = std::unique_ptr<llvm::TargetMachine>(
-        target->createTargetMachine(triple, llvm::sys::getHostCPUName().str(), /*features=*/"",
-                                    options, llvm::Reloc::PIC_));
+    auto tm = std::unique_ptr<llvm::TargetMachine>(target->createTargetMachine(
+        triple, llvm::sys::getHostCPUName().str(), /*features=*/"", options, llvm::Reloc::PIC_));
     if (!tm)
       return llvm::createStringError("failed to create TargetMachine");
 

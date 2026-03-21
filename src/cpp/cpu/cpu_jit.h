@@ -38,8 +38,7 @@ llvm::Error cast_cpu_optimize_kernel_ir(CastCpuGeneratedKernel &generated);
 /// Heap-allocates out.matrix (for StackLoad mode) and out.asm_text (if
 /// capture_asm is set); the caller is responsible for freeing them (e.g. via
 /// cast_cpu_jit_kernel_records_free).
-llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit,
-                                        CastCpuGeneratedKernel &generated,
+llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedKernel &generated,
                                         cast_cpu_jit_kernel_record_t &out);
 
 #endif // CAST_SIMULATOR_SRC_CPP_CPU_JIT_H
