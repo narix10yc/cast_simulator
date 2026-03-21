@@ -13,8 +13,12 @@
 //! # CPU + CUDA, 10-qubit QFT for a quicker run:
 //! cargo run --bin bench_noisy_qft --features cuda --release -- -n 10
 //!
-//! # Provide a cached hardware profile to skip live profiling:
-//! cargo run --bin bench_noisy_qft --release -- --profile profiles/cpu_f64.json
+//! # Provide cached hardware profiles to skip live profiling:
+//! cargo run --bin bench_noisy_qft --release -- --cpu-profile profiles/cpu_f64.json
+//!
+//! # With CUDA, provide both backend-specific profiles:
+//! cargo run --bin bench_noisy_qft --features cuda --release -- \
+//!       --cpu-profile profiles/cpu_f64.json --cuda-profile profiles/cuda_f64.json
 //!
 //! # Override noise probability and per-run time budget:
 //! cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --bench-budget 10
@@ -61,17 +65,22 @@ struct Args {
     #[arg(long, default_value_t = 6)]
     max_size: usize,
 
-    /// Path to a cached HardwareProfile JSON; skips live profiling when supplied.
+    /// Cached CPU HardwareProfile JSON; skips live CPU profiling when supplied.
     #[arg(long)]
-    profile: Option<std::path::PathBuf>,
+    cpu_profile: Option<std::path::PathBuf>,
 
-    /// Time budget for hardware profiling in seconds (ignored when --profile is given).
+    /// Cached CUDA HardwareProfile JSON; skips live CUDA profiling when supplied.
+    #[arg(long)]
+    cuda_profile: Option<std::path::PathBuf>,
+
+    /// Time budget for hardware profiling in seconds (ignored when a cached
+    /// profile is given for that backend).
     #[arg(long, default_value_t = 20.0)]
     profile_budget: f64,
 
-    /// Qubit count used for hardware profiling (ignored when --profile is given).
-    /// Defaults to the DM statevector size (2n) for representative timings.
-    /// Falls back to available-memory auto-detection if 2n would OOM.
+    /// Qubit count used for hardware profiling (ignored when a cached profile
+    /// is given).  Defaults to the DM statevector size (2n) for representative
+    /// timings.  Falls back to available-memory auto-detection if 2n would OOM.
     #[arg(long)]
     profile_qubits: Option<u32>,
 }
@@ -254,8 +263,8 @@ fn resolve_profile_qubits(args: &Args, n_dm: u32) -> u32 {
 
 fn get_cpu_profile(args: &Args, n_dm: u32) -> Result<HardwareProfile> {
     use cast::cpu::CPUKernelGenSpec;
-    if let Some(ref p) = args.profile {
-        eprintln!("  Loading cached profile: {}", p.display());
+    if let Some(ref p) = args.cpu_profile {
+        eprintln!("  Loading cached CPU profile: {}", p.display());
         return HardwareProfile::load(p);
     }
     let pq = resolve_profile_qubits(args, n_dm);
@@ -269,8 +278,8 @@ fn get_cpu_profile(args: &Args, n_dm: u32) -> Result<HardwareProfile> {
 #[cfg(feature = "cuda")]
 fn get_cuda_profile(args: &Args, n_dm: u32) -> Result<HardwareProfile> {
     use cast::cuda::{device_sm, CudaKernelGenSpec, CudaPrecision};
-    if let Some(ref p) = args.profile {
-        eprintln!("  Loading cached profile: {}", p.display());
+    if let Some(ref p) = args.cuda_profile {
+        eprintln!("  Loading cached CUDA profile: {}", p.display());
         return HardwareProfile::load(p);
     }
     let pq = resolve_profile_qubits(args, n_dm);
