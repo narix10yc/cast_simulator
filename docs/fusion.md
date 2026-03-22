@@ -30,7 +30,7 @@ For each single-qubit unitary gate at position `(row, qubit)`:
 
 1. **Forward scan:** walk later rows on the same qubit.  If the next gate is
    unitary, fuse the pair (matrix product) and place the result at the later
-   position.  Stop at channel gates — they act as causal barriers.
+   position.  Stop at noisy gates — they act as causal barriers.
 
 2. **Backward scan** (fallback): if no forward target was found, try fusing
    with the nearest earlier unitary on the same qubit.
@@ -58,7 +58,7 @@ optimizer repeatedly sweeps the circuit attempting to grow gates:
 ### Single fusion attempt: `start_fusion()`
 
 1. **Seed** — pick a gate at `(start_row, start_qubit)`.  Skip if it's a
-   channel gate or if `start_qubit` isn't the gate's lowest qubit (avoids
+   noisy gate or if `start_qubit` isn't the gate's lowest qubit (avoids
    re-processing the same multi-qubit gate from different qubit slots).
 
 2. **Same-row sweep** — absorb gates to the right in the same row, as long as
@@ -83,11 +83,11 @@ optimizer repeatedly sweeps the circuit attempting to grow gates:
 After each full sweep of `apply_gate_fusion`, call `squeeze()` and repeat
 until no fusions occurred.
 
-### Channel gate handling
+### Noisy gate handling
 
-Channel (noise) gates are **never** fused.  Every code path that considers a
+Noisy gates are **never** fused.  Every code path that considers a
 candidate gate checks `gate.is_unitary()` and skips non-unitary gates.
-Channel gates in the graph act as barriers that prevent fusion across them.
+Noisy gates in the graph act as barriers that prevent fusion across them.
 
 ## Cost Models
 
@@ -140,9 +140,9 @@ profile.  Two conditions must hold for accurate cost decisions:
 
 ## Effective Qubit Counting
 
-For density-matrix simulation, channel gates act on 2k virtual qubits for k
+For density-matrix simulation, noisy gates act on 2k virtual qubits for k
 physical qubits.  The cost model uses `effective_n_qubits()` which returns
-`2 * n_qubits` for channel gates and `n_qubits` for unitary gates.  This
+`2 * n_qubits` for noisy gates and `n_qubits` for unitary gates.  This
 ensures the size budget correctly accounts for the expanded gate dimensions.
 
 ## Density-Matrix Circuits

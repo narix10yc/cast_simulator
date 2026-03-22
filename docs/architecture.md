@@ -26,6 +26,7 @@ src/
 │   ├── mod.rs              Re-exports: parse_qasm, Angle, Gate, Circuit
 │   ├── circuit.rs          Gate/Angle/Circuit types, QASM 2.0 serialization
 │   └── parser.rs           Recursive-descent QASM parser
+├── simulator.rs            Simulator<B>, QuantumState<B>, Backend trait (Cpu/Cuda)
 ├── cpu/
 │   ├── mod.rs              Re-exports, get_num_threads()
 │   ├── kernel.rs           CpuKernelManager — LLVM JIT generate/apply
@@ -34,11 +35,12 @@ src/
 ├── cuda/                   (behind `cuda` feature flag)
 │   ├── mod.rs              Re-exports, device_sm(), cuda_free_memory_bytes()
 │   ├── kernel.rs           CudaKernelManager — PTX gen, LRU module cache
-│   ├── statevector.rs      CudaStatevector — GPU device memory
+│   ├── statevector.rs      CudaStatevector — GPU device memory, norm_squared, normalize
 │   └── tests.rs            CUDA backend unit tests
 ├── cpp/
 │   ├── cpu/                C++ FFI: LLVM IR generation + OrcJIT
-│   └── cuda/               C++ FFI: NVPTX IR generation + CUDA driver API
+│   ├── cuda/               C++ FFI: NVPTX IR gen + CUDA driver API
+│   │   └── cuda_kernels.cu Device-side reduction/scale kernels (compiled by nvcc)
 └── bin/
     ├── profile_hw.rs       CLI: roofline hardware profiler
     ├── bench_fusion.rs     CLI: benchmark fusion strategies on QASM files
@@ -78,8 +80,8 @@ Two phases (see [fusion.md](fusion.md) for details):
   iteratively merge gates across rows up to a size limit, guided by a cost
   model.
 
-Channel (noise) gates are never fused — all `is_unitary()` checks prevent
-channels from participating in matrix multiplication.
+Noisy gates (those with non-empty `noise` field) are never fused — all
+`is_unitary()` checks prevent them from participating in matrix multiplication.
 
 ### 3. Kernel Compilation
 
@@ -165,11 +167,13 @@ circuits — no separate density-matrix kernel is needed.
 1. Reads `LLVM_CONFIG` to get LLVM include/link flags.
 2. Compiles `src/cpp/cpu/*.cpp` → `libcast_cpu_ffi.a` (always).
 3. With `--features cuda`: compiles `src/cpp/cuda/*.cpp` → `libcast_cuda_ffi.a`,
-   links the CUDA driver library.
+   compiles `cuda_kernels.cu` via nvcc → `libcast_cuda_kernels.a`,
+   links the CUDA driver and runtime libraries.
 4. Links LLVM component libraries (`core`, `orcjit`/`nvptx`, `native`, `passes`).
 
 Environment variables:
 - `LLVM_CONFIG` — **required**, path to `llvm-config`
 - `CXX` — optional, C++17 compiler (default: `c++`)
 - `CUDA_PATH` — optional, CUDA toolkit root
+- `CUDA_ARCH` — optional, target GPU architecture for nvcc (e.g. `120` for sm_120)
 - `CAST_NUM_THREADS` — optional, CPU thread count for simulation (default: all cores)
