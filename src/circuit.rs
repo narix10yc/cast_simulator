@@ -500,7 +500,7 @@ impl CircuitGraph {
 /// Angle parameters are resolved to `f64` radians before constructing the gate.
 /// Multi-qubit gate operands may arrive in any order; [`QuantumGate::new`]
 /// canonicalises qubit order internally.
-fn quantum_gate_from_qasm_gate(gate: &openqasm::Gate) -> QuantumGate {
+pub(crate) fn quantum_gate_from_qasm_gate(gate: &openqasm::Gate) -> QuantumGate {
     match gate {
         openqasm::Gate::X(q) => QuantumGate::x(*q),
         openqasm::Gate::Y(q) => QuantumGate::y(*q),

@@ -1,20 +1,16 @@
 //! Generic simulator parameterized by backend.
 //!
-//! - [`Simulator::run`] — takes an [`openqasm::Circuit`](crate::openqasm::Circuit),
-//!   builds a [`CircuitGraph`], applies fusion, and simulates.
-//! - [`Simulator::run_graph`] — takes a pre-built [`CircuitGraph`] and simulates
-//!   directly (no fusion).
-//!
 //! # Example
 //!
 //! ```no_run
-//! use cast::simulator::{Simulator, Cpu, SimulationMode};
-//! use cast::openqasm::parse_qasm;
+//! use cast::simulator::{Simulator, Cpu, SimulationMode, QuantumCircuit};
+//! use cast::types::QuantumGate;
 //!
-//! let sim = Simulator::<Cpu>::f64()
-//!     .with_mode(SimulationMode::StateVector);
+//! let mut circuit = QuantumCircuit::new(4);
+//! circuit.add(QuantumGate::h(0));
+//! circuit.add(QuantumGate::cx(0, 1));
 //!
-//! let circuit = parse_qasm("qreg q[4]; h q[0]; cx q[0],q[1];").unwrap();
+//! let sim = Simulator::<Cpu>::f64();
 //! let result = sim.run(&circuit).unwrap();
 //! println!("amplitudes: {:?}", result.state.amplitudes());
 //! ```
@@ -33,6 +29,83 @@ use crate::CircuitGraph;
 
 #[cfg(feature = "cuda")]
 use crate::cuda::{CudaKernelGenSpec, CudaKernelManager, CudaStatevector};
+
+// ── QuantumCircuit ───────────────────────────────────────────────────────────
+
+/// A sequence of quantum gates forming a circuit.
+///
+/// This is the primary user-facing circuit type. Build circuits programmatically
+/// or parse from OpenQASM, then pass to [`Simulator::run`]. Internally converted
+/// to a [`CircuitGraph`] for scheduling and fusion before simulation.
+#[derive(Clone, Debug)]
+pub struct QuantumCircuit {
+    gates: Vec<Arc<QuantumGate>>,
+    n_qubits: u32,
+}
+
+impl QuantumCircuit {
+    /// Create an empty circuit on `n_qubits` qubits.
+    pub fn new(n_qubits: u32) -> Self {
+        Self {
+            gates: Vec::new(),
+            n_qubits,
+        }
+    }
+
+    /// Add a gate to the circuit. Returns `&mut Self` for chaining.
+    ///
+    /// # Panics
+    /// Panics if any qubit index in the gate is ≥ `n_qubits`.
+    pub fn add(&mut self, gate: QuantumGate) -> &mut Self {
+        for &q in gate.qubits() {
+            assert!(
+                q < self.n_qubits,
+                "qubit {q} out of range for {}-qubit circuit",
+                self.n_qubits
+            );
+        }
+        self.gates.push(Arc::new(gate));
+        self
+    }
+
+    /// Parse an OpenQASM 2.0 string into a circuit.
+    pub fn from_qasm(qasm: &str) -> Result<Self> {
+        let parsed = crate::openqasm::parse_qasm(qasm)?;
+        Ok(Self::from_openqasm(&parsed))
+    }
+
+    /// Convert from a parsed OpenQASM circuit.
+    pub fn from_openqasm(qasm_circuit: &crate::openqasm::Circuit) -> Self {
+        use crate::circuit::quantum_gate_from_qasm_gate;
+        let n_qubits = qasm_circuit.required_qreg_size();
+        let gates: Vec<Arc<QuantumGate>> = qasm_circuit
+            .gates
+            .iter()
+            .map(|g| Arc::new(quantum_gate_from_qasm_gate(g)))
+            .collect();
+        Self { gates, n_qubits }
+    }
+
+    /// Number of qubits in the circuit.
+    pub fn n_qubits(&self) -> u32 {
+        self.n_qubits
+    }
+
+    /// Number of gates in the circuit.
+    pub fn len(&self) -> usize {
+        self.gates.len()
+    }
+
+    /// Whether the circuit has no gates.
+    pub fn is_empty(&self) -> bool {
+        self.gates.is_empty()
+    }
+
+    /// The gates in circuit order.
+    pub fn gates(&self) -> &[Arc<QuantumGate>] {
+        &self.gates
+    }
+}
 
 // ── Backend trait ────────────────────────────────────────────────────────────
 
@@ -327,6 +400,7 @@ pub struct SimulationResult<B: Backend> {
 }
 
 /// Per-trajectory outcome data.
+#[derive(Clone, Debug)]
 pub struct TrajectoryResult {
     /// Index of the noise branch sampled at each noisy gate.
     pub sampled_operators: Vec<usize>,
@@ -409,10 +483,14 @@ impl<B: Backend> Simulator<B> {
         self
     }
 
-    /// Run simulation on an OpenQASM circuit. Builds a CircuitGraph, applies
-    /// fusion (if configured), and delegates to [`run_graph`](Self::run_graph).
-    pub fn run(&self, circuit: &crate::openqasm::Circuit) -> Result<SimulationResult<B>> {
-        let mut graph = CircuitGraph::from_qasm_circuit(circuit);
+    /// Run simulation on a [`QuantumCircuit`]. Builds an internal
+    /// [`CircuitGraph`], applies fusion (if configured), and simulates.
+    pub fn run(&self, circuit: &QuantumCircuit) -> Result<SimulationResult<B>> {
+        let mut graph = CircuitGraph::new();
+        graph.ensure_n_qubits(circuit.n_qubits() as usize);
+        for gate in circuit.gates() {
+            graph.insert_gate(Arc::clone(gate));
+        }
         if let Some(ref config) = self.fusion_config {
             fusion::optimize(&mut graph, config);
         }
@@ -618,22 +696,20 @@ mod tests {
 
     const TEST_QUBITS: u32 = 4;
 
-    fn test_graph_with_padding(gates: Vec<QuantumGate>) -> CircuitGraph {
-        let mut graph = CircuitGraph::new();
-        graph.ensure_n_qubits(TEST_QUBITS as usize);
+    fn test_circuit(gates: Vec<QuantumGate>) -> QuantumCircuit {
+        let mut circuit = QuantumCircuit::new(TEST_QUBITS);
         for g in gates {
-            graph.insert_gate(g);
+            circuit.add(g);
         }
-        graph
+        circuit
     }
 
     #[test]
     fn statevector_h_gate() {
-        let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::StateVector);
-        let graph = test_graph_with_padding(vec![QuantumGate::h(0)]);
-        let result = sim.run_graph(&graph).unwrap();
+        let sim = Simulator::<Cpu>::f64();
+        let circuit = test_circuit(vec![QuantumGate::h(0)]);
+        let result = sim.run(&circuit).unwrap();
         assert!(result.state.is_pure());
-        // H|0⟩ = (|0⟩+|1⟩)/√2 → populations ~0.5 on qubit 0
         let pops = result.state.populations();
         assert!((pops[0] - 0.5).abs() < 1e-10);
         assert!((pops[1] - 0.5).abs() < 1e-10);
@@ -641,21 +717,20 @@ mod tests {
 
     #[test]
     fn statevector_rejects_noisy_gates() {
-        let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::StateVector);
-        let graph =
-            test_graph_with_padding(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
-        assert!(sim.run_graph(&graph).is_err());
+        let sim = Simulator::<Cpu>::f64();
+        let circuit = test_circuit(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
+        assert!(sim.run(&circuit).is_err());
     }
 
     #[test]
     fn density_matrix_trace_preserved() {
         let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::DensityMatrix);
-        let graph = test_graph_with_padding(vec![
+        let circuit = test_circuit(vec![
             QuantumGate::h(0),
             QuantumGate::cx(0, 1),
             QuantumGate::depolarizing(0, 0.05),
         ]);
-        let result = sim.run_graph(&graph).unwrap();
+        let result = sim.run(&circuit).unwrap();
         assert!(!result.state.is_pure());
         let trace = result.state.trace();
         assert!(
@@ -670,13 +745,11 @@ mod tests {
             n_trajectories: 2000,
             seed: Some(42),
         });
-        let graph =
-            test_graph_with_padding(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
-        let result = sim.run_graph(&graph).unwrap();
+        let circuit = test_circuit(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
+        let result = sim.run(&circuit).unwrap();
         let traj_data = result.trajectory_data.unwrap();
         assert_eq!(traj_data.len(), 2000);
 
-        // Depolarizing(p=0.1): identity branch has probability 0.9.
         let n_identity: usize = traj_data
             .iter()
             .filter(|t| t.sampled_operators[0] == 0)
@@ -686,6 +759,20 @@ mod tests {
             (frac - 0.9).abs() < 0.05,
             "identity fraction should be ~0.9, got {frac}"
         );
+    }
+
+    #[test]
+    fn from_qasm() {
+        let circuit = QuantumCircuit::from_qasm(
+            "OPENQASM 2.0; qreg q[4]; h q[0]; cx q[0],q[1]; cx q[2],q[3];",
+        )
+        .unwrap();
+        assert_eq!(circuit.n_qubits(), 4);
+        assert_eq!(circuit.len(), 3);
+
+        let sim = Simulator::<Cpu>::f64();
+        let result = sim.run(&circuit).unwrap();
+        assert!(result.state.is_pure());
     }
 
     #[test]

@@ -64,22 +64,21 @@ The `Simulator` handles this automatically in `DensityMatrix` mode.
 ## Worked Example
 
 ```rust
-use cast::simulator::{Simulator, Cpu, SimulationMode};
+use cast::simulator::{Simulator, Cpu, SimulationMode, QuantumCircuit};
 use cast::types::QuantumGate;
-use cast::CircuitGraph;
 
 // Build a noisy circuit.
-let mut graph = CircuitGraph::new();
-graph.insert_gate(QuantumGate::h(0));
-graph.insert_gate(QuantumGate::depolarizing(0, 0.01));
-graph.insert_gate(QuantumGate::cx(0, 1));
-graph.insert_gate(QuantumGate::depolarizing(0, 0.01));
-graph.insert_gate(QuantumGate::depolarizing(1, 0.01));
+let mut circuit = QuantumCircuit::new(2);
+circuit.add(QuantumGate::h(0));
+circuit.add(QuantumGate::depolarizing(0, 0.01));
+circuit.add(QuantumGate::cx(0, 1));
+circuit.add(QuantumGate::depolarizing(0, 0.01));
+circuit.add(QuantumGate::depolarizing(1, 0.01));
 
 // Density-matrix simulation.
 let sim = Simulator::<Cpu>::f64()
     .with_mode(SimulationMode::DensityMatrix);
-let result = sim.run_graph(&graph).unwrap();
+let result = sim.run(&circuit).unwrap();
 let trace = result.state.trace();       // should be ~1.0
 let pops = result.state.populations();  // diagonal of ρ
 
@@ -89,7 +88,7 @@ let sim = Simulator::<Cpu>::f64()
         n_trajectories: 10_000,
         seed: Some(42),
     });
-let result = sim.run_graph(&graph).unwrap();
+let result = sim.run(&circuit).unwrap();
 for traj in result.trajectory_data.unwrap() {
     println!("sampled branches: {:?}", traj.sampled_operators);
 }
@@ -97,28 +96,33 @@ for traj in result.trajectory_data.unwrap() {
 
 ## Fusion with Noisy Circuits
 
-Fusion skips noisy gates — they act as barriers:
+Fusion skips noisy gates — they act as barriers. Fusion is applied
+automatically when using `Simulator::run()` with `with_fusion()`:
 
 ```rust
-use cast::{fusion, cost_model::FusionConfig, CircuitGraph};
-
-let mut graph = CircuitGraph::new();
-// ... insert gates ...
-fusion::optimize(&mut graph, &FusionConfig::size_only(4));
+let sim = Simulator::<Cpu>::f64()
+    .with_mode(SimulationMode::DensityMatrix)
+    .with_fusion(FusionConfig::size_only(4));
+let result = sim.run(&circuit).unwrap();
 // Noisy gates remain; only noiseless gates are fused.
 ```
 
 ## Extracting Results
 
-Via `QuantumState<Cpu>`:
+`SimulationResult<B>` contains `state: QuantumState<B>`:
 
 ```rust
-// Pure state (StateVector mode):
-result.state.amplitudes()    // Vec<Complex>
-result.state.populations()   // Vec<f64> — |aᵢ|²
-result.state.trace()         // f64 — squared norm (should be 1.0)
+// Common:
+result.state.n_qubits()      // u32
+result.state.is_pure()        // true for StateVector/Trajectory, false for DM
 
-// Density matrix (DensityMatrix mode):
-result.state.populations()   // Vec<f64> — ρ[i,i]
-result.state.trace()         // f64 — Tr(ρ) (should be 1.0)
+// CPU backend (QuantumState<Cpu>):
+result.state.amplitudes()     // Vec<Complex>
+result.state.populations()    // Vec<f64> — |aᵢ|² or ρ[i,i]
+result.state.trace()          // f64 — ||ψ||² or Tr(ρ)
+
+// CUDA backend (QuantumState<Cuda>):
+result.state.download_amplitudes()  // Result<Vec<(f64, f64)>>
+result.state.populations()          // Result<Vec<f64>>
+result.state.trace()                // Result<f64>
 ```
