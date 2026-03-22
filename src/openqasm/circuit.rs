@@ -81,7 +81,7 @@ impl Circuit {
         Ok(())
     }
 
-    fn required_qreg_size(&self) -> u32 {
+    pub fn required_qreg_size(&self) -> u32 {
         let mut max_index: Option<u32> = None;
         for gate in &self.gates {
             let gate_max = max_qubit_in_gate(gate);
