@@ -11,11 +11,9 @@ src/
 ├── lib.rs                  Module root — re-exports CircuitGraph, GateId
 ├── types/
 │   ├── mod.rs              Re-exports: Complex, Rational, Precision, QuantumGate,
-│   │                         ComplexSquareMatrix, KrausChannel
-│   ├── gate.rs             QuantumGate — unitary or channel, matrix + qubit indices
+│   │                         ComplexSquareMatrix
+│   ├── gate.rs             QuantumGate — unitary + optional noise branches
 │   ├── matrix.rs           ComplexSquareMatrix — dense row-major complex matrix
-│   ├── channel.rs          KrausChannel — noise channels (depolarizing, amplitude
-│   │                         damping, phase damping, Pauli, etc.)
 │   ├── rational.rs         Rational — exact i32/i32 fractions, auto-reduced
 │   └── precision.rs        Precision enum (F32, F64)
 ├── circuit.rs              CircuitGraph — 2-D gate grid (rows × qubits)
@@ -154,11 +152,8 @@ Noisy (open-system) simulation uses the density-matrix representation:
 - A unitary gate U is lifted to the superoperator `S = U ⊗ conj(U)` acting on
   2n virtual qubits `[q₀, ..., q_{k-1}, q₀+n, ..., q_{k-1}+n]`.
 
-- A noise channel (KrausChannel) pre-computes its 4^k × 4^k superoperator
-  `S = Σᵢ Kᵢ ⊗ Kᵢ*` and stores it as a gate matrix.  The same virtual-qubit
-  mapping applies.
-
-- `QuantumGate::to_density_matrix_gate(n_total)` performs the lifting.
+- A noisy gate with branches `[(pᵢ, Uᵢ)]` computes the superoperator
+  `S = Σ pᵢ · (Uᵢ·U) ⊗ conj(Uᵢ·U)` via `to_density_matrix_gate()`.
 
 This allows reusing the existing statevector simulation engine for noisy
 circuits — no separate density-matrix kernel is needed.

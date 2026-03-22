@@ -31,7 +31,7 @@ Best Paper nominee) projects.
 | Sparsity | Per-gate sparsity detection, zero-skip in generated code | Dense matrix-vector multiply |
 | Backends | Single-node CPU (SIMD) + single GPU (CUDA) | CPU, OpenMP, MPI, CUDA, NVSHMEM multi-GPU, HIP/AMD |
 | Scale target | Single-node performance (deep circuits) | Multi-node HPC clusters (wide circuits) |
-| Noise | KrausChannel + density-matrix via superoperator | Device JSON noise profiles (IBM models) |
+| Noise | Probability-weighted unitary noise on QuantumGate + DM superoperator | Device JSON noise profiles (IBM models) |
 | Input | OpenQASM 2.0 | OpenQASM 2/3, Q#/QIR, Qiskit, XACC |
 
 **Key differentiator:** CAST competes on *per-node kernel efficiency* — JIT
