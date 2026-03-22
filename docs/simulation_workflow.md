@@ -5,29 +5,7 @@ from circuit construction through kernel execution to result extraction.
 
 ## Overview
 
-```
-User Code                CAST Internals
-─────────                ──────────────
-QuantumCircuit ──run()─► CircuitGraph ──fusion──► gate list
-                                                    │
-                                         ┌──────────┼──────────┐
-                                    StateVector  DensityMatrix  Trajectory
-                                         │          │            │
-                                      compile    lift to DM    compile base
-                                      kernels    superops +    + noise-branch
-                                         │       compile        kernels
-                                         │          │            │
-                                      alloc SV   alloc 2n SV   alloc n SV
-                                         │          │            │
-                                      apply      apply         for each trajectory:
-                                      in order   in order        sample & apply
-                                         │          │            │
-                                         └──────────┴────────────┘
-                                                    │
-                                            QuantumState<B>
-                                                    │
-                                         SimulationResult<B>
-```
+![CAST Simulation Workflow](simulation_workflow.png)
 
 ## Step 1: Build a Circuit
 
