@@ -2,7 +2,7 @@
 //!
 //! Each test uses 1–2 physical qubits so the DM statevector is at most 4 virtual
 //! qubits (16 amplitudes). Tests verify trace preservation, known analytic
-//! populations, and that channel gates interact correctly with fusion.
+//! populations, and that noisy gates interact correctly with fusion.
 
 use std::sync::Arc;
 
@@ -163,8 +163,8 @@ fn noiseless_dm_diagonal_matches_sv_probabilities() {
 // ── Fusion + channels ────────────────────────────────────────────────────────
 
 #[test]
-fn channel_gates_survive_fusion() {
-    // Fusion must not absorb channel gates.
+fn noisy_gates_survive_fusion() {
+    // Fusion must not absorb noisy gates.
     let gates: Vec<QuantumGate> = vec![
         QuantumGate::h(0),
         QuantumGate::depolarizing(0, 0.1),
@@ -173,18 +173,18 @@ fn channel_gates_survive_fusion() {
         QuantumGate::depolarizing(1, 0.1),
     ];
 
-    let n_channels_before = gates.iter().filter(|g| !g.is_unitary()).count();
+    let n_noisy_before = gates.iter().filter(|g| !g.is_unitary()).count();
 
     let mut cg = to_graph(&gates);
     let config = FusionConfig::size_only(3);
     fusion::optimize(&mut cg, &config);
 
     let after = cg.gates_in_row_order();
-    let n_channels_after = after.iter().filter(|g| !g.is_unitary()).count();
+    let n_noisy_after = after.iter().filter(|g| !g.is_unitary()).count();
 
     assert_eq!(
-        n_channels_before, n_channels_after,
-        "fusion changed channel count: {n_channels_before} → {n_channels_after}"
+        n_noisy_before, n_noisy_after,
+        "fusion changed noisy gate count: {n_noisy_before} → {n_noisy_after}"
     );
 }
 

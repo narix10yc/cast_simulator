@@ -432,10 +432,10 @@ mod tests {
         assert!(m.cost_of(&QuantumGate::cx(0, 1)) < 1e-9);
     }
 
-    // ── Channel gate size accounting ─────────────────────────────────────────
+    // ── Noisy gate size accounting ─────────────────────────────────────────
 
     #[test]
-    fn channel_gate_counts_as_double_qubits() {
+    fn noisy_gate_counts_as_double_qubits() {
         // A 2-qubit channel has a 4^2=16×16 superoperator — equivalent to a
         // 4-qubit unitary. A max_size=3 model must reject it.
         let m = size_model(3);
@@ -448,18 +448,18 @@ mod tests {
         assert_eq!(
             m.cost_of(&ch2),
             1.0,
-            "2-qubit channel must be rejected by max_size=3"
+            "2-qubit noisy gate must be rejected by max_size=3"
         );
     }
 
     #[test]
-    fn single_qubit_channel_fits_within_size2_limit() {
+    fn single_qubit_noisy_gate_fits_within_size2_limit() {
         let m = size_model(2);
         let ch = crate::types::QuantumGate::depolarizing(0, 0.1);
         assert_eq!(ch.effective_n_qubits(), 2);
         assert!(
             m.cost_of(&ch) < 1e-9,
-            "1-qubit channel fits within max_size=2"
+            "1-qubit noisy gate fits within max_size=2"
         );
     }
 

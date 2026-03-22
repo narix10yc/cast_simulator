@@ -115,7 +115,7 @@ fn add_depolarizing_noise(gates: &[QuantumGate], p: f64) -> Vec<QuantumGate> {
     noisy
 }
 
-/// Count unitary and channel gates in a list.
+/// Count unitary and noisy gates in a list.
 fn gate_stats(gates: &[QuantumGate]) -> (usize, usize) {
     let unitary = gates.iter().filter(|g| g.is_unitary()).count();
     let channels = gates.len() - unitary;
@@ -336,7 +336,7 @@ fn main() -> Result<()> {
         "{n}-qubit noisy QFT — density-matrix circuit (n_sv={n_dm}, SV\u{2248}{sv_gib:.1} GiB F64)"
     );
     eprintln!(
-        "  Physical circuit: {uni} unitary + {ch} channel gates  \u{2192}  {n_gates_raw} DM gates"
+        "  Physical circuit: {uni} unitary + {ch} noisy gates  \u{2192}  {n_gates_raw} DM gates"
     );
     eprintln!("  Noise: depolarizing p={}\n", args.noise_p);
 

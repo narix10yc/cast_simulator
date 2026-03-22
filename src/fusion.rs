@@ -57,7 +57,7 @@ fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> 
         let Some(next_gate) = cg.gate(next_gate_id) else {
             continue;
         };
-        // A channel gate on this qubit is a causal barrier; cannot fuse past it.
+        // A noisy gate on this qubit is a causal barrier; cannot fuse past it.
         if !next_gate.is_unitary() {
             break;
         }
@@ -188,7 +188,7 @@ fn start_fusion(
     let seed_gate = cg.gate_arc(seed_id).unwrap().clone();
 
     // Only process a gate from its lowest qubit to avoid duplicate seeds.
-    // Channel gates cannot participate in matmul-based fusion.
+    // Noisy gates cannot participate in matmul-based fusion.
     if seed_gate.qubits()[0] as usize != start_qubit || !seed_gate.is_unitary() {
         return 0;
     }

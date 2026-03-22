@@ -263,7 +263,7 @@ impl QuantumGate {
 
     /// The number of non-zero entries in the gate matrix. Real and imag parts are counted
     /// independently. For a unitary k-qubit gate the matrix is `2ᵏ×2ᵏ` (up to `2^(2k+1)`
-    /// non-zeros); for a channel gate it is `4ᵏ×4ᵏ`.
+    /// non-zeros); for a noisy gate it is `4ᵏ×4ᵏ`.
     pub fn scalar_nnz(&self, ztol: f64) -> usize {
         self.matrix
             .data()
@@ -283,7 +283,7 @@ impl QuantumGate {
     /// The gate acts as identity on qubits not originally in its target set.
     ///
     /// # Panics
-    /// Panics if either gate is a channel gate (`is_unitary()` is `false`).
+    /// Panics if either gate is a noisy gate (`is_unitary()` is `false`).
     pub fn matmul(&self, other: &Self) -> Self {
         assert!(
             self.is_unitary() && other.is_unitary(),
