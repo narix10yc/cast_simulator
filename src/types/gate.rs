@@ -610,7 +610,7 @@ fn union_qubits(lhs: &[u32], rhs: &[u32]) -> Vec<u32> {
 /// For each `(target_bit, position)` in `positions.iter().enumerate()`, the bit at
 /// `position` in `index` is placed at bit `target_bit` in the output. This effectively
 /// projects an expanded basis index down to the gate's local basis.
-fn compress_bits(index: usize, positions: &[usize]) -> usize {
+pub(crate) fn compress_bits(index: usize, positions: &[usize]) -> usize {
     let mut out = 0usize;
     for (target_bit, position) in positions.iter().enumerate() {
         let bit = (index >> position) & 1usize;

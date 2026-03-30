@@ -17,7 +17,11 @@ mod matrix;
 pub use matrix::ComplexSquareMatrix;
 
 mod gate;
+pub(crate) use gate::compress_bits;
 pub use gate::QuantumGate;
+
+mod circuit;
+pub use circuit::QuantumCircuit;
 
 mod precision;
 pub use precision::Precision;
