@@ -12,19 +12,27 @@ from circuit construction through kernel execution to result extraction.
 ### Programmatic construction
 
 ```rust
-use cast::simulator::QuantumCircuit;
-use cast::types::QuantumGate;
+use cast::types::{QuantumCircuit, QuantumGate};
 
 let mut circuit = QuantumCircuit::new(4);  // 4 qubits
 circuit.add(QuantumGate::h(0));
 circuit.add(QuantumGate::cx(0, 1));
 circuit.add(QuantumGate::depolarizing(0, 0.01));  // noisy gate
+circuit.measure(&[0, 1]);  // which qubits to measure (used by trajectory mode)
 ```
 
-`QuantumCircuit` stores `Vec<Arc<QuantumGate>>` and a qubit count. Each
+`QuantumCircuit` (defined in `src/types/circuit.rs`) stores
+`Vec<Arc<QuantumGate>>`, a qubit count, and a `measured_qubits` list. Each
 `add()` validates that qubit indices are within bounds and wraps the gate in
 an `Arc` (cheap reference-counted pointer — no deep copy when the circuit is
 later consumed).
+
+`measure()` specifies which qubits are measured at the end of the circuit.
+This is used by trajectory mode for dead-gate elimination and measurement
+sampling. For statevector/density-matrix modes it is ignored.
+
+`eliminate_dead_gates()` returns a pruned copy of the circuit, removing gates
+that cannot influence any measured qubit via backward liveness analysis.
 
 ### From OpenQASM
 
@@ -71,11 +79,12 @@ let sim = Simulator::<Cuda>::f64()
     .with_mode(SimulationMode::DensityMatrix)
     .with_fusion(FusionConfig::hardware_adaptive(&profile, 4));
 
-// CPU, trajectory mode
+// CPU, trajectory mode (measured qubits come from the circuit)
 let sim = Simulator::<Cpu>::f64()
     .with_mode(SimulationMode::Trajectory {
-        n_trajectories: 10_000,
+        n_samples: 10_000,
         seed: Some(42),
+        max_ensemble: Some(4),
     });
 ```
 
@@ -88,8 +97,9 @@ let sim = Simulator::<Cpu>::f64()
 | Spec | `CPUKernelGenSpec` (precision, SIMD width, tolerances) | `CudaKernelGenSpec` (precision, tolerances, SM version) |
 | Apply semantics | Synchronous (threaded dispatch) | Asynchronous (enqueue + `sync()`) |
 
-The Backend trait abstracts: `new_sv`, `init_sv`, `generate`, `apply`, `flush`.
-All dispatch is resolved at compile time — no runtime enum matching.
+The Backend trait abstracts: `new_sv`, `init_sv`, `generate`, `apply`, `flush`,
+`marginal_probabilities`, `clone_sv`. All dispatch is resolved at compile time
+— no runtime enum matching.
 
 ## Step 3: Run the Simulation
 
@@ -170,28 +180,38 @@ for each compiled kernel:
 B::flush()                           // CPU: no-op; CUDA: sync stream
 ```
 
-#### Trajectory
+#### Trajectory (Ensemble)
+
+`Simulator::run()` first calls `circuit.eliminate_dead_gates()` to remove
+gates that cannot influence the measured qubits, then proceeds with the
+pruned circuit.
 
 ```
-allocate statevector (n qubits, reused across trajectories)
+compile noise-branch kernels (deduplicated via matrix-bytes cache)
+initialize ensemble = [single |0⟩ statevector, weight=1.0]
 
-for each trajectory:
-    initialize sv to |0⟩
-    for each gate:
-        if noiseless:
-            apply pre-compiled kernel
-        if noisy:
-            sample j from WeightedIndex [p_0, ..., p_{m-1}]
-            apply pre-compiled noise-branch kernel j
-            (no renormalization needed — composed unitary preserves norm)
-    B::flush()
-    record sampled branches + wall time
+for each gate:
+    if noiseless:
+        apply kernel to every ensemble member
+    if noisy:
+        expand: each member × each noise branch → candidates
+        sort candidates by weight descending
+        keep top M (max_ensemble) candidates
+        clone/move statevectors, apply branch kernel
+
+B::flush()
+
+sample measurement outcomes:
+    for each ensemble member:
+        compute marginal probabilities over measured_qubits
+        batch-sample proportional to member weight
+    aggregate into histogram
 ```
 
 The key insight: noise branches store `(probability, unitary)`. The composed
 operation `U_noise · U_gate` is always unitary, so applying it preserves
-||ψ|| = 1 exactly. No statevector cloning, norm computation, or
-renormalization is needed — just sample from stored weights and apply.
+||ψ|| = 1 exactly. Ensemble pruning keeps the M highest-weight branches
+at each noise gate, bounding approximation error by `1 − explored_weight`.
 
 ## Step 4: Inspect Results
 
@@ -199,10 +219,10 @@ renormalization is needed — just sample from stored weights and apply.
 let result = sim.run(&circuit)?;
 
 // SimulationResult<B> fields:
-result.state          // QuantumState<B>
-result.timing         // TimingStats (execution time)
-result.compile_time_s // kernel JIT time
-result.trajectory_data // Option<Vec<TrajectoryResult>>
+result.state           // Option<QuantumState<B>> (None for trajectory mode)
+result.timing          // TimingStats (execution time)
+result.compile_time_s  // kernel JIT time
+result.trajectory_data // Option<TrajectoryResult>
 ```
 
 ### QuantumState<B>
@@ -210,29 +230,31 @@ result.trajectory_data // Option<Vec<TrajectoryResult>>
 The state is either `Pure` (statevector) or `DensityMatrix` (vectorized ρ),
 determined by the simulation mode:
 
-| Mode | State variant | `is_pure()` |
-|------|--------------|-------------|
-| StateVector | `Pure` | true |
-| DensityMatrix | `DensityMatrix` | false |
-| Trajectory | `Pure` (last trajectory's state) | true |
+| Mode | `state` | `is_pure()` |
+|------|---------|-------------|
+| StateVector | `Some(Pure)` | true |
+| DensityMatrix | `Some(DensityMatrix)` | false |
+| Trajectory | `None` | — |
 
 ### CPU inspection (QuantumState<Cpu>)
 
 ```rust
-result.state.n_qubits()      // u32 — physical qubit count
-result.state.is_pure()        // bool
-result.state.amplitudes()     // Vec<Complex> — full statevector
-result.state.amp(idx)         // Complex — single amplitude
-result.state.populations()    // Vec<f64> — |a_i|² or ρ[i,i]
-result.state.trace()          // f64 — ||ψ||² or Tr(ρ)
+let state = result.state.unwrap();    // None for trajectory mode
+state.n_qubits()      // u32 — physical qubit count
+state.is_pure()        // bool
+state.amplitudes()     // Vec<Complex> — full statevector
+state.amp(idx)         // Complex — single amplitude
+state.populations()    // Vec<f64> — |a_i|² or ρ[i,i]
+state.trace()          // f64 — ||ψ||² or Tr(ρ)
 ```
 
 ### CUDA inspection (QuantumState<Cuda>)
 
 ```rust
-result.state.download_amplitudes()  // Result<Vec<(f64, f64)>>
-result.state.populations()          // Result<Vec<f64>>
-result.state.trace()                // Result<f64>
+let state = result.state.unwrap();
+state.download_amplitudes()  // Result<Vec<(f64, f64)>>
+state.populations()          // Result<Vec<f64>>
+state.trace()                // Result<f64>
 ```
 
 CUDA methods return `Result` because they involve GPU → host data transfer.
@@ -242,11 +264,15 @@ bandwidth on RTX 5090).
 ### Trajectory data
 
 ```rust
-if let Some(trajectories) = result.trajectory_data {
-    for traj in &trajectories {
-        // traj.sampled_operators[i] = index of noise branch sampled
-        // at the i-th noisy gate (noiseless gates don't contribute)
-        println!("{:?}, {:.3}ms", traj.sampled_operators, traj.time_s * 1e3);
+if let Some(traj) = result.trajectory_data {
+    println!("samples: {}", traj.n_samples);
+    println!("explored weight: {:.4}", traj.explored_weight);
+    for branch in &traj.branches {
+        println!("  weight={:.4}, path={:?}, samples={}",
+            branch.weight, branch.noise_path, branch.n_samples);
+    }
+    for (outcome, &count) in &traj.histogram {
+        println!("  |{outcome:b}⟩ → {count}");
     }
 }
 ```
@@ -257,7 +283,7 @@ if let Some(trajectories) = result.trajectory_data {
 QuantumGate          — gate unitary + qubits + noise branches
     │
 QuantumCircuit       — ordered sequence of Arc<QuantumGate> + qubit count
-    │                  (user-facing, from code or QASM)
+    │                  + measured_qubits (user-facing, from code or QASM)
     │
     ├─ Simulator::run()
     │     │

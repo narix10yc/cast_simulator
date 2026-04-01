@@ -8,7 +8,7 @@ Three simulation modes handle noise differently:
 
 - **StateVector**: errors if any gate has noise (pure unitary only)
 - **DensityMatrix**: computes superoperator `S = Σ pᵢ · (Uᵢ·U) ⊗ conj(Uᵢ·U)` on 2n virtual qubits
-- **Trajectory**: samples one noise branch per gate, applies composed unitary `Uᵢ·U`
+- **Trajectory**: deterministic ensemble branching — expands all noise branches, prunes to top-M by weight, batch-samples measurements
 
 ## Noise Model
 
@@ -64,8 +64,8 @@ The `Simulator` handles this automatically in `DensityMatrix` mode.
 ## Worked Example
 
 ```rust
-use cast::simulator::{Simulator, Cpu, SimulationMode, QuantumCircuit};
-use cast::types::QuantumGate;
+use cast::simulator::{Simulator, Cpu, SimulationMode};
+use cast::types::{QuantumCircuit, QuantumGate};
 
 // Build a noisy circuit.
 let mut circuit = QuantumCircuit::new(2);
@@ -74,23 +74,29 @@ circuit.add(QuantumGate::depolarizing(0, 0.01));
 circuit.add(QuantumGate::cx(0, 1));
 circuit.add(QuantumGate::depolarizing(0, 0.01));
 circuit.add(QuantumGate::depolarizing(1, 0.01));
+circuit.measure(&[0, 1]);  // measure both qubits
 
 // Density-matrix simulation.
 let sim = Simulator::<Cpu>::f64()
     .with_mode(SimulationMode::DensityMatrix);
 let result = sim.run(&circuit).unwrap();
-let trace = result.state.trace();       // should be ~1.0
-let pops = result.state.populations();  // diagonal of ρ
+let state = result.state.unwrap();
+let trace = state.trace();       // should be ~1.0
+let pops = state.populations();  // diagonal of ρ
 
 // Trajectory simulation (same circuit, less memory).
+// measured_qubits come from the circuit.
 let sim = Simulator::<Cpu>::f64()
     .with_mode(SimulationMode::Trajectory {
-        n_trajectories: 10_000,
+        n_samples: 10_000,
         seed: Some(42),
+        max_ensemble: Some(4),
     });
 let result = sim.run(&circuit).unwrap();
-for traj in result.trajectory_data.unwrap() {
-    println!("sampled branches: {:?}", traj.sampled_operators);
+let traj = result.trajectory_data.unwrap();
+println!("explored weight: {:.4}", traj.explored_weight);
+for (outcome, &count) in &traj.histogram {
+    println!("  |{outcome:b}⟩ → {count}");
 }
 ```
 
@@ -109,20 +115,21 @@ let result = sim.run(&circuit).unwrap();
 
 ## Extracting Results
 
-`SimulationResult<B>` contains `state: QuantumState<B>`:
+`SimulationResult<B>` contains `state: Option<QuantumState<B>>` (None for
+trajectory mode) and `trajectory_data: Option<TrajectoryResult>`:
 
 ```rust
-// Common:
-result.state.n_qubits()      // u32
-result.state.is_pure()        // true for StateVector/Trajectory, false for DM
+// StateVector / DensityMatrix:
+let state = result.state.unwrap();
+state.n_qubits()       // u32
+state.is_pure()        // true for StateVector, false for DM
+state.populations()    // Vec<f64> — |aᵢ|² or ρ[i,i]
+state.trace()          // f64 — ||ψ||² or Tr(ρ)
 
-// CPU backend (QuantumState<Cpu>):
-result.state.amplitudes()     // Vec<Complex>
-result.state.populations()    // Vec<f64> — |aᵢ|² or ρ[i,i]
-result.state.trace()          // f64 — ||ψ||² or Tr(ρ)
-
-// CUDA backend (QuantumState<Cuda>):
-result.state.download_amplitudes()  // Result<Vec<(f64, f64)>>
-result.state.populations()          // Result<Vec<f64>>
-result.state.trace()                // Result<f64>
+// Trajectory:
+let traj = result.trajectory_data.unwrap();
+traj.histogram         // HashMap<u64, u64> — bitstring → count
+traj.n_samples         // u64
+traj.branches          // Vec<ExploredBranch>
+traj.explored_weight   // f64 (≤ 1.0)
 ```

@@ -8,15 +8,16 @@ fusion pipeline, and executed via compiled kernels on statevectors.
 
 ```
 src/
-├── lib.rs                  Module root — re-exports CircuitGraph, GateId
+├── lib.rs                  Module root — re-exports CircuitGraph, GateId, QuantumCircuit
 ├── types/
 │   ├── mod.rs              Re-exports: Complex, Rational, Precision, QuantumGate,
-│   │                         ComplexSquareMatrix
+│   │                         QuantumCircuit, ComplexSquareMatrix
 │   ├── gate.rs             QuantumGate — unitary + optional noise branches
+│   ├── circuit.rs          QuantumCircuit — user-facing gate sequence + measured qubits
 │   ├── matrix.rs           ComplexSquareMatrix — dense row-major complex matrix
 │   ├── rational.rs         Rational — exact i32/i32 fractions, auto-reduced
 │   └── precision.rs        Precision enum (F32, F64)
-├── circuit.rs              CircuitGraph — 2-D gate grid (rows × qubits)
+├── circuit_graph.rs        CircuitGraph — 2-D gate grid (rows × qubits)
 ├── fusion.rs               Two-phase fusion optimizer
 ├── cost_model.rs           CostModel trait, FusionConfig, HardwareProfile
 ├── profile.rs              Adaptive roofline profiler (sweep + fit)
@@ -26,7 +27,11 @@ src/
 │   ├── mod.rs              Re-exports: parse_qasm, Angle, Gate, Circuit
 │   ├── circuit.rs          Gate/Angle/Circuit types, QASM 2.0 serialization
 │   └── parser.rs           Recursive-descent QASM parser
-├── simulator.rs            Simulator<B>, QuantumState<B>, Backend trait (Cpu/Cuda)
+├── simulator/
+│   ├── mod.rs              Simulator<B>, QuantumState<B>, Backend trait (Cpu/Cuda)
+│   ├── trajectory.rs       Ensemble branching, pruning, TrajectoryResult
+│   ├── measure.rs          Marginal probabilities, batch sampling
+│   └── tests.rs            Simulator integration tests
 ├── cpu/
 │   ├── mod.rs              Re-exports, get_num_threads()
 │   ├── kernel.rs           CpuKernelManager — LLVM JIT generate/apply

@@ -4,7 +4,7 @@ pub mod sysinfo;
 
 pub mod timing;
 
-pub mod circuit;
+pub mod circuit_graph;
 
 pub mod cost_model;
 
@@ -21,4 +21,5 @@ pub mod cuda;
 
 pub mod simulator;
 
-pub use circuit::{CircuitGraph, CircuitGraphRow, GateId};
+pub use circuit_graph::{CircuitGraph, CircuitGraphRow, GateId};
+pub use types::QuantumCircuit;

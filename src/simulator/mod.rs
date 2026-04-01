@@ -3,8 +3,8 @@
 //! # Example
 //!
 //! ```no_run
-//! use cast::simulator::{Simulator, Cpu, SimulationMode, QuantumCircuit};
-//! use cast::types::QuantumGate;
+//! use cast::simulator::{Simulator, Cpu, SimulationMode};
+//! use cast::types::{QuantumGate, QuantumCircuit};
 //!
 //! let mut circuit = QuantumCircuit::new(4);
 //! circuit.add(QuantumGate::h(0));
@@ -12,100 +12,28 @@
 //!
 //! let sim = Simulator::<Cpu>::f64();
 //! let result = sim.run(&circuit).unwrap();
-//! println!("amplitudes: {:?}", result.state.amplitudes());
+//! println!("amplitudes: {:?}", result.state.unwrap().amplitudes());
 //! ```
+
+mod measure;
+mod trajectory;
+
+pub use trajectory::{ExploredBranch, TrajectoryResult};
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::cost_model::FusionConfig;
 use crate::cpu::{get_num_threads, CPUKernelGenSpec, CPUStatevector, CpuKernelManager};
 use crate::fusion;
 use crate::timing::TimingStats;
-use crate::types::{Complex, QuantumGate};
+use crate::types::{Complex, QuantumCircuit, QuantumGate};
 use crate::CircuitGraph;
 
 #[cfg(feature = "cuda")]
 use crate::cuda::{CudaKernelGenSpec, CudaKernelManager, CudaStatevector};
-
-// ── QuantumCircuit ───────────────────────────────────────────────────────────
-
-/// A sequence of quantum gates forming a circuit.
-///
-/// This is the primary user-facing circuit type. Build circuits programmatically
-/// or parse from OpenQASM, then pass to [`Simulator::run`]. Internally converted
-/// to a [`CircuitGraph`] for scheduling and fusion before simulation.
-#[derive(Clone, Debug)]
-pub struct QuantumCircuit {
-    gates: Vec<Arc<QuantumGate>>,
-    n_qubits: u32,
-}
-
-impl QuantumCircuit {
-    /// Create an empty circuit on `n_qubits` qubits.
-    pub fn new(n_qubits: u32) -> Self {
-        Self {
-            gates: Vec::new(),
-            n_qubits,
-        }
-    }
-
-    /// Add a gate to the circuit. Returns `&mut Self` for chaining.
-    ///
-    /// # Panics
-    /// Panics if any qubit index in the gate is ≥ `n_qubits`.
-    pub fn add(&mut self, gate: QuantumGate) -> &mut Self {
-        for &q in gate.qubits() {
-            assert!(
-                q < self.n_qubits,
-                "qubit {q} out of range for {}-qubit circuit",
-                self.n_qubits
-            );
-        }
-        self.gates.push(Arc::new(gate));
-        self
-    }
-
-    /// Parse an OpenQASM 2.0 string into a circuit.
-    pub fn from_qasm(qasm: &str) -> Result<Self> {
-        let parsed = crate::openqasm::parse_qasm(qasm)?;
-        Ok(Self::from_openqasm(&parsed))
-    }
-
-    /// Convert from a parsed OpenQASM circuit.
-    pub fn from_openqasm(qasm_circuit: &crate::openqasm::Circuit) -> Self {
-        use crate::circuit::quantum_gate_from_qasm_gate;
-        let n_qubits = qasm_circuit.required_qreg_size();
-        let gates: Vec<Arc<QuantumGate>> = qasm_circuit
-            .gates
-            .iter()
-            .map(|g| Arc::new(quantum_gate_from_qasm_gate(g)))
-            .collect();
-        Self { gates, n_qubits }
-    }
-
-    /// Number of qubits in the circuit.
-    pub fn n_qubits(&self) -> u32 {
-        self.n_qubits
-    }
-
-    /// Number of gates in the circuit.
-    pub fn len(&self) -> usize {
-        self.gates.len()
-    }
-
-    /// Whether the circuit has no gates.
-    pub fn is_empty(&self) -> bool {
-        self.gates.is_empty()
-    }
-
-    /// The gates in circuit order.
-    pub fn gates(&self) -> &[Arc<QuantumGate>] {
-        &self.gates
-    }
-}
 
 // ── Backend trait ────────────────────────────────────────────────────────────
 
@@ -148,6 +76,12 @@ pub trait Backend: sealed::Sealed + Sized {
     fn sv_n_qubits(sv: &Self::Sv) -> u32;
     #[doc(hidden)]
     fn flush(mgr: &Self::Mgr) -> Result<()>;
+    /// Compute marginal measurement probabilities for trajectory simulation.
+    #[doc(hidden)]
+    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> Result<Vec<f64>>;
+    /// Clone a statevector (deep copy). Used for ensemble branching.
+    #[doc(hidden)]
+    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv>;
 }
 
 mod sealed {
@@ -207,6 +141,12 @@ impl Backend for Cpu {
     fn flush(_mgr: &Self::Mgr) -> Result<()> {
         Ok(())
     }
+    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> Result<Vec<f64>> {
+        Ok(measure::marginal_probabilities_cpu(sv, measured_qubits))
+    }
+    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
+        Ok(sv.clone())
+    }
 }
 
 // ── CUDA backend ─────────────────────────────────────────────────────────────
@@ -254,6 +194,19 @@ impl Backend for Cuda {
     fn flush(mgr: &Self::Mgr) -> Result<()> {
         mgr.sync()?;
         Ok(())
+    }
+    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> Result<Vec<f64>> {
+        let amps = sv.download()?;
+        let positions = measure::qubit_positions(measured_qubits);
+        let n_bins = 1usize << measured_qubits.len();
+        Ok(measure::accumulate_marginal_probs(
+            amps.into_iter(),
+            &positions,
+            n_bins,
+        ))
+    }
+    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
+        sv.clone_device()
     }
 }
 
@@ -379,33 +332,31 @@ pub enum SimulationMode {
     /// Density-matrix simulation on 2n virtual qubits. Supports noisy gates
     /// via superoperator lifting.
     DensityMatrix,
-    /// Monte Carlo wavefunction: pure-state simulation with stochastic noise
-    /// branch sampling at each noisy gate. Memory cost is O(2^n) per trajectory.
+    /// Trajectory-based noisy simulation: deterministic ensemble branching
+    /// with batch measurement sampling. Produces a measurement histogram
+    /// over the circuit's `measured_qubits`.
     Trajectory {
-        n_trajectories: usize,
+        /// Total number of measurement samples to generate.
+        n_samples: u64,
+        /// RNG seed for measurement sampling (None = entropy).
         seed: Option<u64>,
+        /// Maximum number of concurrent statevectors in the ensemble.
+        /// `None` = auto-detect from available memory. `Some(1)` = single
+        /// deterministic trajectory (highest-probability branch only).
+        max_ensemble: Option<usize>,
     },
 }
 
 /// Result of a simulation run.
 pub struct SimulationResult<B: Backend> {
-    /// Final quantum state.
-    pub state: QuantumState<B>,
+    /// Final quantum state (`None` for trajectory mode).
+    pub state: Option<QuantumState<B>>,
     /// Execution time statistics.
     pub timing: TimingStats,
     /// Kernel compilation wall time (seconds).
     pub compile_time_s: f64,
-    /// Per-trajectory data (only for [`SimulationMode::Trajectory`]).
-    pub trajectory_data: Option<Vec<TrajectoryResult>>,
-}
-
-/// Per-trajectory outcome data.
-#[derive(Clone, Debug)]
-pub struct TrajectoryResult {
-    /// Index of the noise branch sampled at each noisy gate.
-    pub sampled_operators: Vec<usize>,
-    /// Wall time for this trajectory (seconds).
-    pub time_s: f64,
+    /// Trajectory simulation data (only for [`SimulationMode::Trajectory`]).
+    pub trajectory_data: Option<TrajectoryResult>,
 }
 
 // ── Simulator ────────────────────────────────────────────────────────────────
@@ -414,9 +365,9 @@ pub struct TrajectoryResult {
 pub struct Simulator<B: Backend> {
     mode: SimulationMode,
     fusion_config: Option<FusionConfig>,
-    mgr: B::Mgr,
-    spec: B::Spec,
-    extra: B::Extra,
+    pub(crate) mgr: B::Mgr,
+    pub(crate) spec: B::Spec,
+    pub(crate) extra: B::Extra,
 }
 
 // CPU constructors.
@@ -485,7 +436,17 @@ impl<B: Backend> Simulator<B> {
 
     /// Run simulation on a [`QuantumCircuit`]. Builds an internal
     /// [`CircuitGraph`], applies fusion (if configured), and simulates.
+    ///
+    /// For trajectory mode, dead-gate elimination is applied automatically
+    /// based on [`QuantumCircuit::measured_qubits`].
     pub fn run(&self, circuit: &QuantumCircuit) -> Result<SimulationResult<B>> {
+        // For trajectory mode, eliminate gates that can't influence measured qubits.
+        let circuit = if matches!(self.mode, SimulationMode::Trajectory { .. }) {
+            circuit.eliminate_dead_gates()
+        } else {
+            circuit.clone()
+        };
+
         let mut graph = CircuitGraph::new();
         graph.ensure_n_qubits(circuit.n_qubits() as usize);
         for gate in circuit.gates() {
@@ -494,11 +455,18 @@ impl<B: Backend> Simulator<B> {
         if let Some(ref config) = self.fusion_config {
             fusion::optimize(&mut graph, config);
         }
-        self.run_graph(&graph)
+        self.run_graph(&graph, circuit.measured_qubits())
     }
 
     /// Run simulation on a pre-built circuit graph (no fusion applied).
-    pub fn run_graph(&self, circuit: &CircuitGraph) -> Result<SimulationResult<B>> {
+    ///
+    /// `measured_qubits` is used only for trajectory mode — it specifies
+    /// which qubits to measure at the end of the circuit.
+    pub fn run_graph(
+        &self,
+        circuit: &CircuitGraph,
+        measured_qubits: &[u32],
+    ) -> Result<SimulationResult<B>> {
         let n_physical = circuit.n_qubits() as u32;
         let (gates, n_sv) = self.prepare_gates(circuit, n_physical)?;
 
@@ -528,23 +496,20 @@ impl<B: Backend> Simulator<B> {
                 };
 
                 Ok(SimulationResult {
-                    state,
+                    state: Some(state),
                     timing: crate::timing::stats_from_samples(&[exec_s]),
                     compile_time_s,
                     trajectory_data: None,
                 })
             }
-            SimulationMode::Trajectory {
-                n_trajectories,
-                seed,
-            } => self.execute_trajectory(
-                &gates,
-                &kernel_ids,
-                n_sv,
-                *n_trajectories,
-                *seed,
-                compile_time_s,
-            ),
+            SimulationMode::Trajectory { .. } => {
+                let prepared = trajectory::PreparedCircuit {
+                    gates,
+                    kernel_ids,
+                    n_sv,
+                };
+                self.execute_trajectory(&prepared, measured_qubits, compile_time_s)
+            }
         }
     }
 
@@ -603,198 +568,10 @@ impl<B: Backend> Simulator<B> {
         Ok(sv)
     }
 
-    fn execute_trajectory(
-        &self,
-        gates: &[Arc<QuantumGate>],
-        gate_kernel_ids: &[Option<B::KernelId>],
-        n_sv: u32,
-        n_trajectories: usize,
-        seed: Option<u64>,
-        compile_time_s: f64,
-    ) -> Result<SimulationResult<B>> {
-        use rand::distributions::WeightedIndex;
-        use rand::prelude::*;
-        use rand::rngs::StdRng;
-
-        // Pre-compile noise-branch kernels and sampling distributions.
-        let mut noise_kernels: Vec<Option<Vec<B::KernelId>>> = Vec::with_capacity(gates.len());
-        let mut noise_dists: Vec<Option<WeightedIndex<f64>>> = Vec::with_capacity(gates.len());
-        for gate in gates {
-            if !gate.is_unitary() {
-                let mut kids = Vec::new();
-                for (_, u_noise) in gate.noise() {
-                    let composed = u_noise.matmul(gate.matrix());
-                    let g = Arc::new(QuantumGate::new(composed, gate.qubits().to_vec()));
-                    kids.push(B::generate(&self.mgr, &self.spec, &g)?);
-                }
-                noise_kernels.push(Some(kids));
-                let weights: Vec<f64> = gate.noise().iter().map(|(p, _)| *p).collect();
-                noise_dists.push(Some(
-                    WeightedIndex::new(&weights).context("invalid noise probabilities")?,
-                ));
-            } else {
-                noise_kernels.push(None);
-                noise_dists.push(None);
-            }
-        }
-
-        let mut rng: Box<dyn RngCore> = match seed {
-            Some(s) => Box::new(StdRng::seed_from_u64(s)),
-            None => Box::new(StdRng::from_entropy()),
-        };
-
-        let n_noisy_gates = noise_kernels.iter().filter(|k| k.is_some()).count();
-        let mut trajectory_results = Vec::with_capacity(n_trajectories);
-        let mut sv = B::new_sv(n_sv, &self.spec)?;
-
-        for _ in 0..n_trajectories {
-            let t0 = Instant::now();
-            B::init_sv(&mut sv)?;
-
-            let mut sampled_ops = Vec::with_capacity(n_noisy_gates);
-            for (i, gate) in gates.iter().enumerate() {
-                if gate.is_unitary() {
-                    self.apply_one(gate_kernel_ids[i].unwrap(), &mut sv)?;
-                } else {
-                    let chosen = noise_dists[i].as_ref().unwrap().sample(&mut *rng);
-                    sampled_ops.push(chosen);
-                    self.apply_one(noise_kernels[i].as_ref().unwrap()[chosen], &mut sv)?;
-                }
-            }
-            B::flush(&self.mgr)?;
-
-            let time_s = t0.elapsed().as_secs_f64();
-            trajectory_results.push(TrajectoryResult {
-                sampled_operators: sampled_ops,
-                time_s,
-            });
-        }
-
-        let samples: Vec<f64> = trajectory_results.iter().map(|t| t.time_s).collect();
-        let timing = crate::timing::stats_from_samples(&samples);
-
-        let state = QuantumState {
-            repr: StateRepr::Pure(sv),
-        };
-
-        Ok(SimulationResult {
-            state,
-            timing,
-            compile_time_s,
-            trajectory_data: Some(trajectory_results),
-        })
-    }
-
-    fn apply_one(&self, kid: B::KernelId, sv: &mut B::Sv) -> Result<()> {
+    pub(crate) fn apply_one(&self, kid: B::KernelId, sv: &mut B::Sv) -> Result<()> {
         B::apply(&self.mgr, kid, sv, &self.extra)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const TEST_QUBITS: u32 = 4;
-
-    fn test_circuit(gates: Vec<QuantumGate>) -> QuantumCircuit {
-        let mut circuit = QuantumCircuit::new(TEST_QUBITS);
-        for g in gates {
-            circuit.add(g);
-        }
-        circuit
-    }
-
-    #[test]
-    fn statevector_h_gate() {
-        let sim = Simulator::<Cpu>::f64();
-        let circuit = test_circuit(vec![QuantumGate::h(0)]);
-        let result = sim.run(&circuit).unwrap();
-        assert!(result.state.is_pure());
-        let pops = result.state.populations();
-        assert!((pops[0] - 0.5).abs() < 1e-10);
-        assert!((pops[1] - 0.5).abs() < 1e-10);
-    }
-
-    #[test]
-    fn statevector_rejects_noisy_gates() {
-        let sim = Simulator::<Cpu>::f64();
-        let circuit = test_circuit(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
-        assert!(sim.run(&circuit).is_err());
-    }
-
-    #[test]
-    fn density_matrix_trace_preserved() {
-        let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::DensityMatrix);
-        let circuit = test_circuit(vec![
-            QuantumGate::h(0),
-            QuantumGate::cx(0, 1),
-            QuantumGate::depolarizing(0, 0.05),
-        ]);
-        let result = sim.run(&circuit).unwrap();
-        assert!(!result.state.is_pure());
-        let trace = result.state.trace();
-        assert!(
-            (trace - 1.0).abs() < 1e-10,
-            "trace should be 1.0, got {trace}"
-        );
-    }
-
-    #[test]
-    fn trajectory_sampling_distribution() {
-        let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
-            n_trajectories: 2000,
-            seed: Some(42),
-        });
-        let circuit = test_circuit(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
-        let result = sim.run(&circuit).unwrap();
-        let traj_data = result.trajectory_data.unwrap();
-        assert_eq!(traj_data.len(), 2000);
-
-        let n_identity: usize = traj_data
-            .iter()
-            .filter(|t| t.sampled_operators[0] == 0)
-            .count();
-        let frac = n_identity as f64 / 2000.0;
-        assert!(
-            (frac - 0.9).abs() < 0.05,
-            "identity fraction should be ~0.9, got {frac}"
-        );
-    }
-
-    #[test]
-    fn from_qasm() {
-        let circuit = QuantumCircuit::from_qasm(
-            "OPENQASM 2.0; qreg q[4]; h q[0]; cx q[0],q[1]; cx q[2],q[3];",
-        )
-        .unwrap();
-        assert_eq!(circuit.n_qubits(), 4);
-        assert_eq!(circuit.len(), 3);
-
-        let sim = Simulator::<Cpu>::f64();
-        let result = sim.run(&circuit).unwrap();
-        assert!(result.state.is_pure());
-    }
-
-    #[test]
-    #[cfg(feature = "cuda")]
-    fn cuda_norm_squared_and_normalize() {
-        use crate::cuda::{CudaPrecision, CudaStatevector};
-
-        let mut sv = CudaStatevector::new(4, CudaPrecision::F64).unwrap();
-        sv.zero().unwrap();
-        let ns = sv.norm_squared().unwrap();
-        assert!((ns - 1.0).abs() < 1e-12);
-
-        let n = 1usize << 4;
-        let mut data = vec![(0.0, 0.0); n];
-        data[0] = (3.0, 0.0);
-        data[1] = (4.0, 0.0);
-        sv.upload(&data).unwrap();
-        let ns = sv.norm_squared().unwrap();
-        assert!((ns - 25.0).abs() < 1e-10);
-
-        sv.normalize().unwrap();
-        let ns = sv.norm_squared().unwrap();
-        assert!((ns - 1.0).abs() < 1e-10);
-    }
-}
+mod tests;
