@@ -12,25 +12,29 @@ use crate::{
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn apply_size_two_fusion(cg: &mut CircuitGraph) {
-    let n_absorbed = absorb_single_qubit_gates(cg);
+    apply_size_two_fusion_inner(cg, false);
+}
+
+fn apply_size_two_fusion_inner(cg: &mut CircuitGraph, trajectory_mode: bool) {
+    let n_absorbed = absorb_single_qubit_gates(cg, trajectory_mode);
     if n_absorbed > 0 {
         cg.squeeze();
     }
 
-    let n_two_qubit_fused = fuse_adjacent_two_qubit_gates(cg);
+    let n_two_qubit_fused = fuse_adjacent_two_qubit_gates(cg, trajectory_mode);
     if n_two_qubit_fused > 0 {
         cg.squeeze();
     }
 }
 
-fn absorb_single_qubit_gates(cg: &mut CircuitGraph) -> usize {
+fn absorb_single_qubit_gates(cg: &mut CircuitGraph, trajectory_mode: bool) -> usize {
     let mut n_fused = 0;
     let n_rows = cg.n_rows();
     let n_qubits = cg.n_qubits();
 
     for row in 0..n_rows {
         for qubit in 0..n_qubits {
-            if absorb_single_qubit_gate(cg, row, qubit) {
+            if absorb_single_qubit_gate(cg, row, qubit, trajectory_mode) {
                 n_fused += 1;
             }
         }
@@ -39,14 +43,23 @@ fn absorb_single_qubit_gates(cg: &mut CircuitGraph) -> usize {
     n_fused
 }
 
-fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> bool {
+fn can_fuse(gate: &QuantumGate, trajectory_mode: bool) -> bool {
+    trajectory_mode || gate.is_unitary()
+}
+
+fn absorb_single_qubit_gate(
+    cg: &mut CircuitGraph,
+    row: usize,
+    qubit: usize,
+    trajectory_mode: bool,
+) -> bool {
     let gate_id = match cg.gate_id_at(row, qubit) {
         Some(gate_id) => gate_id,
         None => return false,
     };
 
     let gate = match cg.gate_arc(gate_id) {
-        Some(gate) if gate.n_qubits() == 1 && gate.is_unitary() => gate.clone(),
+        Some(gate) if gate.n_qubits() == 1 && can_fuse(&gate, trajectory_mode) => gate.clone(),
         _ => return false,
     };
 
@@ -57,8 +70,7 @@ fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> 
         let Some(next_gate) = cg.gate(next_gate_id) else {
             continue;
         };
-        // A noisy gate on this qubit is a causal barrier; cannot fuse past it.
-        if !next_gate.is_unitary() {
+        if !can_fuse(next_gate, trajectory_mode) {
             break;
         }
         let fused = next_gate.matmul(&gate);
@@ -75,7 +87,7 @@ fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> 
         let Some(prev_gate) = cg.gate(prev_gate_id) else {
             continue;
         };
-        if !prev_gate.is_unitary() {
+        if !can_fuse(prev_gate, trajectory_mode) {
             break;
         }
         let fused = gate.matmul(prev_gate);
@@ -88,7 +100,7 @@ fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> 
     false
 }
 
-fn fuse_adjacent_two_qubit_gates(cg: &mut CircuitGraph) -> usize {
+fn fuse_adjacent_two_qubit_gates(cg: &mut CircuitGraph, trajectory_mode: bool) -> usize {
     let mut n_fused = 0;
     if cg.n_rows() < 2 {
         return n_fused;
@@ -97,7 +109,7 @@ fn fuse_adjacent_two_qubit_gates(cg: &mut CircuitGraph) -> usize {
     let mut row = 0;
     while row + 1 < cg.n_rows() {
         for qubit in 0..cg.n_qubits() {
-            if fuse_adjacent_two_qubit_gate(cg, row, qubit) {
+            if fuse_adjacent_two_qubit_gate(cg, row, qubit, trajectory_mode) {
                 n_fused += 1;
             }
         }
@@ -107,7 +119,12 @@ fn fuse_adjacent_two_qubit_gates(cg: &mut CircuitGraph) -> usize {
     n_fused
 }
 
-fn fuse_adjacent_two_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> bool {
+fn fuse_adjacent_two_qubit_gate(
+    cg: &mut CircuitGraph,
+    row: usize,
+    qubit: usize,
+    trajectory_mode: bool,
+) -> bool {
     let next_row = row + 1;
     let Some(left_gate_id) = cg.gate_id_at(row, qubit) else {
         return false;
@@ -116,7 +133,7 @@ fn fuse_adjacent_two_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize)
         return false;
     };
     if left_gate.n_qubits() != 2
-        || !left_gate.is_unitary()
+        || !can_fuse(left_gate, trajectory_mode)
         || left_gate.qubits()[0] as usize != qubit
     {
         return false;
@@ -129,7 +146,7 @@ fn fuse_adjacent_two_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize)
         return false;
     };
     if right_gate.n_qubits() != 2
-        || !right_gate.is_unitary()
+        || !can_fuse(right_gate, trajectory_mode)
         || right_gate.qubits() != left_gate.qubits()
     {
         return false;
@@ -188,8 +205,9 @@ fn start_fusion(
     let seed_gate = cg.gate_arc(seed_id).unwrap().clone();
 
     // Only process a gate from its lowest qubit to avoid duplicate seeds.
-    // Noisy gates cannot participate in matmul-based fusion.
-    if seed_gate.qubits()[0] as usize != start_qubit || !seed_gate.is_unitary() {
+    if seed_gate.qubits()[0] as usize != start_qubit
+        || !can_fuse(&seed_gate, config.trajectory_mode)
+    {
         return 0;
     }
 
@@ -211,7 +229,7 @@ fn start_fusion(
             continue;
         }
         let cand_gate = cg.gate_arc(cand_id).unwrap().clone();
-        if !cand_gate.is_unitary() {
+        if !can_fuse(&cand_gate, config.trajectory_mode) {
             continue;
         }
         if union_qubit_count(prod_gate.qubits(), cand_gate.qubits()) > cdd_size {
@@ -249,7 +267,7 @@ fn start_fusion(
                 continue;
             }
             let cand_gate = cg.gate_arc(cand_id).unwrap().clone();
-            if !cand_gate.is_unitary() {
+            if !can_fuse(&cand_gate, config.trajectory_mode) {
                 continue;
             }
             if union_qubit_count(prod_gate.qubits(), cand_gate.qubits()) > cdd_size {
@@ -354,7 +372,7 @@ pub fn apply_gate_fusion(
 /// Each size level is repeated (multi-traverse) until no further fusions are
 /// found, allowing earlier fusions to expose new opportunities after squeeze.
 pub fn optimize(cg: &mut CircuitGraph, config: &FusionConfig) {
-    apply_size_two_fusion(cg);
+    apply_size_two_fusion_inner(cg, config.trajectory_mode);
     for cdd_size in 3..=config.size_max {
         while apply_gate_fusion(cg, config, cdd_size, None) > 0 {}
     }
@@ -363,7 +381,7 @@ pub fn optimize(cg: &mut CircuitGraph, config: &FusionConfig) {
 /// Like [`optimize`], but records every Phase-2 accept/reject decision in
 /// the returned [`FusionLog`].
 pub fn optimize_with_log(cg: &mut CircuitGraph, config: &FusionConfig) -> FusionLog {
-    apply_size_two_fusion(cg);
+    apply_size_two_fusion_inner(cg, config.trajectory_mode);
     let mut log = FusionLog::new();
     for cdd_size in 3..=config.size_max {
         while apply_gate_fusion(cg, config, cdd_size, Some(&mut log)) > 0 {}
@@ -602,7 +620,9 @@ mod tests {
                 max_size: 6,
                 max_ai: usize::MAX,
                 zero_tol: 0.0,
+                trajectory_mode: false,
             }),
+            trajectory_mode: false,
         };
         let n_before = cg.n_rows();
         apply_gate_fusion(&mut cg, &config, 3, None);
@@ -937,7 +957,9 @@ mod tests {
                 max_size: 6,
                 max_ai: usize::MAX,
                 zero_tol: 0.0,
+                trajectory_mode: false,
             }),
+            trajectory_mode: false,
         };
         // Phase 2 rollback: unitary must be unchanged.
         check_fusion(&cg, |g| {
@@ -957,7 +979,9 @@ mod tests {
                 max_size: 6,
                 max_ai: usize::MAX,
                 zero_tol: 0.0,
+                trajectory_mode: false,
             }),
+            trajectory_mode: false,
         };
         let n_before = cg.n_rows();
         let fused = check_fusion(&cg, |g| {
@@ -1094,5 +1118,110 @@ mod tests {
     fn random_5qubit_20gates_size_only_5() {
         let cg = random_circuit(5, 20, 123);
         check_fusion(&cg, |g| optimize(g, &FusionConfig::size_only(5)));
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Trajectory-mode noisy gate fusion tests
+    // ═════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn trajectory_fuses_noisy_single_qubit_into_neighbor() {
+        // H(0) followed by depolarizing(0) — in trajectory mode, the
+        // depolarizing gate should be absorbed into H.
+        let mut cg = CircuitGraph::new();
+        cg.insert_gate(QuantumGate::h(0));
+        cg.insert_gate(QuantumGate::depolarizing(0, 0.01));
+        assert_eq!(cg.n_rows(), 2);
+
+        let config = FusionConfig::size_only_trajectory(4);
+        optimize(&mut cg, &config);
+
+        // The two gates should be fused into one.
+        let gates = cg.gates_in_row_order();
+        assert_eq!(gates.len(), 1, "expected 1 fused gate, got {}", gates.len());
+        // The fused gate should carry noise branches from the depolarizing gate.
+        assert!(
+            !gates[0].is_unitary(),
+            "fused gate should carry noise branches"
+        );
+        assert_eq!(
+            gates[0].noise_model().unwrap().len(),
+            4,
+            "depolarizing has 4 branches"
+        );
+    }
+
+    #[test]
+    fn trajectory_fuses_two_noisy_gates_cartesian_product() {
+        // depolarizing(0) followed by depolarizing(0) → fused gate should have
+        // 4 × 4 = 16 noise branches.
+        let mut cg = CircuitGraph::new();
+        cg.insert_gate(QuantumGate::depolarizing(0, 0.01));
+        cg.insert_gate(QuantumGate::depolarizing(0, 0.02));
+
+        let config = FusionConfig::size_only_trajectory(4);
+        optimize(&mut cg, &config);
+
+        let gates = cg.gates_in_row_order();
+        assert_eq!(gates.len(), 1);
+        assert_eq!(
+            gates[0].noise_model().unwrap().len(),
+            16,
+            "Cartesian product of two 4-branch noise models"
+        );
+    }
+
+    #[test]
+    fn trajectory_dm_mode_blocks_noisy_fusion() {
+        // Same circuit as above, but in DM mode (trajectory_mode = false):
+        // noisy gates should NOT be fused.
+        let mut cg = CircuitGraph::new();
+        cg.insert_gate(QuantumGate::h(0));
+        cg.insert_gate(QuantumGate::depolarizing(0, 0.01));
+        let n_before = cg.n_rows();
+
+        let config = FusionConfig::size_only(4);
+        optimize(&mut cg, &config);
+
+        // H should not absorb the noisy gate.
+        assert_eq!(cg.n_rows(), n_before);
+    }
+
+    #[test]
+    fn trajectory_noisy_fusion_preserves_base_unitary() {
+        // H(0) + depolarizing(0, p=0.01). The fused gate's base matrix should
+        // equal the composition: I · H = H (since depolarizing's base is I).
+        let mut cg = CircuitGraph::new();
+        cg.insert_gate(QuantumGate::h(0));
+        cg.insert_gate(QuantumGate::depolarizing(0, 0.01));
+
+        let config = FusionConfig::size_only_trajectory(4);
+        optimize(&mut cg, &config);
+
+        let gates = cg.gates_in_row_order();
+        let fused = &gates[0];
+        let h_matrix = ComplexSquareMatrix::h();
+        let diff = fused.matrix().maximum_norm_diff(&h_matrix);
+        assert!(diff < 1e-12, "fused base matrix should be H, diff = {diff}");
+    }
+
+    #[test]
+    fn trajectory_noise_branch_weights_sum_to_one() {
+        // After fusing two depolarizing gates, the noise branch weights
+        // should still sum to 1.0.
+        let mut cg = CircuitGraph::new();
+        cg.insert_gate(QuantumGate::depolarizing(0, 0.01));
+        cg.insert_gate(QuantumGate::depolarizing(0, 0.02));
+
+        let config = FusionConfig::size_only_trajectory(4);
+        optimize(&mut cg, &config);
+
+        let gates = cg.gates_in_row_order();
+        let noise = gates[0].noise_model().unwrap();
+        let weight_sum: f64 = noise.branches().iter().map(|(p, _)| p).sum();
+        assert!(
+            (weight_sum - 1.0).abs() < 1e-10,
+            "noise weights must sum to 1.0, got {weight_sum}"
+        );
     }
 }

@@ -18,7 +18,7 @@ pub use matrix::ComplexSquareMatrix;
 
 mod gate;
 pub(crate) use gate::compress_bits;
-pub use gate::QuantumGate;
+pub use gate::{NoiseModel, QuantumGate};
 
 mod circuit;
 pub use circuit::QuantumCircuit;

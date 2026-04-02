@@ -19,11 +19,19 @@ pub struct SizeOnlyCostModel {
     pub max_size: usize,
     pub max_ai: usize,
     pub zero_tol: f64,
+    /// When true, use `n_qubits()` (trajectory) instead of
+    /// `effective_n_qubits()` (density-matrix) for the size check.
+    pub trajectory_mode: bool,
 }
 
 impl CostModel for SizeOnlyCostModel {
     fn cost_of(&self, gate: &QuantumGate) -> f64 {
-        if gate.effective_n_qubits() > self.max_size {
+        let size = if self.trajectory_mode {
+            gate.n_qubits()
+        } else {
+            gate.effective_n_qubits()
+        };
+        if size > self.max_size {
             return 1.0;
         }
         if gate.arithmetic_intensity(self.zero_tol) > self.max_ai as f64 {
@@ -225,21 +233,30 @@ pub struct HardwareAdaptiveCostModel {
     pub crossover_ai: f64,
     pub max_size: usize,
     pub zero_tol: f64,
+    /// When true, use `n_qubits()` (trajectory) instead of
+    /// `effective_n_qubits()` (density-matrix) for the size check.
+    pub trajectory_mode: bool,
 }
 
 impl HardwareAdaptiveCostModel {
-    pub fn new(profile: &HardwareProfile, max_size: usize) -> Self {
+    pub fn new(profile: &HardwareProfile, max_size: usize, trajectory_mode: bool) -> Self {
         Self {
             crossover_ai: profile.crossover_ai,
             max_size,
             zero_tol: 1e-12,
+            trajectory_mode,
         }
     }
 }
 
 impl CostModel for HardwareAdaptiveCostModel {
     fn cost_of(&self, gate: &QuantumGate) -> f64 {
-        if gate.effective_n_qubits() > self.max_size {
+        let size = if self.trajectory_mode {
+            gate.n_qubits()
+        } else {
+            gate.effective_n_qubits()
+        };
+        if size > self.max_size {
             return f64::INFINITY;
         }
         (gate.arithmetic_intensity(self.zero_tol) / self.crossover_ai).max(1.0)
@@ -253,10 +270,16 @@ impl CostModel for HardwareAdaptiveCostModel {
 /// `size_max` caps the qubit count of any fused gate. `benefit_margin` is the
 /// minimum `old_cost / (new_cost + ε) - 1` for a fusion to be accepted. Phase 1
 /// (size-2 canonicalization) always runs before the agglomerative phase.
+///
+/// When `trajectory_mode` is `true`, noisy gates participate in fusion and the
+/// cost model evaluates the dominant (noiseless) branch. When `false` (default),
+/// noisy gates act as fusion barriers and the cost model uses the superoperator
+/// size (density-matrix oriented).
 pub struct FusionConfig {
     pub size_max: usize,
     pub benefit_margin: f64,
     pub cost_model: Box<dyn CostModel>,
+    pub trajectory_mode: bool,
 }
 
 impl Default for FusionConfig {
@@ -268,6 +291,15 @@ impl Default for FusionConfig {
 impl FusionConfig {
     /// Pure size-gated fusion up to `max_size` qubits. No AI cap.
     pub fn size_only(max_size: usize) -> Self {
+        Self::size_only_inner(max_size, false)
+    }
+
+    /// Size-gated fusion for trajectory mode — noisy gates participate.
+    pub fn size_only_trajectory(max_size: usize) -> Self {
+        Self::size_only_inner(max_size, true)
+    }
+
+    fn size_only_inner(max_size: usize, trajectory_mode: bool) -> Self {
         Self {
             size_max: max_size,
             benefit_margin: 0.0,
@@ -275,7 +307,9 @@ impl FusionConfig {
                 max_size,
                 max_ai: usize::MAX,
                 zero_tol: 0.0,
+                trajectory_mode,
             }),
+            trajectory_mode,
         }
     }
 
@@ -286,10 +320,28 @@ impl FusionConfig {
     /// Roofline-adaptive fusion. The crossover in `profile` must match the
     /// precision and thread count of your simulation.
     pub fn hardware_adaptive(profile: &HardwareProfile, max_size: usize) -> Self {
+        Self::hardware_adaptive_inner(profile, max_size, false)
+    }
+
+    /// Roofline-adaptive fusion for trajectory mode — noisy gates participate.
+    pub fn hardware_adaptive_trajectory(profile: &HardwareProfile, max_size: usize) -> Self {
+        Self::hardware_adaptive_inner(profile, max_size, true)
+    }
+
+    fn hardware_adaptive_inner(
+        profile: &HardwareProfile,
+        max_size: usize,
+        trajectory_mode: bool,
+    ) -> Self {
         Self {
             size_max: max_size,
             benefit_margin: 0.0,
-            cost_model: Box::new(HardwareAdaptiveCostModel::new(profile, max_size)),
+            cost_model: Box::new(HardwareAdaptiveCostModel::new(
+                profile,
+                max_size,
+                trajectory_mode,
+            )),
+            trajectory_mode,
         }
     }
 }
@@ -387,6 +439,7 @@ mod tests {
             max_size,
             max_ai: usize::MAX,
             zero_tol: 0.0,
+            trajectory_mode: false,
         }
     }
 
@@ -403,7 +456,7 @@ mod tests {
 
     fn adaptive_model(bw: f64, gflops: f64, max_size: usize) -> HardwareAdaptiveCostModel {
         let profile = HardwareProfile::from_roofline(test_config(), bw, gflops, size_of::<f64>());
-        HardwareAdaptiveCostModel::new(&profile, max_size)
+        HardwareAdaptiveCostModel::new(&profile, max_size, false)
     }
 
     // ── SizeOnlyCostModel ────────────────────────────────────────────────────

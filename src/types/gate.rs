@@ -1,6 +1,79 @@
+use std::sync::Arc;
+
 use rand::Rng;
 
 use super::{Complex, ComplexSquareMatrix};
+
+// ── NoiseModel ──────────────────────────────────────────────────────────────
+
+/// A probability-weighted set of unitary noise branches.
+///
+/// Each entry `(p_i, U_i)` pairs a probability with a unitary operator of the
+/// same dimension as the gate it is attached to. Probabilities must sum to 1.0.
+///
+/// `NoiseModel` is designed to be shared via `Arc<NoiseModel>` across gates that
+/// use the same noise channel (e.g. identical depolarizing noise on every qubit).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoiseModel {
+    branches: Vec<(f64, ComplexSquareMatrix)>,
+}
+
+impl NoiseModel {
+    /// Create a noise model from a list of `(probability, unitary)` branches.
+    ///
+    /// # Panics
+    /// Panics if probabilities do not sum to 1.0 (within 1e-10) or any
+    /// probability is negative.
+    pub fn new(branches: Vec<(f64, ComplexSquareMatrix)>) -> Self {
+        let mut prob_sum = 0.0f64;
+        for (p, _) in &branches {
+            assert!(*p >= 0.0, "noise probability must be non-negative, got {p}");
+            prob_sum += p;
+        }
+        assert!(
+            (prob_sum - 1.0).abs() < 1e-10,
+            "noise probabilities must sum to 1.0, got {prob_sum}"
+        );
+        Self { branches }
+    }
+
+    /// The noise branches `[(probability, unitary)]`.
+    pub fn branches(&self) -> &[(f64, ComplexSquareMatrix)] {
+        &self.branches
+    }
+
+    /// Number of noise branches.
+    pub fn len(&self) -> usize {
+        self.branches.len()
+    }
+
+    /// Whether the noise model has no branches.
+    pub fn is_empty(&self) -> bool {
+        self.branches.is_empty()
+    }
+
+    /// Cartesian product of two noise models.
+    ///
+    /// Given `self` with branches `[(p_i, U_i)]` and `other` with branches
+    /// `[(q_j, V_j)]`, produces a noise model with `len(self) × len(other)`
+    /// branches `[(p_i * q_j, V_j ⊗ U_i)]` where ⊗ denotes composition in the
+    /// expanded qubit space (handled by the caller).
+    ///
+    /// The unitary matrices returned are the *noise-only* operators (not composed
+    /// with the base gate unitary). The caller is responsible for expanding them
+    /// to the union qubit set before use.
+    pub fn cartesian_product(&self, other: &NoiseModel) -> NoiseModel {
+        let mut branches = Vec::with_capacity(self.branches.len() * other.branches.len());
+        for (p_i, u_i) in &self.branches {
+            for (q_j, v_j) in &other.branches {
+                branches.push((p_i * q_j, v_j.matmul(u_i)));
+            }
+        }
+        NoiseModel { branches }
+    }
+}
+
+// ── QuantumGate ─────────────────────────────────────────────────────────────
 
 /// A quantum gate: a unitary matrix paired with target qubit indices, optionally
 /// carrying a noise model.
@@ -8,9 +81,9 @@ use super::{Complex, ComplexSquareMatrix};
 /// The `matrix` field is always a `2ⁿ × 2ⁿ` unitary. The optional `noise` field
 /// describes a probability-weighted unitary noise channel:
 ///
-/// - **Noiseless gate** (`noise` is empty): applies `matrix` to the statevector.
-/// - **Noisy gate** (`noise` has entries `[(p_i, U_i)]`): in trajectory simulation,
-///   one noise branch is sampled and the composed unitary `U_i · matrix` is applied.
+/// - **Noiseless gate** (`noise` is `None`): applies `matrix` to the statevector.
+/// - **Noisy gate** (`noise` is `Some`): in trajectory simulation, one noise
+///   branch is sampled and the composed unitary `U_i · matrix` is applied.
 ///   In density-matrix simulation, the effective channel
 ///   `E(ρ) = Σ_i p_i · (U_i·U) ρ (U_i·U)†` is computed as a superoperator.
 ///
@@ -22,9 +95,8 @@ pub struct QuantumGate {
     matrix: ComplexSquareMatrix,
     /// Physical qubit indices, sorted ascending.
     qubits: Vec<u32>,
-    /// Probability-weighted unitary noise branches `(p_i, U_i)`.
-    /// Empty for noiseless gates. Probabilities must sum to 1.0.
-    noise: Vec<(f64, ComplexSquareMatrix)>,
+    /// Optional noise model, shared via `Arc` across gates with the same channel.
+    noise: Option<Arc<NoiseModel>>,
 }
 
 impl QuantumGate {
@@ -48,7 +120,7 @@ impl QuantumGate {
         Self {
             matrix,
             qubits,
-            noise: Vec::new(),
+            noise: None,
         }
     }
 
@@ -150,12 +222,12 @@ impl QuantumGate {
 
     /// Returns `true` if this gate has no noise (pure unitary).
     pub fn is_unitary(&self) -> bool {
-        self.noise.is_empty()
+        self.noise.is_none()
     }
 
-    /// Returns the noise branches `[(probability, unitary)]`, empty for noiseless gates.
-    pub fn noise(&self) -> &[(f64, ComplexSquareMatrix)] {
-        &self.noise
+    /// Returns the noise model, or `None` for noiseless gates.
+    pub fn noise_model(&self) -> Option<&Arc<NoiseModel>> {
+        self.noise.as_ref()
     }
 
     /// Attach a noise model to this gate.
@@ -164,21 +236,28 @@ impl QuantumGate {
     /// dimension as the gate matrix. Probabilities must sum to 1.0.
     pub fn with_noise(mut self, noise: Vec<(f64, ComplexSquareMatrix)>) -> Self {
         let edge = self.matrix.edge_size();
-        let mut prob_sum = 0.0f64;
-        for (p, u) in &noise {
-            assert!(*p >= 0.0, "noise probability must be non-negative, got {p}");
+        for (_, u) in &noise {
             assert_eq!(
                 u.edge_size(),
                 edge,
                 "noise operator dimension must match gate dimension"
             );
-            prob_sum += p;
         }
-        assert!(
-            (prob_sum - 1.0).abs() < 1e-10,
-            "noise probabilities must sum to 1.0, got {prob_sum}"
-        );
-        self.noise = noise;
+        self.noise = Some(Arc::new(NoiseModel::new(noise)));
+        self
+    }
+
+    /// Attach a shared noise model to this gate.
+    pub fn with_noise_model(mut self, noise: Arc<NoiseModel>) -> Self {
+        let edge = self.matrix.edge_size();
+        for (_, u) in noise.branches() {
+            assert_eq!(
+                u.edge_size(),
+                edge,
+                "noise operator dimension must match gate dimension"
+            );
+        }
+        self.noise = Some(noise);
         self
     }
 
@@ -187,14 +266,15 @@ impl QuantumGate {
     /// The noise model is `[(1-p, I), (p/3, X), (p/3, Y), (p/3, Z)]`.
     pub fn with_depolarizing(self, p: f64) -> Self {
         assert_eq!(self.n_qubits(), 1, "depolarizing noise is single-qubit");
-        self.with_noise(depolarizing_noise(p))
+        self.with_noise_model(Arc::new(depolarizing_noise(p)))
     }
 
     // ── Noise-only gate factories ────────────────────────────────────────
 
     /// Single-qubit depolarizing noise (identity gate + depolarizing channel).
     pub fn depolarizing(qubit: u32, p: f64) -> Self {
-        Self::new(ComplexSquareMatrix::eye(2), vec![qubit]).with_noise(depolarizing_noise(p))
+        Self::new(ComplexSquareMatrix::eye(2), vec![qubit])
+            .with_noise_model(Arc::new(depolarizing_noise(p)))
     }
 
     /// Single-qubit bit-flip noise (X error with probability `p`).
@@ -249,7 +329,7 @@ impl QuantumGate {
             // Noisy: S = Σ_i p_i · (U_i·U) ⊗ conj(U_i·U)
             let super_dim = self.matrix.edge_size().pow(2);
             let mut s = ComplexSquareMatrix::zeros(super_dim);
-            for (p, u_noise) in &self.noise {
+            for (p, u_noise) in self.noise.as_ref().unwrap().branches() {
                 let composed = u_noise.matmul(&self.matrix);
                 s += &(&superoperator_of(&composed) * *p);
             }
@@ -282,17 +362,61 @@ impl QuantumGate {
     ///
     /// The gate acts as identity on qubits not originally in its target set.
     ///
-    /// # Panics
-    /// Panics if either gate is a noisy gate (`is_unitary()` is `false`).
+    /// If either gate carries noise, the fused gate's noise model is the Cartesian
+    /// product of both noise models (noiseless gates contribute a single identity
+    /// branch). The fused base unitary is the noiseless composition `self.matrix *
+    /// other.matrix`, and each noise branch stores the composed noise-only operator
+    /// expanded to the union qubit set.
     pub fn matmul(&self, other: &Self) -> Self {
-        assert!(
-            self.is_unitary() && other.is_unitary(),
-            "matmul is only defined for noiseless gates"
-        );
         let qubits = union_qubits(&self.qubits, &other.qubits);
         let lhs = self.expand_to(&qubits);
         let rhs = other.expand_to(&qubits);
-        Self::new(lhs.matmul(&rhs), qubits)
+        let fused_matrix = lhs.matmul(&rhs);
+
+        let fused_noise = match (&self.noise, &other.noise) {
+            (None, None) => None,
+            (Some(ln), None) => {
+                // Expand self's noise operators to the union qubit set.
+                let branches = ln
+                    .branches()
+                    .iter()
+                    .map(|(p, u)| {
+                        let expanded = self.expand_noise_op(u, &qubits);
+                        (*p, expanded)
+                    })
+                    .collect();
+                Some(Arc::new(NoiseModel { branches }))
+            }
+            (None, Some(rn)) => {
+                let branches = rn
+                    .branches()
+                    .iter()
+                    .map(|(p, u)| {
+                        let expanded = other.expand_noise_op(u, &qubits);
+                        (*p, expanded)
+                    })
+                    .collect();
+                Some(Arc::new(NoiseModel { branches }))
+            }
+            (Some(ln), Some(rn)) => {
+                // Cartesian product: for each (p_i, U_i) from self and (q_j, V_j)
+                // from other, the composed noise operator on the union qubit set
+                // is expand(U_i) · expand(V_j), with weight p_i * q_j.
+                let mut branches = Vec::with_capacity(ln.len() * rn.len());
+                for (p_i, u_i) in ln.branches() {
+                    let exp_u = self.expand_noise_op(u_i, &qubits);
+                    for (q_j, v_j) in rn.branches() {
+                        let exp_v = other.expand_noise_op(v_j, &qubits);
+                        branches.push((p_i * q_j, exp_u.matmul(&exp_v)));
+                    }
+                }
+                Some(Arc::new(NoiseModel { branches }))
+            }
+        };
+
+        let mut gate = Self::new(fused_matrix, qubits);
+        gate.noise = fused_noise;
+        gate
     }
 
     /// Expands `self` into a larger matrix that acts on `union_qubits`.
@@ -301,37 +425,17 @@ impl QuantumGate {
     /// the non-target bits of `row` and `col` are identical. Target-qubit bits are
     /// extracted with [`compress_bits`] to index into the original gate matrix.
     fn expand_to(&self, union_qubits: &[u32]) -> ComplexSquareMatrix {
-        let union_edge_size = edge_size_for_n_qubits(union_qubits.len());
-        let target_positions: Vec<usize> = self
-            .qubits
-            .iter()
-            .map(|qubit| {
-                union_qubits
-                    .iter()
-                    .position(|candidate| candidate == qubit)
-                    .expect("gate qubit must exist in union qubits")
-            })
-            .collect();
+        expand_matrix(&self.matrix, &self.qubits, union_qubits)
+    }
 
-        let target_mask = target_positions
-            .iter()
-            .fold(0usize, |mask, position| mask | (1usize << position));
-
-        let mut expanded = ComplexSquareMatrix::zeros(union_edge_size);
-        for row in 0..union_edge_size {
-            for col in 0..union_edge_size {
-                // Skip entries where non-target bits differ (identity on those wires).
-                if ((row ^ col) & !target_mask) != 0 {
-                    continue;
-                }
-
-                let gate_row = compress_bits(row, &target_positions);
-                let gate_col = compress_bits(col, &target_positions);
-                expanded.set(row, col, self.matrix.get(gate_row, gate_col));
-            }
-        }
-
-        expanded
+    /// Expand a noise operator (same dimension as `self.matrix`) to act on
+    /// `union_qubits`, treating non-target qubits as identity wires.
+    fn expand_noise_op(
+        &self,
+        noise_op: &ComplexSquareMatrix,
+        union_qubits: &[u32],
+    ) -> ComplexSquareMatrix {
+        expand_matrix(noise_op, &self.qubits, union_qubits)
     }
 
     /// Generate a random unitary gate for the given qubits.
@@ -442,6 +546,42 @@ impl QuantumGate {
         let _ = ztol; // ztol is for the caller's use; gate construction doesn't need it
         Self::random_sparse_with_rng(qubits, sparsity, rng)
     }
+}
+
+/// Expands a matrix that acts on `gate_qubits` into a larger matrix that acts
+/// on `union_qubits`, treating non-target qubits as identity wires.
+fn expand_matrix(
+    matrix: &ComplexSquareMatrix,
+    gate_qubits: &[u32],
+    union_qubits: &[u32],
+) -> ComplexSquareMatrix {
+    let union_edge_size = edge_size_for_n_qubits(union_qubits.len());
+    let target_positions: Vec<usize> = gate_qubits
+        .iter()
+        .map(|qubit| {
+            union_qubits
+                .iter()
+                .position(|candidate| candidate == qubit)
+                .expect("gate qubit must exist in union qubits")
+        })
+        .collect();
+
+    let target_mask = target_positions
+        .iter()
+        .fold(0usize, |mask, position| mask | (1usize << position));
+
+    let mut expanded = ComplexSquareMatrix::zeros(union_edge_size);
+    for row in 0..union_edge_size {
+        for col in 0..union_edge_size {
+            if ((row ^ col) & !target_mask) != 0 {
+                continue;
+            }
+            let gate_row = compress_bits(row, &target_positions);
+            let gate_col = compress_bits(col, &target_positions);
+            expanded.set(row, col, matrix.get(gate_row, gate_col));
+        }
+    }
+    expanded
 }
 
 /// Returns `2^n_qubits`, panicking on overflow.
@@ -655,14 +795,14 @@ fn superoperator_of(u: &ComplexSquareMatrix) -> ComplexSquareMatrix {
     ComplexSquareMatrix::from_vec(super_dim, data)
 }
 
-/// Returns the noise branches for single-qubit depolarizing noise with probability `p`.
-fn depolarizing_noise(p: f64) -> Vec<(f64, ComplexSquareMatrix)> {
-    vec![
+/// Returns the noise model for single-qubit depolarizing noise with probability `p`.
+fn depolarizing_noise(p: f64) -> NoiseModel {
+    NoiseModel::new(vec![
         (1.0 - p, ComplexSquareMatrix::eye(2)),
         (p / 3.0, ComplexSquareMatrix::x()),
         (p / 3.0, ComplexSquareMatrix::y()),
         (p / 3.0, ComplexSquareMatrix::z()),
-    ]
+    ])
 }
 
 #[cfg(test)]

@@ -124,9 +124,9 @@ impl<B: Backend> super::Simulator<B> {
         let mut cache: HashMap<(Vec<u32>, Vec<u8>), B::KernelId> = HashMap::new();
 
         for gate in gates {
-            if !gate.is_unitary() {
+            if let Some(noise) = gate.noise_model() {
                 let mut kids = Vec::new();
-                for (_, u_noise) in gate.noise() {
+                for (_, u_noise) in noise.branches() {
                     let composed = u_noise.matmul(gate.matrix());
                     let key = (gate.qubits().to_vec(), matrix_to_bytes(&composed));
                     let kid = match cache.get(&key) {
@@ -141,7 +141,7 @@ impl<B: Backend> super::Simulator<B> {
                     kids.push(kid);
                 }
                 kernels.push(Some(kids));
-                weights.push(Some(gate.noise().iter().map(|(p, _)| *p).collect()));
+                weights.push(Some(noise.branches().iter().map(|(p, _)| *p).collect()));
             } else {
                 kernels.push(None);
                 weights.push(None);

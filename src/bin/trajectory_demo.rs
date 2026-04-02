@@ -44,11 +44,12 @@ fn main() -> Result<()> {
         .unwrap_or(1);
     let noise_p = 0.005;
 
-    let circuit = build_noisy_qft(n_qubits, noise_p);
+    let mut circuit = build_noisy_qft(n_qubits, noise_p);
+    let measured_qubits: Vec<u32> = (0..n_qubits).collect();
+    circuit.measure(&measured_qubits);
 
     let n_noisy = circuit.gates().iter().filter(|g| !g.is_unitary()).count();
     let n_unitary = circuit.len() - n_noisy;
-    let measured_qubits: Vec<u32> = (0..n_qubits).collect();
 
     eprintln!("Circuit: {n_qubits}-qubit noisy QFT");
     eprintln!(
@@ -67,7 +68,6 @@ fn main() -> Result<()> {
 
     let sim = Simulator::<Cpu>::f32().with_mode(SimulationMode::Trajectory {
         n_samples,
-        measured_qubits,
         seed: Some(42),
         max_ensemble: Some(max_ensemble),
     });
