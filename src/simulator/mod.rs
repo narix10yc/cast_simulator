@@ -49,17 +49,13 @@ pub trait Backend: sealed::Sealed + Sized {
     type Spec: Copy;
 
     #[doc(hidden)]
-    fn new_manager() -> Self::Mgr;
+    fn new_manager(spec: Self::Spec) -> Self::Mgr;
     #[doc(hidden)]
     fn new_sv(n_qubits: u32, spec: &Self::Spec) -> Result<Self::Sv>;
     #[doc(hidden)]
     fn init_sv(sv: &mut Self::Sv) -> Result<()>;
     #[doc(hidden)]
-    fn generate(
-        mgr: &Self::Mgr,
-        spec: &Self::Spec,
-        gate: &Arc<QuantumGate>,
-    ) -> Result<Self::KernelId>;
+    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId>;
     /// Extra per-simulator state needed for apply (e.g., CPU thread count).
     #[doc(hidden)]
     type Extra;
@@ -103,8 +99,8 @@ impl Backend for Cpu {
     type Spec = CPUKernelGenSpec;
     type Extra = u32; // n_threads
 
-    fn new_manager() -> Self::Mgr {
-        CpuKernelManager::new()
+    fn new_manager(spec: Self::Spec) -> Self::Mgr {
+        CpuKernelManager::new(spec)
     }
     fn default_extra() -> Self::Extra {
         get_num_threads()
@@ -120,12 +116,8 @@ impl Backend for Cpu {
         sv.initialize();
         Ok(())
     }
-    fn generate(
-        mgr: &Self::Mgr,
-        spec: &Self::Spec,
-        gate: &Arc<QuantumGate>,
-    ) -> Result<Self::KernelId> {
-        mgr.generate(spec, gate)
+    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId> {
+        mgr.generate(gate)
     }
     fn sv_n_qubits(sv: &Self::Sv) -> u32 {
         sv.n_qubits()
@@ -163,8 +155,8 @@ impl Backend for Cuda {
     type Spec = CudaKernelGenSpec;
     type Extra = (); // no extra state needed
 
-    fn new_manager() -> Self::Mgr {
-        CudaKernelManager::new()
+    fn new_manager(spec: Self::Spec) -> Self::Mgr {
+        CudaKernelManager::new(spec)
     }
     fn default_extra() -> Self::Extra {}
     fn new_sv(n_qubits: u32, spec: &Self::Spec) -> Result<Self::Sv> {
@@ -173,12 +165,8 @@ impl Backend for Cuda {
     fn init_sv(sv: &mut Self::Sv) -> Result<()> {
         sv.zero()
     }
-    fn generate(
-        mgr: &Self::Mgr,
-        spec: &Self::Spec,
-        gate: &Arc<QuantumGate>,
-    ) -> Result<Self::KernelId> {
-        mgr.generate(gate, *spec)
+    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId> {
+        mgr.generate(gate)
     }
     fn sv_n_qubits(sv: &Self::Sv) -> u32 {
         sv.n_qubits()
@@ -377,7 +365,7 @@ impl Simulator<Cpu> {
         Self {
             mode: SimulationMode::StateVector,
             fusion_config: None,
-            mgr: Cpu::new_manager(),
+            mgr: Cpu::new_manager(spec),
             spec,
             extra: Cpu::default_extra(),
         }
@@ -392,6 +380,12 @@ impl Simulator<Cpu> {
     pub fn f32() -> Self {
         Self::new(CPUKernelGenSpec::f32())
     }
+
+    /// Override the number of worker threads used for kernel application.
+    pub fn with_threads(mut self, n_threads: u32) -> Self {
+        self.extra = n_threads;
+        self
+    }
 }
 
 // CUDA constructors.
@@ -402,7 +396,7 @@ impl Simulator<Cuda> {
         Self {
             mode: SimulationMode::StateVector,
             fusion_config: None,
-            mgr: Cuda::new_manager(),
+            mgr: Cuda::new_manager(spec),
             spec,
             extra: (),
         }
@@ -470,9 +464,8 @@ impl<B: Backend> Simulator<B> {
         let n_physical = circuit.n_qubits() as u32;
         let (gates, n_sv) = self.prepare_gates(circuit, n_physical)?;
 
-        let skip_noisy = matches!(self.mode, SimulationMode::Trajectory { .. });
         let t0 = Instant::now();
-        let kernel_ids = self.compile_gates(&gates, skip_noisy)?;
+        let kernel_ids = self.compile_gates(&gates)?;
         let compile_time_s = t0.elapsed().as_secs_f64();
 
         match &self.mode {
@@ -542,17 +535,14 @@ impl<B: Backend> Simulator<B> {
         }
     }
 
-    fn compile_gates(
-        &self,
-        gates: &[Arc<QuantumGate>],
-        skip_noisy: bool,
-    ) -> Result<Vec<Option<B::KernelId>>> {
+    fn compile_gates(&self, gates: &[Arc<QuantumGate>]) -> Result<Vec<Option<B::KernelId>>> {
+        let skip_noisy = matches!(self.mode, SimulationMode::Trajectory { .. });
         let mut ids = Vec::with_capacity(gates.len());
         for gate in gates {
             if skip_noisy && !gate.is_unitary() {
                 ids.push(None);
             } else {
-                ids.push(Some(B::generate(&self.mgr, &self.spec, gate)?));
+                ids.push(Some(B::generate(&self.mgr, gate)?));
             }
         }
         Ok(ids)

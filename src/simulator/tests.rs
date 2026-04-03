@@ -1,6 +1,6 @@
 use super::*;
 
-const TEST_QUBITS: u32 = 4;
+const TEST_QUBITS: u32 = 6;
 
 fn test_circuit(gates: Vec<QuantumGate>, measured: &[u32]) -> QuantumCircuit {
     let mut circuit = QuantumCircuit::new(TEST_QUBITS);
@@ -59,9 +59,9 @@ fn density_matrix_trace_preserved() {
 #[test]
 fn from_qasm() {
     let circuit =
-        QuantumCircuit::from_qasm("OPENQASM 2.0; qreg q[4]; h q[0]; cx q[0],q[1]; cx q[2],q[3];")
+        QuantumCircuit::from_qasm("OPENQASM 2.0; qreg q[6]; h q[0]; cx q[0],q[1]; cx q[4],q[5];")
             .unwrap();
-    assert_eq!(circuit.n_qubits(), 4);
+    assert_eq!(circuit.n_qubits(), 6);
     assert_eq!(circuit.len(), 3);
 
     let sim = Simulator::<Cpu>::f64();

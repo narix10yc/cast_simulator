@@ -20,10 +20,8 @@ fn default_spec() -> CudaKernelGenSpec {
 
 #[test]
 fn test_h_gate_emit_ptx() {
-    let mgr = CudaKernelManager::new();
-    let kid = mgr
-        .generate(&hadamard(), default_spec())
-        .expect("generate H kernel");
+    let mgr = CudaKernelManager::new(default_spec());
+    let kid = mgr.generate(&hadamard()).expect("generate H kernel");
     let ptx = mgr.emit_ptx(kid).expect("emit PTX");
     assert!(
         ptx.contains(".visible .entry"),
@@ -33,13 +31,9 @@ fn test_h_gate_emit_ptx() {
 
 #[test]
 fn test_cnot_ptx_differs_from_h() {
-    let mgr = CudaKernelManager::new();
-    let h_kid = mgr
-        .generate(&hadamard(), default_spec())
-        .expect("generate H kernel");
-    let cnot_kid = mgr
-        .generate(&cnot(), default_spec())
-        .expect("generate CNOT kernel");
+    let mgr = CudaKernelManager::new(default_spec());
+    let h_kid = mgr.generate(&hadamard()).expect("generate H kernel");
+    let cnot_kid = mgr.generate(&cnot()).expect("generate CNOT kernel");
     let ptx_h = mgr.emit_ptx(h_kid).expect("emit H PTX");
     let ptx_cnot = mgr.emit_ptx(cnot_kid).expect("emit CNOT PTX");
     assert_ne!(ptx_h, ptx_cnot, "H and CNOT should produce different PTX");
@@ -47,10 +41,8 @@ fn test_cnot_ptx_differs_from_h() {
 
 #[test]
 fn test_emit_ptx_idempotent() {
-    let mgr = CudaKernelManager::new();
-    let kid = mgr
-        .generate(&hadamard(), default_spec())
-        .expect("generate kernel");
+    let mgr = CudaKernelManager::new(default_spec());
+    let kid = mgr.generate(&hadamard()).expect("generate kernel");
     let ptx1 = mgr.emit_ptx(kid).expect("first emit_ptx");
     let ptx2 = mgr.emit_ptx(kid).expect("second emit_ptx");
     assert_eq!(ptx1, ptx2, "emit_ptx should be idempotent");
@@ -58,13 +50,9 @@ fn test_emit_ptx_idempotent() {
 
 #[test]
 fn test_multi_kernel_manager() {
-    let mgr = CudaKernelManager::new();
-    let h_kid = mgr
-        .generate(&hadamard(), default_spec())
-        .expect("generate H");
-    let cnot_kid = mgr
-        .generate(&cnot(), default_spec())
-        .expect("generate CNOT");
+    let mgr = CudaKernelManager::new(default_spec());
+    let h_kid = mgr.generate(&hadamard()).expect("generate H");
+    let cnot_kid = mgr.generate(&cnot()).expect("generate CNOT");
     assert_ne!(h_kid, cnot_kid, "kernel IDs must be distinct");
     let ptx_h = mgr.emit_ptx(h_kid).expect("emit H PTX");
     let ptx_cnot = mgr.emit_ptx(cnot_kid).expect("emit CNOT PTX");
@@ -75,7 +63,7 @@ fn test_multi_kernel_manager() {
 
 #[test]
 fn test_unknown_kernel_id_returns_error() {
-    let mgr = CudaKernelManager::new();
+    let mgr = CudaKernelManager::new(default_spec());
     assert!(
         mgr.emit_ptx(9999).is_none(),
         "emit_ptx with unknown id should fail"
@@ -115,10 +103,8 @@ fn test_statevector_upload_download_roundtrip() {
 
 #[test]
 fn test_h_gate_apply_to_zero_state() {
-    let mgr = CudaKernelManager::new();
-    let kid = mgr
-        .generate(&hadamard(), default_spec())
-        .expect("generate H kernel");
+    let mgr = CudaKernelManager::new(default_spec());
+    let kid = mgr.generate(&hadamard()).expect("generate H kernel");
 
     let mut sv = CudaStatevector::new(1, CudaPrecision::F64).expect("alloc statevector");
     sv.zero().expect("zero");
@@ -135,9 +121,9 @@ fn test_h_gate_apply_to_zero_state() {
 
 #[test]
 fn test_x_gate_apply_to_zero_state() {
-    let mgr = CudaKernelManager::new();
+    let mgr = CudaKernelManager::new(default_spec());
     let kid = mgr
-        .generate(&Arc::new(QuantumGate::x(0)), default_spec())
+        .generate(&Arc::new(QuantumGate::x(0)))
         .expect("generate X kernel");
 
     let mut sv = CudaStatevector::new(1, CudaPrecision::F64).expect("alloc statevector");
@@ -152,10 +138,8 @@ fn test_x_gate_apply_to_zero_state() {
 
 #[test]
 fn test_apply_on_larger_statevector() {
-    let mgr = CudaKernelManager::new();
-    let kid = mgr
-        .generate(&hadamard(), default_spec())
-        .expect("generate H kernel");
+    let mgr = CudaKernelManager::new(default_spec());
+    let kid = mgr.generate(&hadamard()).expect("generate H kernel");
 
     let mut sv = CudaStatevector::new(4, CudaPrecision::F64).expect("alloc statevector");
     sv.zero().expect("zero");
@@ -178,13 +162,11 @@ fn test_apply_on_larger_statevector() {
 fn test_sequential_apply() {
     // Apply X then H on the same statevector via two enqueued launches.
     // X|0⟩ = |1⟩, then H|1⟩ = |−⟩ = (1/√2)|0⟩ − (1/√2)|1⟩.
-    let mgr = CudaKernelManager::new();
+    let mgr = CudaKernelManager::new(default_spec());
     let x_kid = mgr
-        .generate(&Arc::new(QuantumGate::x(0)), default_spec())
+        .generate(&Arc::new(QuantumGate::x(0)))
         .expect("generate X");
-    let h_kid = mgr
-        .generate(&hadamard(), default_spec())
-        .expect("generate H");
+    let h_kid = mgr.generate(&hadamard()).expect("generate H");
 
     let mut sv = CudaStatevector::new(1, CudaPrecision::F64).expect("alloc statevector");
     sv.zero().expect("zero");

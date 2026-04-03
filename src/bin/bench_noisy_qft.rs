@@ -138,13 +138,13 @@ fn run_cpu(graph: &CircuitGraph, n_sv: u32, budget_s: f64) -> Result<(f64, Timin
 
     let spec = CPUKernelGenSpec::f64();
     let n_threads = get_num_threads();
-    let mgr = CpuKernelManager::new();
+    let mgr = CpuKernelManager::new(spec);
     let gates = graph.gates_in_row_order();
 
     let t0 = Instant::now();
     let mut kernel_ids = Vec::with_capacity(gates.len());
     for gate in &gates {
-        kernel_ids.push(mgr.generate(&spec, gate)?);
+        kernel_ids.push(mgr.generate(gate)?);
     }
     let compile_s = t0.elapsed().as_secs_f64();
 
@@ -181,13 +181,13 @@ fn run_cuda(graph: &CircuitGraph, n_sv: u32, budget_s: f64) -> Result<(f64, Timi
         sm_minor,
     };
 
-    let mgr = CudaKernelManager::new();
+    let mgr = CudaKernelManager::new(spec);
     let gates = graph.gates_in_row_order();
 
     let t0 = Instant::now();
     let mut kernel_ids = Vec::with_capacity(gates.len());
     for gate in &gates {
-        kernel_ids.push(mgr.generate(gate, spec)?);
+        kernel_ids.push(mgr.generate(gate)?);
     }
     let compile_s = t0.elapsed().as_secs_f64();
 

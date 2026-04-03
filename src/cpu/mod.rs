@@ -24,3 +24,22 @@ pub fn get_num_threads() -> u32 {
         .filter(|&n| n > 0)
         .unwrap_or_else(|| num_cpus::get() as u32)
 }
+
+// ── SIMD width detection ────────────────────────────────────────────────────
+
+/// Detects the widest SIMD register width supported by the current CPU.
+///
+/// Checks x86 feature flags at runtime:
+/// - AVX-512F → [`SimdWidth::W512`]
+/// - AVX / AVX2 → [`SimdWidth::W256`]
+/// - fallback  → [`SimdWidth::W128`] (SSE2, baseline on x86-64)
+#[cfg(target_arch = "x86_64")]
+pub fn native_simd_width() -> SimdWidth {
+    if is_x86_feature_detected!("avx512f") {
+        SimdWidth::W512
+    } else if is_x86_feature_detected!("avx2") {
+        SimdWidth::W256
+    } else {
+        SimdWidth::W128
+    }
+}

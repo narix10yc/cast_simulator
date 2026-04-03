@@ -16,9 +16,12 @@ pub use rational::Rational;
 mod matrix;
 pub use matrix::ComplexSquareMatrix;
 
+mod noise;
+pub use noise::NoiseModel;
+
 mod gate;
 pub(crate) use gate::compress_bits;
-pub use gate::{NoiseModel, QuantumGate};
+pub use gate::QuantumGate;
 
 mod circuit;
 pub use circuit::QuantumCircuit;

@@ -142,11 +142,31 @@ impl Drop for EventPair {
     }
 }
 
+// ── Kernel deduplication ─────────────────────────────────────────────────────
+
+/// Key capturing every input that affects the compiled CUDA kernel output.
+/// The spec is fixed per manager, so only the gate-specific fields vary.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct DedupKey {
+    matrix_bytes: Vec<u8>,
+    qubits: Vec<u32>,
+}
+
+impl DedupKey {
+    fn new(gate: &QuantumGate) -> Self {
+        Self {
+            matrix_bytes: gate.matrix().as_bytes().to_vec(),
+            qubits: gate.qubits().to_vec(),
+        }
+    }
+}
+
 // ── ManagerInner ─────────────────────────────────────────────────────────────
 
 struct ManagerInner {
     kernels: HashMap<CudaKernelId, Arc<CudaKernel>>,
     next_id: u64,
+    dedup: HashMap<DedupKey, CudaKernelId>,
     /// Ordered queue of apply requests not yet launched onto the stream.
     #[cfg(feature = "cuda")]
     pending: VecDeque<PendingApply>,
@@ -438,9 +458,9 @@ pub struct SyncStats {
 /// ```ignore
 /// use std::sync::Arc;
 ///
-/// let mgr = CudaKernelManager::new();
+/// let mgr = CudaKernelManager::new(spec);
 /// let gate = Arc::new(QuantumGate::h(0));
-/// let kid = mgr.generate(&gate, spec)?;   // LLVM IR → PTX (→ cubin with cuda feature)
+/// let kid = mgr.generate(&gate)?;   // LLVM IR → PTX (→ cubin with cuda feature)
 /// mgr.apply(kid, &mut statevector)?;      // queue for launch (non-blocking)
 /// mgr.sync()?;                            // flush queue, then wait for GPU
 /// let amps = statevector.download()?;
@@ -461,6 +481,7 @@ pub struct SyncStats {
 /// A `CudaStatevector` passed to `apply` must remain valid (not dropped) until
 /// the next call to `sync`.
 pub struct CudaKernelManager {
+    spec: CudaKernelGenSpec,
     inner: Mutex<ManagerInner>,
 }
 
@@ -473,19 +494,16 @@ impl fmt::Debug for CudaKernelManager {
     }
 }
 
-impl Default for CudaKernelManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CudaKernelManager {
-    /// Creates a new manager. Does not initialise the CUDA driver.
-    pub fn new() -> Self {
+    /// Creates a new manager bound to the given spec.
+    /// Does not initialise the CUDA driver.
+    pub fn new(spec: CudaKernelGenSpec) -> Self {
         Self {
+            spec,
             inner: Mutex::new(ManagerInner {
                 kernels: HashMap::new(),
                 next_id: 0,
+                dedup: HashMap::new(),
                 #[cfg(feature = "cuda")]
                 pending: VecDeque::new(),
                 #[cfg(feature = "cuda")]
@@ -498,6 +516,11 @@ impl CudaKernelManager {
         }
     }
 
+    /// Returns the spec this manager was created with.
+    pub fn spec(&self) -> &CudaKernelGenSpec {
+        &self.spec
+    }
+
     /// Generates a CUDA kernel for `gate`.
     ///
     /// Runs LLVM IR generation → O1 optimisation → NVPTX PTX emission on the
@@ -505,11 +528,17 @@ impl CudaKernelManager {
     /// enabled the PTX is further compiled to device-native cubin via the
     /// CUDA JIT linker.  Multiple threads may call `generate` concurrently;
     /// the manager lock is only held briefly at the end to insert the result.
-    pub fn generate(
-        &self,
-        gate: &Arc<QuantumGate>,
-        spec: CudaKernelGenSpec,
-    ) -> anyhow::Result<CudaKernelId> {
+    pub fn generate(&self, gate: &Arc<QuantumGate>) -> anyhow::Result<CudaKernelId> {
+        // ── Dedup check ──────────────────────────────────────────────────
+        let spec = self.spec;
+        let key = DedupKey::new(gate);
+        {
+            let guard = self.inner.lock().unwrap();
+            if let Some(&id) = guard.dedup.get(&key) {
+                return Ok(id);
+            }
+        }
+
         let gate = gate.clone();
         let ffi_matrix: Vec<ffi::FfiComplex64> = gate
             .matrix()
@@ -616,8 +645,15 @@ impl CudaKernelManager {
 
         // ── Insert under lock (brief) ─────────────────────────────────────
         let mut guard = self.inner.lock().unwrap();
+
+        // Re-check dedup: another thread may have compiled the same gate.
+        if let Some(&existing_id) = guard.dedup.get(&key) {
+            return Ok(existing_id);
+        }
+
         let id = guard.next_id;
         guard.next_id += 1;
+        guard.dedup.insert(key, id);
         guard.kernels.insert(id, kernel);
         log::info!(
             "cuda: manager registered kernel {} ({} gate qubits, {:?})",

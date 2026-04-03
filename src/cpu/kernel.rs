@@ -28,22 +28,22 @@ pub struct CPUKernelGenSpec {
 }
 
 impl CPUKernelGenSpec {
-    /// Sensible defaults for single-precision (F32, W256, ImmValue).
+    /// Sensible defaults for single-precision (native SIMD, ImmValue).
     pub fn f32() -> Self {
         Self {
             precision: Precision::F32,
-            simd_width: SimdWidth::W256,
+            simd_width: super::native_simd_width(),
             mode: MatrixLoadMode::ImmValue,
             ztol: 1e-6,
             otol: 1e-6,
         }
     }
 
-    /// Sensible defaults for double-precision (F64, W256, ImmValue).
+    /// Sensible defaults for double-precision (native SIMD, ImmValue).
     pub fn f64() -> Self {
         Self {
             precision: Precision::F64,
-            simd_width: SimdWidth::W256,
+            simd_width: super::native_simd_width(),
             mode: MatrixLoadMode::ImmValue,
             ztol: 1e-12,
             otol: 1e-12,
@@ -365,9 +365,72 @@ impl Drop for KernelEntry {
 // serialised through the manager's Mutex.
 unsafe impl Send for KernelEntry {}
 
+// ── Kernel deduplication ─────────────────────────────────────────────────────
+
+/// Key capturing every input that affects the compiled kernel output.
+///
+/// The spec is fixed per manager, so only the gate-specific fields vary.
+///
+/// - **ImmValue** mode bakes matrix values as immediates → key uses raw bytes.
+/// - **StackLoad** mode loads values at runtime → key uses the element
+///   classification (zero / +1 / −1 / other) since only the sparsity pattern
+///   is baked into the generated code.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct DedupKey {
+    /// Raw matrix bytes (ImmValue) or per-scalar classification (StackLoad).
+    matrix_fingerprint: Vec<u8>,
+    qubits: Vec<u32>,
+}
+
+impl DedupKey {
+    fn new(spec: &CPUKernelGenSpec, gate: &QuantumGate) -> Self {
+        let matrix_fingerprint = match spec.mode {
+            MatrixLoadMode::ImmValue => matrix_bytes(gate),
+            MatrixLoadMode::StackLoad => matrix_signature(gate, spec.ztol, spec.otol),
+        };
+        Self {
+            matrix_fingerprint,
+            qubits: gate.qubits().to_vec(),
+        }
+    }
+}
+
+fn matrix_bytes(gate: &QuantumGate) -> Vec<u8> {
+    gate.matrix().as_bytes().to_vec()
+}
+
+/// Classify each real/imaginary scalar: 0 = zero, 1 = +1, 2 = −1, 3 = other.
+fn classify_scalar(val: f64, ztol: f64, otol: f64) -> u8 {
+    if val.abs() < ztol {
+        0
+    } else if (val - 1.0).abs() < otol {
+        1
+    } else if (val + 1.0).abs() < otol {
+        2
+    } else {
+        3
+    }
+}
+
+/// Per-scalar classification of the gate matrix, capturing the sparsity pattern
+/// that determines generated code in StackLoad mode.
+fn matrix_signature(gate: &QuantumGate, ztol: f64, otol: f64) -> Vec<u8> {
+    gate.matrix()
+        .data()
+        .iter()
+        .flat_map(|z| {
+            [
+                classify_scalar(z.re, ztol, otol),
+                classify_scalar(z.im, ztol, otol),
+            ]
+        })
+        .collect()
+}
+
 struct CpuManagerInner {
     next_id: KernelId,
     entries: HashMap<KernelId, KernelEntry>,
+    dedup: HashMap<DedupKey, KernelId>,
 }
 
 /// Unified manager for CPU kernel generation, JIT compilation, and execution.
@@ -377,9 +440,9 @@ struct CpuManagerInner {
 /// ```ignore
 /// use std::sync::Arc;
 ///
-/// let mgr = CpuKernelManager::new();
+/// let mgr = CpuKernelManager::new(spec);
 /// let gate = Arc::new(QuantumGate::h(0));
-/// let kid = mgr.generate(&spec, &gate)?;   // LLVM IR → O1 → native JIT
+/// let kid = mgr.generate(&gate)?;   // LLVM IR → O1 → native JIT
 /// mgr.apply(kid, &mut statevector, n_threads)?;
 /// ```
 ///
@@ -392,24 +455,26 @@ struct CpuManagerInner {
 /// Multiple threads may call `generate` concurrently.
 /// [`apply`](Self::apply) dispatches work across a thread pool synchronously.
 pub struct CpuKernelManager {
+    spec: CPUKernelGenSpec,
     inner: std::sync::Mutex<CpuManagerInner>,
 }
 
-impl Default for CpuKernelManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CpuKernelManager {
-    /// Creates a new kernel manager.
-    pub fn new() -> Self {
+    /// Creates a new kernel manager bound to the given spec.
+    pub fn new(spec: CPUKernelGenSpec) -> Self {
         Self {
+            spec,
             inner: std::sync::Mutex::new(CpuManagerInner {
                 next_id: 0,
                 entries: HashMap::new(),
+                dedup: HashMap::new(),
             }),
         }
+    }
+
+    /// Returns the spec this manager was created with.
+    pub fn spec(&self) -> &CPUKernelGenSpec {
+        &self.spec
     }
 
     /// Generates, optimises, and JIT-compiles a gate kernel.
@@ -420,12 +485,8 @@ impl CpuKernelManager {
     /// [`gate`](Self::gate).
     ///
     /// Multiple threads may call `generate` concurrently.
-    pub fn generate(
-        &self,
-        spec: &CPUKernelGenSpec,
-        gate: &Arc<QuantumGate>,
-    ) -> anyhow::Result<KernelId> {
-        self.generate_inner(spec, gate.clone(), false, false)
+    pub fn generate(&self, gate: &Arc<QuantumGate>) -> anyhow::Result<KernelId> {
+        self.generate_inner(gate.clone(), false, false)
     }
 
     /// Like [`generate`](Self::generate), but also captures diagnostics.
@@ -434,21 +495,33 @@ impl CpuKernelManager {
     /// - `request_asm`: capture native assembly (retrieve via [`emit_asm`](Self::emit_asm)).
     pub fn generate_with_diagnostics(
         &self,
-        spec: &CPUKernelGenSpec,
         gate: &Arc<QuantumGate>,
         request_llvm_ir: bool,
         request_asm: bool,
     ) -> anyhow::Result<KernelId> {
-        self.generate_inner(spec, gate.clone(), request_llvm_ir, request_asm)
+        self.generate_inner(gate.clone(), request_llvm_ir, request_asm)
     }
 
     fn generate_inner(
         &self,
-        spec: &CPUKernelGenSpec,
         gate: Arc<QuantumGate>,
         request_llvm_ir: bool,
         request_asm: bool,
     ) -> anyhow::Result<KernelId> {
+        // ── Dedup check (skip for diagnostic calls) ──────────────────────
+        let spec = &self.spec;
+        let want_dedup = !request_llvm_ir && !request_asm;
+        let key = if want_dedup {
+            let k = DedupKey::new(spec, &gate);
+            let guard = self.inner.lock().unwrap();
+            if let Some(&id) = guard.dedup.get(&k) {
+                return Ok(id);
+            }
+            Some(k)
+        } else {
+            None
+        };
+
         // Extract FFI data upfront so the borrow on `gate` is released
         // before we move the Arc into KernelEntry.
         let ffi_matrix: Vec<ffi::c64> = gate
@@ -564,8 +637,21 @@ impl CpuKernelManager {
 
         // ── Insert under lock (brief) ─────────────────────────────────────
         let mut guard = self.inner.lock().unwrap();
+
+        // Re-check dedup: another thread may have compiled the same gate
+        // while we were running the LLVM pipeline.
+        if let Some(ref key) = key {
+            if let Some(&existing_id) = guard.dedup.get(key) {
+                // entry (and its JIT session) drops after guard is released.
+                return Ok(existing_id);
+            }
+        }
+
         let id = guard.next_id;
         guard.next_id += 1;
+        if let Some(key) = key {
+            guard.dedup.insert(key, id);
+        }
         guard.entries.insert(
             id,
             KernelEntry {

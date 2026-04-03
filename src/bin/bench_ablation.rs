@@ -145,12 +145,12 @@ fn run_cpu(
         spec.otol = 0.0;
     }
     let n_threads = get_num_threads();
-    let mgr = CpuKernelManager::new();
+    let mgr = CpuKernelManager::new(spec);
 
     let t0 = Instant::now();
     let mut kernel_ids = Vec::with_capacity(gates.len());
     for gate in gates {
-        kernel_ids.push(mgr.generate(&spec, gate)?);
+        kernel_ids.push(mgr.generate(gate)?);
     }
     let compile_s = t0.elapsed().as_secs_f64();
 
@@ -196,12 +196,12 @@ fn run_cuda(
         sm_minor,
     };
 
-    let mgr = CudaKernelManager::new();
+    let mgr = CudaKernelManager::new(spec);
 
     let t0 = Instant::now();
     let mut kernel_ids = Vec::with_capacity(gates.len());
     for gate in gates {
-        kernel_ids.push(mgr.generate(gate, spec)?);
+        kernel_ids.push(mgr.generate(gate)?);
     }
     let compile_s = t0.elapsed().as_secs_f64();
 

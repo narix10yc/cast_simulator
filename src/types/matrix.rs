@@ -233,16 +233,20 @@ impl ComplexSquareMatrix {
     pub fn kron(&self, other: &Self) -> Self {
         let m = self.edge_size;
         let n = other.edge_size;
-        let mut out = Self::zeros(m * n);
+        let mn = m * n;
+        // SAFETY: every element is written exactly once by the four nested loops.
+        let mut out = unsafe { Self::uninit(mn) };
+        let ptr = out.data_ptr_mut();
         for i in 0..m {
-            for j in 0..m {
-                let a = self.get(i, j);
-                if a == Complex::default() {
-                    continue;
-                }
-                for k in 0..n {
+            for k in 0..n {
+                let out_row = i * n + k;
+                for j in 0..m {
+                    let a = self.get(i, j);
                     for l in 0..n {
-                        out.set(i * n + k, j * n + l, a * other.get(k, l));
+                        let out_col = j * n + l;
+                        unsafe {
+                            ptr.add(out_row * mn + out_col).write(a * other.get(k, l));
+                        }
                     }
                 }
             }
@@ -383,6 +387,17 @@ impl ComplexSquareMatrix {
         &self.data
     }
 
+    /// Returns the raw bytes of the element buffer.
+    ///
+    /// Useful for content-based hashing and deduplication keys.
+    pub fn as_bytes(&self) -> &[u8] {
+        let ptr = self.data.as_ptr() as *const u8;
+        let len = self.data.len() * std::mem::size_of::<Complex>();
+        // SAFETY: Complex64 is repr(C) with two f64 fields; we view the
+        // existing slice as bytes within its lifetime.
+        unsafe { std::slice::from_raw_parts(ptr, len) }
+    }
+
     /// Returns a mutable slice over the flat, row-major element buffer.
     pub fn data_mut(&mut self) -> &mut [Complex] {
         &mut self.data
@@ -441,7 +456,9 @@ impl ComplexSquareMatrix {
     pub fn matmul(&self, other: &Self) -> Self {
         assert_eq!(self.edge_size, other.edge_size, "matrix size mismatch");
         let n = self.edge_size;
-        let mut out = Self::zeros(n);
+        // SAFETY: every element [row * n + col] is written exactly once below.
+        let mut out = unsafe { Self::uninit(n) };
+        let ptr = out.data_ptr_mut();
 
         for row in 0..n {
             for col in 0..n {
@@ -449,10 +466,24 @@ impl ComplexSquareMatrix {
                 for k in 0..n {
                     acc += self.get(row, k) * other.get(k, col);
                 }
-                out.set(row, col, acc);
+                unsafe { ptr.add(row * n + col).write(acc) };
             }
         }
 
+        out
+    }
+
+    /// Returns the conjugate-transpose (adjoint) `M†`:  `out[i,j] = conj(self[j,i])`.
+    pub fn adjoint(&self) -> Self {
+        let n = self.edge_size;
+        // SAFETY: every element [col * n + row] is written exactly once below.
+        let mut out = unsafe { Self::uninit(n) };
+        let ptr = out.data_ptr_mut();
+        for row in 0..n {
+            for col in 0..n {
+                unsafe { ptr.add(col * n + row).write(self.get(row, col).conj()) };
+            }
+        }
         out
     }
 
@@ -560,17 +591,6 @@ mod tests {
     use crate::types::Complex;
     use rand::{rngs::StdRng, SeedableRng};
 
-    fn conjugate_transpose(matrix: &ComplexSquareMatrix) -> ComplexSquareMatrix {
-        let n = matrix.edge_size();
-        let mut out = ComplexSquareMatrix::zeros(n);
-        for row in 0..n {
-            for col in 0..n {
-                out.set(col, row, matrix.get(row, col).conj());
-            }
-        }
-        out
-    }
-
     #[test]
     fn constructs_identity_matrix() {
         let matrix = ComplexSquareMatrix::eye(3);
@@ -649,7 +669,7 @@ mod tests {
     #[test]
     fn random_unitary_is_approximately_unitary() {
         let matrix = ComplexSquareMatrix::random_unitary(4);
-        let matrix_dag = conjugate_transpose(&matrix);
+        let matrix_dag = matrix.adjoint();
         let gram = matrix.matmul(&matrix_dag);
         let identity = ComplexSquareMatrix::eye(4);
 

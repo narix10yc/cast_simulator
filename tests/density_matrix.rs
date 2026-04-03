@@ -35,13 +35,13 @@ fn run_dm(gates: &[QuantumGate], n_phys: u32) -> Vec<(f64, f64)> {
 
     // DM initial state: |0…0⟩⟨0…0| → only element 0 is 1.
     let spec = cpu_spec();
-    let mgr = CpuKernelManager::new();
+    let mgr = CpuKernelManager::new(spec);
     let mut sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
     sv.set_amp(0, Complex::new(1.0, 0.0));
 
     for gate in gates {
         let kid = mgr
-            .generate(&spec, &Arc::new(gate.clone()))
+            .generate(&Arc::new(gate.clone()))
             .unwrap_or_else(|e| panic!("generate: {e}"));
         mgr.apply(kid, &mut sv, 1)
             .unwrap_or_else(|e| panic!("apply: {e}"));
@@ -136,10 +136,10 @@ fn noiseless_dm_diagonal_matches_sv_probabilities() {
 
     // Pure SV simulation.
     let spec = cpu_spec();
-    let mgr = CpuKernelManager::new();
+    let mgr = CpuKernelManager::new(spec);
     let mut sv = CPUStatevector::new(n_phys, spec.precision, spec.simd_width);
     sv.set_amp(0, Complex::new(1.0, 0.0));
-    let kid = mgr.generate(&spec, &Arc::new(QuantumGate::h(0))).unwrap();
+    let kid = mgr.generate(&Arc::new(QuantumGate::h(0))).unwrap();
     mgr.apply(kid, &mut sv, 1).unwrap();
     let probs: Vec<f64> = sv
         .amplitudes()
@@ -163,8 +163,10 @@ fn noiseless_dm_diagonal_matches_sv_probabilities() {
 // ── Fusion + channels ────────────────────────────────────────────────────────
 
 #[test]
-fn noisy_gates_survive_fusion() {
-    // Fusion must not absorb noisy gates.
+fn noisy_gates_fuse_and_preserve_trace() {
+    // Noisy gates participate in fusion; the fused circuit must still
+    // preserve DM trace and agree with the unfused result.
+    let n_phys: u32 = 3;
     let gates: Vec<QuantumGate> = vec![
         QuantumGate::h(0),
         QuantumGate::depolarizing(0, 0.1),
@@ -173,19 +175,43 @@ fn noisy_gates_survive_fusion() {
         QuantumGate::depolarizing(1, 0.1),
     ];
 
-    let n_noisy_before = gates.iter().filter(|g| !g.is_unitary()).count();
-
+    // Fusion should reduce gate count (noisy gates are absorbed).
     let mut cg = to_graph(&gates);
     let config = FusionConfig::size_only(3);
     fusion::optimize(&mut cg, &config);
-
     let after = cg.gates_in_row_order();
-    let n_noisy_after = after.iter().filter(|g| !g.is_unitary()).count();
-
-    assert_eq!(
-        n_noisy_before, n_noisy_after,
-        "fusion changed noisy gate count: {n_noisy_before} → {n_noisy_after}"
+    assert!(
+        after.len() < gates.len(),
+        "expected fusion to reduce gate count"
     );
+
+    // Unfused DM.
+    let dm_unfused = to_dm_gates(&gates, n_phys);
+    let result_unfused = run_dm(&dm_unfused, n_phys);
+    let trace_unfused = dm_trace(&result_unfused, n_phys);
+    assert!(
+        (trace_unfused - 1.0).abs() < TOL,
+        "unfused trace = {trace_unfused}"
+    );
+
+    // Fused DM.
+    let fused: Vec<QuantumGate> = after.iter().map(|a| a.as_ref().clone()).collect();
+    let dm_fused = to_dm_gates(&fused, n_phys);
+    let result_fused = run_dm(&dm_fused, n_phys);
+    let trace_fused = dm_trace(&result_fused, n_phys);
+    assert!(
+        (trace_fused - 1.0).abs() < TOL,
+        "fused trace = {trace_fused}"
+    );
+
+    // Results must agree.
+    for (i, (&(ru, iu), &(rf, ifu))) in result_unfused.iter().zip(result_fused.iter()).enumerate() {
+        let diff = ((ru - rf).powi(2) + (iu - ifu).powi(2)).sqrt();
+        assert!(
+            diff < TOL,
+            "dm[{i}]: unfused=({ru:.4e},{iu:.4e}) fused=({rf:.4e},{ifu:.4e}) diff={diff:.2e}"
+        );
+    }
 }
 
 #[test]

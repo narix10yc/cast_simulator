@@ -1,6 +1,6 @@
 /// Floating-point precision used for the statevector and generated kernels.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Precision {
     F32,
     F64,

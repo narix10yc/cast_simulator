@@ -102,10 +102,10 @@ fn ordered_gates(cg: &CircuitGraph) -> Vec<Arc<QuantumGate>> {
 /// Apply `gates` sequentially on the CPU JIT backend.
 fn run_cpu(gates: &[Arc<QuantumGate>], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let spec = cpu_spec();
-    let mgr = CpuKernelManager::new();
+    let mgr = CpuKernelManager::new(spec);
     let kids: Vec<_> = gates
         .iter()
-        .map(|g| mgr.generate(&spec, g).expect("cpu: generate"))
+        .map(|g| mgr.generate(g).expect("cpu: generate"))
         .collect();
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
@@ -120,11 +120,11 @@ fn run_cpu(gates: &[Arc<QuantumGate>], n_qubits: u32, init: &[(f64, f64)]) -> Ve
 
 /// Apply `gates` via the CUDA manager (all queued then synced in one shot).
 fn run_cuda(gates: &[Arc<QuantumGate>], n_qubits: u32, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
-    let mgr = CudaKernelManager::new();
     let spec = cuda_spec();
+    let mgr = CudaKernelManager::new(spec);
     let kids: Vec<_> = gates
         .iter()
-        .map(|g| mgr.generate(g, spec).expect("cuda: generate"))
+        .map(|g| mgr.generate(g).expect("cuda: generate"))
         .collect();
 
     let mut sv = CudaStatevector::new(n_qubits, CudaPrecision::F64).expect("cuda: alloc");
@@ -254,11 +254,8 @@ fn lru_repeating_3kernel_pattern_12q() {
 
     // ── CPU reference ─────────────────────────────────────────────────────────
     let spec = cpu_spec();
-    let cpu_mgr = CpuKernelManager::new();
-    let cpu_kids: Vec<_> = gates
-        .iter()
-        .map(|g| cpu_mgr.generate(&spec, g).unwrap())
-        .collect();
+    let cpu_mgr = CpuKernelManager::new(spec);
+    let cpu_kids: Vec<_> = gates.iter().map(|g| cpu_mgr.generate(g).unwrap()).collect();
     let mut cpu_sv = CPUStatevector::new(n, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -273,12 +270,9 @@ fn lru_repeating_3kernel_pattern_12q() {
         .collect();
 
     // ── CUDA ──────────────────────────────────────────────────────────────────
-    let mgr = CudaKernelManager::new();
     let spec = cuda_spec();
-    let cuda_kids: Vec<_> = gates
-        .iter()
-        .map(|g| mgr.generate(g, spec).unwrap())
-        .collect();
+    let mgr = CudaKernelManager::new(spec);
+    let cuda_kids: Vec<_> = gates.iter().map(|g| mgr.generate(g).unwrap()).collect();
     let mut sv = CudaStatevector::new(n, CudaPrecision::F64).unwrap();
     sv.upload(&init).unwrap();
     for &idx in &seq {
@@ -303,11 +297,11 @@ fn lru_split_sync_12q() {
     let cpu = run_cpu(&gates, n, &init);
 
     // CUDA: first half, sync, second half, sync.
-    let mgr = CudaKernelManager::new();
     let spec = cuda_spec();
+    let mgr = CudaKernelManager::new(spec);
     let kids: Vec<_> = gates
         .iter()
-        .map(|g| mgr.generate(g, spec).expect("cuda: generate"))
+        .map(|g| mgr.generate(g).expect("cuda: generate"))
         .collect();
     let mut sv = CudaStatevector::new(n, CudaPrecision::F64).unwrap();
     sv.upload(&init).unwrap();

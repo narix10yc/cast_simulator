@@ -201,11 +201,12 @@ mod tests {
     fn qft_on_computational_basis_produces_uniform() {
         // QFT|0⟩ = uniform superposition = H⊗n|0⟩
         // All 2^n amplitudes should have magnitude 1/√(2^n).
-        let circuit = QuantumCircuit::qft(4, true);
+        let n = 8u32;
+        let circuit = QuantumCircuit::qft(n, true);
         let sim = Simulator::<Cpu>::f64();
         let result = sim.run(&circuit).unwrap();
         let pops = result.state.unwrap().populations();
-        let expected = 1.0 / 16.0; // 1/2^4
+        let expected = 1.0 / (1u64 << n) as f64;
         for (i, &p) in pops.iter().enumerate() {
             assert!(
                 (p - expected).abs() < 1e-10,
@@ -219,7 +220,7 @@ mod tests {
         // QFT|k⟩ has uniform magnitudes but different phases.
         // The trailing swaps bit-reverse the amplitude indices.
         // Verify: amps_swap[j] == amps_noswap[bit_reverse(j)].
-        let n = 4u32;
+        let n = 8u32;
         let sim = Simulator::<Cpu>::f64();
 
         let mut c_swap = QuantumCircuit::new(n);
@@ -264,7 +265,7 @@ mod tests {
         // (QFT_swap)^2 on |0⟩ maps back to a computational basis state.
         // Easier check: QFT(no-swap) twice = bit-reversal permutation,
         // so QFT(no-swap)^2 on |0...0⟩ = |0...0⟩ (since 0 reversed is 0).
-        let n = 4u32;
+        let n = 8u32;
         let qft_gates = QuantumCircuit::qft(n, false);
 
         let mut circuit = QuantumCircuit::new(n);
@@ -279,7 +280,7 @@ mod tests {
         let sim = Simulator::<Cpu>::f64();
         let pops = sim.run(&circuit).unwrap().state.unwrap().populations();
 
-        // QFT(no-swap)^2 is bit-reversal. |0000⟩ reversed = |0000⟩,
+        // QFT(no-swap)^2 is bit-reversal. |00...0⟩ reversed = |00...0⟩,
         // so population should be concentrated on |0⟩.
         assert!(
             pops[0] > 0.99,

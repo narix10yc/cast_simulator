@@ -73,8 +73,8 @@ fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let spec = cpu_spec();
     let gate = Arc::new(gate.clone());
 
-    let mgr = CpuKernelManager::new();
-    let kid = mgr.generate(&spec, &gate).expect("cpu: generate kernel");
+    let mgr = CpuKernelManager::new(spec);
+    let kid = mgr.generate(&gate).expect("cpu: generate kernel");
 
     let mut sv = CPUStatevector::new(n_sv_qubits, spec.precision, spec.simd_width);
     for (idx, &(re, im)) in init.iter().enumerate() {
@@ -89,10 +89,8 @@ fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
 fn apply_cuda(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let n_sv_qubits = init.len().trailing_zeros();
     let gate = Arc::new(gate.clone());
-    let mgr = CudaKernelManager::new();
-    let kid = mgr
-        .generate(&gate, cuda_spec())
-        .expect("cuda: generate kernel");
+    let mgr = CudaKernelManager::new(cuda_spec());
+    let kid = mgr.generate(&gate).expect("cuda: generate kernel");
 
     let mut sv = CudaStatevector::new(n_sv_qubits as u32, CudaPrecision::F64)
         .expect("cuda: alloc statevector");
@@ -245,11 +243,11 @@ fn compare_sequential_h_then_x() {
 
     // CPU: H then X on qubit 0.
     let h_spec = cpu_spec();
-    let cpu_mgr = CpuKernelManager::new();
+    let cpu_mgr = CpuKernelManager::new(h_spec);
     let h_gate = Arc::new(QuantumGate::h(0));
     let x_gate = Arc::new(QuantumGate::x(0));
-    let h_cpu = cpu_mgr.generate(&h_spec, &h_gate).unwrap();
-    let x_cpu = cpu_mgr.generate(&h_spec, &x_gate).unwrap();
+    let h_cpu = cpu_mgr.generate(&h_gate).unwrap();
+    let x_cpu = cpu_mgr.generate(&x_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, h_spec.precision, h_spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -263,13 +261,9 @@ fn compare_sequential_h_then_x() {
         .collect();
 
     // CUDA: H then X enqueued on the same stream.
-    let mgr = CudaKernelManager::new();
-    let h_kid = mgr
-        .generate(&Arc::new(QuantumGate::h(0)), cuda_spec())
-        .unwrap();
-    let x_kid = mgr
-        .generate(&Arc::new(QuantumGate::x(0)), cuda_spec())
-        .unwrap();
+    let mgr = CudaKernelManager::new(cuda_spec());
+    let h_kid = mgr.generate(&Arc::new(QuantumGate::h(0))).unwrap();
+    let x_kid = mgr.generate(&Arc::new(QuantumGate::x(0))).unwrap();
     let mut cuda_sv = CudaStatevector::new(n_sv as u32, CudaPrecision::F64).unwrap();
     cuda_sv.upload(&init).unwrap();
     mgr.apply(h_kid, &mut cuda_sv).unwrap();
@@ -287,9 +281,9 @@ fn compare_h_squared_is_identity() {
 
     // CPU: H^2
     let spec = cpu_spec();
-    let cpu_mgr = CpuKernelManager::new();
+    let cpu_mgr = CpuKernelManager::new(spec);
     let h_gate = Arc::new(QuantumGate::h(0));
-    let kid = cpu_mgr.generate(&spec, &h_gate).unwrap();
+    let kid = cpu_mgr.generate(&h_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -303,10 +297,8 @@ fn compare_h_squared_is_identity() {
         .collect();
 
     // CUDA: H^2 — apply the same kernel twice.
-    let mgr = CudaKernelManager::new();
-    let h_kid = mgr
-        .generate(&Arc::new(QuantumGate::h(0)), cuda_spec())
-        .unwrap();
+    let mgr = CudaKernelManager::new(cuda_spec());
+    let h_kid = mgr.generate(&Arc::new(QuantumGate::h(0))).unwrap();
     let mut cuda_sv = CudaStatevector::new(n_sv as u32, CudaPrecision::F64).unwrap();
     cuda_sv.upload(&init).unwrap();
     mgr.apply(h_kid, &mut cuda_sv).unwrap();
@@ -361,11 +353,11 @@ fn compare_multi_kernel_same_manager() {
 
     // CPU: H on q0, then CX(0,1).
     let spec = cpu_spec();
-    let cpu_mgr = CpuKernelManager::new();
+    let cpu_mgr = CpuKernelManager::new(spec);
     let h_gate = Arc::new(QuantumGate::h(0));
     let cx_gate = Arc::new(QuantumGate::cx(0, 1));
-    let h_cpu = cpu_mgr.generate(&spec, &h_gate).unwrap();
-    let cx_cpu = cpu_mgr.generate(&spec, &cx_gate).unwrap();
+    let h_cpu = cpu_mgr.generate(&h_gate).unwrap();
+    let cx_cpu = cpu_mgr.generate(&cx_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -379,13 +371,9 @@ fn compare_multi_kernel_same_manager() {
         .collect();
 
     // CUDA: H and CX in one manager, enqueued in order.
-    let mgr = CudaKernelManager::new();
-    let h_kid = mgr
-        .generate(&Arc::new(QuantumGate::h(0)), cuda_spec())
-        .unwrap();
-    let cx_kid = mgr
-        .generate(&Arc::new(QuantumGate::cx(0, 1)), cuda_spec())
-        .unwrap();
+    let mgr = CudaKernelManager::new(cuda_spec());
+    let h_kid = mgr.generate(&Arc::new(QuantumGate::h(0))).unwrap();
+    let cx_kid = mgr.generate(&Arc::new(QuantumGate::cx(0, 1))).unwrap();
     let mut cuda_sv = CudaStatevector::new(n_sv, CudaPrecision::F64).unwrap();
     cuda_sv.upload(&init).unwrap();
     mgr.apply(h_kid, &mut cuda_sv).unwrap();
@@ -415,10 +403,8 @@ fn apply_cpu_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
         otol: 1e-6,
     };
     let gate = Arc::new(gate.clone());
-    let mgr = CpuKernelManager::new();
-    let kid = mgr
-        .generate(&spec, &gate)
-        .expect("cpu f32: generate kernel");
+    let mgr = CpuKernelManager::new(spec);
+    let kid = mgr.generate(&gate).expect("cpu f32: generate kernel");
     let mut sv = CPUStatevector::new(n_sv_qubits, spec.precision, spec.simd_width);
     for (idx, &(re, im)) in init.iter().enumerate() {
         sv.set_amp(idx, Complex::new(re, im));
@@ -438,8 +424,8 @@ fn apply_cuda_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
         sm_minor,
     };
     let gate = Arc::new(gate.clone());
-    let mgr = CudaKernelManager::new();
-    let kid = mgr.generate(&gate, spec).expect("cuda f32: generate");
+    let mgr = CudaKernelManager::new(spec);
+    let kid = mgr.generate(&gate).expect("cuda f32: generate");
     let mut sv =
         CudaStatevector::new(n_sv_qubits as u32, CudaPrecision::F32).expect("cuda f32: alloc");
     sv.upload(init).expect("cuda f32: upload");

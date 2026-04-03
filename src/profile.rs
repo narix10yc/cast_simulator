@@ -406,7 +406,7 @@ pub fn measure_cpu(
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     sv.initialize();
-    let mgr = CpuKernelManager::new();
+    let mgr = CpuKernelManager::new(*spec);
 
     let config = ProfileConfig {
         device: Device::Cpu {
@@ -419,7 +419,7 @@ pub fn measure_cpu(
 
     measure(config, n_qubits, scalar_bytes, budget_s, |gate, budget| {
         let gate = Arc::new(gate.clone());
-        let kid = mgr.generate(spec, &gate)?;
+        let kid = mgr.generate(&gate)?;
         let timing = mgr.time_adaptive(kid, &mut sv, n_threads, budget)?;
         Ok(timing.mean_s)
     })
@@ -439,7 +439,7 @@ pub fn measure_cuda(
     use crate::cuda::{CudaKernelManager, CudaStatevector};
 
     let scalar_bytes = spec.precision.scalar_bytes();
-    let mgr = CudaKernelManager::new();
+    let mgr = CudaKernelManager::new(*spec);
     let mut sv = CudaStatevector::new(n_qubits, spec.precision)?;
     sv.zero()?;
 
@@ -455,7 +455,7 @@ pub fn measure_cuda(
 
     measure(config, n_qubits, scalar_bytes, budget_s, |gate, budget| {
         let gate = Arc::new(gate.clone());
-        let kid = mgr.generate(&gate, *spec)?;
+        let kid = mgr.generate(&gate)?;
         let timing = mgr.time_adaptive(kid, &mut sv, budget)?;
         Ok(timing.mean_s)
     })

@@ -84,17 +84,17 @@ mod tests {
     use crate::types::QuantumGate;
     use std::sync::Arc;
 
-    /// Helper: build a 4-qubit SV with Bell state on qubits 0,1:
-    /// (|00⟩+|11⟩)/√2 ⊗ |00⟩ via H(0) + CX(0,1).
+    /// Helper: build a 6-qubit SV with Bell state on qubits 0,1:
+    /// (|00⟩+|11⟩)/√2 ⊗ |0000⟩ via H(0) + CX(0,1).
     fn bell_state_sv() -> CPUStatevector {
         let spec = CPUKernelGenSpec::f64();
-        let mgr = CpuKernelManager::new();
-        let mut sv = CPUStatevector::new(4, spec.precision, spec.simd_width);
+        let mgr = CpuKernelManager::new(spec);
+        let mut sv = CPUStatevector::new(6, spec.precision, spec.simd_width);
         sv.initialize();
         let h = Arc::new(QuantumGate::h(0));
         let cx = Arc::new(QuantumGate::cx(0, 1));
-        let kid_h = mgr.generate(&spec, &h).unwrap();
-        let kid_cx = mgr.generate(&spec, &cx).unwrap();
+        let kid_h = mgr.generate(&h).unwrap();
+        let kid_cx = mgr.generate(&cx).unwrap();
         let n_threads = crate::cpu::get_num_threads();
         mgr.apply(kid_h, &mut sv, n_threads).unwrap();
         mgr.apply(kid_cx, &mut sv, n_threads).unwrap();

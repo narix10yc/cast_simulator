@@ -271,10 +271,11 @@ impl CostModel for HardwareAdaptiveCostModel {
 /// minimum `old_cost / (new_cost + ε) - 1` for a fusion to be accepted. Phase 1
 /// (size-2 canonicalization) always runs before the agglomerative phase.
 ///
-/// When `trajectory_mode` is `true`, noisy gates participate in fusion and the
-/// cost model evaluates the dominant (noiseless) branch. When `false` (default),
-/// noisy gates act as fusion barriers and the cost model uses the superoperator
-/// size (density-matrix oriented).
+/// Noisy gates always participate in fusion. When `trajectory_mode` is `true`,
+/// the cost model evaluates the dominant (noiseless) branch using `n_qubits()`.
+/// When `false` (default, density-matrix), the cost model uses
+/// `effective_n_qubits()` which doubles the qubit count for noisy gates to
+/// reflect the superoperator size.
 pub struct FusionConfig {
     pub size_max: usize,
     pub benefit_margin: f64,

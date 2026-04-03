@@ -9,7 +9,7 @@ use anyhow::Result;
 
 use super::measure::batch_sample;
 use super::{Backend, SimulationResult};
-use crate::types::{ComplexSquareMatrix, QuantumGate};
+use crate::types::QuantumGate;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -114,31 +114,21 @@ impl<B: Backend> super::Simulator<B> {
         }
     }
 
-    /// Compile deduplicated kernels for every noise branch in the circuit.
+    /// Compile kernels for every noise branch in the circuit.
+    /// Deduplication is handled by the backend's kernel manager.
     fn compile_noise_kernels(
         &self,
         gates: &[Arc<QuantumGate>],
     ) -> Result<NoiseKernelTable<B::KernelId>> {
         let mut kernels: Vec<Option<Vec<B::KernelId>>> = Vec::with_capacity(gates.len());
         let mut weights: Vec<Option<Vec<f64>>> = Vec::with_capacity(gates.len());
-        let mut cache: HashMap<(Vec<u32>, Vec<u8>), B::KernelId> = HashMap::new();
 
         for gate in gates {
             if let Some(noise) = gate.noise_model() {
                 let mut kids = Vec::new();
-                for (_, u_noise) in noise.branches() {
-                    let composed = u_noise.matmul(gate.matrix());
-                    let key = (gate.qubits().to_vec(), matrix_to_bytes(&composed));
-                    let kid = match cache.get(&key) {
-                        Some(&cached) => cached,
-                        None => {
-                            let g = Arc::new(QuantumGate::new(composed, gate.qubits().to_vec()));
-                            let kid = B::generate(&self.mgr, &self.spec, &g)?;
-                            cache.insert(key, kid);
-                            kid
-                        }
-                    };
-                    kids.push(kid);
+                for (_, kraus) in noise.branches() {
+                    let g = Arc::new(QuantumGate::new(kraus.clone(), gate.qubits().to_vec()));
+                    kids.push(B::generate(&self.mgr, &g)?);
                 }
                 kernels.push(Some(kids));
                 weights.push(Some(noise.branches().iter().map(|(p, _)| *p).collect()));
@@ -286,14 +276,4 @@ impl<B: Backend> super::Simulator<B> {
 
         Ok((histogram, branches, total_weight))
     }
-}
-
-/// Reinterpret a complex matrix's data as raw bytes for deduplication keying.
-fn matrix_to_bytes(m: &ComplexSquareMatrix) -> Vec<u8> {
-    let data = m.data();
-    let ptr = data.as_ptr() as *const u8;
-    let len = data.len() * std::mem::size_of::<crate::types::Complex>();
-    // SAFETY: Complex64 is repr(C) with two f64 fields; we're reading the
-    // existing slice as bytes within its lifetime.
-    unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec()
 }
