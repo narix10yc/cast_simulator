@@ -433,27 +433,17 @@ struct CpuManagerInner {
     dedup: HashMap<DedupKey, KernelId>,
 }
 
-/// Unified manager for CPU kernel generation, JIT compilation, and execution.
-///
-/// # Workflow
+/// CPU kernel manager: generate → JIT-compile → apply.
 ///
 /// ```ignore
-/// use std::sync::Arc;
-///
 /// let mgr = CpuKernelManager::new(spec);
-/// let gate = Arc::new(QuantumGate::h(0));
-/// let kid = mgr.generate(&gate)?;   // LLVM IR → O1 → native JIT
+/// let kid = mgr.generate(&gate)?;          // LLVM IR → O1 → native JIT
 /// mgr.apply(kid, &mut statevector, n_threads)?;
 /// ```
 ///
-/// Each [`generate`](Self::generate) call runs the full LLVM pipeline
-/// independently before briefly locking to insert the result.  The compiled
-/// [`KernelEntry`] stores the source `Arc<QuantumGate>` alongside the
-/// JIT-compiled function pointer, so the gate can be inspected later via
-/// [`gate`](Self::gate).
-///
-/// Multiple threads may call `generate` concurrently.
-/// [`apply`](Self::apply) dispatches work across a thread pool synchronously.
+/// `generate` is thread-safe (lock-free LLVM pipeline, brief lock to insert).
+/// Identical gates are deduplicated via content-based keys.
+/// `apply` dispatches work across threads synchronously.
 pub struct CpuKernelManager {
     spec: CPUKernelGenSpec,
     inner: std::sync::Mutex<CpuManagerInner>,

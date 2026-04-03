@@ -12,7 +12,8 @@ src/
 ├── types/
 │   ├── mod.rs              Re-exports: Complex, Rational, Precision, QuantumGate,
 │   │                         QuantumCircuit, ComplexSquareMatrix
-│   ├── gate.rs             QuantumGate — unitary + optional noise branches
+│   ├── gate.rs             QuantumGate — unitary + optional NoiseModel
+│   ├── noise.rs            NoiseModel — probability-weighted Kraus operators
 │   ├── circuit.rs          QuantumCircuit — user-facing gate sequence + measured qubits
 │   ├── matrix.rs           ComplexSquareMatrix — dense row-major complex matrix
 │   ├── rational.rs         Rational — exact i32/i32 fractions, auto-reduced
@@ -33,7 +34,7 @@ src/
 │   ├── measure.rs          Marginal probabilities, batch sampling
 │   └── tests.rs            Simulator integration tests
 ├── cpu/
-│   ├── mod.rs              Re-exports, get_num_threads()
+│   ├── mod.rs              Re-exports, get_num_threads(), native_simd_width()
 │   ├── kernel.rs           CpuKernelManager — LLVM JIT generate/apply
 │   ├── statevector.rs      CPUStatevector — SIMD-aware aligned memory
 │   └── tests.rs            CPU backend unit tests
@@ -85,8 +86,9 @@ Two phases (see [fusion.md](fusion.md) for details):
   iteratively merge gates across rows up to a size limit, guided by a cost
   model.
 
-Noisy gates (those with non-empty `noise` field) are never fused — all
-`is_unitary()` checks prevent them from participating in matrix multiplication.
+Noisy gates participate in fusion. Their Kraus operators are composed via
+Cartesian product: `K_i^self · K_j^other`. In density-matrix mode, the cost
+model uses `effective_n_qubits()` (2× physical) to account for superoperator size.
 
 ### 3. Kernel Compilation
 
@@ -109,22 +111,22 @@ compilation.  Rust owns the lifecycle via `CpuKernelManager` / `CudaKernelManage
 
 **CPU:**
 ```rust
-let mgr = CpuKernelManager::new();
-let kid = mgr.generate(&spec, &gate)?;
-mgr.apply(kid, &mut sv, n_threads)?;     // scoped thread pool, implicit barrier
+let mgr = CpuKernelManager::new(spec);
+let kid = mgr.generate(&gate)?;         // LLVM IR → O1 → native JIT
+mgr.apply(kid, &mut sv, n_threads)?;    // scoped thread pool, implicit barrier
 ```
 
 **CUDA:**
 ```rust
-let mgr = CudaKernelManager::new();
-let kid = mgr.generate(&gate, spec)?;
-mgr.apply(kid, &mut sv)?;                // non-blocking enqueue
-let stats = mgr.sync()?;                 // flush queue, launch, wait
+let mgr = CudaKernelManager::new(spec);
+let kid = mgr.generate(&gate)?;         // LLVM IR → PTX → cubin
+mgr.apply(kid, &mut sv)?;               // non-blocking enqueue
+let stats = mgr.sync()?;                // flush queue, launch, wait
 ```
 
-The CUDA manager uses a **2-slot LRU module cache**: only two CUmodules are
-loaded at a time.  On cache miss the oldest module is evicted and the new one
-loaded from the cached cubin.
+Both managers deduplicate identical gates via content-based keys, avoiding
+redundant LLVM compilations. The CUDA manager uses a 2-slot LRU module cache
+for loaded CUmodules.
 
 ### 5. Statevector Layout
 
@@ -159,8 +161,8 @@ Noisy (open-system) simulation uses the density-matrix representation:
 - A unitary gate U is lifted to the superoperator `S = U ⊗ conj(U)` acting on
   2n virtual qubits `[q₀, ..., q_{k-1}, q₀+n, ..., q_{k-1}+n]`.
 
-- A noisy gate with branches `[(pᵢ, Uᵢ)]` computes the superoperator
-  `S = Σ pᵢ · (Uᵢ·U) ⊗ conj(Uᵢ·U)` via `to_density_matrix_gate()`.
+- A noisy gate with Kraus operators `[(pᵢ, Kᵢ)]` computes the superoperator
+  `S = Σ pᵢ · Kᵢ ⊗ conj(Kᵢ)` via `to_density_matrix_gate()`.
 
 This allows reusing the existing statevector simulation engine for noisy
 circuits — no separate density-matrix kernel is needed.

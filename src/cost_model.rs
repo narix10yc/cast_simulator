@@ -265,17 +265,11 @@ impl CostModel for HardwareAdaptiveCostModel {
 
 // ── Fusion config ────────────────────────────────────────────────────────────
 
-/// Configuration for the adaptive gate-fusion optimizer.
+/// Gate-fusion optimizer configuration.
 ///
-/// `size_max` caps the qubit count of any fused gate. `benefit_margin` is the
-/// minimum `old_cost / (new_cost + ε) - 1` for a fusion to be accepted. Phase 1
-/// (size-2 canonicalization) always runs before the agglomerative phase.
-///
-/// Noisy gates always participate in fusion. When `trajectory_mode` is `true`,
-/// the cost model evaluates the dominant (noiseless) branch using `n_qubits()`.
-/// When `false` (default, density-matrix), the cost model uses
-/// `effective_n_qubits()` which doubles the qubit count for noisy gates to
-/// reflect the superoperator size.
+/// Phase 1 (size-2 canonicalization) always runs before the agglomerative phase.
+/// `trajectory_mode` controls cost estimation for noisy gates: `n_qubits()`
+/// in trajectory mode, `effective_n_qubits()` (2×) in density-matrix mode.
 pub struct FusionConfig {
     pub size_max: usize,
     pub benefit_margin: f64,

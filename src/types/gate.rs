@@ -7,13 +7,10 @@ use super::{Complex, ComplexSquareMatrix, NoiseModel};
 // ── QuantumGate ─────────────────────────────────────────────────────────────
 
 /// A quantum gate: a unitary matrix paired with target qubit indices, optionally
-/// carrying a noise model.
+/// carrying a [`NoiseModel`] of full Kraus operators.
 ///
-/// The `matrix` field is always a $2^n × 2^n$ unitary. The optional `noise` field
-/// describes a probability-weighted unitary noise channel:
-///
-/// Qubits are always stored in ascending order. If the caller supplies them in a
-/// different order, [`QuantumGate::new`] permutes the matrix to match.
+/// Qubits are stored in ascending order; [`QuantumGate::new`] permutes the
+/// matrix if needed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct QuantumGate {
     /// Gate matrix.
@@ -128,15 +125,13 @@ impl QuantumGate {
         &self.qubits
     }
 
+    /// Number of target qubits.
     pub fn n_qubits(&self) -> usize {
         self.qubits.len()
     }
 
-    /// Returns the effective qubit count for kernel sizing and cost estimation.
-    ///
-    /// For noiseless gates this equals [`Self::n_qubits`]. For noisy gates in
-    /// density-matrix mode the superoperator acts on `2 × n_qubits` virtual
-    /// qubits, so that value is returned instead.
+    /// Effective qubit count for cost estimation: `n_qubits` for pure gates,
+    /// `2 * n_qubits` for noisy gates (superoperator size).
     pub fn effective_n_qubits(&self) -> usize {
         if self.is_unitary() {
             self.qubits.len()
@@ -264,9 +259,7 @@ impl QuantumGate {
         Self::new(super_mat, virtual_qubits)
     }
 
-    /// The number of non-zero entries in the gate matrix. Real and imag parts are counted
-    /// independently. For a unitary k-qubit gate the matrix is `2ᵏ×2ᵏ` (up to `2^(2k+1)`
-    /// non-zeros); for a noisy gate it is `4ᵏ×4ᵏ`.
+    /// Number of non-zero real/imaginary scalars in the gate matrix (counted independently).
     pub fn scalar_nnz(&self, ztol: f64) -> usize {
         self.matrix
             .data()

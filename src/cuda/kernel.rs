@@ -451,35 +451,22 @@ pub struct SyncStats {
 
 // ── CudaKernelManager ────────────────────────────────────────────────────────
 
-/// Unified manager for CUDA kernel generation, PTX storage, and GPU execution.
-///
-/// # Workflow
+/// CUDA kernel manager: generate → enqueue → sync.
 ///
 /// ```ignore
-/// use std::sync::Arc;
-///
 /// let mgr = CudaKernelManager::new(spec);
-/// let gate = Arc::new(QuantumGate::h(0));
-/// let kid = mgr.generate(&gate)?;   // LLVM IR → PTX (→ cubin with cuda feature)
-/// mgr.apply(kid, &mut statevector)?;      // queue for launch (non-blocking)
-/// mgr.sync()?;                            // flush queue, then wait for GPU
-/// let amps = statevector.download()?;
+/// let kid = mgr.generate(&gate)?;      // LLVM IR → PTX → cubin
+/// mgr.apply(kid, &mut statevector)?;   // enqueue (non-blocking)
+/// mgr.sync()?;                         // flush queue, wait for GPU
 /// ```
 ///
-/// Each [`CudaKernel`] stores the source `Arc<QuantumGate>` alongside the
-/// compiled PTX/cubin, accessible via [`CudaKernel::gate`].
+/// `generate` is thread-safe with content-based deduplication.
+/// `apply` enqueues without blocking. `sync` drains the queue via a 2-slot
+/// LRU module cache, then blocks until GPU completion.
 ///
-/// `generate` can be called from multiple threads concurrently; each call runs
-/// the full LLVM pipeline independently before briefly locking to insert the result.
-/// `apply` is non-blocking — it validates and enqueues the request.  `sync` drains
-/// the queue in order, loading and evicting CUmodules via a 2-slot LRU policy
-/// (keeping at most two modules resident at once), then blocks until all GPU work
-/// is complete.
+/// # Safety
 ///
-/// # Safety contract
-///
-/// A `CudaStatevector` passed to `apply` must remain valid (not dropped) until
-/// the next call to `sync`.
+/// A `CudaStatevector` passed to `apply` must outlive the next `sync` call.
 pub struct CudaKernelManager {
     spec: CudaKernelGenSpec,
     inner: Mutex<ManagerInner>,

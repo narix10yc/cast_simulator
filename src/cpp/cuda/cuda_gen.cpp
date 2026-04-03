@@ -26,22 +26,22 @@ enum ScalarKind {
 
 // ── Helper types ────────────────────────────────────────────────────────────
 
-struct IRArgsCUDA {
-  Argument *pSvArg;  // ptr to statevector
-  Argument *pMatArg; // ptr to matrix (unused in ImmValue mode)
-  Argument *pCombos; // i64: total number of amplitude combos
+struct KernelArgs {
+  Argument *p_sv;     // ptr to statevector
+  Argument *p_mat;    // ptr to matrix (unused in ImmValue mode)
+  Argument *p_combos; // i64: total number of amplitude combos
 };
 
-struct IRMatDataCUDA {
-  Value *reVal;
-  Value *imVal;
-  ScalarKind reKind;
-  ScalarKind imKind;
+struct IRMatData {
+  Value *re_val;
+  Value *im_val;
+  ScalarKind re_kind;
+  ScalarKind im_kind;
 };
 
-// ── genOptFMul ──────────────────────────────────────────────────────────────
+// ── emit_opt_fmul ──────────────────────────────────────────────────────────
 
-static Value *genOptFMul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B) {
+static Value *emit_opt_fmul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B) {
   switch (aKind) {
   case SK_Runtime:
   case SK_ImmValue:
@@ -58,65 +58,65 @@ static Value *genOptFMul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B) {
   }
 }
 
-// ── getMatDataCUDA ──────────────────────────────────────────────────────────
+// ── build_matrix_data ──────────────────────────────────────────────────────
 
 /// Classifies each matrix element as zero, ±1, or general, and returns the
 /// corresponding LLVM constant value alongside its ScalarKind tag.
-static std::vector<IRMatDataCUDA> getMatDataCUDA(IRBuilder<> &B,
-                                                 const cast_cuda_kernel_gen_spec_t &spec,
-                                                 const cast_cuda_complex64_t *matrix,
-                                                 unsigned nQubits) {
-  const auto K = 1U << nQubits;
+static std::vector<IRMatData> build_matrix_data(IRBuilder<> &B,
+                                                const cast_cuda_kernel_gen_spec_t &spec,
+                                                const cast_cuda_complex64_t *matrix,
+                                                unsigned n_qubits) {
+  const auto K = 1U << n_qubits;
   const auto KK = K * K;
 
-  const auto zTol = spec.ztol / static_cast<double>(K);
-  const auto oTol = spec.otol / static_cast<double>(K);
+  const auto z_tol = spec.ztol / static_cast<double>(K);
+  const auto o_tol = spec.otol / static_cast<double>(K);
 
   const bool fp32 = (spec.precision == CAST_CUDA_PRECISION_F32);
-  Type *scalarTy = fp32 ? B.getFloatTy() : B.getDoubleTy();
-  auto *zeroVal = ConstantFP::get(scalarTy, 0.0);
-  auto *oneVal = ConstantFP::get(scalarTy, 1.0);
-  auto *minusOneVal = ConstantFP::get(scalarTy, -1.0);
+  Type *scalar_ty = fp32 ? B.getFloatTy() : B.getDoubleTy();
+  auto *zero_val = ConstantFP::get(scalar_ty, 0.0);
+  auto *one_val = ConstantFP::get(scalar_ty, 1.0);
+  auto *minus_one_val = ConstantFP::get(scalar_ty, -1.0);
 
   // Classify kind and build LLVM constant for a single scalar.
   auto classify = [&](double v) -> std::pair<Value *, ScalarKind> {
-    if (spec.ztol > 0.0 && std::abs(v) < zTol)
-      return {zeroVal, SK_Zero};
-    if (spec.otol > 0.0 && std::abs(v - 1.0) < oTol)
-      return {oneVal, SK_One};
-    if (spec.otol > 0.0 && std::abs(v + 1.0) < oTol)
-      return {minusOneVal, SK_MinusOne};
-    return {ConstantFP::get(scalarTy, fp32 ? static_cast<double>(static_cast<float>(v)) : v),
+    if (spec.ztol > 0.0 && std::abs(v) < z_tol)
+      return {zero_val, SK_Zero};
+    if (spec.otol > 0.0 && std::abs(v - 1.0) < o_tol)
+      return {one_val, SK_One};
+    if (spec.otol > 0.0 && std::abs(v + 1.0) < o_tol)
+      return {minus_one_val, SK_MinusOne};
+    return {ConstantFP::get(scalar_ty, fp32 ? static_cast<double>(static_cast<float>(v)) : v),
             SK_ImmValue};
   };
 
-  std::vector<IRMatDataCUDA> data(KK);
+  std::vector<IRMatData> data(KK);
   for (unsigned i = 0; i < KK; ++i) {
-    auto [reVal, reKind] = classify(matrix[i].re);
-    auto [imVal, imKind] = classify(matrix[i].im);
-    data[i] = {reVal, imVal, reKind, imKind};
+    auto [re_val, re_kind] = classify(matrix[i].re);
+    auto [im_val, im_kind] = classify(matrix[i].im);
+    data[i] = {re_val, im_val, re_kind, im_kind};
   }
   return data;
 }
 
-// ── getFunctionDeclarationCUDA ───────────────────────────────────────────────
+// ── create_kernel_function ───────────────────────────────────────────────────
 
-static Function *getFunctionDeclarationCUDA(IRBuilder<> &B, Module &M, const std::string &funcName,
-                                            IRArgsCUDA &args) {
+static Function *create_kernel_function(IRBuilder<> &B, Module &M, const std::string &func_name,
+                                        KernelArgs &args) {
   auto params = std::array<Type *, 3>{
       B.getPtrTy(),  // sv
       B.getPtrTy(),  // mat
       B.getInt64Ty() // combos
   };
   auto *fty = FunctionType::get(B.getVoidTy(), params, false);
-  auto *func = Function::Create(fty, Function::ExternalLinkage, funcName, M);
+  auto *func = Function::Create(fty, Function::ExternalLinkage, func_name, M);
 
-  args.pSvArg = func->getArg(0);
-  args.pSvArg->setName("p.sv");
-  args.pMatArg = func->getArg(1);
-  args.pMatArg->setName("p.mat");
-  args.pCombos = func->getArg(2);
-  args.pCombos->setName("p.combos");
+  args.p_sv = func->getArg(0);
+  args.p_sv->setName("p.sv");
+  args.p_mat = func->getArg(1);
+  args.p_mat->setName("p.mat");
+  args.p_combos = func->getArg(2);
+  args.p_combos->setName("p.combos");
 
   // Mark as a CUDA (PTX) kernel via nvvm.annotations metadata.
   auto *mdString = MDString::get(M.getContext(), "kernel");
@@ -126,7 +126,7 @@ static Function *getFunctionDeclarationCUDA(IRBuilder<> &B, Module &M, const std
   return func;
 }
 
-// ── buildOffset ─────────────────────────────────────────────────────────────
+// ── emit_combo_offset ──────────────────────────────────────────────────────
 //
 // Maps a combo counter to the base statevector amplitude index (in units of
 // scalars) using a compile-time-known PDEP-like bit scatter.
@@ -137,66 +137,64 @@ static Function *getFunctionDeclarationCUDA(IRBuilder<> &B, Module &M, const std
 // The returned Value is the byte-GEP index into the scalar array (×2 shift
 // for re/im is applied by the caller).
 
-static Value *buildOffset(IRBuilder<> &B, Value *counterV, const uint32_t *qubits,
-                          size_t n_qubits) {
+static Value *emit_combo_offset(IRBuilder<> &B, Value *counter_v, const uint32_t *qubits,
+                                size_t n_qubits) {
   assert(n_qubits > 0);
 
   auto *offset = static_cast<Value *>(B.getInt64(0ULL));
-  counterV = B.CreateZExt(counterV, B.getInt64Ty(), "i64.counter");
+  counter_v = B.CreateZExt(counter_v, B.getInt64Ty(), "i64.counter");
 
   const int k = static_cast<int>(n_qubits);
-  const int highestQ = static_cast<int>(qubits[n_qubits - 1]);
+  const int highest_q = static_cast<int>(qubits[n_qubits - 1]);
 
   uint64_t mask = 0ULL;
-  int qIdx = 0;
-  int counterQ = 0;
+  int q_idx = 0;
+  int counter_q = 0;
 
-  Value *tmpCounterV = nullptr;
+  Value *tmp_counter = nullptr;
 
-  for (int q = 0; q <= highestQ; q++) {
-    if (q < static_cast<int>(qubits[qIdx])) {
-      mask |= (1ULL << counterQ++);
+  for (int q = 0; q <= highest_q; q++) {
+    if (q < static_cast<int>(qubits[q_idx])) {
+      mask |= (1ULL << counter_q++);
       continue;
     }
-    ++qIdx;
+    ++q_idx;
     if (mask == 0)
       continue;
 
-    tmpCounterV = B.CreateAnd(counterV, mask, "tmpCounter");
-    tmpCounterV = B.CreateShl(tmpCounterV, (qIdx - 1), "tmpCounter");
-    offset = B.CreateAdd(offset, tmpCounterV, "tmpIdx");
+    tmp_counter = B.CreateAnd(counter_v, mask, "tmpCounter");
+    tmp_counter = B.CreateShl(tmp_counter, (q_idx - 1), "tmpCounter");
+    offset = B.CreateAdd(offset, tmp_counter, "tmpIdx");
     mask = 0ULL;
   }
 
-  mask = ~((1ULL << (highestQ - k + 1)) - 1);
-  tmpCounterV = B.CreateAnd(counterV, mask, "tmpCounter");
-  tmpCounterV = B.CreateShl(tmpCounterV, k, "tmpCounter");
-  offset = B.CreateAdd(offset, tmpCounterV, "offset");
+  mask = ~((1ULL << (highest_q - k + 1)) - 1);
+  tmp_counter = B.CreateAnd(counter_v, mask, "tmpCounter");
+  tmp_counter = B.CreateShl(tmp_counter, k, "tmpCounter");
+  offset = B.CreateAdd(offset, tmp_counter, "offset");
 
   return offset;
 }
 
-// ── genMatrixVectorMultiply_InlineImm ────────────────────────────────────────
+// ── emit_matvec ─────────────────────────────────────────────────────────────
 //
 // Emits straight-line code that:
-//   1. Loads all K amplitude pairs (re, im) from sv[svPtrV + 2*delta{i}]
+//   1. Loads all K amplitude pairs (re, im) from sv[sv_ptr + 2*delta{i}]
 //   2. Accumulates M*v with constant (ImmValue) matrix entries
 //   3. Stores the updated amplitudes back in place
 //
-// svPtrV already points to the base amplitude for this combo (offset has been
+// sv_ptr already points to the base amplitude for this combo (offset has been
 // applied by the caller).
 
-static void genMatrixVectorMultiply_InlineImm(IRBuilder<> &B, const uint32_t *qubits,
-                                              size_t n_qubits,
-                                              const std::vector<IRMatDataCUDA> &matData,
-                                              Value *svPtrV, Type *scalarTy) {
+static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
+                        const std::vector<IRMatData> &mat_data, Value *sv_ptr, Type *scalar_ty) {
   B.setFastMathFlags(FastMathFlags::getFast());
 
   const unsigned k = static_cast<unsigned>(n_qubits);
   const unsigned K = 1u << k;
 
-  std::vector<Value *> reAmpPtrs(K), imAmpPtrs(K);
-  std::vector<Value *> reAmps(K), imAmps(K);
+  std::vector<Value *> re_amp_ptrs(K), im_amp_ptrs(K);
+  std::vector<Value *> re_amps(K), im_amps(K);
 
   // Compute the offset for each of the K amplitude slots in the combo.
   // Amplitude i corresponds to setting bits qubits[b] iff bit b of i is set.
@@ -207,50 +205,50 @@ static void genMatrixVectorMultiply_InlineImm(IRBuilder<> &B, const uint32_t *qu
         delta |= (1ull << qubits[b]);
 
     uint64_t off2 = 2ull * delta;
-    reAmpPtrs[i] = B.CreateConstGEP1_64(scalarTy, svPtrV, off2, "re.ptr");
-    imAmpPtrs[i] = B.CreateConstGEP1_64(scalarTy, svPtrV, off2 + 1, "im.ptr");
-    reAmps[i] = B.CreateLoad(scalarTy, reAmpPtrs[i], "re.amp");
-    imAmps[i] = B.CreateLoad(scalarTy, imAmpPtrs[i], "im.amp");
+    re_amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2, "re.ptr");
+    im_amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2 + 1, "im.ptr");
+    re_amps[i] = B.CreateLoad(scalar_ty, re_amp_ptrs[i], "re.amp");
+    im_amps[i] = B.CreateLoad(scalar_ty, im_amp_ptrs[i], "im.amp");
   }
 
   // For each output row r:  new[r] = sum_c  M[r,c] * old[c]
   for (unsigned r = 0; r < K; ++r) {
-    auto *accRe0 = static_cast<Value *>(ConstantFP::get(scalarTy, 0.0));
-    auto *accRe1 = static_cast<Value *>(ConstantFP::get(scalarTy, 0.0));
-    auto *accIm = static_cast<Value *>(ConstantFP::get(scalarTy, 0.0));
+    auto *acc_re0 = static_cast<Value *>(ConstantFP::get(scalar_ty, 0.0));
+    auto *acc_re1 = static_cast<Value *>(ConstantFP::get(scalar_ty, 0.0));
+    auto *acc_im = static_cast<Value *>(ConstantFP::get(scalar_ty, 0.0));
 
     for (unsigned c = 0; c < K; ++c) {
-      const auto &md = matData[r * K + c];
-      if (md.reKind == SK_Zero && md.imKind == SK_Zero)
+      const auto &md = mat_data[r * K + c];
+      if (md.re_kind == SK_Zero && md.im_kind == SK_Zero)
         continue;
 
       // Re(new) = Re(M)*Re(old) - Im(M)*Im(old)
-      if (auto *t0 = genOptFMul(md.reVal, reAmps[c], md.reKind, B))
-        accRe0 = B.CreateFAdd(accRe0, t0);
-      if (auto *t1 = genOptFMul(md.imVal, imAmps[c], md.imKind, B))
-        accRe1 = B.CreateFAdd(accRe1, t1);
+      if (auto *t0 = emit_opt_fmul(md.re_val, re_amps[c], md.re_kind, B))
+        acc_re0 = B.CreateFAdd(acc_re0, t0);
+      if (auto *t1 = emit_opt_fmul(md.im_val, im_amps[c], md.im_kind, B))
+        acc_re1 = B.CreateFAdd(acc_re1, t1);
 
       // Im(new) = Re(M)*Im(old) + Im(M)*Re(old)
-      if (auto *t2 = genOptFMul(md.reVal, imAmps[c], md.reKind, B))
-        accIm = B.CreateFAdd(accIm, t2);
-      if (auto *t3 = genOptFMul(md.imVal, reAmps[c], md.imKind, B))
-        accIm = B.CreateFAdd(accIm, t3);
+      if (auto *t2 = emit_opt_fmul(md.re_val, im_amps[c], md.re_kind, B))
+        acc_im = B.CreateFAdd(acc_im, t2);
+      if (auto *t3 = emit_opt_fmul(md.im_val, re_amps[c], md.im_kind, B))
+        acc_im = B.CreateFAdd(acc_im, t3);
     }
 
-    auto *newRe = B.CreateFSub(accRe0, accRe1, "new.re");
-    B.CreateStore(newRe, reAmpPtrs[r]);
-    B.CreateStore(accIm, imAmpPtrs[r]);
+    auto *new_re = B.CreateFSub(acc_re0, acc_re1, "new.re");
+    B.CreateStore(new_re, re_amp_ptrs[r]);
+    B.CreateStore(acc_im, im_amp_ptrs[r]);
   }
 }
 
-// ── genMatVecMul_Imm ─────────────────────────────────────────────────────────
+// ── emit_persistent_grid_loop ────────────────────────────────────────────────
 //
-// Wraps genMatrixVectorMultiply_InlineImm inside a persistent-grid loop:
+// Wraps emit_matvec inside a persistent-grid loop:
 //   for (combo = global_tid; combo < p.combos; combo += stride) { ... }
 
-static void genMatVecMul_Imm(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
-                             const std::vector<IRMatDataCUDA> &matData, Value *svRoot,
-                             Value *combosV, Type *scalarTy) {
+static void emit_persistent_grid_loop(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
+                                      const std::vector<IRMatData> &mat_data, Value *sv_root,
+                                      Value *combos_v, Type *scalar_ty) {
   auto *func = B.GetInsertBlock()->getParent();
   auto &C = B.getContext();
 
@@ -269,36 +267,36 @@ static void genMatVecMul_Imm(IRBuilder<> &B, const uint32_t *qubits, size_t n_qu
   stride = B.CreateIntCast(stride, B.getInt64Ty(), true, "combo.stride");
 
   // Persistent-grid combo loop.
-  auto *cmbChk = BasicBlock::Create(C, "cmb.chk", func);
-  auto *cmbBody = BasicBlock::Create(C, "cmb.body", func);
-  auto *cmbInc = BasicBlock::Create(C, "cmb.inc", func);
-  auto *cmbDone = BasicBlock::Create(C, "cmb.done", func);
+  auto *loop_bb = BasicBlock::Create(C, "cmb.chk", func);
+  auto *loop_body_bb = BasicBlock::Create(C, "cmb.body", func);
+  auto *loop_inc_bb = BasicBlock::Create(C, "cmb.inc", func);
+  auto *loop_done_bb = BasicBlock::Create(C, "cmb.done", func);
 
   auto *pre = B.GetInsertBlock();
-  B.CreateBr(cmbChk);
+  B.CreateBr(loop_bb);
 
-  B.SetInsertPoint(cmbChk);
-  auto *comboid = B.CreatePHI(B.getInt64Ty(), 2, "combo");
-  comboid->addIncoming(global_tid, pre);
-  B.CreateCondBr(B.CreateICmpULT(comboid, combosV), cmbBody, cmbDone);
+  B.SetInsertPoint(loop_bb);
+  auto *combo_id = B.CreatePHI(B.getInt64Ty(), 2, "combo");
+  combo_id->addIncoming(global_tid, pre);
+  B.CreateCondBr(B.CreateICmpULT(combo_id, combos_v), loop_body_bb, loop_done_bb);
 
-  B.SetInsertPoint(cmbBody);
+  B.SetInsertPoint(loop_body_bb);
   {
-    auto *svBase = buildOffset(B, comboid, qubits, n_qubits);
-    svBase = B.CreateShl(svBase, 1, "sv.base.idx"); // ×2 for re/im interleave
-    svBase = B.CreateGEP(scalarTy, svRoot, svBase, "sv.base");
-    genMatrixVectorMultiply_InlineImm(B, qubits, n_qubits, matData, svBase, scalarTy);
-    B.CreateBr(cmbInc);
+    auto *sv_base = emit_combo_offset(B, combo_id, qubits, n_qubits);
+    sv_base = B.CreateShl(sv_base, 1, "sv.base.idx"); // ×2 for re/im interleave
+    sv_base = B.CreateGEP(scalar_ty, sv_root, sv_base, "sv.base");
+    emit_matvec(B, qubits, n_qubits, mat_data, sv_base, scalar_ty);
+    B.CreateBr(loop_inc_bb);
   }
 
-  B.SetInsertPoint(cmbInc);
+  B.SetInsertPoint(loop_inc_bb);
   {
-    auto *nextCombo = B.CreateAdd(comboid, stride, "combo.next");
-    comboid->addIncoming(nextCombo, cmbInc);
-    B.CreateBr(cmbChk);
+    auto *combo_next = B.CreateAdd(combo_id, stride, "combo.next");
+    combo_id->addIncoming(combo_next, loop_inc_bb);
+    B.CreateBr(loop_bb);
   }
 
-  B.SetInsertPoint(cmbDone);
+  B.SetInsertPoint(loop_done_bb);
 }
 
 } // end anonymous namespace
@@ -323,22 +321,22 @@ llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
   auto &ctx = module.getContext();
   IRBuilder<> B(ctx);
 
-  Type *scalarTy = (spec.precision == CAST_CUDA_PRECISION_F32) ? B.getFloatTy() : B.getDoubleTy();
+  Type *scalar_ty = (spec.precision == CAST_CUDA_PRECISION_F32) ? B.getFloatTy() : B.getDoubleTy();
 
-  IRArgsCUDA args;
-  auto *func = getFunctionDeclarationCUDA(B, module, func_name.str(), args);
+  KernelArgs args;
+  auto *func = create_kernel_function(B, module, func_name.str(), args);
 
-  auto *entryBB = BasicBlock::Create(ctx, "entry", func);
-  B.SetInsertPoint(entryBB);
+  auto *entry_bb = BasicBlock::Create(ctx, "entry", func);
+  B.SetInsertPoint(entry_bb);
 
-  auto matData = getMatDataCUDA(B, spec, matrix, static_cast<unsigned>(n_qubits));
+  auto mat_data = build_matrix_data(B, spec, matrix, static_cast<unsigned>(n_qubits));
 
-  genMatVecMul_Imm(B, qubits, n_qubits, matData, args.pSvArg, args.pCombos, scalarTy);
+  emit_persistent_grid_loop(B, qubits, n_qubits, mat_data, args.p_sv, args.p_combos, scalar_ty);
 
   B.CreateRetVoid();
 
-  std::string errInfo;
-  llvm::raw_string_ostream rso(errInfo);
+  std::string err_info;
+  llvm::raw_string_ostream rso(err_info);
   if (llvm::verifyFunction(*func, &rso))
     return llvm::createStringError("Function verification failed: " + rso.str());
 

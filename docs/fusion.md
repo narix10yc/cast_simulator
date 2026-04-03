@@ -28,9 +28,9 @@ qubits:
 
 For each single-qubit unitary gate at position `(row, qubit)`:
 
-1. **Forward scan:** walk later rows on the same qubit.  If the next gate is
-   unitary, fuse the pair (matrix product) and place the result at the later
-   position.  Stop at noisy gates — they act as causal barriers.
+1. **Forward scan:** walk later rows on the same qubit.  If the next gate
+   exists, fuse the pair (matrix product) and place the result at the later
+   position.
 
 2. **Backward scan** (fallback): if no forward target was found, try fusing
    with the nearest earlier unitary on the same qubit.
@@ -39,8 +39,8 @@ Repeat until no more absorptions occur, then `squeeze()`.
 
 ### Step B — Merge adjacent 2-qubit gates
 
-Scan consecutive row pairs.  If both rows contain 2-qubit unitary gates on
-the same pair of qubits, fuse them via matrix product.
+Scan consecutive row pairs.  If both rows contain 2-qubit gates on the same
+pair of qubits, fuse them via matrix product.
 
 Repeat until stable, then `squeeze()`.
 
@@ -57,9 +57,9 @@ optimizer repeatedly sweeps the circuit attempting to grow gates:
 
 ### Single fusion attempt: `start_fusion()`
 
-1. **Seed** — pick a gate at `(start_row, start_qubit)`.  Skip if it's a
-   noisy gate or if `start_qubit` isn't the gate's lowest qubit (avoids
-   re-processing the same multi-qubit gate from different qubit slots).
+1. **Seed** — pick a gate at `(start_row, start_qubit)`.  Skip if
+   `start_qubit` isn't the gate's lowest qubit (avoids re-processing the
+   same multi-qubit gate from different qubit slots).
 
 2. **Same-row sweep** — absorb gates to the right in the same row, as long as
    the union qubit count stays ≤ `cdd_size`.  Fused via tensor product (gates
@@ -85,9 +85,12 @@ until no fusions occurred.
 
 ### Noisy gate handling
 
-Noisy gates are **never** fused.  Every code path that considers a
-candidate gate checks `gate.is_unitary()` and skips non-unitary gates.
-Noisy gates in the graph act as barriers that prevent fusion across them.
+Noisy gates participate in fusion like any other gate. When two noisy gates
+are fused, their Kraus operators are composed via Cartesian product
+(`K_i^self · K_j^other`). The cost model uses `effective_n_qubits()` (2×
+physical) for noisy gates in density-matrix mode to account for superoperator
+size. In trajectory mode (`FusionConfig::size_only_trajectory()`), the
+cost model uses `n_qubits()` instead.
 
 ## Cost Models
 

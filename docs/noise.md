@@ -1,23 +1,25 @@
 # Noisy Simulation
 
-CAST supports noisy quantum simulation via probability-weighted unitary noise
-branches embedded directly on `QuantumGate`. No separate noise channel type is
-needed — noise is a property of the gate itself.
+CAST supports noisy quantum simulation via a `NoiseModel` embedded directly
+on `QuantumGate`.
 
 Three simulation modes handle noise differently:
 
-- **StateVector**: errors if any gate has noise (pure unitary only)
-- **DensityMatrix**: computes superoperator `S = Σ pᵢ · (Uᵢ·U) ⊗ conj(Uᵢ·U)` on 2n virtual qubits
-- **Trajectory**: deterministic ensemble branching — expands all noise branches, prunes to top-M by weight, batch-samples measurements
+- **StateVector**: rejects noisy gates (pure unitary only)
+- **DensityMatrix**: computes superoperator `S = Σ pᵢ · Kᵢ ⊗ conj(Kᵢ)` on 2n virtual qubits
+- **Trajectory**: deterministic ensemble branching — expands all noise paths, prunes to top-M by weight, batch-samples measurements
 
 ## Noise Model
 
-Each noisy gate stores `Vec<(f64, ComplexSquareMatrix)>` where each entry is
-`(probability, unitary_operator)`. Probabilities must sum to 1.0.
+`NoiseModel` stores full Kraus operators `[(pᵢ, Kᵢ)]` where `Kᵢ = Vᵢ · U`
+(noise-only operator `Vᵢ` pre-composed with the gate's base unitary `U`).
+Probabilities must sum to 1.0.
 
-For depolarizing noise with error probability `p`:
+Constructors like `with_noise()` accept noise-only operators and pre-compose
+them internally. For depolarizing noise with error probability `p`:
 ```
-noise = [(1-p, I), (p/3, X), (p/3, Y), (p/3, Z)]
+with_noise([(1-p, I), (p/3, X), (p/3, Y), (p/3, Z)])
+→ stores [(1-p, U), (p/3, X·U), (p/3, Y·U), (p/3, Z·U)]
 ```
 
 ## Noise Constructors
@@ -57,7 +59,7 @@ sv[ket_idx | (bra_idx << n)] = ρ[ket_idx, bra_idx]
 `gate.to_density_matrix_gate(n_total)` converts any gate to a superoperator:
 
 - **Noiseless** gate `U`: `S = U ⊗ conj(U)`
-- **Noisy** gate `[(pᵢ, Uᵢ)]`: `S = Σ pᵢ · (Uᵢ·U) ⊗ conj(Uᵢ·U)`
+- **Noisy** gate with Kraus ops `[(pᵢ, Kᵢ)]`: `S = Σ pᵢ · Kᵢ ⊗ conj(Kᵢ)`
 
 The `Simulator` handles this automatically in `DensityMatrix` mode.
 
@@ -102,15 +104,15 @@ for (outcome, &count) in &traj.histogram {
 
 ## Fusion with Noisy Circuits
 
-Fusion skips noisy gates — they act as barriers. Fusion is applied
-automatically when using `Simulator::run()` with `with_fusion()`:
+Noisy gates participate in fusion. When two noisy gates are fused, their
+Kraus operators are composed via Cartesian product: each `Kᵢ · Kⱼ` pair
+becomes a branch in the fused gate's noise model.
 
 ```rust
 let sim = Simulator::<Cpu>::f64()
     .with_mode(SimulationMode::DensityMatrix)
     .with_fusion(FusionConfig::size_only(4));
 let result = sim.run(&circuit).unwrap();
-// Noisy gates remain; only noiseless gates are fused.
 ```
 
 ## Extracting Results
