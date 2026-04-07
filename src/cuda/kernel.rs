@@ -92,9 +92,9 @@ impl fmt::Debug for CudaKernel {
 
 // ── LRU module cache ──────────────────────────────────────────────────────────
 
-/// Number of CUmodule slots in the manager's LRU cache.
+/// Default number of CUmodule slots in the manager's LRU cache.
 #[cfg(feature = "cuda")]
-const LRU_SIZE: usize = 2;
+const DEFAULT_LRU_SIZE: usize = 4;
 
 /// A CUmodule / CUfunction pair held in the manager's LRU cache.
 #[cfg(feature = "cuda")]
@@ -161,6 +161,76 @@ impl DedupKey {
     }
 }
 
+// ── Shared FFI helpers ──────────────────────────────────────────────────────
+
+/// Load a cubin into a CUmodule and look up the entry-point function.
+/// On failure, any partially-loaded module is unloaded before returning.
+#[cfg(feature = "cuda")]
+fn load_cubin_module(
+    cubin: &[u8],
+    func_name: &str,
+    err_buf: &mut [c_char; ERR_BUF_LEN],
+) -> anyhow::Result<(*mut std::ffi::c_void, *mut std::ffi::c_void)> {
+    let cu_module = unsafe {
+        ffi::cast_cuda_cubin_load(
+            cubin.as_ptr(),
+            cubin.len(),
+            err_buf.as_mut_ptr(),
+            err_buf.len(),
+        )
+    };
+    if cu_module.is_null() {
+        return Err(anyhow::anyhow!(
+            "cubin load failed: {}",
+            error_from_buf(err_buf)
+        ));
+    }
+    let func_cstr = CString::new(func_name.as_bytes())
+        .map_err(|e| anyhow::anyhow!("func_name contains null byte: {e}"))?;
+    let cu_function = unsafe {
+        ffi::cast_cuda_module_get_function(
+            cu_module,
+            func_cstr.as_ptr(),
+            err_buf.as_mut_ptr(),
+            err_buf.len(),
+        )
+    };
+    if cu_function.is_null() {
+        unsafe { ffi::cast_cuda_module_unload(cu_module) };
+        return Err(anyhow::anyhow!(
+            "module_get_function failed: {}",
+            error_from_buf(err_buf)
+        ));
+    }
+    Ok((cu_module, cu_function))
+}
+
+/// Create a CUDA event and record it on `stream`.
+/// On failure, the event is destroyed before returning.
+#[cfg(feature = "cuda")]
+fn create_and_record_event(
+    stream: *mut std::ffi::c_void,
+    err_buf: &mut [c_char; ERR_BUF_LEN],
+) -> anyhow::Result<*mut std::ffi::c_void> {
+    let ev = unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
+    if ev.is_null() {
+        return Err(anyhow::anyhow!(
+            "event_create failed: {}",
+            error_from_buf(err_buf)
+        ));
+    }
+    let status =
+        unsafe { ffi::cast_cuda_event_record(ev, stream, err_buf.as_mut_ptr(), err_buf.len()) };
+    if status != 0 {
+        unsafe { ffi::cast_cuda_event_destroy(ev) };
+        return Err(anyhow::anyhow!(
+            "event_record failed: {}",
+            error_from_buf(err_buf)
+        ));
+    }
+    Ok(ev)
+}
+
 // ── ManagerInner ─────────────────────────────────────────────────────────────
 
 struct ManagerInner {
@@ -170,9 +240,9 @@ struct ManagerInner {
     /// Ordered queue of apply requests not yet launched onto the stream.
     #[cfg(feature = "cuda")]
     pending: VecDeque<PendingApply>,
-    /// LRU cache of loaded CUmodule handles; capacity is [`LRU_SIZE`].
+    /// LRU cache of loaded CUmodule handles.
     #[cfg(feature = "cuda")]
-    loaded: [Option<LoadedModule>; LRU_SIZE],
+    loaded: Vec<Option<LoadedModule>>,
     #[cfg(feature = "cuda")]
     lru_tick: u64,
     /// Lazily initialised on first `sync`; `None` until then.
@@ -215,8 +285,8 @@ impl ManagerInner {
         Ok(stream)
     }
 
-    /// Ensures the module for `kernel` is resident in one of the two LRU slots,
-    /// loading (and possibly evicting the LRU entry) as needed.
+    /// Ensures the module for `kernel` is resident in one of the LRU slots,
+    /// loading (and possibly evicting the least-recently-used entry) as needed.
     /// Returns `cu_function` for immediate use.
     fn ensure_module(
         &mut self,
@@ -259,38 +329,7 @@ impl ManagerInner {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("kernel {} has no cubin", id))?;
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
-        let cu_module = unsafe {
-            ffi::cast_cuda_cubin_load(
-                cubin.as_ptr(),
-                cubin.len(),
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if cu_module.is_null() {
-            return Err(anyhow::anyhow!(
-                "cubin load failed: {}",
-                error_from_buf(&err_buf)
-            ));
-        }
-
-        let func_cstr = CString::new(kernel.func_name().as_bytes())
-            .map_err(|e| anyhow::anyhow!("func_name contains null byte: {e}"))?;
-        let cu_function = unsafe {
-            ffi::cast_cuda_module_get_function(
-                cu_module,
-                func_cstr.as_ptr(),
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if cu_function.is_null() {
-            unsafe { ffi::cast_cuda_module_unload(cu_module) };
-            return Err(anyhow::anyhow!(
-                "module_get_function failed: {}",
-                error_from_buf(&err_buf)
-            ));
-        }
+        let (cu_module, cu_function) = load_cubin_module(cubin, kernel.func_name(), &mut err_buf)?;
 
         self.lru_tick += 1;
         self.loaded[slot_idx] = Some(LoadedModule {
@@ -337,27 +376,8 @@ impl ManagerInner {
 
             let cu_function = self.ensure_module(&kernel, item.kernel_id)?;
 
-            // ── start event ──────────────────────────────────────────────────
-            let start_ev =
-                unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
-            if start_ev.is_null() {
-                return Err(anyhow::anyhow!(
-                    "event_create (start) failed: {}",
-                    error_from_buf(&err_buf)
-                ));
-            }
-            let status = unsafe {
-                ffi::cast_cuda_event_record(start_ev, stream, err_buf.as_mut_ptr(), err_buf.len())
-            };
-            if status != 0 {
-                unsafe { ffi::cast_cuda_event_destroy(start_ev) };
-                return Err(anyhow::anyhow!(
-                    "event_record (start) failed: {}",
-                    error_from_buf(&err_buf)
-                ));
-            }
+            let start_ev = create_and_record_event(stream, &mut err_buf)?;
 
-            // ── kernel launch ─────────────────────────────────────────────────
             let status = unsafe {
                 ffi::cast_cuda_kernel_launch(
                     cu_function,
@@ -379,27 +399,13 @@ impl ManagerInner {
                 ));
             }
 
-            // ── end event ─────────────────────────────────────────────────────
-            let end_ev =
-                unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
-            if end_ev.is_null() {
-                unsafe { ffi::cast_cuda_event_destroy(start_ev) };
-                return Err(anyhow::anyhow!(
-                    "event_create (end) failed: {}",
-                    error_from_buf(&err_buf)
-                ));
-            }
-            let status = unsafe {
-                ffi::cast_cuda_event_record(end_ev, stream, err_buf.as_mut_ptr(), err_buf.len())
+            let end_ev = match create_and_record_event(stream, &mut err_buf) {
+                Ok(ev) => ev,
+                Err(e) => {
+                    unsafe { ffi::cast_cuda_event_destroy(start_ev) };
+                    return Err(e);
+                }
             };
-            if status != 0 {
-                unsafe { ffi::cast_cuda_event_destroy(start_ev) };
-                unsafe { ffi::cast_cuda_event_destroy(end_ev) };
-                return Err(anyhow::anyhow!(
-                    "event_record (end) failed: {}",
-                    error_from_buf(&err_buf)
-                ));
-            }
 
             log::debug!(
                 "cuda: launched kernel {} ({} gate qubits, {} sv qubits, {:?})",
@@ -461,8 +467,8 @@ pub struct SyncStats {
 /// ```
 ///
 /// `generate` is thread-safe with content-based deduplication.
-/// `apply` enqueues without blocking. `sync` drains the queue via a 2-slot
-/// LRU module cache, then blocks until GPU completion.
+/// `apply` enqueues without blocking. `sync` drains the queue via an
+/// LRU module cache (default 4 slots), then blocks until GPU completion.
 ///
 /// # Safety
 ///
@@ -482,9 +488,19 @@ impl fmt::Debug for CudaKernelManager {
 }
 
 impl CudaKernelManager {
-    /// Creates a new manager bound to the given spec.
+    /// Creates a new manager with the default LRU cache size.
     /// Does not initialise the CUDA driver.
     pub fn new(spec: CudaKernelGenSpec) -> Self {
+        Self::with_lru_size(spec, DEFAULT_LRU_SIZE)
+    }
+
+    /// Creates a new manager with a custom LRU cache size.
+    ///
+    /// `lru_cache_size` controls the number of CUmodule slots kept resident
+    /// on the GPU.  Circuits with many distinct kernel shapes benefit from a
+    /// larger cache to avoid module load/unload thrashing.  Minimum 1 slot.
+    pub fn with_lru_size(spec: CudaKernelGenSpec, lru_cache_size: usize) -> Self {
+        let lru_cache_size = lru_cache_size.max(1);
         Self {
             spec,
             inner: Mutex::new(ManagerInner {
@@ -494,7 +510,7 @@ impl CudaKernelManager {
                 #[cfg(feature = "cuda")]
                 pending: VecDeque::new(),
                 #[cfg(feature = "cuda")]
-                loaded: std::array::from_fn(|_| None),
+                loaded: (0..lru_cache_size).map(|_| None).collect(),
                 #[cfg(feature = "cuda")]
                 lru_tick: 0,
                 #[cfg(feature = "cuda")]
@@ -703,8 +719,8 @@ impl CudaKernelManager {
         Ok(())
     }
 
-    /// Flushes the apply queue — loading and evicting CUmodules via a 2-slot LRU
-    /// policy — enqueues all pending kernel launches onto the internal CUDA stream,
+    /// Flushes the apply queue — loading and evicting CUmodules via the LRU
+    /// cache — enqueues all pending kernel launches onto the internal CUDA stream,
     /// then blocks until the stream is idle.
     ///
     /// Returns a [`SyncStats`] with per-kernel GPU execution times (measured via
@@ -809,5 +825,328 @@ impl CudaKernelManager {
             },
             budget_s,
         )
+    }
+
+    /// Pipelined compile-and-execute: a thread pool compiles gate kernels while
+    /// the main thread loads CUmodules and launches kernels on the GPU stream.
+    ///
+    /// Compilation of gate N+1 overlaps with GPU execution of gate N.
+    /// `window_size` limits the number of simultaneously loaded CUmodules
+    /// (bounding device memory). When the window is full, the main thread
+    /// waits for the oldest kernel's completion event before evicting its
+    /// module and loading the next.
+    ///
+    /// Gates are launched in order (each modifies the statevector in place).
+    /// Out-of-order compilation results are buffered until needed.
+    ///
+    /// # Safety contract
+    ///
+    /// `sv` must remain valid for the duration of this call.
+    #[cfg(feature = "cuda")]
+    pub fn execute_pipelined(
+        &self,
+        gates: &[Arc<QuantumGate>],
+        sv: &mut CudaStatevector,
+        window_size: usize,
+        n_compile_threads: usize,
+    ) -> anyhow::Result<SyncStats> {
+        let wall_t0 = Instant::now();
+        let window_size = window_size.max(1);
+        let n_compile_threads = n_compile_threads.max(1);
+
+        if gates.is_empty() {
+            return Ok(SyncStats {
+                kernels: vec![],
+                wall_time: Duration::ZERO,
+            });
+        }
+
+        // Obtain the CUDA stream (created lazily on first use).
+        let stream = {
+            let mut guard = self.inner.lock().unwrap();
+            guard.ensure_stream()?
+        };
+
+        let sv_dptr = sv.dptr();
+        let sv_n_qubits = sv.n_qubits();
+        let sv_precision = sv.precision();
+
+        let mut timings: Vec<KernelExecTime> = Vec::with_capacity(gates.len());
+        let mut window: VecDeque<WindowSlot> = VecDeque::with_capacity(window_size);
+
+        // Set up the work channel BEFORE entering the scope so `work_rx`
+        // outlives the spawned compile threads (locals declared inside the
+        // scope closure don't satisfy the `'scope` lifetime bound).
+        let (work_tx, work_rx) = std::sync::mpsc::channel::<(usize, Arc<QuantumGate>)>();
+        for (i, gate) in gates.iter().enumerate() {
+            work_tx.send((i, gate.clone())).unwrap();
+        }
+        drop(work_tx);
+        let work_rx = std::sync::Mutex::new(work_rx);
+
+        let scope_result = std::thread::scope(|s| {
+            let (result_tx, result_rx) =
+                std::sync::mpsc::channel::<anyhow::Result<(usize, CudaKernelId)>>();
+
+            for _ in 0..n_compile_threads {
+                let tx = result_tx.clone();
+                let wrx = &work_rx;
+                s.spawn(move || loop {
+                    let item = {
+                        let rx = wrx.lock().unwrap();
+                        rx.recv().ok()
+                    };
+                    match item {
+                        Some((idx, gate)) => {
+                            let res = self.generate(&gate).map(|kid| (idx, kid));
+                            if tx.send(res).is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                });
+            }
+            drop(result_tx);
+
+            // ── Main dispatch loop ───────────────────────────────────────────
+            let mut compiled: HashMap<usize, CudaKernelId> = HashMap::new();
+            let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+
+            for next in 0..gates.len() {
+                // 1. Ensure a window slot is free.
+                if window.len() >= window_size {
+                    let slot = window.pop_front().unwrap();
+                    timings.push(slot.wait_and_collect(&mut err_buf)?);
+                }
+
+                // 2. Wait for the next gate (in order) to finish compiling.
+                while !compiled.contains_key(&next) {
+                    match result_rx.recv() {
+                        Ok(Ok((idx, kid))) => {
+                            compiled.insert(idx, kid);
+                        }
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => {
+                            return Err(anyhow::anyhow!(
+                                "compile workers exited before gate {} was compiled",
+                                next
+                            ));
+                        }
+                    }
+                }
+                let kid = compiled.remove(&next).unwrap();
+
+                // 3. Look up the compiled kernel (brief lock).
+                let kernel = {
+                    let guard = self.inner.lock().unwrap();
+                    guard
+                        .kernels
+                        .get(&kid)
+                        .cloned()
+                        .ok_or_else(|| anyhow::anyhow!("kernel {} not found", kid))?
+                };
+
+                if sv_n_qubits < kernel.n_gate_qubits() {
+                    anyhow::bail!(
+                        "statevector has fewer qubits ({}) than kernel requires ({})",
+                        sv_n_qubits,
+                        kernel.n_gate_qubits()
+                    );
+                }
+                if sv_precision as u8 != kernel.precision() as u8 {
+                    anyhow::bail!("statevector precision does not match kernel");
+                }
+
+                // 4. Load cubin → CUmodule.
+                let cubin = kernel
+                    .cubin
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("kernel {} has no cubin", kid))?;
+                let (cu_module, cu_function) =
+                    load_cubin_module(cubin, kernel.func_name(), &mut err_buf)?;
+
+                // 5. Record start event → launch → record end event.
+                let start_ev = match create_and_record_event(stream, &mut err_buf) {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        unsafe { ffi::cast_cuda_module_unload(cu_module) };
+                        return Err(e);
+                    }
+                };
+
+                if unsafe {
+                    ffi::cast_cuda_kernel_launch(
+                        cu_function,
+                        stream,
+                        sv_dptr,
+                        kernel.n_gate_qubits(),
+                        sv_n_qubits,
+                        kernel.precision() as u8,
+                        err_buf.as_mut_ptr(),
+                        err_buf.len(),
+                    )
+                } != 0
+                {
+                    unsafe { ffi::cast_cuda_event_destroy(start_ev) };
+                    unsafe { ffi::cast_cuda_module_unload(cu_module) };
+                    return Err(anyhow::anyhow!(
+                        "kernel {} launch failed: {}",
+                        kid,
+                        error_from_buf(&err_buf)
+                    ));
+                }
+
+                let end_ev = match create_and_record_event(stream, &mut err_buf) {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        unsafe { ffi::cast_cuda_event_destroy(start_ev) };
+                        unsafe { ffi::cast_cuda_module_unload(cu_module) };
+                        return Err(e);
+                    }
+                };
+
+                log::debug!(
+                    "cuda: pipelined launch kernel {} ({} gate qubits, {} sv qubits, {:?})",
+                    kid,
+                    kernel.n_gate_qubits(),
+                    sv_n_qubits,
+                    kernel.precision(),
+                );
+
+                window.push_back(WindowSlot {
+                    kernel_id: kid,
+                    cu_module,
+                    start_event: start_ev,
+                    end_event: end_ev,
+                    n_gate_qubits: kernel.n_gate_qubits(),
+                    precision: kernel.precision(),
+                    ptx_compile_time: kernel.ptx_compile_time(),
+                    jit_compile_time: kernel.jit_compile_time(),
+                });
+            }
+
+            // ── Drain remaining window slots ─────────────────────────────────
+            if unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) }
+                != 0
+            {
+                return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            }
+
+            while let Some(slot) = window.pop_front() {
+                timings.push(slot.collect_timing(&mut err_buf)?);
+            }
+
+            Ok(())
+        });
+
+        // Sync stream before dropping any remaining window slots on the error
+        // path — in-flight kernels may still reference the loaded CUmodules.
+        // If sync fails the device may be in a bad state and unloading
+        // modules with active kernels could hang or crash; surface the
+        // failure via a warning so the underlying cause is observable.
+        if !window.is_empty() {
+            let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+            let sync_status =
+                unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) };
+            if sync_status != 0 {
+                log::warn!(
+                    "cuda: stream_sync failed during pipelined cleanup ({} slots in flight): {}",
+                    window.len(),
+                    error_from_buf(&err_buf),
+                );
+            }
+        }
+
+        scope_result?;
+
+        log::debug!(
+            "cuda: pipelined execution complete — {} kernels, wall {:?}",
+            timings.len(),
+            wall_t0.elapsed(),
+        );
+
+        Ok(SyncStats {
+            kernels: timings,
+            wall_time: wall_t0.elapsed(),
+        })
+    }
+}
+
+// ── Pipelined window slot ───────────────────────────────────────────────────
+
+/// A loaded CUmodule + CUDA events for one in-flight kernel in the pipelined
+/// execution window.  Drop destroys events and unloads the module.
+#[cfg(feature = "cuda")]
+struct WindowSlot {
+    kernel_id: CudaKernelId,
+    cu_module: *mut std::ffi::c_void,
+    start_event: *mut std::ffi::c_void,
+    end_event: *mut std::ffi::c_void,
+    n_gate_qubits: u32,
+    precision: CudaPrecision,
+    ptx_compile_time: Duration,
+    jit_compile_time: Duration,
+}
+
+#[cfg(feature = "cuda")]
+impl Drop for WindowSlot {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::cast_cuda_event_destroy(self.start_event);
+            ffi::cast_cuda_event_destroy(self.end_event);
+            ffi::cast_cuda_module_unload(self.cu_module);
+        }
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl WindowSlot {
+    /// Wait for this slot's kernel to complete, query GPU execution time,
+    /// then clean up (events destroyed, module unloaded via Drop).
+    fn wait_and_collect(
+        self,
+        err_buf: &mut [c_char; ERR_BUF_LEN],
+    ) -> anyhow::Result<KernelExecTime> {
+        let status = unsafe {
+            ffi::cast_cuda_event_synchronize(self.end_event, err_buf.as_mut_ptr(), err_buf.len())
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(
+                "event_synchronize: {}",
+                error_from_buf(err_buf)
+            ));
+        }
+        self.collect_timing(err_buf)
+    }
+
+    /// Query GPU execution time from already-completed events, then clean up.
+    fn collect_timing(self, err_buf: &mut [c_char; ERR_BUF_LEN]) -> anyhow::Result<KernelExecTime> {
+        let mut ms = 0.0f32;
+        let status = unsafe {
+            ffi::cast_cuda_event_elapsed_ms(
+                self.start_event,
+                self.end_event,
+                &mut ms,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(
+                "event_elapsed_ms: {}",
+                error_from_buf(err_buf)
+            ));
+        }
+        let timing = KernelExecTime {
+            kernel_id: self.kernel_id,
+            n_gate_qubits: self.n_gate_qubits,
+            precision: self.precision,
+            ptx_compile_time: self.ptx_compile_time,
+            jit_compile_time: self.jit_compile_time,
+            gpu_time: Duration::from_secs_f64(ms as f64 / 1000.0),
+        };
+        // self drops here → events destroyed, module unloaded.
+        Ok(timing)
     }
 }

@@ -394,7 +394,7 @@ fn main() -> Result<()> {
             hw.config.device, hw.peak_bw_gib_s, hw.peak_gflops_s, hw.crossover_ai,
         );
 
-        let hw_cfg = FusionConfig::hardware_adaptive(&hw, args.max_size);
+        let hw_cfg = FusionConfig::hardware_adaptive(&hw, args.max_size, 1e-12);
         circuits.push(fuse("hw-adaptive", &base_graph, &hw_cfg));
 
         println!("CPU");
@@ -431,7 +431,7 @@ fn main() -> Result<()> {
             hw.config.device, hw.peak_bw_gib_s, hw.peak_gflops_s, hw.crossover_ai,
         );
 
-        let hw_cfg = FusionConfig::hardware_adaptive(&hw, args.max_size);
+        let hw_cfg = FusionConfig::hardware_adaptive(&hw, args.max_size, 1e-12);
         circuits.push(fuse("hw-adaptive", &base_graph, &hw_cfg));
 
         println!("CUDA");

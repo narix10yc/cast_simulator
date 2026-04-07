@@ -258,17 +258,92 @@ fn ffi_emit_ir(gen: *mut ffi::KernelGenerator, kernel_id: KernelId) -> anyhow::R
     String::from_utf8(ir_buf).map_err(|e| anyhow::anyhow!("IR is not valid UTF-8: {e}"))
 }
 
+// ── JIT session / generator RAII handles ─────────────────────────────────
+
+/// RAII wrapper for a C++ LLJIT session.  Shared via `Arc` across all
+/// kernels compiled in the same batch — the session (and thus the compiled
+/// code pages) stays alive as long as any kernel from the batch is alive.
+struct JitSessionHandle(NonNull<ffi::JitSession>);
+
+impl Drop for JitSessionHandle {
+    fn drop(&mut self) {
+        unsafe { ffi::cast_cpu_jit_session_delete(self.0.as_ptr()) };
+    }
+}
+
+// The session is never mutated after construction.
+unsafe impl Send for JitSessionHandle {}
+unsafe impl Sync for JitSessionHandle {}
+
+/// RAII wrapper for the C++ kernel generator.  On drop, the generator is
+/// deleted via `cast_cpu_kernel_generator_delete`.
+struct GeneratorHandle(NonNull<ffi::KernelGenerator>);
+
+impl GeneratorHandle {
+    fn new() -> anyhow::Result<Self> {
+        let raw = unsafe { ffi::cast_cpu_kernel_generator_new() };
+        NonNull::new(raw)
+            .map(Self)
+            .ok_or_else(|| anyhow::anyhow!("failed to create CPU kernel generator"))
+    }
+
+    fn as_ptr(&self) -> *mut ffi::KernelGenerator {
+        self.0.as_ptr()
+    }
+
+    /// Consumes the handle and calls `finish`, returning the JIT session and
+    /// kernel records.  On success the C++ generator is deleted by `finish`;
+    /// on failure it is deleted here.
+    fn finish(self) -> anyhow::Result<(NonNull<ffi::JitSession>, *mut ffi::KernelRecord, usize)> {
+        let mut raw_session: *mut ffi::JitSession = std::ptr::null_mut();
+        let mut raw_records: *mut ffi::KernelRecord = std::ptr::null_mut();
+        let mut n_records: usize = 0;
+        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+
+        let status = unsafe {
+            ffi::cast_cpu_kernel_generator_finish(
+                self.as_ptr(),
+                &mut raw_session,
+                &mut raw_records,
+                &mut n_records,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+
+        // `finish` deletes the C++ generator on success.  On failure the
+        // generator is left intact — our Drop will clean it up.
+        if status != 0 {
+            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        }
+
+        // Ownership transferred to the C++ side on success — prevent our
+        // Drop from double-freeing.
+        std::mem::forget(self);
+
+        let jit_session = NonNull::new(raw_session)
+            .ok_or_else(|| anyhow::anyhow!("finish returned null session"))?;
+        Ok((jit_session, raw_records, n_records))
+    }
+}
+
+impl Drop for GeneratorHandle {
+    fn drop(&mut self) {
+        unsafe { ffi::cast_cpu_kernel_generator_delete(self.as_ptr()) };
+    }
+}
+
 // ── CpuKernelManager ──────────────────────────────────────────────────────
 
 /// A single compiled kernel owned by the manager.
 ///
-/// Holds the LLJIT session pointer (to keep the compiled code pages alive),
-/// the JIT-compiled function pointer, the source gate, and optional
-/// diagnostics (LLVM IR / native assembly text).
+/// Holds a shared reference to the LLJIT session (to keep the compiled code
+/// pages alive), the JIT-compiled function pointer, the source gate, and
+/// optional diagnostics (LLVM IR / native assembly text).
 struct KernelEntry {
-    /// C++ LLJIT session; keeps the JIT-compiled code pages alive.
-    /// Destroyed via `cast_cpu_jit_session_delete` on drop.
-    jit_session: NonNull<ffi::JitSession>,
+    /// Shared LLJIT session; multiple kernels from the same batch share this.
+    /// Not read directly — kept alive to pin the JIT-compiled code pages.
+    _jit_session: Arc<JitSessionHandle>,
     /// The source gate this kernel was compiled from.  Also used to query
     /// `n_gate_qubits` at apply time (avoids storing a redundant copy).
     gate: Arc<QuantumGate>,
@@ -355,15 +430,22 @@ impl KernelEntry {
     }
 }
 
-impl Drop for KernelEntry {
-    fn drop(&mut self) {
-        unsafe { ffi::cast_cpu_jit_session_delete(self.jit_session.as_ptr()) };
-    }
-}
-
-// jit_session is not Send by default (raw pointer), but access is
-// serialised through the manager's Mutex.
+// All fields are immutable after construction.  The JitSessionHandle is
+// shared via Arc, function pointers are Copy, matrix_buf is read-only.
 unsafe impl Send for KernelEntry {}
+unsafe impl Sync for KernelEntry {}
+
+/// Metadata for a kernel that has been added to the C++ generator but not
+/// yet JIT-compiled.  Promoted to a [`KernelEntry`] by [`CpuKernelManager::finalize`].
+struct PendingKernel {
+    gate: Arc<QuantumGate>,
+    /// C++ kernel id within the current generator batch.  Not read on the
+    /// Rust side — present for debugging and to document the mapping.
+    #[allow(dead_code)]
+    raw_kid: KernelId,
+    /// Captured LLVM IR text (only if `request_llvm_ir` was set).
+    ir_text: Option<String>,
+}
 
 // ── Kernel deduplication ─────────────────────────────────────────────────────
 
@@ -429,24 +511,38 @@ fn matrix_signature(gate: &QuantumGate, ztol: f64, otol: f64) -> Vec<u8> {
 
 struct CpuManagerInner {
     next_id: KernelId,
-    entries: HashMap<KernelId, KernelEntry>,
+    /// Compiled, ready-to-apply kernel entries.
+    entries: HashMap<KernelId, Arc<KernelEntry>>,
     dedup: HashMap<DedupKey, KernelId>,
+    /// Kernels added to the generator but not yet JIT-compiled.
+    /// Order matches the C++ generator's internal kernel vector.
+    pending: Vec<(KernelId, PendingKernel)>,
 }
 
 /// CPU kernel manager: generate → JIT-compile → apply.
 ///
 /// ```ignore
 /// let mgr = CpuKernelManager::new(spec);
-/// let kid = mgr.generate(&gate)?;          // LLVM IR → O1 → native JIT
-/// mgr.apply(kid, &mut statevector, n_threads)?;
+/// let k1 = mgr.generate(&gate_a)?;         // LLVM IR (deferred JIT)
+/// let k2 = mgr.generate(&gate_b)?;         // batched with k1
+/// mgr.apply(k1, &mut statevector, 0)?;     // auto-finalizes both
+/// mgr.apply(k2, &mut statevector, 0)?;     // already compiled
 /// ```
 ///
-/// `generate` is thread-safe (lock-free LLVM pipeline, brief lock to insert).
+/// Kernels are accumulated in a shared C++ generator during [`generate`]
+/// calls and batch-compiled into a single LLJIT session on the first
+/// [`apply`], [`finalize`], or diagnostic query.  This amortises LLJIT
+/// setup overhead and shares compiled code pages across kernels.
+///
 /// Identical gates are deduplicated via content-based keys.
-/// `apply` dispatches work across threads synchronously.
+/// `apply` dispatches work across threads synchronously; the manager lock
+/// is released before kernel execution.
 pub struct CpuKernelManager {
     spec: CPUKernelGenSpec,
     inner: std::sync::Mutex<CpuManagerInner>,
+    /// Shared C++ generator accumulating un-compiled kernels.
+    /// Lock ordering: always acquire `generator` before `inner`.
+    generator: std::sync::Mutex<Option<GeneratorHandle>>,
 }
 
 impl CpuKernelManager {
@@ -458,7 +554,9 @@ impl CpuKernelManager {
                 next_id: 0,
                 entries: HashMap::new(),
                 dedup: HashMap::new(),
+                pending: Vec::new(),
             }),
+            generator: std::sync::Mutex::new(None),
         }
     }
 
@@ -498,7 +596,7 @@ impl CpuKernelManager {
         request_llvm_ir: bool,
         request_asm: bool,
     ) -> anyhow::Result<KernelId> {
-        // ── Dedup check (skip for diagnostic calls) ──────────────────────
+        // ── First dedup check (fast path, no generator lock) ─────────────
         let spec = &self.spec;
         let want_dedup = !request_llvm_ir && !request_asm;
         let key = if want_dedup {
@@ -513,7 +611,7 @@ impl CpuKernelManager {
         };
 
         // Extract FFI data upfront so the borrow on `gate` is released
-        // before we move the Arc into KernelEntry.
+        // before we move the Arc into the pending entry.
         let ffi_matrix: Vec<ffi::c64> = gate
             .matrix()
             .data()
@@ -523,15 +621,38 @@ impl CpuKernelManager {
         let qubits = gate.qubits().to_vec();
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
 
-        // ── Create generator ──────────────────────────────────────────────
-        let raw_gen = unsafe { ffi::cast_cpu_kernel_generator_new() };
-        let raw_gen = NonNull::new(raw_gen)
-            .ok_or_else(|| anyhow::anyhow!("failed to create CPU kernel generator"))?;
+        // ── Acquire generator lock for the remainder of the function ────
+        // Lock order: generator → inner.  Held through the C++ codegen and
+        // the pending push so the generator state and pending list stay
+        // consistent — no concurrent generate_inner can race with us.
+        let mut gen_guard = self.generator.lock().unwrap();
+
+        // ── Second dedup re-check, BEFORE enqueueing into the C++ batch ──
+        // Another generate_inner may have completed between our first
+        // dedup miss and our acquisition of the generator lock.  We must
+        // catch the duplicate here so we never add an orphan kernel to the
+        // C++ generator's batch (which would cause a record/pending size
+        // mismatch in finalize).
+        if let Some(ref key) = key {
+            let inner = self.inner.lock().unwrap();
+            if let Some(&existing_id) = inner.dedup.get(key) {
+                return Ok(existing_id);
+            }
+        }
+
+        // ── Create generator if this is the first kernel of the batch ───
+        let gen = match gen_guard.as_ref() {
+            Some(g) => g,
+            None => {
+                *gen_guard = Some(GeneratorHandle::new()?);
+                gen_guard.as_ref().unwrap()
+            }
+        };
 
         let mut raw_kid: KernelId = 0;
         let status = unsafe {
             ffi::cast_cpu_kernel_generator_generate(
-                raw_gen.as_ptr(),
+                gen.as_ptr(),
                 spec as *const CPUKernelGenSpec,
                 ffi_matrix.as_ptr(),
                 ffi_matrix.len(),
@@ -543,162 +664,222 @@ impl CpuKernelManager {
             )
         };
         if status != 0 {
-            unsafe { ffi::cast_cpu_kernel_generator_delete(raw_gen.as_ptr()) };
             return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
         }
 
         // ── Diagnostics (IR + asm capture) ────────────────────────────────
+        // emit_ir triggers O1 optimisation for this kernel (idempotent —
+        // finish will skip re-optimising it).  request_asm only sets a flag;
+        // assembly is emitted during finish.
         let ir_text = if request_llvm_ir {
-            Some(ffi_emit_ir(raw_gen.as_ptr(), raw_kid)?)
+            Some(ffi_emit_ir(gen.as_ptr(), raw_kid)?)
         } else {
             None
         };
         if request_asm {
             let status = unsafe {
                 ffi::cast_cpu_kernel_generator_request_asm(
-                    raw_gen.as_ptr(),
+                    gen.as_ptr(),
                     raw_kid,
                     err_buf.as_mut_ptr(),
                     err_buf.len(),
                 )
             };
             if status != 0 {
-                unsafe { ffi::cast_cpu_kernel_generator_delete(raw_gen.as_ptr()) };
                 return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
             }
         }
 
-        // ── JIT-compile ───────────────────────────────────────────────────
-        // `finish` deletes the C++ generator on success; on failure the
-        // generator is left intact — but we give up ownership either way
-        // to avoid a double-free, so we do NOT call generator_delete after
-        // this point regardless of the outcome.
-        let mut raw_session: *mut ffi::JitSession = std::ptr::null_mut();
-        let mut raw_records: *mut ffi::KernelRecord = std::ptr::null_mut();
-        let mut n_records: usize = 0;
-
-        let status = unsafe {
-            ffi::cast_cpu_kernel_generator_finish(
-                raw_gen.as_ptr(),
-                &mut raw_session,
-                &mut raw_records,
-                &mut n_records,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
-        }
-
-        let jit_session = NonNull::new(raw_session)
-            .ok_or_else(|| anyhow::anyhow!("finish returned null session"))?;
-
-        // ── Extract the single kernel record ──────────────────────────────
-        // Each generate_inner produces exactly one kernel.
-        debug_assert!(n_records == 1);
-        let records = unsafe { std::slice::from_raw_parts(raw_records, n_records) };
-        let record = &records[0];
-
-        let entry_fn = record
-            .entry
-            .ok_or_else(|| anyhow::anyhow!("finish returned null entry pointer"))?;
-
-        let matrix_data = if record.matrix.is_null() {
-            Vec::new()
-        } else {
-            unsafe { std::slice::from_raw_parts(record.matrix, record.matrix_len) }.to_vec()
-        };
-
-        let asm_text = if record.asm_text.is_null() {
-            None
-        } else {
-            Some(
-                unsafe { std::ffi::CStr::from_ptr(record.asm_text) }
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        };
-
-        let precision = record.metadata.precision;
-        let simd_width = record.metadata.simd_width;
-        let matrix_buf = MatrixBuffer::from_ffi(record.metadata.mode, precision, &matrix_data);
-        unsafe { ffi::cast_cpu_jit_kernel_records_free(raw_records, n_records) };
-
-        // ── Insert under lock (brief) ─────────────────────────────────────
-        let mut guard = self.inner.lock().unwrap();
-
-        // Re-check dedup: another thread may have compiled the same gate
-        // while we were running the LLVM pipeline.
-        if let Some(ref key) = key {
-            if let Some(&existing_id) = guard.dedup.get(key) {
-                // entry (and its JIT session) drops after guard is released.
-                return Ok(existing_id);
-            }
-        }
-
-        let id = guard.next_id;
-        guard.next_id += 1;
+        // ── Register pending entry ───────────────────────────────────────
+        // We still hold the generator lock, so no concurrent generate_inner
+        // can have inserted into dedup since our second re-check above.
+        let mut inner = self.inner.lock().unwrap();
+        let id = inner.next_id;
+        inner.next_id += 1;
         if let Some(key) = key {
-            guard.dedup.insert(key, id);
+            inner.dedup.insert(key, id);
         }
-        guard.entries.insert(
+        inner.pending.push((
             id,
-            KernelEntry {
-                jit_session,
+            PendingKernel {
                 gate,
-                func: entry_fn,
-                precision,
-                simd_width,
-                matrix_buf,
+                raw_kid,
                 ir_text,
-                asm_text,
             },
-        );
+        ));
         log::info!(
-            "cpu: manager registered kernel {} ({} qubits, {:?} precision)",
+            "cpu: queued kernel {} ({} qubits, {:?} precision, batch pos {})",
             id,
             qubits.len(),
             spec.precision,
+            inner.pending.len() - 1,
         );
         Ok(id)
     }
 
+    /// Batch-compiles all pending kernels into a single LLJIT session.
+    ///
+    /// Called automatically by [`apply`](Self::apply) and diagnostic
+    /// accessors when the requested kernel is still pending.  Explicit
+    /// calls allow the caller to control when the compilation cost is paid.
+    ///
+    /// No-op if there are no pending kernels.
+    pub fn finalize(&self) -> anyhow::Result<()> {
+        // ── Take the generator and pending list atomically ───────────────
+        // Hold the generator lock while taking pending so concurrent
+        // generate_inner cannot push new entries between the two takes
+        // (which would leave them stranded — their kernels are in a
+        // different generator than the one we're about to finish).
+        // Lock order: generator → inner.
+        let mut gen_guard = self.generator.lock().unwrap();
+        let gen_handle = match gen_guard.take() {
+            Some(g) => g,
+            None => return Ok(()), // no generator → nothing pending
+        };
+        let pending = {
+            let mut inner = self.inner.lock().unwrap();
+            std::mem::take(&mut inner.pending)
+        };
+        // Release the generator lock — concurrent generate_inner calls
+        // can now create a fresh GeneratorHandle for the next batch.
+        drop(gen_guard);
+
+        if pending.is_empty() {
+            // Generator existed but had no pending kernels (should not happen
+            // in normal use, but handle gracefully — drop the generator).
+            return Ok(());
+        }
+
+        // ── JIT-compile the entire batch (no locks held) ─────────────────
+        let (jit_session, raw_records, n_records) = gen_handle.finish()?;
+        let session = Arc::new(JitSessionHandle(jit_session));
+
+        debug_assert_eq!(
+            n_records,
+            pending.len(),
+            "finish returned {} records but {} pending kernels",
+            n_records,
+            pending.len(),
+        );
+
+        let records = unsafe { std::slice::from_raw_parts(raw_records, n_records) };
+
+        // ── Promote pending entries to compiled entries ───────────────────
+        let mut inner = self.inner.lock().unwrap();
+        for ((kid, pend), record) in pending.iter().zip(records.iter()) {
+            let entry_fn = record
+                .entry
+                .ok_or_else(|| anyhow::anyhow!("finish returned null entry pointer"))?;
+
+            let matrix_data = if record.matrix.is_null() {
+                &[] as &[ffi::c64]
+            } else {
+                unsafe { std::slice::from_raw_parts(record.matrix, record.matrix_len) }
+            };
+
+            let asm_text = if record.asm_text.is_null() {
+                None
+            } else {
+                Some(
+                    unsafe { std::ffi::CStr::from_ptr(record.asm_text) }
+                        .to_string_lossy()
+                        .into_owned(),
+                )
+            };
+
+            let precision = record.metadata.precision;
+            let simd_width = record.metadata.simd_width;
+            let matrix_buf = MatrixBuffer::from_ffi(record.metadata.mode, precision, matrix_data);
+
+            inner.entries.insert(
+                *kid,
+                Arc::new(KernelEntry {
+                    _jit_session: session.clone(),
+                    gate: pend.gate.clone(),
+                    func: entry_fn,
+                    precision,
+                    simd_width,
+                    matrix_buf,
+                    ir_text: pend.ir_text.clone(),
+                    asm_text,
+                }),
+            );
+        }
+        unsafe { ffi::cast_cpu_jit_kernel_records_free(raw_records, n_records) };
+
+        log::info!(
+            "cpu: finalized batch of {} kernels into shared JIT session",
+            n_records,
+        );
+        Ok(())
+    }
+
+    /// Ensures kernel `id` is compiled, calling [`finalize`](Self::finalize)
+    /// if it is still pending.  Returns the compiled entry.
+    fn ensure_compiled(&self, id: KernelId) -> anyhow::Result<Arc<KernelEntry>> {
+        // Fast path: already compiled.
+        {
+            let inner = self.inner.lock().unwrap();
+            if let Some(entry) = inner.entries.get(&id) {
+                return Ok(entry.clone());
+            }
+            if !inner.pending.iter().any(|(kid, _)| *kid == id) {
+                return Err(anyhow::anyhow!("kernel id {} not found", id));
+            }
+        }
+        // Kernel is pending — finalize the batch.
+        self.finalize()?;
+        let inner = self.inner.lock().unwrap();
+        inner
+            .entries
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found after finalize", id))
+    }
+
     /// Returns the optimised LLVM IR for a kernel, if it was generated with
-    /// diagnostics.
+    /// diagnostics.  Triggers [`finalize`](Self::finalize) if the kernel is
+    /// still pending.
     pub fn emit_ir(&self, id: KernelId) -> Option<String> {
-        let guard = self.inner.lock().unwrap();
-        guard.entries.get(&id)?.ir_text.clone()
+        self.ensure_compiled(id).ok()?.ir_text.clone()
     }
 
     /// Returns the native assembly for a kernel, if it was generated with
-    /// diagnostics.
+    /// diagnostics.  Triggers [`finalize`](Self::finalize) if the kernel is
+    /// still pending.
     pub fn emit_asm(&self, id: KernelId) -> Option<String> {
-        let guard = self.inner.lock().unwrap();
-        guard.entries.get(&id)?.asm_text.clone()
+        self.ensure_compiled(id).ok()?.asm_text.clone()
     }
 
     /// Returns the source gate for the kernel identified by `id`.
     pub fn gate(&self, id: KernelId) -> Option<Arc<QuantumGate>> {
-        let guard = self.inner.lock().unwrap();
-        guard.entries.get(&id).map(|e| e.gate.clone())
+        let inner = self.inner.lock().unwrap();
+        if let Some(entry) = inner.entries.get(&id) {
+            return Some(entry.gate.clone());
+        }
+        inner
+            .pending
+            .iter()
+            .find(|(kid, _)| *kid == id)
+            .map(|(_, p)| p.gate.clone())
     }
 
     /// Applies the kernel identified by `id` to `statevector` in-place.
     ///
     /// `n_threads`: number of worker threads. Pass `0` to use the hardware
     /// thread count.
+    ///
+    /// If the kernel is still pending, the entire batch is finalized first.
+    /// The manager lock is released before kernel execution begins, so
+    /// concurrent `generate` and `apply` calls on other kernels are not blocked.
     pub fn apply(
         &self,
         id: KernelId,
         statevector: &mut CPUStatevector,
         n_threads: u32,
     ) -> anyhow::Result<()> {
-        let guard = self.inner.lock().unwrap();
-        let entry = guard
-            .entries
-            .get(&id)
-            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found", id))?;
+        let entry = self.ensure_compiled(id)?;
+        // Lock released — kernel execution does not block the manager.
         entry.apply_kernel(statevector, n_threads)
     }
 

@@ -239,11 +239,16 @@ pub struct HardwareAdaptiveCostModel {
 }
 
 impl HardwareAdaptiveCostModel {
-    pub fn new(profile: &HardwareProfile, max_size: usize, trajectory_mode: bool) -> Self {
+    pub fn new(
+        profile: &HardwareProfile,
+        max_size: usize,
+        trajectory_mode: bool,
+        zero_tol: f64,
+    ) -> Self {
         Self {
             crossover_ai: profile.crossover_ai,
             max_size,
-            zero_tol: 1e-12,
+            zero_tol,
             trajectory_mode,
         }
     }
@@ -275,6 +280,10 @@ pub struct FusionConfig {
     pub benefit_margin: f64,
     pub cost_model: Box<dyn CostModel>,
     pub trajectory_mode: bool,
+    /// Zero-tolerance used for arithmetic intensity calculations in the
+    /// fusion log.  Should match the kernel generator's `ztol` so that
+    /// logged AI values reflect what the codegen actually produces.
+    pub zero_tol: f64,
 }
 
 impl Default for FusionConfig {
@@ -305,6 +314,7 @@ impl FusionConfig {
                 trajectory_mode,
             }),
             trajectory_mode,
+            zero_tol: 0.0,
         }
     }
 
@@ -312,21 +322,28 @@ impl FusionConfig {
         Self::size_only(4)
     }
 
-    /// Roofline-adaptive fusion. The crossover in `profile` must match the
-    /// precision and thread count of your simulation.
-    pub fn hardware_adaptive(profile: &HardwareProfile, max_size: usize) -> Self {
-        Self::hardware_adaptive_inner(profile, max_size, false)
+    /// Roofline-adaptive fusion.  `zero_tol` should match the kernel
+    /// generator's `ztol` (e.g. `1e-12` for F64, `1e-6` for F32).
+    /// The crossover in `profile` must match the precision and thread count
+    /// of your simulation.
+    pub fn hardware_adaptive(profile: &HardwareProfile, max_size: usize, zero_tol: f64) -> Self {
+        Self::hardware_adaptive_inner(profile, max_size, false, zero_tol)
     }
 
     /// Roofline-adaptive fusion for trajectory mode — noisy gates participate.
-    pub fn hardware_adaptive_trajectory(profile: &HardwareProfile, max_size: usize) -> Self {
-        Self::hardware_adaptive_inner(profile, max_size, true)
+    pub fn hardware_adaptive_trajectory(
+        profile: &HardwareProfile,
+        max_size: usize,
+        zero_tol: f64,
+    ) -> Self {
+        Self::hardware_adaptive_inner(profile, max_size, true, zero_tol)
     }
 
     fn hardware_adaptive_inner(
         profile: &HardwareProfile,
         max_size: usize,
         trajectory_mode: bool,
+        zero_tol: f64,
     ) -> Self {
         Self {
             size_max: max_size,
@@ -335,8 +352,10 @@ impl FusionConfig {
                 profile,
                 max_size,
                 trajectory_mode,
+                zero_tol,
             )),
             trajectory_mode,
+            zero_tol,
         }
     }
 }
@@ -451,7 +470,7 @@ mod tests {
 
     fn adaptive_model(bw: f64, gflops: f64, max_size: usize) -> HardwareAdaptiveCostModel {
         let profile = HardwareProfile::from_roofline(test_config(), bw, gflops, size_of::<f64>());
-        HardwareAdaptiveCostModel::new(&profile, max_size, false)
+        HardwareAdaptiveCostModel::new(&profile, max_size, false, 1e-12)
     }
 
     // ── SizeOnlyCostModel ────────────────────────────────────────────────────

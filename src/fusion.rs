@@ -43,11 +43,7 @@ fn absorb_single_qubit_gates(cg: &mut CircuitGraph) -> usize {
     n_fused
 }
 
-fn absorb_single_qubit_gate(
-    cg: &mut CircuitGraph,
-    row: usize,
-    qubit: usize,
-) -> bool {
+fn absorb_single_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> bool {
     let gate_id = match cg.gate_id_at(row, qubit) {
         Some(gate_id) => gate_id,
         None => return false,
@@ -108,11 +104,7 @@ fn fuse_adjacent_two_qubit_gates(cg: &mut CircuitGraph) -> usize {
     n_fused
 }
 
-fn fuse_adjacent_two_qubit_gate(
-    cg: &mut CircuitGraph,
-    row: usize,
-    qubit: usize,
-) -> bool {
+fn fuse_adjacent_two_qubit_gate(cg: &mut CircuitGraph, row: usize, qubit: usize) -> bool {
     let next_row = row + 1;
     let Some(left_gate_id) = cg.gate_id_at(row, qubit) else {
         return false;
@@ -120,10 +112,7 @@ fn fuse_adjacent_two_qubit_gate(
     let Some(left_gate) = cg.gate(left_gate_id) else {
         return false;
     };
-    if left_gate.n_qubits() != 2
-
-        || left_gate.qubits()[0] as usize != qubit
-    {
+    if left_gate.n_qubits() != 2 || left_gate.qubits()[0] as usize != qubit {
         return false;
     }
 
@@ -133,10 +122,7 @@ fn fuse_adjacent_two_qubit_gate(
     let Some(right_gate) = cg.gate(right_gate_id) else {
         return false;
     };
-    if right_gate.n_qubits() != 2
-
-        || right_gate.qubits() != left_gate.qubits()
-    {
+    if right_gate.n_qubits() != 2 || right_gate.qubits() != left_gate.qubits() {
         return false;
     }
 
@@ -193,9 +179,7 @@ fn start_fusion(
     let seed_gate = cg.gate_arc(seed_id).unwrap().clone();
 
     // Only process a gate from its lowest qubit to avoid duplicate seeds.
-    if seed_gate.qubits()[0] as usize != start_qubit
-
-    {
+    if seed_gate.qubits()[0] as usize != start_qubit {
         return 0;
     }
 
@@ -278,7 +262,7 @@ fn start_fusion(
     }
 
     // ── Step D: cost-model decision ───────────────────────────────────────────
-    let ztol = 1e-12;
+    let ztol = config.zero_tol;
     let old_cost: f64 = tentative
         .iter()
         .map(|(g, _)| config.cost_model.cost_of(g))
@@ -605,6 +589,7 @@ mod tests {
                 trajectory_mode: false,
             }),
             trajectory_mode: false,
+            zero_tol: 0.0,
         };
         let n_before = cg.n_rows();
         apply_gate_fusion(&mut cg, &config, 3, None);
@@ -942,6 +927,7 @@ mod tests {
                 trajectory_mode: false,
             }),
             trajectory_mode: false,
+            zero_tol: 0.0,
         };
         // Phase 2 rollback: unitary must be unchanged.
         check_fusion(&cg, |g| {
@@ -964,6 +950,7 @@ mod tests {
                 trajectory_mode: false,
             }),
             trajectory_mode: false,
+            zero_tol: 0.0,
         };
         let n_before = cg.n_rows();
         let fused = check_fusion(&cg, |g| {

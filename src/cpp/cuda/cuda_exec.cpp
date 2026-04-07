@@ -363,6 +363,21 @@ extern "C" int cast_cuda_event_record(void *event, void *stream, char *err_buf,
   return 0;
 }
 
+extern "C" int cast_cuda_event_synchronize(void *event, char *err_buf, size_t err_buf_len) {
+  if (!event) {
+    write_error_message(err_buf, err_buf_len, "event must not be null");
+    return 1;
+  }
+  std::string err;
+  CUresult rc = cuEventSynchronize(static_cast<CUevent>(event));
+  if (!cu_check(rc, "cuEventSynchronize", err)) {
+    write_error_message(err_buf, err_buf_len, err);
+    return 1;
+  }
+  clear_error_buffer(err_buf, err_buf_len);
+  return 0;
+}
+
 extern "C" void cast_cuda_event_destroy(void *event) {
   if (event)
     cuEventDestroy(static_cast<CUevent>(event));

@@ -179,6 +179,12 @@ pub(super) mod ffi {
             err_buf_len: usize,
         ) -> i32;
         #[cfg(feature = "cuda")]
+        pub fn cast_cuda_event_synchronize(
+            event: *mut std::ffi::c_void,
+            err_buf: *mut c_char,
+            err_buf_len: usize,
+        ) -> i32;
+        #[cfg(feature = "cuda")]
         pub fn cast_cuda_event_destroy(event: *mut std::ffi::c_void);
         #[cfg(feature = "cuda")]
         pub fn cast_cuda_event_elapsed_ms(

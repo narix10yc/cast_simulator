@@ -299,7 +299,9 @@ fn main() -> Result<()> {
         FusionStrategy::NoFusion => FusionConfig::size_only(1),
         FusionStrategy::Default => FusionConfig::default(),
         FusionStrategy::Aggressive => FusionConfig::aggressive(),
-        FusionStrategy::HwAdaptive => FusionConfig::hardware_adaptive(&hw_profile, args.max_size),
+        FusionStrategy::HwAdaptive => {
+            FusionConfig::hardware_adaptive(&hw_profile, args.max_size, 1e-12)
+        }
     };
     eprintln!("  Fusion: {:?}\n", args.fusion);
 

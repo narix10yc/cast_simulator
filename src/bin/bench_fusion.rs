@@ -294,7 +294,11 @@ fn main() -> Result<()> {
         ("aggressive", FusionConfig::aggressive()),
         (
             "hw-adaptive",
-            FusionConfig::hardware_adaptive(&hw_profile, args.max_size),
+            FusionConfig::hardware_adaptive(
+                &hw_profile,
+                args.max_size,
+                if args.force_dense { 0.0 } else { 1e-12 },
+            ),
         ),
     ];
 

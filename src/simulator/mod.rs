@@ -78,6 +78,32 @@ pub trait Backend: sealed::Sealed + Sized {
     /// Clone a statevector (deep copy). Used for ensemble branching.
     #[doc(hidden)]
     fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv>;
+
+    /// Compile and execute `gates` on a freshly initialised statevector, using
+    /// the backend-optimal pipelining strategy.
+    ///
+    /// - **CPU**: compile all gates (batch JIT), then execute all sequentially.
+    ///   `compile_s` and `exec_s` are measured independently.
+    /// - **CUDA**: compile in a thread pool while launching in a windowed
+    ///   pipeline on the GPU stream.  Compile and execute overlap, so
+    ///   `compile_s = 0` and `exec_s = total_wall`; per-kernel CPU compile
+    ///   times are still available via the manager's stats if needed.
+    #[doc(hidden)]
+    fn execute_pipelined(
+        mgr: &Self::Mgr,
+        spec: &Self::Spec,
+        extra: &Self::Extra,
+        gates: &[Arc<QuantumGate>],
+        n_sv: u32,
+    ) -> Result<(Self::Sv, PipelineTimings)>;
+}
+
+/// Wall-time split returned by [`Backend::execute_pipelined`].
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PipelineTimings {
+    pub compile_s: f64,
+    pub exec_s: f64,
 }
 
 mod sealed {
@@ -139,6 +165,35 @@ impl Backend for Cpu {
     fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
         Ok(sv.clone())
     }
+    fn execute_pipelined(
+        mgr: &Self::Mgr,
+        spec: &Self::Spec,
+        extra: &Self::Extra,
+        gates: &[Arc<QuantumGate>],
+        n_sv: u32,
+    ) -> Result<(Self::Sv, PipelineTimings)> {
+        // CPU: compile all gates first (batch JIT), then execute all.
+        // Explicitly finalize the batch so the compile cost is attributed
+        // to compile_s rather than to the first apply.
+        let compile_t0 = Instant::now();
+        let ids: Vec<Self::KernelId> = gates
+            .iter()
+            .map(|g| Self::generate(mgr, g))
+            .collect::<Result<_>>()?;
+        mgr.finalize()?;
+        let compile_s = compile_t0.elapsed().as_secs_f64();
+
+        let exec_t0 = Instant::now();
+        let mut sv = Self::new_sv(n_sv, spec)?;
+        Self::init_sv(&mut sv)?;
+        for &kid in &ids {
+            Self::apply(mgr, kid, &mut sv, extra)?;
+        }
+        Self::flush(mgr)?;
+        let exec_s = exec_t0.elapsed().as_secs_f64();
+
+        Ok((sv, PipelineTimings { compile_s, exec_s }))
+    }
 }
 
 // ── CUDA backend ─────────────────────────────────────────────────────────────
@@ -195,6 +250,31 @@ impl Backend for Cuda {
     }
     fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
         sv.clone_device()
+    }
+    fn execute_pipelined(
+        mgr: &Self::Mgr,
+        spec: &Self::Spec,
+        _extra: &Self::Extra,
+        gates: &[Arc<QuantumGate>],
+        n_sv: u32,
+    ) -> Result<(Self::Sv, PipelineTimings)> {
+        let mut sv = Self::new_sv(n_sv, spec)?;
+        Self::init_sv(&mut sv)?;
+        // Default window = LRU cache size, compile threads = 4.
+        let window_size = 4;
+        let n_compile_threads = 4;
+        let stats = mgr.execute_pipelined(gates, &mut sv, window_size, n_compile_threads)?;
+        // Compile and execute overlap in the pipelined CUDA path, so the
+        // entire wall is reported as exec_s.  Per-kernel CPU compile times
+        // remain available via `stats.kernels`.
+        let exec_s = stats.wall_time.as_secs_f64();
+        Ok((
+            sv,
+            PipelineTimings {
+                compile_s: 0.0,
+                exec_s,
+            },
+        ))
     }
 }
 
@@ -464,20 +544,10 @@ impl<B: Backend> Simulator<B> {
         let n_physical = circuit.n_qubits() as u32;
         let (gates, n_sv) = self.prepare_gates(circuit, n_physical)?;
 
-        let t0 = Instant::now();
-        let kernel_ids = self.compile_gates(&gates)?;
-        let compile_time_s = t0.elapsed().as_secs_f64();
-
         match &self.mode {
             SimulationMode::StateVector | SimulationMode::DensityMatrix => {
-                let ids: Vec<B::KernelId> = kernel_ids
-                    .iter()
-                    .map(|k| k.expect("non-trajectory mode must compile all gates"))
-                    .collect();
-
-                let t_exec = Instant::now();
-                let sv = self.execute_standard(&ids, n_sv)?;
-                let exec_s = t_exec.elapsed().as_secs_f64();
+                let (sv, timings) =
+                    B::execute_pipelined(&self.mgr, &self.spec, &self.extra, &gates, n_sv)?;
 
                 let state = match &self.mode {
                     SimulationMode::DensityMatrix => QuantumState {
@@ -490,12 +560,15 @@ impl<B: Backend> Simulator<B> {
 
                 Ok(SimulationResult {
                     state: Some(state),
-                    timing: crate::timing::stats_from_samples(&[exec_s]),
-                    compile_time_s,
+                    timing: crate::timing::stats_from_samples(&[timings.exec_s]),
+                    compile_time_s: timings.compile_s,
                     trajectory_data: None,
                 })
             }
             SimulationMode::Trajectory { .. } => {
+                let t0 = Instant::now();
+                let kernel_ids = self.compile_gates(&gates)?;
+                let compile_time_s = t0.elapsed().as_secs_f64();
                 let prepared = trajectory::PreparedCircuit {
                     gates,
                     kernel_ids,
@@ -546,16 +619,6 @@ impl<B: Backend> Simulator<B> {
             }
         }
         Ok(ids)
-    }
-
-    fn execute_standard(&self, kernel_ids: &[B::KernelId], n_sv: u32) -> Result<B::Sv> {
-        let mut sv = B::new_sv(n_sv, &self.spec)?;
-        B::init_sv(&mut sv)?;
-        for &kid in kernel_ids {
-            self.apply_one(kid, &mut sv)?;
-        }
-        B::flush(&self.mgr)?;
-        Ok(sv)
     }
 
     pub(crate) fn apply_one(&self, kid: B::KernelId, sv: &mut B::Sv) -> Result<()> {

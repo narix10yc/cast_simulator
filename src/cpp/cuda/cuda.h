@@ -78,6 +78,7 @@ int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t sv_dptr,
 
 void *cast_cuda_event_create(char *err_buf, size_t err_buf_len);
 int cast_cuda_event_record(void *event, void *stream, char *err_buf, size_t err_buf_len);
+int cast_cuda_event_synchronize(void *event, char *err_buf, size_t err_buf_len);
 void cast_cuda_event_destroy(void *event);
 int cast_cuda_event_elapsed_ms(void *start_event, void *end_event, float *out_ms, char *err_buf,
                                size_t err_buf_len);
