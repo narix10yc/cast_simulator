@@ -565,12 +565,13 @@ impl CpuKernelManager {
         &self.spec
     }
 
-    /// Generates, optimises, and JIT-compiles a gate kernel.
+    /// Adds the gate to the shared compile queue and returns its kernel ID.
     ///
-    /// Runs the full LLVM pipeline on the calling thread, then briefly locks
-    /// to store the result.  The `Arc<QuantumGate>` is cloned and stored
-    /// alongside the compiled code so the source gate remains accessible via
-    /// [`gate`](Self::gate).
+    /// LLVM IR generation runs on the calling thread; O1 optimization and
+    /// native code generation are deferred until [`apply`](Self::apply),
+    /// [`finalize`](Self::finalize), or a diagnostic accessor is called.
+    /// The `Arc<QuantumGate>` is stored alongside the compiled code so the
+    /// source gate remains accessible via [`gate`](Self::gate).
     ///
     /// Multiple threads may call `generate` concurrently.
     pub fn generate(&self, gate: &Arc<QuantumGate>) -> anyhow::Result<KernelId> {
@@ -579,7 +580,7 @@ impl CpuKernelManager {
 
     /// Like [`generate`](Self::generate), but also captures diagnostics.
     ///
-    /// - `request_llvm_ir`: capture optimised LLVM IR (retrieve via [`emit_ir`](Self::emit_ir)).
+    /// - `request_llvm_ir`: capture optimized LLVM IR (retrieve via [`emit_ir`](Self::emit_ir)).
     /// - `request_asm`: capture native assembly (retrieve via [`emit_asm`](Self::emit_asm)).
     pub fn generate_with_diagnostics(
         &self,
@@ -668,8 +669,8 @@ impl CpuKernelManager {
         }
 
         // ── Diagnostics (IR + asm capture) ────────────────────────────────
-        // emit_ir triggers O1 optimisation for this kernel (idempotent —
-        // finish will skip re-optimising it).  request_asm only sets a flag;
+        // emit_ir triggers O1 optimization for this kernel (idempotent —
+        // finish will skip re-optimizing it).  request_asm only sets a flag;
         // assembly is emitted during finish.
         let ir_text = if request_llvm_ir {
             Some(ffi_emit_ir(gen.as_ptr(), raw_kid)?)
@@ -837,7 +838,7 @@ impl CpuKernelManager {
             .ok_or_else(|| anyhow::anyhow!("kernel id {} not found after finalize", id))
     }
 
-    /// Returns the optimised LLVM IR for a kernel, if it was generated with
+    /// Returns the optimized LLVM IR for a kernel, if it was generated with
     /// diagnostics.  Triggers [`finalize`](Self::finalize) if the kernel is
     /// still pending.
     pub fn emit_ir(&self, id: KernelId) -> Option<String> {

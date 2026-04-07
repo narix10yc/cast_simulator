@@ -189,7 +189,7 @@ impl HardwareProfile {
     /// Use this when `bw_slope` has been measured via the adaptive sweep
     /// rather than derived from `peak_bw_gib_s` and `scalar_bytes`.  The
     /// measured slope is preferred because it reflects actual memory-system
-    /// behaviour more accurately.
+    /// behavior more accurately.
     pub fn from_measurements(
         config: ProfileConfig,
         peak_bw_gib_s: f64,

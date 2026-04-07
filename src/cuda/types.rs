@@ -59,8 +59,8 @@ impl CudaPrecision {
     }
 }
 
-/// Opaque handle returned by [`super::CudaKernelGenerator::generate`], used to identify a
-/// compiled kernel inside a [`super::CudaKernelArtifacts`].
+/// Opaque handle returned by [`super::CudaKernelManager::generate`], used to
+/// identify a compiled kernel owned by a [`super::CudaKernelManager`].
 pub type CudaKernelId = u64;
 
 pub(super) const ERR_BUF_LEN: usize = 1024;

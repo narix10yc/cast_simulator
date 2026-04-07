@@ -79,7 +79,7 @@ pub trait Backend: sealed::Sealed + Sized {
     #[doc(hidden)]
     fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv>;
 
-    /// Compile and execute `gates` on a freshly initialised statevector, using
+    /// Compile and execute `gates` on a freshly initialized statevector, using
     /// the backend-optimal pipelining strategy.
     ///
     /// - **CPU**: compile all gates (batch JIT), then execute all sequentially.
