@@ -76,7 +76,7 @@ static bool ensure_cuda(std::string &err) {
     return false;
   }
   if (!g_context) {
-    err = "CUDA context not initialised";
+    err = "CUDA context not initialized";
     return false;
   }
   // The primary context must be made current for the *calling* thread.

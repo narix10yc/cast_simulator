@@ -58,7 +58,7 @@ pub fn device_sm() -> anyhow::Result<(u32, u32)> {
 /// Query free and total GPU device memory in bytes.
 ///
 /// Returns `(free_bytes, total_bytes)`. Requires the `cuda` feature and an
-/// initialised CUDA context (device 0).
+/// initialized CUDA context (device 0).
 #[cfg(feature = "cuda")]
 pub fn cuda_free_memory_bytes() -> anyhow::Result<(u64, u64)> {
     let mut err_buf = [0 as c_char; types::ERR_BUF_LEN];

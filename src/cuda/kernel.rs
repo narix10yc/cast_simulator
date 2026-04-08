@@ -117,7 +117,7 @@ struct PendingApply {
 }
 
 /// CUDA event pair bracketing a single kernel launch, plus the metadata needed
-/// to build a [`KernelExecTime`] after the stream is synchronised.
+/// to build a [`KernelExecTime`] after the stream is synchronized.
 ///
 /// Events are destroyed automatically on drop, so error paths never need
 /// explicit cleanup loops — they just let the `Vec<EventPair>` go out of scope.
@@ -245,7 +245,7 @@ struct ManagerInner {
     loaded: Vec<Option<LoadedModule>>,
     #[cfg(feature = "cuda")]
     lru_tick: u64,
-    /// Lazily initialised on first `sync`; `None` until then.
+    /// Lazily initialized on first `sync`; `None` until then.
     #[cfg(feature = "cuda")]
     stream: Option<*mut std::ffi::c_void>,
 }
@@ -489,7 +489,7 @@ impl fmt::Debug for CudaKernelManager {
 
 impl CudaKernelManager {
     /// Creates a new manager with the default LRU cache size.
-    /// Does not initialise the CUDA driver.
+    /// Does not initialize the CUDA driver.
     pub fn new(spec: CudaKernelGenSpec) -> Self {
         Self::with_lru_size(spec, DEFAULT_LRU_SIZE)
     }
@@ -499,6 +499,12 @@ impl CudaKernelManager {
     /// `lru_cache_size` controls the number of CUmodule slots kept resident
     /// on the GPU.  Circuits with many distinct kernel shapes benefit from a
     /// larger cache to avoid module load/unload thrashing.  Minimum 1 slot.
+    ///
+    /// **Note:** the LRU cache is only used by the [`apply`](Self::apply) /
+    /// [`sync`](Self::sync) path (currently exercised by trajectory mode).
+    /// The simulator's non-trajectory path goes through
+    /// [`execute_pipelined`](Self::execute_pipelined), which manages its
+    /// own per-call sliding window of CUmodules and bypasses this cache.
     pub fn with_lru_size(spec: CudaKernelGenSpec, lru_cache_size: usize) -> Self {
         let lru_cache_size = lru_cache_size.max(1);
         Self {

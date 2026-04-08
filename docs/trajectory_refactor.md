@@ -310,7 +310,7 @@ The ensemble mode is most beneficial when:
 - Memory holds M ≫ 1 statevectors (e.g., 28-qubit F32 SV is 2 GiB;
   a 32 GiB machine fits ~15 copies).
 - Noise rate is low, so the probability mass concentrates in few branches.
-- A large number of samples is requested (amortises simulation cost).
+- A large number of samples is requested (amortizes simulation cost).
 - Circuit has long noiseless segments (shared prefix is simulated once).
 
 When M = 1, this degenerates to a single deterministic trajectory (always

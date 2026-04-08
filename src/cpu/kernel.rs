@@ -531,12 +531,18 @@ struct CpuManagerInner {
 ///
 /// Kernels are accumulated in a shared C++ generator during [`generate`]
 /// calls and batch-compiled into a single LLJIT session on the first
-/// [`apply`], [`finalize`], or diagnostic query.  This amortises LLJIT
+/// [`apply`], [`finalize`], or diagnostic query.  This amortizes LLJIT
 /// setup overhead and shares compiled code pages across kernels.
 ///
 /// Identical gates are deduplicated via content-based keys.
 /// `apply` dispatches work across threads synchronously; the manager lock
 /// is released before kernel execution.
+///
+/// **Concurrency:** `generate` may be called from multiple threads, but
+/// LLVM IR codegen serializes on the shared C++ generator's lock — only
+/// one thread runs the codegen at a time.  `apply` for *different*
+/// kernels can run in parallel because each `apply` clones its
+/// `KernelEntry` (via `Arc`) before releasing the manager lock.
 pub struct CpuKernelManager {
     spec: CPUKernelGenSpec,
     inner: std::sync::Mutex<CpuManagerInner>,
@@ -725,7 +731,13 @@ impl CpuKernelManager {
     /// calls allow the caller to control when the compilation cost is paid.
     ///
     /// No-op if there are no pending kernels.
-    pub fn finalize(&self) -> anyhow::Result<()> {
+    ///
+    /// **Failure semantics:** if `finish` returns an error mid-batch, the
+    /// kernel IDs in the failed batch are already in `dedup` but will not
+    /// appear in `entries`.  Subsequent `apply` / `ensure_compiled` calls
+    /// for those IDs return `Err("kernel id N not found")`.  There is no
+    /// per-kernel recovery; the manager must be discarded and rebuilt.
+    pub(crate) fn finalize(&self) -> anyhow::Result<()> {
         // ── Take the generator and pending list atomically ───────────────
         // Hold the generator lock while taking pending so concurrent
         // generate_inner cannot push new entries between the two takes

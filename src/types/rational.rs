@@ -33,7 +33,7 @@ impl Rational {
         Self::from_i64(numerator as i64, denominator as i64)
     }
 
-    /// Internal constructor that normalises sign, reduces by GCD, and fits back into `i32`.
+    /// Internal constructor that normalizes sign, reduces by GCD, and fits back into `i32`.
     ///
     /// Using `i64` intermediates prevents overflow during cross-multiplication.
     fn from_i64(numerator: i64, denominator: i64) -> Self {
