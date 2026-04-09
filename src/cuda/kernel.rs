@@ -1,7 +1,7 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{c_char, CStr, CString};
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use super::error_from_buf;
@@ -11,12 +11,19 @@ use super::types::{CudaKernelGenSpec, CudaKernelId, CudaPrecision, ERR_BUF_LEN};
 use super::CudaStatevector;
 use crate::types::QuantumGate;
 
+/// Shorthand for opaque CUDA driver handles (CUmodule, CUfunction, CUstream,
+/// CUevent) passed through the FFI layer.
+type CuPtr = *mut std::ffi::c_void;
+
 // ── CudaKernel ───────────────────────────────────────────────────────────────
 
 /// A compiled CUDA kernel, ready to be loaded and launched.
 ///
 /// Owned by [`CudaKernelManager`]; obtained via [`CudaKernelManager::generate`].
-/// CUDA module handles are not stored here — they live in the manager's LRU cache.
+/// CUDA module handles are not stored here — the [`sync`](CudaKernelManager::sync)
+/// path manages them via an LRU cache, while the
+/// [`execute_pipelined`](CudaKernelManager::execute_pipelined) path uses a
+/// per-call local module cache.
 pub struct CudaKernel {
     /// The source gate this kernel was compiled from.
     gate: Arc<QuantumGate>,
@@ -100,8 +107,8 @@ const DEFAULT_LRU_SIZE: usize = 4;
 #[cfg(feature = "cuda")]
 struct LoadedModule {
     kernel_id: CudaKernelId,
-    cu_module: *mut std::ffi::c_void,
-    cu_function: *mut std::ffi::c_void,
+    cu_module: CuPtr,
+    cu_function: CuPtr,
     /// Monotonically increasing tick set on each cache access; smaller → older.
     lru_tick: u64,
 }
@@ -112,8 +119,6 @@ struct PendingApply {
     kernel_id: CudaKernelId,
     sv_dptr: u64,
     sv_n_qubits: u32,
-    n_gate_qubits: u32,
-    precision: CudaPrecision,
 }
 
 /// CUDA event pair bracketing a single kernel launch, plus the metadata needed
@@ -121,6 +126,9 @@ struct PendingApply {
 ///
 /// Events are destroyed automatically on drop, so error paths never need
 /// explicit cleanup loops — they just let the `Vec<EventPair>` go out of scope.
+///
+/// Used by both the [`CudaKernelManager::sync`] and
+/// [`CudaKernelManager::execute_pipelined`] paths.
 #[cfg(feature = "cuda")]
 struct EventPair {
     kernel_id: CudaKernelId,
@@ -128,8 +136,8 @@ struct EventPair {
     precision: CudaPrecision,
     ptx_compile_time: Duration,
     jit_compile_time: Duration,
-    start_ev: *mut std::ffi::c_void,
-    end_ev: *mut std::ffi::c_void,
+    start_ev: CuPtr,
+    end_ev: CuPtr,
 }
 
 #[cfg(feature = "cuda")]
@@ -139,6 +147,57 @@ impl Drop for EventPair {
             ffi::cast_cuda_event_destroy(self.start_ev);
             ffi::cast_cuda_event_destroy(self.end_ev);
         }
+    }
+}
+
+#[cfg(feature = "cuda")]
+impl EventPair {
+    /// Wait for this kernel's end event to complete, then query GPU time.
+    fn wait_and_collect(
+        &self,
+        err_buf: &mut [c_char; ERR_BUF_LEN],
+    ) -> anyhow::Result<KernelExecTime> {
+        let status = unsafe {
+            ffi::cast_cuda_event_synchronize(self.end_ev, err_buf.as_mut_ptr(), err_buf.len())
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(
+                "event_synchronize: {}",
+                error_from_buf(err_buf)
+            ));
+        }
+        self.collect_timing(err_buf)
+    }
+
+    /// Query GPU execution time from already-completed events.
+    fn collect_timing(
+        &self,
+        err_buf: &mut [c_char; ERR_BUF_LEN],
+    ) -> anyhow::Result<KernelExecTime> {
+        let mut ms = 0.0f32;
+        let status = unsafe {
+            ffi::cast_cuda_event_elapsed_ms(
+                self.start_ev,
+                self.end_ev,
+                &mut ms,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        if status != 0 {
+            return Err(anyhow::anyhow!(
+                "event_elapsed_ms: {}",
+                error_from_buf(err_buf)
+            ));
+        }
+        Ok(KernelExecTime {
+            kernel_id: self.kernel_id,
+            n_gate_qubits: self.n_gate_qubits,
+            precision: self.precision,
+            ptx_compile_time: self.ptx_compile_time,
+            jit_compile_time: self.jit_compile_time,
+            gpu_time: Duration::from_secs_f64(ms as f64 / 1000.0),
+        })
     }
 }
 
@@ -163,6 +222,75 @@ impl DedupKey {
 
 // ── Shared FFI helpers ──────────────────────────────────────────────────────
 
+/// GPU-side parameters for a single kernel launch.
+#[cfg(feature = "cuda")]
+struct LaunchParams {
+    cu_function: CuPtr,
+    stream: CuPtr,
+    sv_dptr: u64,
+    sv_n_qubits: u32,
+}
+
+/// Record a start event, launch the kernel, then record an end event.
+/// Returns a fully armed [`EventPair`] on success.  On failure, any
+/// partially-created events are destroyed before returning.
+#[cfg(feature = "cuda")]
+fn record_launch(
+    params: &LaunchParams,
+    kernel_id: CudaKernelId,
+    kernel: &CudaKernel,
+    err_buf: &mut [c_char; ERR_BUF_LEN],
+) -> anyhow::Result<EventPair> {
+    let start_ev = create_and_record_event(params.stream, err_buf)?;
+
+    let status = unsafe {
+        ffi::cast_cuda_kernel_launch(
+            params.cu_function,
+            params.stream,
+            params.sv_dptr,
+            kernel.n_gate_qubits(),
+            params.sv_n_qubits,
+            kernel.precision() as u8,
+            err_buf.as_mut_ptr(),
+            err_buf.len(),
+        )
+    };
+    if status != 0 {
+        unsafe { ffi::cast_cuda_event_destroy(start_ev) };
+        return Err(anyhow::anyhow!(
+            "kernel {} launch failed: {}",
+            kernel_id,
+            error_from_buf(err_buf)
+        ));
+    }
+
+    let end_ev = match create_and_record_event(params.stream, err_buf) {
+        Ok(ev) => ev,
+        Err(e) => {
+            unsafe { ffi::cast_cuda_event_destroy(start_ev) };
+            return Err(e);
+        }
+    };
+
+    log::debug!(
+        "cuda: launched kernel {} ({} gate qubits, {} sv qubits, {:?})",
+        kernel_id,
+        kernel.n_gate_qubits(),
+        params.sv_n_qubits,
+        kernel.precision(),
+    );
+
+    Ok(EventPair {
+        kernel_id,
+        n_gate_qubits: kernel.n_gate_qubits(),
+        precision: kernel.precision(),
+        ptx_compile_time: kernel.ptx_compile_time(),
+        jit_compile_time: kernel.jit_compile_time(),
+        start_ev,
+        end_ev,
+    })
+}
+
 /// Load a cubin into a CUmodule and look up the entry-point function.
 /// On failure, any partially-loaded module is unloaded before returning.
 #[cfg(feature = "cuda")]
@@ -170,7 +298,7 @@ fn load_cubin_module(
     cubin: &[u8],
     func_name: &str,
     err_buf: &mut [c_char; ERR_BUF_LEN],
-) -> anyhow::Result<(*mut std::ffi::c_void, *mut std::ffi::c_void)> {
+) -> anyhow::Result<(CuPtr, CuPtr)> {
     let cu_module = unsafe {
         ffi::cast_cuda_cubin_load(
             cubin.as_ptr(),
@@ -209,9 +337,9 @@ fn load_cubin_module(
 /// On failure, the event is destroyed before returning.
 #[cfg(feature = "cuda")]
 fn create_and_record_event(
-    stream: *mut std::ffi::c_void,
+    stream: CuPtr,
     err_buf: &mut [c_char; ERR_BUF_LEN],
-) -> anyhow::Result<*mut std::ffi::c_void> {
+) -> anyhow::Result<CuPtr> {
     let ev = unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
     if ev.is_null() {
         return Err(anyhow::anyhow!(
@@ -231,12 +359,130 @@ fn create_and_record_event(
     Ok(ev)
 }
 
+/// Run the LLVM IR → PTX (→ cubin) pipeline for `gate`.
+///
+/// This is a pure function of `spec` and `gate` — no manager state is accessed.
+/// Returns the compiled kernel, its gate qubit count, and the precision used.
+fn compile_gate(
+    spec: CudaKernelGenSpec,
+    gate: &Arc<QuantumGate>,
+) -> anyhow::Result<(Arc<CudaKernel>, u32, CudaPrecision)> {
+    let gate = gate.clone();
+    let ffi_matrix: Vec<ffi::FfiComplex64> = gate
+        .matrix()
+        .data()
+        .iter()
+        .map(|c| ffi::FfiComplex64 { re: c.re, im: c.im })
+        .collect();
+    let qubits = gate.qubits();
+
+    let mut err_buf = [0 as c_char; ERR_BUF_LEN];
+    let mut out_ptx: *mut c_char = std::ptr::null_mut();
+    let mut out_func_name: *mut c_char = std::ptr::null_mut();
+    let mut n_gate_qubits: u32 = 0;
+    let mut precision_byte: u8 = 0;
+
+    let ptx_t0 = Instant::now();
+    let status = unsafe {
+        ffi::cast_cuda_compile_gate_ptx(
+            &spec as *const CudaKernelGenSpec,
+            ffi_matrix.as_ptr(),
+            ffi_matrix.len(),
+            qubits.as_ptr(),
+            qubits.len(),
+            &mut out_ptx,
+            &mut out_func_name,
+            &mut n_gate_qubits,
+            &mut precision_byte,
+            err_buf.as_mut_ptr(),
+            err_buf.len(),
+        )
+    };
+    let ptx_compile_time = ptx_t0.elapsed();
+    if status != 0 {
+        return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+    }
+
+    // Safety: C++ guarantees non-null, null-terminated strings on success.
+    let ptx = unsafe { CStr::from_ptr(out_ptx) }
+        .to_string_lossy()
+        .into_owned();
+    let func_name = unsafe { CStr::from_ptr(out_func_name) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { ffi::cast_cuda_str_free(out_ptx) };
+    unsafe { ffi::cast_cuda_str_free(out_func_name) };
+
+    let precision = if precision_byte == 0 {
+        CudaPrecision::F32
+    } else {
+        CudaPrecision::F64
+    };
+
+    log::debug!(
+        "cuda: compiled kernel ({} gate qubits, {:?} precision, {} B PTX, {:?} PTX stage)",
+        n_gate_qubits,
+        precision,
+        ptx.len(),
+        ptx_compile_time,
+    );
+
+    // ── PTX → cubin (cuda feature only) ─────────────────────────────────
+    #[cfg(feature = "cuda")]
+    let (cubin, jit_compile_time) = {
+        let ptx_cstr = CString::new(ptx.as_bytes())
+            .map_err(|e| anyhow::anyhow!("PTX contains null byte: {e}"))?;
+        let mut raw_cubin: *mut u8 = std::ptr::null_mut();
+        let mut cubin_len: usize = 0;
+        let jit_t0 = Instant::now();
+        let status = unsafe {
+            ffi::cast_cuda_ptx_to_cubin(
+                ptx_cstr.as_ptr(),
+                &mut raw_cubin,
+                &mut cubin_len,
+                err_buf.as_mut_ptr(),
+                err_buf.len(),
+            )
+        };
+        let jit_compile_time = jit_t0.elapsed();
+        if status != 0 {
+            return Err(anyhow::anyhow!(
+                "PTX → cubin failed: {}",
+                error_from_buf(&err_buf)
+            ));
+        }
+        // Safety: raw_cubin points to cubin_len bytes allocated by C++.
+        let bytes = unsafe { std::slice::from_raw_parts(raw_cubin, cubin_len) }.to_vec();
+        unsafe { ffi::cast_cuda_cubin_free(raw_cubin) };
+        log::debug!("cuda: JIT PTX → cubin took {:?}", jit_compile_time);
+        (Some(bytes), jit_compile_time)
+    };
+
+    let kernel = Arc::new(CudaKernel {
+        gate,
+        precision,
+        ptx,
+        func_name,
+        ptx_compile_time,
+        #[cfg(feature = "cuda")]
+        cubin,
+        #[cfg(feature = "cuda")]
+        jit_compile_time,
+    });
+
+    Ok((kernel, n_gate_qubits, precision))
+}
+
 // ── ManagerInner ─────────────────────────────────────────────────────────────
 
 struct ManagerInner {
     kernels: HashMap<CudaKernelId, Arc<CudaKernel>>,
     next_id: u64,
     dedup: HashMap<DedupKey, CudaKernelId>,
+    /// Keys currently being compiled by a worker thread.  Other threads
+    /// finding their key here wait on `CudaKernelManager::compile_done`
+    /// instead of redundantly compiling the same gate.
+    compiling: HashSet<DedupKey>,
     /// Ordered queue of apply requests not yet launched onto the stream.
     #[cfg(feature = "cuda")]
     pending: VecDeque<PendingApply>,
@@ -247,7 +493,7 @@ struct ManagerInner {
     lru_tick: u64,
     /// Lazily initialized on first `sync`; `None` until then.
     #[cfg(feature = "cuda")]
-    stream: Option<*mut std::ffi::c_void>,
+    stream: Option<CuPtr>,
 }
 
 // loaded / stream are accessed only through the Mutex.
@@ -272,7 +518,7 @@ impl Drop for ManagerInner {
 #[cfg(feature = "cuda")]
 impl ManagerInner {
     /// Returns the CUDA stream, creating it on the first call.
-    fn ensure_stream(&mut self) -> anyhow::Result<*mut std::ffi::c_void> {
+    fn ensure_stream(&mut self) -> anyhow::Result<CuPtr> {
         if let Some(stream) = self.stream {
             return Ok(stream);
         }
@@ -292,7 +538,7 @@ impl ManagerInner {
         &mut self,
         kernel: &CudaKernel,
         id: CudaKernelId,
-    ) -> anyhow::Result<*mut std::ffi::c_void> {
+    ) -> anyhow::Result<CuPtr> {
         // ── Cache hit ────────────────────────────────────────────────────────
         let hit_idx = self
             .loaded
@@ -350,7 +596,10 @@ impl ManagerInner {
     /// with a start/end CUDA event for later GPU time measurement.
     /// Returns one [`EventPair`] per launch; events are destroyed via [`Drop`]
     /// when the returned `Vec` goes out of scope.
-    fn drain_pending(&mut self, stream: *mut std::ffi::c_void) -> anyhow::Result<Vec<EventPair>> {
+    fn drain_pending(&mut self, stream: CuPtr) -> anyhow::Result<Vec<EventPair>> {
+        // Collect into a Vec first: launch_all needs &mut self (for
+        // ensure_module), which conflicts with borrowing self.pending
+        // through a drain iterator.
         let pending: Vec<PendingApply> = self.pending.drain(..).collect();
         self.launch_all(stream, &pending)
     }
@@ -360,7 +609,7 @@ impl ManagerInner {
     /// the current item's partially-created events are destroyed before returning.
     fn launch_all(
         &mut self,
-        stream: *mut std::ffi::c_void,
+        stream: CuPtr,
         pending: &[PendingApply],
     ) -> anyhow::Result<Vec<EventPair>> {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
@@ -371,59 +620,18 @@ impl ManagerInner {
             let kernel = self
                 .kernels
                 .get(&item.kernel_id)
-                .ok_or_else(|| anyhow::anyhow!("kernel {} missing during drain", item.kernel_id))?
+                .ok_or_else(|| anyhow::anyhow!("kernel {} not found", item.kernel_id))?
                 .clone();
 
             let cu_function = self.ensure_module(&kernel, item.kernel_id)?;
 
-            let start_ev = create_and_record_event(stream, &mut err_buf)?;
-
-            let status = unsafe {
-                ffi::cast_cuda_kernel_launch(
-                    cu_function,
-                    stream,
-                    item.sv_dptr,
-                    item.n_gate_qubits,
-                    item.sv_n_qubits,
-                    item.precision as u8,
-                    err_buf.as_mut_ptr(),
-                    err_buf.len(),
-                )
+            let params = LaunchParams {
+                cu_function,
+                stream,
+                sv_dptr: item.sv_dptr,
+                sv_n_qubits: item.sv_n_qubits,
             };
-            if status != 0 {
-                unsafe { ffi::cast_cuda_event_destroy(start_ev) };
-                return Err(anyhow::anyhow!(
-                    "kernel {} launch failed: {}",
-                    item.kernel_id,
-                    error_from_buf(&err_buf)
-                ));
-            }
-
-            let end_ev = match create_and_record_event(stream, &mut err_buf) {
-                Ok(ev) => ev,
-                Err(e) => {
-                    unsafe { ffi::cast_cuda_event_destroy(start_ev) };
-                    return Err(e);
-                }
-            };
-
-            log::debug!(
-                "cuda: launched kernel {} ({} gate qubits, {} sv qubits, {:?})",
-                item.kernel_id,
-                item.n_gate_qubits,
-                item.sv_n_qubits,
-                item.precision,
-            );
-
-            pairs.push(EventPair {
-                kernel_id: item.kernel_id,
-                n_gate_qubits: kernel.n_gate_qubits(),
-                precision: kernel.precision(),
-                ptx_compile_time: kernel.ptx_compile_time(),
-                jit_compile_time: kernel.jit_compile_time(),
-                start_ev,
-                end_ev,
-            });
+            pairs.push(record_launch(&params, item.kernel_id, &kernel, &mut err_buf)?);
         }
         Ok(pairs)
     }
@@ -476,6 +684,9 @@ pub struct SyncStats {
 pub struct CudaKernelManager {
     spec: CudaKernelGenSpec,
     inner: Mutex<ManagerInner>,
+    /// Notified whenever a compilation finishes, so threads waiting on a
+    /// duplicate key can wake up and find the result in `dedup`.
+    compile_done: Condvar,
 }
 
 impl fmt::Debug for CudaKernelManager {
@@ -503,8 +714,8 @@ impl CudaKernelManager {
     /// **Note:** the LRU cache is only used by the [`apply`](Self::apply) /
     /// [`sync`](Self::sync) path (currently exercised by trajectory mode).
     /// The simulator's non-trajectory path goes through
-    /// [`execute_pipelined`](Self::execute_pipelined), which manages its
-    /// own per-call sliding window of CUmodules and bypasses this cache.
+    /// [`execute_pipelined`](Self::execute_pipelined), which maintains its
+    /// own per-call module cache keyed by kernel ID and bypasses this LRU.
     pub fn with_lru_size(spec: CudaKernelGenSpec, lru_cache_size: usize) -> Self {
         let lru_cache_size = lru_cache_size.max(1);
         Self {
@@ -513,6 +724,7 @@ impl CudaKernelManager {
                 kernels: HashMap::new(),
                 next_id: 0,
                 dedup: HashMap::new(),
+                compiling: HashSet::new(),
                 #[cfg(feature = "cuda")]
                 pending: VecDeque::new(),
                 #[cfg(feature = "cuda")]
@@ -522,6 +734,7 @@ impl CudaKernelManager {
                 #[cfg(feature = "cuda")]
                 stream: None,
             }),
+            compile_done: Condvar::new(),
         }
     }
 
@@ -536,127 +749,53 @@ impl CudaKernelManager {
     /// calling thread (no CUDA device required).  When the `cuda` feature is
     /// enabled the PTX is further compiled to device-native cubin via the
     /// CUDA JIT linker.  Multiple threads may call `generate` concurrently;
-    /// the manager lock is only held briefly at the end to insert the result.
+    /// the manager lock is only held briefly at the start and end.
+    ///
+    /// If another thread is already compiling the same gate (same matrix bytes
+    /// and qubit indices), this thread waits on `compile_done` instead of
+    /// redundantly running the LLVM pipeline.
     pub fn generate(&self, gate: &Arc<QuantumGate>) -> anyhow::Result<CudaKernelId> {
-        // ── Dedup check ──────────────────────────────────────────────────
         let spec = self.spec;
         let key = DedupKey::new(gate);
+
+        // ── Dedup / in-flight check ─────────────────────────────────────
         {
-            let guard = self.inner.lock().unwrap();
-            if let Some(&id) = guard.dedup.get(&key) {
-                return Ok(id);
+            let mut guard = self.inner.lock().unwrap();
+            loop {
+                if let Some(&id) = guard.dedup.get(&key) {
+                    return Ok(id);
+                }
+                if !guard.compiling.contains(&key) {
+                    guard.compiling.insert(key.clone());
+                    break; // this thread owns the compilation
+                }
+                // Another thread is compiling this key — wait.
+                guard = self.compile_done.wait(guard).unwrap();
             }
         }
 
-        let gate = gate.clone();
-        let ffi_matrix: Vec<ffi::FfiComplex64> = gate
-            .matrix()
-            .data()
-            .iter()
-            .map(|c| ffi::FfiComplex64 { re: c.re, im: c.im })
-            .collect();
-        let qubits = gate.qubits();
+        // ── Compile (no lock held) ──────────────────────────────────────
+        let result = compile_gate(spec, gate);
 
-        // ── C++ LLVM pipeline (blocking, no lock held) ────────────────────
-        let mut err_buf = [0 as c_char; ERR_BUF_LEN];
-        let mut out_ptx: *mut c_char = std::ptr::null_mut();
-        let mut out_func_name: *mut c_char = std::ptr::null_mut();
-        let mut n_gate_qubits: u32 = 0;
-        let mut precision_byte: u8 = 0;
-
-        let ptx_t0 = Instant::now();
-        let status = unsafe {
-            ffi::cast_cuda_compile_gate_ptx(
-                &spec as *const CudaKernelGenSpec,
-                ffi_matrix.as_ptr(),
-                ffi_matrix.len(),
-                qubits.as_ptr(),
-                qubits.len(),
-                &mut out_ptx,
-                &mut out_func_name,
-                &mut n_gate_qubits,
-                &mut precision_byte,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        let ptx_compile_time = ptx_t0.elapsed();
-        if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
-        }
-
-        // Safety: C++ guarantees non-null, null-terminated strings on success.
-        let ptx = unsafe { CStr::from_ptr(out_ptx) }
-            .to_string_lossy()
-            .into_owned();
-        let func_name = unsafe { CStr::from_ptr(out_func_name) }
-            .to_string_lossy()
-            .into_owned();
-        unsafe { ffi::cast_cuda_str_free(out_ptx) };
-        unsafe { ffi::cast_cuda_str_free(out_func_name) };
-
-        let precision = if precision_byte == 0 {
-            CudaPrecision::F32
-        } else {
-            CudaPrecision::F64
-        };
-
-        log::debug!(
-            "cuda: compiled kernel ({} gate qubits, {:?} precision, {} B PTX, {:?} PTX stage)",
-            n_gate_qubits,
-            precision,
-            ptx.len(),
-            ptx_compile_time,
-        );
-
-        // ── PTX → cubin (cuda feature only) ──────────────────────────────
-        #[cfg(feature = "cuda")]
-        let (cubin, jit_compile_time) = {
-            let ptx_cstr = CString::new(ptx.as_bytes())
-                .map_err(|e| anyhow::anyhow!("PTX contains null byte: {e}"))?;
-            let mut raw_cubin: *mut u8 = std::ptr::null_mut();
-            let mut cubin_len: usize = 0;
-            let jit_t0 = Instant::now();
-            let status = unsafe {
-                ffi::cast_cuda_ptx_to_cubin(
-                    ptx_cstr.as_ptr(),
-                    &mut raw_cubin,
-                    &mut cubin_len,
-                    err_buf.as_mut_ptr(),
-                    err_buf.len(),
-                )
-            };
-            let jit_compile_time = jit_t0.elapsed();
-            if status != 0 {
-                return Err(anyhow::anyhow!(
-                    "PTX → cubin failed: {}",
-                    error_from_buf(&err_buf)
-                ));
+        let (kernel, n_gate_qubits, precision) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                // Remove key from `compiling` and wake waiters so they can
+                // either retry or surface the same error via their own attempt.
+                let mut guard = self.inner.lock().unwrap();
+                guard.compiling.remove(&key);
+                self.compile_done.notify_all();
+                return Err(e);
             }
-            // Safety: raw_cubin points to cubin_len bytes allocated by C++.
-            let bytes = unsafe { std::slice::from_raw_parts(raw_cubin, cubin_len) }.to_vec();
-            unsafe { ffi::cast_cuda_cubin_free(raw_cubin) };
-            log::debug!("cuda: JIT PTX → cubin took {:?}", jit_compile_time);
-            (Some(bytes), jit_compile_time)
         };
 
-        let kernel = Arc::new(CudaKernel {
-            gate,
-            precision,
-            ptx,
-            func_name,
-            ptx_compile_time,
-            #[cfg(feature = "cuda")]
-            cubin,
-            #[cfg(feature = "cuda")]
-            jit_compile_time,
-        });
-
-        // ── Insert under lock (brief) ─────────────────────────────────────
+        // ── Insert under lock (brief) ────────────────────────────────────
         let mut guard = self.inner.lock().unwrap();
+        guard.compiling.remove(&key);
 
-        // Re-check dedup: another thread may have compiled the same gate.
+        // Re-check dedup: another path (unlikely) may have inserted first.
         if let Some(&existing_id) = guard.dedup.get(&key) {
+            self.compile_done.notify_all();
             return Ok(existing_id);
         }
 
@@ -664,6 +803,7 @@ impl CudaKernelManager {
         guard.next_id += 1;
         guard.dedup.insert(key, id);
         guard.kernels.insert(id, kernel);
+        self.compile_done.notify_all();
         log::info!(
             "cuda: manager registered kernel {} ({} gate qubits, {:?})",
             id,
@@ -697,7 +837,7 @@ impl CudaKernelManager {
             .kernels
             .get(&id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("kernel id {} not found", id))?;
+            .ok_or_else(|| anyhow::anyhow!("kernel {} not found", id))?;
 
         if sv.n_qubits() < kernel.n_gate_qubits() {
             anyhow::bail!("statevector has fewer qubits than the gate kernel requires");
@@ -710,8 +850,6 @@ impl CudaKernelManager {
             kernel_id: id,
             sv_dptr: sv.dptr(),
             sv_n_qubits: sv.n_qubits(),
-            n_gate_qubits: kernel.n_gate_qubits(),
-            precision: kernel.precision(),
         });
 
         log::debug!(
@@ -762,43 +900,11 @@ impl CudaKernelManager {
 
         let wall_time = wall_t0.elapsed();
 
-        // Query GPU elapsed time for each launch. Events are destroyed when
+        // Query GPU elapsed time for each launch.  Events are destroyed when
         // `pairs` drops at the end of this function.
-        let mut query_err: Option<anyhow::Error> = None;
-        let mut kernels = Vec::with_capacity(pairs.len());
+        let mut kernels: Vec<KernelExecTime> = Vec::with_capacity(pairs.len());
         for pair in &pairs {
-            let mut ms = 0.0f32;
-            if query_err.is_none() {
-                let status = unsafe {
-                    ffi::cast_cuda_event_elapsed_ms(
-                        pair.start_ev,
-                        pair.end_ev,
-                        &mut ms,
-                        err_buf.as_mut_ptr(),
-                        err_buf.len(),
-                    )
-                };
-                if status != 0 {
-                    query_err = Some(anyhow::anyhow!(
-                        "event_elapsed_ms: {}",
-                        error_from_buf(&err_buf)
-                    ));
-                } else {
-                    kernels.push(KernelExecTime {
-                        kernel_id: pair.kernel_id,
-                        n_gate_qubits: pair.n_gate_qubits,
-                        precision: pair.precision,
-                        ptx_compile_time: pair.ptx_compile_time,
-                        jit_compile_time: pair.jit_compile_time,
-                        gpu_time: Duration::from_secs_f64(ms as f64 / 1000.0),
-                    });
-                }
-            }
-        }
-        // pairs drops here, destroying all events via Drop.
-
-        if let Some(e) = query_err {
-            return Err(e);
+            kernels.push(pair.collect_timing(&mut err_buf)?);
         }
 
         log::debug!(
@@ -837,10 +943,9 @@ impl CudaKernelManager {
     /// the main thread loads CUmodules and launches kernels on the GPU stream.
     ///
     /// Compilation of gate N+1 overlaps with GPU execution of gate N.
-    /// `window_size` limits the number of simultaneously loaded CUmodules
-    /// (bounding device memory). When the window is full, the main thread
-    /// waits for the oldest kernel's completion event before evicting its
-    /// module and loading the next.
+    /// `window_size` limits the number of in-flight (launched but not yet
+    /// waited-on) kernels.  Loaded CUmodules are cached for the duration of
+    /// the call so that repeated gates avoid redundant load/unload cycles.
     ///
     /// Gates are launched in order (each modifies the statevector in place).
     /// Out-of-order compilation results are buffered until needed.
@@ -878,22 +983,39 @@ impl CudaKernelManager {
         let sv_precision = sv.precision();
 
         let mut timings: Vec<KernelExecTime> = Vec::with_capacity(gates.len());
-        let mut window: VecDeque<WindowSlot> = VecDeque::with_capacity(window_size);
+        let mut window: VecDeque<EventPair> = VecDeque::with_capacity(window_size);
 
-        // Set up the work channel BEFORE entering the scope so `work_rx`
-        // outlives the spawned compile threads (locals declared inside the
-        // scope closure don't satisfy the `'scope` lifetime bound).
-        let (work_tx, work_rx) = std::sync::mpsc::channel::<(usize, Arc<QuantumGate>)>();
-        for (i, gate) in gates.iter().enumerate() {
-            work_tx.send((i, gate.clone())).unwrap();
-        }
-        drop(work_tx);
+        // Local module cache: CudaKernelId → (CUmodule, CUfunction).
+        // Modules stay loaded for the duration of this call so that
+        // repeated kernel IDs do not trigger redundant load/unload cycles.
+        let mut module_cache: HashMap<CudaKernelId, (CuPtr, CuPtr)> =
+            HashMap::new();
+
+        // Bounded work channel with capacity proportional to the thread pool,
+        // so large circuits don't buffer the entire gate list upfront.
+        let (work_tx, work_rx) =
+            std::sync::mpsc::sync_channel::<(usize, Arc<QuantumGate>)>(2 * n_compile_threads);
         let work_rx = std::sync::Mutex::new(work_rx);
 
         let scope_result = std::thread::scope(|s| {
+            // Result channel (unbounded — results are small).
             let (result_tx, result_rx) =
                 std::sync::mpsc::channel::<anyhow::Result<(usize, CudaKernelId)>>();
 
+            // ── Feed thread ─────────────────────────────────────────────────
+            // Runs in its own thread so the bounded channel provides
+            // backpressure without blocking the compile workers.
+            let feed_gates = &*gates;
+            s.spawn(move || {
+                for (i, gate) in feed_gates.iter().enumerate() {
+                    if work_tx.send((i, gate.clone())).is_err() {
+                        break;
+                    }
+                }
+                // work_tx drops here, closing the channel.
+            });
+
+            // ── Compile workers ─────────────────────────────────────────────
             for _ in 0..n_compile_threads {
                 let tx = result_tx.clone();
                 let wrx = &work_rx;
@@ -915,153 +1037,70 @@ impl CudaKernelManager {
             }
             drop(result_tx);
 
-            // ── Main dispatch loop ───────────────────────────────────────────
-            let mut compiled: HashMap<usize, CudaKernelId> = HashMap::new();
+            // ── Main dispatch loop ──────────────────────────────────────────
+            // Reorder buffer: dense Vec indexed by gate position.
+            let mut compiled: Vec<Option<CudaKernelId>> = vec![None; gates.len()];
             let mut err_buf = [0 as c_char; ERR_BUF_LEN];
 
             for next in 0..gates.len() {
-                // 1. Ensure a window slot is free.
+                // 1. Free a window slot if full.
                 if window.len() >= window_size {
-                    let slot = window.pop_front().unwrap();
-                    timings.push(slot.wait_and_collect(&mut err_buf)?);
+                    let pair = window.pop_front().unwrap();
+                    timings.push(pair.wait_and_collect(&mut err_buf)?);
                 }
 
-                // 2. Wait for the next gate (in order) to finish compiling.
-                while !compiled.contains_key(&next) {
-                    match result_rx.recv() {
-                        Ok(Ok((idx, kid))) => {
-                            compiled.insert(idx, kid);
-                        }
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => {
-                            return Err(anyhow::anyhow!(
-                                "compile workers exited before gate {} was compiled",
-                                next
-                            ));
-                        }
-                    }
-                }
-                let kid = compiled.remove(&next).unwrap();
+                // 2. Wait for gate `next` to finish compiling (in order).
+                let kid = Self::await_compiled(
+                    next,
+                    &mut compiled,
+                    &result_rx,
+                )?;
 
-                // 3. Look up the compiled kernel (brief lock).
-                let kernel = {
-                    let guard = self.inner.lock().unwrap();
-                    guard
-                        .kernels
-                        .get(&kid)
-                        .cloned()
-                        .ok_or_else(|| anyhow::anyhow!("kernel {} not found", kid))?
-                };
-
-                if sv_n_qubits < kernel.n_gate_qubits() {
-                    anyhow::bail!(
-                        "statevector has fewer qubits ({}) than kernel requires ({})",
-                        sv_n_qubits,
-                        kernel.n_gate_qubits()
-                    );
-                }
-                if sv_precision as u8 != kernel.precision() as u8 {
-                    anyhow::bail!("statevector precision does not match kernel");
-                }
-
-                // 4. Load cubin → CUmodule.
-                let cubin = kernel
-                    .cubin
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("kernel {} has no cubin", kid))?;
-                let (cu_module, cu_function) =
-                    load_cubin_module(cubin, kernel.func_name(), &mut err_buf)?;
-
-                // 5. Record start event → launch → record end event.
-                let start_ev = match create_and_record_event(stream, &mut err_buf) {
-                    Ok(ev) => ev,
-                    Err(e) => {
-                        unsafe { ffi::cast_cuda_module_unload(cu_module) };
-                        return Err(e);
-                    }
-                };
-
-                if unsafe {
-                    ffi::cast_cuda_kernel_launch(
-                        cu_function,
-                        stream,
-                        sv_dptr,
-                        kernel.n_gate_qubits(),
-                        sv_n_qubits,
-                        kernel.precision() as u8,
-                        err_buf.as_mut_ptr(),
-                        err_buf.len(),
-                    )
-                } != 0
-                {
-                    unsafe { ffi::cast_cuda_event_destroy(start_ev) };
-                    unsafe { ffi::cast_cuda_module_unload(cu_module) };
-                    return Err(anyhow::anyhow!(
-                        "kernel {} launch failed: {}",
-                        kid,
-                        error_from_buf(&err_buf)
-                    ));
-                }
-
-                let end_ev = match create_and_record_event(stream, &mut err_buf) {
-                    Ok(ev) => ev,
-                    Err(e) => {
-                        unsafe { ffi::cast_cuda_event_destroy(start_ev) };
-                        unsafe { ffi::cast_cuda_module_unload(cu_module) };
-                        return Err(e);
-                    }
-                };
-
-                log::debug!(
-                    "cuda: pipelined launch kernel {} ({} gate qubits, {} sv qubits, {:?})",
+                // 3. Look up and validate the kernel, then load/launch.
+                let pair = self.pipelined_launch(
                     kid,
-                    kernel.n_gate_qubits(),
+                    sv_dptr,
                     sv_n_qubits,
-                    kernel.precision(),
-                );
+                    sv_precision,
+                    stream,
+                    &mut module_cache,
+                    &mut err_buf,
+                )?;
 
-                window.push_back(WindowSlot {
-                    kernel_id: kid,
-                    cu_module,
-                    start_event: start_ev,
-                    end_event: end_ev,
-                    n_gate_qubits: kernel.n_gate_qubits(),
-                    precision: kernel.precision(),
-                    ptx_compile_time: kernel.ptx_compile_time(),
-                    jit_compile_time: kernel.jit_compile_time(),
-                });
+                window.push_back(pair);
             }
 
-            // ── Drain remaining window slots ─────────────────────────────────
+            // ── Drain remaining window ──────────────────────────────────────
             if unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) }
                 != 0
             {
                 return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
             }
 
-            while let Some(slot) = window.pop_front() {
-                timings.push(slot.collect_timing(&mut err_buf)?);
+            while let Some(pair) = window.pop_front() {
+                timings.push(pair.collect_timing(&mut err_buf)?);
             }
 
             Ok(())
         });
 
-        // Sync stream before dropping any remaining window slots on the error
-        // path — in-flight kernels may still reference the loaded CUmodules.
-        // If sync fails the device may be in a bad state and unloading
-        // modules with active kernels could hang or crash; surface the
-        // failure via a warning so the underlying cause is observable.
-        if !window.is_empty() {
+        // On the error path, in-flight kernels may still reference cached
+        // CUmodules.  Sync the stream before unloading them.
+        if scope_result.is_err() && !module_cache.is_empty() {
             let mut err_buf = [0 as c_char; ERR_BUF_LEN];
             let sync_status =
                 unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) };
             if sync_status != 0 {
                 log::warn!(
-                    "cuda: stream_sync failed during pipelined cleanup ({} slots in flight): {}",
-                    window.len(),
+                    "cuda: stream_sync failed during pipelined cleanup: {}",
                     error_from_buf(&err_buf),
                 );
             }
+        }
+
+        // Unload all cached modules (events already destroyed via EventPair Drop).
+        for (_, (cu_module, _)) in module_cache.drain() {
+            unsafe { ffi::cast_cuda_module_unload(cu_module) };
         }
 
         scope_result?;
@@ -1077,82 +1116,85 @@ impl CudaKernelManager {
             wall_time: wall_t0.elapsed(),
         })
     }
-}
 
-// ── Pipelined window slot ───────────────────────────────────────────────────
-
-/// A loaded CUmodule + CUDA events for one in-flight kernel in the pipelined
-/// execution window.  Drop destroys events and unloads the module.
-#[cfg(feature = "cuda")]
-struct WindowSlot {
-    kernel_id: CudaKernelId,
-    cu_module: *mut std::ffi::c_void,
-    start_event: *mut std::ffi::c_void,
-    end_event: *mut std::ffi::c_void,
-    n_gate_qubits: u32,
-    precision: CudaPrecision,
-    ptx_compile_time: Duration,
-    jit_compile_time: Duration,
-}
-
-#[cfg(feature = "cuda")]
-impl Drop for WindowSlot {
-    fn drop(&mut self) {
-        unsafe {
-            ffi::cast_cuda_event_destroy(self.start_event);
-            ffi::cast_cuda_event_destroy(self.end_event);
-            ffi::cast_cuda_module_unload(self.cu_module);
+    /// Block until compilation result for gate `idx` is available in the
+    /// reorder buffer, draining the result channel as needed.
+    #[cfg(feature = "cuda")]
+    fn await_compiled(
+        idx: usize,
+        compiled: &mut [Option<CudaKernelId>],
+        result_rx: &std::sync::mpsc::Receiver<anyhow::Result<(usize, CudaKernelId)>>,
+    ) -> anyhow::Result<CudaKernelId> {
+        while compiled[idx].is_none() {
+            match result_rx.recv() {
+                Ok(Ok((i, kid))) => {
+                    compiled[i] = Some(kid);
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    return Err(anyhow::anyhow!(
+                        "compile workers exited before gate {} was compiled",
+                        idx
+                    ));
+                }
+            }
         }
+        Ok(compiled[idx].take().unwrap())
     }
-}
 
-#[cfg(feature = "cuda")]
-impl WindowSlot {
-    /// Wait for this slot's kernel to complete, query GPU execution time,
-    /// then clean up (events destroyed, module unloaded via Drop).
-    fn wait_and_collect(
-        self,
+    /// Look up a compiled kernel, load its module (from cache or cubin),
+    /// and launch it on `stream` via [`record_launch`].
+    #[cfg(feature = "cuda")]
+    fn pipelined_launch(
+        &self,
+        kid: CudaKernelId,
+        sv_dptr: u64,
+        sv_n_qubits: u32,
+        sv_precision: CudaPrecision,
+        stream: CuPtr,
+        module_cache: &mut HashMap<CudaKernelId, (CuPtr, CuPtr)>,
         err_buf: &mut [c_char; ERR_BUF_LEN],
-    ) -> anyhow::Result<KernelExecTime> {
-        let status = unsafe {
-            ffi::cast_cuda_event_synchronize(self.end_event, err_buf.as_mut_ptr(), err_buf.len())
+    ) -> anyhow::Result<EventPair> {
+        let kernel = {
+            let guard = self.inner.lock().unwrap();
+            guard
+                .kernels
+                .get(&kid)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("kernel {} not found", kid))?
         };
-        if status != 0 {
-            return Err(anyhow::anyhow!(
-                "event_synchronize: {}",
-                error_from_buf(err_buf)
-            ));
-        }
-        self.collect_timing(err_buf)
-    }
 
-    /// Query GPU execution time from already-completed events, then clean up.
-    fn collect_timing(self, err_buf: &mut [c_char; ERR_BUF_LEN]) -> anyhow::Result<KernelExecTime> {
-        let mut ms = 0.0f32;
-        let status = unsafe {
-            ffi::cast_cuda_event_elapsed_ms(
-                self.start_event,
-                self.end_event,
-                &mut ms,
-                err_buf.as_mut_ptr(),
-                err_buf.len(),
-            )
-        };
-        if status != 0 {
-            return Err(anyhow::anyhow!(
-                "event_elapsed_ms: {}",
-                error_from_buf(err_buf)
-            ));
+        if sv_n_qubits < kernel.n_gate_qubits() {
+            anyhow::bail!(
+                "statevector has fewer qubits ({}) than kernel requires ({})",
+                sv_n_qubits,
+                kernel.n_gate_qubits()
+            );
         }
-        let timing = KernelExecTime {
-            kernel_id: self.kernel_id,
-            n_gate_qubits: self.n_gate_qubits,
-            precision: self.precision,
-            ptx_compile_time: self.ptx_compile_time,
-            jit_compile_time: self.jit_compile_time,
-            gpu_time: Duration::from_secs_f64(ms as f64 / 1000.0),
+        if sv_precision as u8 != kernel.precision() as u8 {
+            anyhow::bail!("statevector precision does not match kernel");
+        }
+
+        // Load or reuse cached module.
+        let cu_function = match module_cache.get(&kid) {
+            Some(&(_, f)) => f,
+            None => {
+                let cubin = kernel
+                    .cubin
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("kernel {} has no cubin", kid))?;
+                let (m, f) = load_cubin_module(cubin, kernel.func_name(), err_buf)?;
+                module_cache.insert(kid, (m, f));
+                f
+            }
         };
-        // self drops here → events destroyed, module unloaded.
-        Ok(timing)
+
+        let params = LaunchParams {
+            cu_function,
+            stream,
+            sv_dptr,
+            sv_n_qubits,
+        };
+        record_launch(&params, kid, &kernel, err_buf)
     }
 }
