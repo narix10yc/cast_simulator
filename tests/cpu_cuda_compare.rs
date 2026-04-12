@@ -44,6 +44,7 @@ fn cuda_spec() -> CudaKernelGenSpec {
         otol: 1e-12,
         sm_major,
         sm_minor,
+        maxnreg: 128,
     }
 }
 
@@ -422,6 +423,7 @@ fn apply_cuda_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
         otol: 1e-6,
         sm_major,
         sm_minor,
+        maxnreg: 128,
     };
     let gate = Arc::new(gate.clone());
     let mgr = CudaKernelManager::new(spec);

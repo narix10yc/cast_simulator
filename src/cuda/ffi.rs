@@ -111,7 +111,6 @@ unsafe extern "C" {
         sv_dptr: u64,
         n_gate_qubits: u32,
         sv_n_qubits: u32,
-        precision: u8,
         err_buf: *mut c_char,
         err_buf_len: usize,
     ) -> i32;

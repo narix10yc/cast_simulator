@@ -231,6 +231,7 @@ fn run_bench(
                     otol,
                     sm_major,
                     sm_minor,
+                    maxnreg: 128,
                 };
                 let sim = Simulator::<Cuda>::new(spec);
                 let rt = sim
@@ -348,6 +349,7 @@ fn main() -> Result<()> {
                             otol: default_tol,
                             sm_major,
                             sm_minor,
+                            maxnreg: 128,
                         },
                         args.profile_qubits,
                         args.profile_budget,

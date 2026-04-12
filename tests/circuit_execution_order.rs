@@ -51,6 +51,7 @@ fn cuda_spec() -> CudaKernelGenSpec {
         otol: 1e-12,
         sm_major,
         sm_minor,
+        maxnreg: 128,
     }
 }
 

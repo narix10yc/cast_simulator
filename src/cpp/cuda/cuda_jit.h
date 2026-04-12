@@ -7,6 +7,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Target/TargetMachine.h>
 
 #include <memory>
 #include <string>
@@ -19,6 +20,7 @@ struct CastCudaGeneratedKernel {
   std::string func_name{};
   std::unique_ptr<llvm::LLVMContext> context{};
   std::unique_ptr<llvm::Module> module{};
+  std::unique_ptr<llvm::TargetMachine> tm{}; ///< created once, reused for PTX emission
   std::string ir{}; ///< cached after cast_cuda_optimize_kernel_ir
   bool optimized = false;
 };

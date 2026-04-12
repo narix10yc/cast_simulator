@@ -77,15 +77,18 @@ llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated) {
   if (!generated.module)
     return llvm::createStringError("kernel module is null");
 
-  auto tm = create_nvptx_tm(generated.spec.sm_major, generated.spec.sm_minor);
-  if (!tm)
-    return tm.takeError();
+  if (!generated.tm) {
+    auto tm = create_nvptx_tm(generated.spec.sm_major, generated.spec.sm_minor);
+    if (!tm)
+      return tm.takeError();
+    generated.tm = std::move(*tm);
+  }
 
   llvm::Module &M = *generated.module;
 
   // Set triple + data layout so NVPTX passes have consistent target info.
-  M.setTargetTriple((*tm)->getTargetTriple());
-  M.setDataLayout((*tm)->createDataLayout());
+  M.setTargetTriple(generated.tm->getTargetTriple());
+  M.setDataLayout(generated.tm->createDataLayout());
 
   llvm::LoopAnalysisManager lam;
   llvm::FunctionAnalysisManager fam;
@@ -98,7 +101,7 @@ llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated) {
 
   llvm::PipelineTuningOptions pto;
   // Pass the NVPTX TM so backend-specific analyses (e.g. TTI) are available.
-  llvm::PassBuilder pb(tm->get(), pto, std::nullopt, &pic);
+  llvm::PassBuilder pb(generated.tm.get(), pto, std::nullopt, &pic);
   pb.registerLoopAnalyses(lam);
   pb.registerFunctionAnalyses(fam);
   pb.registerCGSCCAnalyses(cgam);
@@ -128,11 +131,8 @@ llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
     return err;
 
   // Stage 2: LLVM IR → PTX via NVPTX backend.
+  // Reuse the TargetMachine created (or cached) by the optimize step.
   {
-    auto tm = create_nvptx_tm(generated.spec.sm_major, generated.spec.sm_minor);
-    if (!tm)
-      return tm.takeError();
-
     // Verify once more before codegen.
     std::string errStr;
     llvm::raw_string_ostream sstream(errStr);
@@ -141,14 +141,24 @@ llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
 
     raw_pwrite_string_ostream ptxStream(out.ptx);
     llvm::legacy::PassManager pm;
-    if ((*tm)->addPassesToEmitFile(pm, ptxStream, /*DwoOut=*/nullptr,
-                                   llvm::CodeGenFileType::AssemblyFile))
+    if (generated.tm->addPassesToEmitFile(pm, ptxStream, /*DwoOut=*/nullptr,
+                                          llvm::CodeGenFileType::AssemblyFile))
       return llvm::createStringError("NVPTX TargetMachine cannot emit PTX");
     pm.run(*generated.module);
   }
 
   if (out.ptx.empty())
     return llvm::createStringError("PTX emission produced empty output");
+
+  // Inject .maxnreg directive between the entry declaration and its body.
+  // There is no LLVM API for this; PTX post-processing is the only way.
+  // The directive tells the CUDA JIT to allocate up to N physical registers
+  // per thread, trading occupancy for less local-memory spilling.
+  if (generated.spec.maxnreg > 0) {
+    auto pos = out.ptx.find(")\n{");
+    if (pos != std::string::npos)
+      out.ptx.insert(pos + 1, "\n.maxnreg " + std::to_string(generated.spec.maxnreg));
+  }
 
   out.n_gate_qubits = generated.n_gate_qubits;
   out.precision = generated.spec.precision;

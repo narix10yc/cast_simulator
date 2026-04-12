@@ -28,6 +28,7 @@ typedef struct cast_cuda_kernel_gen_spec_t {
   double otol;
   uint32_t sm_major;
   uint32_t sm_minor;
+  uint32_t maxnreg; ///< .maxnreg directive for PTX; 0 = no limit
 } cast_cuda_kernel_gen_spec_t;
 
 typedef struct cast_cuda_complex64_t {
@@ -71,8 +72,8 @@ void cast_cuda_module_unload(void *cu_module);
 void *cast_cuda_module_get_function(void *cu_module, const char *func_name, char *err_buf,
                                     size_t err_buf_len);
 int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t sv_dptr,
-                            uint32_t n_gate_qubits, uint32_t sv_n_qubits, uint8_t precision,
-                            char *err_buf, size_t err_buf_len);
+                            uint32_t n_gate_qubits, uint32_t sv_n_qubits, char *err_buf,
+                            size_t err_buf_len);
 
 // -- CUDA timing events (cuda feature) --
 

@@ -205,16 +205,27 @@ impl EventPair {
 
 /// Key capturing every input that affects the compiled CUDA kernel output.
 /// The spec is fixed per manager, so only the gate-specific fields vary.
+///
+/// Uses a pre-computed SipHash digest of the matrix bytes instead of storing
+/// the full matrix (4 KB for 4q, 16 KB for 5q).  Collision probability is
+/// ~2^-64 per pair — negligible for the ~200 distinct kernels in a typical
+/// circuit.  `matrix_len` is stored as a secondary guard.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct DedupKey {
-    matrix_bytes: Vec<u8>,
+    matrix_hash: u64,
+    matrix_len: usize,
     qubits: Vec<u32>,
 }
 
 impl DedupKey {
     fn new(gate: &QuantumGate) -> Self {
+        use std::hash::{Hash, Hasher};
+        let bytes = gate.matrix().as_bytes();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hasher);
         Self {
-            matrix_bytes: gate.matrix().as_bytes().to_vec(),
+            matrix_hash: hasher.finish(),
+            matrix_len: bytes.len(),
             qubits: gate.qubits().to_vec(),
         }
     }
@@ -250,7 +261,6 @@ fn record_launch(
             params.sv_dptr,
             kernel.n_gate_qubits(),
             params.sv_n_qubits,
-            kernel.precision() as u8,
             err_buf.as_mut_ptr(),
             err_buf.len(),
         )
@@ -399,34 +409,41 @@ fn compile_gate(
         )
     };
     let ptx_compile_time = ptx_t0.elapsed();
+
+    // RAII guard: ensures C++-allocated strings are freed even on early
+    // return.  Today the C++ side only allocates on success (status == 0),
+    // so the guard is a safety net against future changes.
+    struct CStrGuard(*mut c_char);
+    impl Drop for CStrGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { ffi::cast_cuda_str_free(self.0) };
+            }
+        }
+    }
+    let _ptx_guard = CStrGuard(out_ptx);
+    let _name_guard = CStrGuard(out_func_name);
+
     if status != 0 {
         return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
     }
 
     // Safety: C++ guarantees non-null, null-terminated strings on success.
-    let mut ptx = unsafe { CStr::from_ptr(out_ptx) }
+    let ptx = unsafe { CStr::from_ptr(out_ptx) }
         .to_string_lossy()
         .into_owned();
     let func_name = unsafe { CStr::from_ptr(out_func_name) }
         .to_string_lossy()
         .into_owned();
-    unsafe { ffi::cast_cuda_str_free(out_ptx) };
-    unsafe { ffi::cast_cuda_str_free(out_func_name) };
+    // Guards handle deallocation when they drop at end of scope.
 
-    // The default NVPTX register allocation (~48 physical regs) forces
-    // massive spilling for large fused gates (a 4q matvec has ~295
-    // virtual regs).  Inject `.maxnreg 128` so the CUDA JIT allocates
-    // more physical regs per thread, trading occupancy for far less
-    // local-memory traffic.  For small gates (34-40 virtual regs)
-    // this is a harmless no-op since 128 > their actual usage.
-    if let Some(pos) = ptx.find(")\n{") {
-        ptx.insert_str(pos + 1, "\n.maxnreg 128");
-    }
+    // .maxnreg is now injected by the C++ layer (cuda_jit.cpp) based on
+    // spec.maxnreg, keeping all PTX manipulation in one place.
 
-    let precision = if precision_byte == 0 {
-        CudaPrecision::F32
-    } else {
-        CudaPrecision::F64
+    let precision = match precision_byte {
+        0 => CudaPrecision::F32,
+        1 => CudaPrecision::F64,
+        _ => anyhow::bail!("invalid precision byte from C++: {precision_byte}"),
     };
 
     log::debug!(

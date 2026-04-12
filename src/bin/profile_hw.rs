@@ -14,10 +14,15 @@
 //! CAST_NUM_THREADS=32 cargo run --bin profile_hw --release      # override threads
 //! cargo run --bin profile_hw --release -- -n 32 --budget 60     # 32-qubit SV, 60s
 //! cargo run --bin profile_hw --release -- --save-profiles ./profiles
+//!
+//! # Merge several independent runs into one consensus profile:
+//! cargo run --bin profile_hw --release -- \
+//!       --merge run1.json,run2.json,run3.json \
+//!       --merge-out profiles/cuda_f64.json
 //! ```
 
 use anyhow::{Context, Result};
-use cast::cost_model::HardwareProfile;
+use cast::cost_model::{HardwareProfile, ProfileConfig, SweepEntry};
 use cast::profile;
 use cast::sysinfo::{self, MAX_DEFAULT_QUBITS, MIN_DEFAULT_QUBITS};
 use clap::{Parser, ValueEnum};
@@ -74,6 +79,19 @@ struct Args {
     /// Files are named `<backend>_<precision>.json` (e.g. `cpu_f64.json`).
     #[arg(long)]
     save_profiles: Option<PathBuf>,
+
+    /// Merge mode: skip measurement and instead load several existing
+    /// HardwareProfile JSON files, concatenate their raw sweep samples, and
+    /// produce one consensus profile via a single piecewise-roofline fit.
+    ///
+    /// All inputs must share the same backend, precision, and n_qubits.
+    /// Pair with `--merge-out <path>` to write the merged profile.
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    merge: Vec<PathBuf>,
+
+    /// Output path for `--merge` mode.
+    #[arg(long)]
+    merge_out: Option<PathBuf>,
 }
 
 impl Args {
@@ -226,10 +244,85 @@ fn oom_hint(backend: &str, precision: &str, n_qubits: u32) -> String {
     )
 }
 
+// ── Merge mode ───────────────────────────────────────────────────────────────
+
+/// Load several HardwareProfile JSON files, validate that they were all
+/// measured under the same `ProfileConfig`, concatenate their raw sweep
+/// samples, and re-fit the roofline from the pooled data. Prints the merged
+/// profile and optionally writes it to `out_path`.
+fn run_merge(inputs: &[PathBuf], out_path: Option<&std::path::Path>) -> Result<()> {
+    anyhow::ensure!(
+        inputs.len() >= 2,
+        "--merge needs at least two input profiles (got {})",
+        inputs.len()
+    );
+
+    let mut all_samples: Vec<SweepEntry> = Vec::new();
+    let mut shared_config: Option<ProfileConfig> = None;
+
+    for path in inputs {
+        let p = HardwareProfile::load(path)
+            .with_context(|| format!("loading profile from {}", path.display()))?;
+        match shared_config {
+            None => shared_config = Some(p.config.clone()),
+            Some(ref cfg) => anyhow::ensure!(
+                cfg == &p.config,
+                "profile {} has mismatched config (expected {}, got {})",
+                path.display(),
+                cfg.device,
+                p.config.device,
+            ),
+        }
+        eprintln!(
+            "  loaded {} ({} samples, peak BW {:.1} GiB/s, crossover AI {:.1})",
+            path.display(),
+            p.raw.len(),
+            p.peak_bw_gib_s,
+            p.crossover_ai,
+        );
+        all_samples.extend(p.raw.into_iter());
+    }
+
+    let config = shared_config.expect("at least one input means shared_config is set");
+    let n_inputs = inputs.len();
+    let n_pooled = all_samples.len();
+
+    let merged = profile::fit_from_samples(config, all_samples)
+        .context("fitting roofline from merged samples")?;
+
+    eprintln!(
+        "\n  Merged {} profiles  →  {} pooled samples",
+        n_inputs, n_pooled,
+    );
+    print_short(&merged, 0.0);
+
+    if let Some(out) = out_path {
+        if let Some(parent) = out.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        merged
+            .save(out)
+            .with_context(|| format!("writing merged profile to {}", out.display()))?;
+        eprintln!("  Saved merged profile to {}", out.display());
+    } else {
+        eprintln!("  (use --merge-out <path> to write the merged profile)");
+    }
+
+    Ok(())
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // ── Merge mode ───────────────────────────────────────────────────────────
+    if !args.merge.is_empty() {
+        return run_merge(&args.merge, args.merge_out.as_deref());
+    }
+
     let mut profiles: Vec<(HardwareProfile, f64)> = Vec::new();
 
     if args.threads > 0 {
@@ -278,6 +371,7 @@ fn main() -> Result<()> {
                 otol: 1e-12,
                 sm_major,
                 sm_minor,
+                maxnreg: 128,
             };
             let t0 = std::time::Instant::now();
             let p = profile::measure_cuda(&spec, n_qubits, args.budget)
@@ -293,6 +387,7 @@ fn main() -> Result<()> {
                 otol: 1e-6,
                 sm_major,
                 sm_minor,
+                maxnreg: 128,
             };
             let t0 = std::time::Instant::now();
             let p = profile::measure_cuda(&spec, n_qubits, args.budget)

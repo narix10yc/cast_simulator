@@ -19,6 +19,10 @@ pub struct CudaKernelGenSpec {
     pub sm_major: u32,
     /// CUDA compute capability minor version (e.g. 6 for sm_86).
     pub sm_minor: u32,
+    /// PTX `.maxnreg` directive: maximum physical registers per thread.
+    /// 0 means no limit (CUDA JIT default, typically ~48).
+    /// 128 is a good default for bandwidth-bound statevector kernels.
+    pub maxnreg: u32,
 }
 
 impl CudaKernelGenSpec {
@@ -32,6 +36,7 @@ impl CudaKernelGenSpec {
             otol: 1e-6,
             sm_major,
             sm_minor,
+            maxnreg: 128,
         }
     }
 
@@ -45,6 +50,7 @@ impl CudaKernelGenSpec {
             otol: 1e-12,
             sm_major,
             sm_minor,
+            maxnreg: 128,
         }
     }
 }

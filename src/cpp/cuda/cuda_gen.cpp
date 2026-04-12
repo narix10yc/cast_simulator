@@ -69,6 +69,18 @@ static std::vector<IRMatData> build_matrix_data(IRBuilder<> &B,
   const auto K = 1U << n_qubits;
   const auto KK = K * K;
 
+  // Scale tolerances by 1/K so that the classification becomes stricter
+  // as the gate dimension grows.  Each output amplitude accumulates K
+  // products; an element classified as zero contributes no error, while
+  // a mis-classified zero introduces error proportional to |element|.
+  // Dividing by K keeps the worst-case accumulated round-off from zero
+  // classification constant regardless of gate size.
+  //
+  // Note: the CPU codegen (cpu/kernel.rs) applies ztol/otol directly
+  // without this 1/K scaling.  The asymmetry is intentional — the CUDA
+  // path is more conservative (classifies fewer elements as zero/±1) to
+  // avoid accumulation artifacts in large fused gates, at the cost of a
+  // few extra FP ops that the GPU easily absorbs.
   const auto z_tol = spec.ztol / static_cast<double>(K);
   const auto o_tol = spec.otol / static_cast<double>(K);
 
@@ -129,14 +141,35 @@ static Function *create_kernel_function(IRBuilder<> &B, Module &M, const std::st
 
 // ── emit_combo_offset ──────────────────────────────────────────────────────
 //
-// Maps a combo counter to the base statevector amplitude index (in units of
-// scalars) using a compile-time-known PDEP-like bit scatter.
+// Maps a linear combo index to the statevector amplitude index using a
+// PDEP-like bit scatter.  Target qubits mark positions that must be ZERO
+// in the base address (they're filled in later by emit_matvec's delta
+// loop); all other address bits come from the combo counter.
 //
-// Example: target qubits [2, 4, 5], counter xxxhgfedcba
-//   result (in scalar units) = hgfed00c0ba * 2
+// Algorithm: scan qubit positions 0..highest_q.  Non-target positions
+// consume counter bits in order.  Each time we reach a target position,
+// the accumulated counter bits are shifted left by the number of target
+// qubits seen so far (inserting zeros at the target positions).
+// After the loop, remaining high counter bits are shifted by k (total
+// target qubits).
 //
-// The returned Value is the byte-GEP index into the scalar array (×2 shift
-// for re/im is applied by the caller).
+// Worked example — target qubits [2, 4, 5], k=3, combo counter = 0b110_01:
+//
+//   Step 1: q=0,1 are non-target → consume counter bits b0,b1 (mask=0b11)
+//           q=2 is target #0 → emit (counter & 0b11) << 0 = 0b01
+//           Insert zero at position 2.
+//   Step 2: q=3 is non-target → consume counter bit b2 (mask=0b100)
+//           q=4 is target #1 → emit (counter & 0b100) << 1 = 0b1000
+//           Insert zero at position 4.
+//   Step 3: q=5 is target #2 → mask=0, nothing to emit.
+//   Final:  high bits of counter (bits ≥ highest_q-k+1 = 3) → shift << 3.
+//           counter bits b3,b4 = 0b11 → shifted << 3 = 0b11_000_000
+//
+//   Result: 0b11_0_0_1000_0_01 = positions [..., -, -, 1, 0, 0, 0, -, 0, 1]
+//           where - are the target-qubit zeros (positions 2, 4, 5).
+//
+// The returned Value is the element index into the scalar array.  The
+// caller applies ×2 for re/im interleave.
 
 static Value *emit_combo_offset(IRBuilder<> &B, Value *counter_v, const uint32_t *qubits,
                                 size_t n_qubits) {

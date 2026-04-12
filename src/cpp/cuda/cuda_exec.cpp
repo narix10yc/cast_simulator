@@ -303,8 +303,8 @@ extern "C" int cast_cuda_stream_sync(void *stream, char *err_buf, size_t err_buf
 // ── Kernel launch ─────────────────────────────────────────────────────────────
 
 extern "C" int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t sv_dptr,
-                                       uint32_t n_gate_qubits, uint32_t sv_n_qubits,
-                                       uint8_t /*precision*/, char *err_buf, size_t err_buf_len) {
+                                       uint32_t n_gate_qubits, uint32_t sv_n_qubits, char *err_buf,
+                                       size_t err_buf_len) {
   if (!cu_function) {
     write_error_message(err_buf, err_buf_len, "cu_function must not be null");
     return 1;
