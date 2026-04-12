@@ -123,6 +123,7 @@ static Function *create_kernel_function(IRBuilder<> &B, Module &M, const std::st
   auto *mdOne = ConstantAsMetadata::get(B.getInt32(1));
   auto *md = MDNode::get(M.getContext(), {ValueAsMetadata::get(func), mdString, mdOne});
   M.getOrInsertNamedMetadata("nvvm.annotations")->addOperand(md);
+
   return func;
 }
 

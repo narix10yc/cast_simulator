@@ -159,6 +159,11 @@ struct Args {
     /// Print a per-decision fusion log for each hardware-adaptive run.
     #[arg(long)]
     fusion_log: bool,
+
+    /// Print per-kernel compilation stats (gate qubits, PTX registers, lines)
+    /// after each circuit. CUDA only.
+    #[arg(long)]
+    kernel_stats: bool,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -184,6 +189,7 @@ fn run_bench(
     precision: CliPrecision,
     budget_s: f64,
     force_dense: bool,
+    kernel_stats: bool,
 ) -> Result<(f64, TimingStats)> {
     let rt = match backend {
         Backend::Cpu => {
@@ -227,14 +233,37 @@ fn run_bench(
                     sm_minor,
                 };
                 let sim = Simulator::<Cuda>::new(spec);
-                sim.bench(graph, Representation::StateVector, budget_s)
-                    .context("CUDA backend bench failed")?
+                let rt = sim
+                    .bench(graph, Representation::StateVector, budget_s)
+                    .context("CUDA backend bench failed")?;
+                if kernel_stats {
+                    print_kernel_stats(&sim);
+                }
+                rt
             }
             #[cfg(not(feature = "cuda"))]
             anyhow::bail!("CUDA backend requires the `cuda` feature");
         }
     };
     Ok((rt.compile.mean_s(), rt.exec.to_stats()))
+}
+
+#[cfg(feature = "cuda")]
+fn print_kernel_stats(sim: &Simulator<Cuda>) {
+    let stats = sim.kernel_stats();
+    if stats.is_empty() {
+        return;
+    }
+    eprintln!(
+        "  {:>4}  {:>4}  {:>6}  {:>5}  {:>10}",
+        "ID", "Qubs", "VRegs", "Lines", "Compile"
+    );
+    for (id, nq, _prec, regs, lines, compile_ms) in &stats {
+        eprintln!(
+            "  {:>4}  {:>4}q  {:>5}  {:>5}  {:>8.1}ms",
+            id, nq, regs, lines, compile_ms,
+        );
+    }
 }
 
 // ── Benchmark logic ──────────────────────────────────────────────────────────
@@ -247,6 +276,7 @@ fn bench_one_config(
     precision: CliPrecision,
     budget_s: f64,
     force_dense: bool,
+    kernel_stats: bool,
 ) -> Result<BenchResult> {
     let mut graph = original.clone();
     fusion::optimize(&mut graph, config);
@@ -254,7 +284,8 @@ fn bench_one_config(
     let n_gates = graph.gates_in_row_order().len();
     let n_rows = graph.n_rows();
 
-    let (compile_s, timing) = run_bench(&graph, backend, precision, budget_s, force_dense)?;
+    let (compile_s, timing) =
+        run_bench(&graph, backend, precision, budget_s, force_dense, kernel_stats)?;
 
     Ok(BenchResult {
         label: label.to_string(),
@@ -382,6 +413,7 @@ fn main() -> Result<()> {
                 args.precision,
                 args.bench_budget,
                 args.force_dense,
+                args.kernel_stats,
             )
             .with_context(|| format!("benchmarking {} with fusion={}", filename, mode.label()))?;
             println!(

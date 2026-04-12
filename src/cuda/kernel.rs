@@ -404,7 +404,7 @@ fn compile_gate(
     }
 
     // Safety: C++ guarantees non-null, null-terminated strings on success.
-    let ptx = unsafe { CStr::from_ptr(out_ptx) }
+    let mut ptx = unsafe { CStr::from_ptr(out_ptx) }
         .to_string_lossy()
         .into_owned();
     let func_name = unsafe { CStr::from_ptr(out_func_name) }
@@ -412,6 +412,16 @@ fn compile_gate(
         .into_owned();
     unsafe { ffi::cast_cuda_str_free(out_ptx) };
     unsafe { ffi::cast_cuda_str_free(out_func_name) };
+
+    // The default NVPTX register allocation (~48 physical regs) forces
+    // massive spilling for large fused gates (a 4q matvec has ~295
+    // virtual regs).  Inject `.maxnreg 128` so the CUDA JIT allocates
+    // more physical regs per thread, trading occupancy for far less
+    // local-memory traffic.  For small gates (34-40 virtual regs)
+    // this is a harmless no-op since 128 > their actual usage.
+    if let Some(pos) = ptx.find(")\n{") {
+        ptx.insert_str(pos + 1, "\n.maxnreg 128");
+    }
 
     let precision = if precision_byte == 0 {
         CudaPrecision::F32
@@ -819,6 +829,45 @@ impl CudaKernelManager {
         let guard = self.inner.lock().unwrap();
         let kernel = guard.kernels.get(&id)?;
         Some(kernel.ptx().into())
+    }
+
+    /// Returns a summary of all compiled kernels for debugging/profiling.
+    /// Each entry: `(id, n_gate_qubits, precision, ptx_regs_b32, ptx_lines, ptx_compile_ms)`.
+    pub fn kernel_stats(&self) -> Vec<(CudaKernelId, u32, CudaPrecision, u32, usize, f64)> {
+        let guard = self.inner.lock().unwrap();
+        let mut stats: Vec<_> = guard
+            .kernels
+            .iter()
+            .map(|(&id, kernel)| {
+                // Parse register count from PTX: ".reg .b32 %r<N>;"
+                let ptx = kernel.ptx();
+                let regs_b32 = ptx
+                    .lines()
+                    .filter_map(|l| {
+                        let l = l.trim();
+                        if l.starts_with(".reg .b32") {
+                            l.split('<')
+                                .nth(1)
+                                .and_then(|s| s.trim_end_matches(">;").parse::<u32>().ok())
+                        } else {
+                            None
+                        }
+                    })
+                    .sum::<u32>();
+                let ptx_lines = ptx.lines().count();
+                let compile_ms = kernel.ptx_compile_time().as_secs_f64() * 1000.0;
+                (
+                    id,
+                    kernel.n_gate_qubits(),
+                    kernel.precision(),
+                    regs_b32,
+                    ptx_lines,
+                    compile_ms,
+                )
+            })
+            .collect();
+        stats.sort_by_key(|s| s.0);
+        stats
     }
 
     /// Queues a launch of kernel `id` on `sv`, without touching the GPU immediately.

@@ -88,8 +88,15 @@ static bool ensure_cuda(std::string &err) {
 
 // ── Grid / block helper ───────────────────────────────────────────────────────
 
-static void launch_dims(uint64_t n_combos, unsigned int &grid_x, unsigned int &block_x) {
-  block_x = static_cast<unsigned int>(std::min<uint64_t>(256, n_combos));
+static void launch_dims(uint64_t n_combos, uint32_t n_gate_qubits, unsigned int &grid_x,
+                        unsigned int &block_x) {
+  // 4q+ gates generate large straight-line kernels with high register
+  // pressure.  Using block=256 forces the register allocator to spill
+  // massively (295 virtual → 48 physical regs on typical 4q kernels).
+  // A smaller block gives each thread more of the SM register file,
+  // avoiding spills and recovering full bandwidth utilization.
+  unsigned int max_block = (n_gate_qubits >= 4) ? 64 : 256;
+  block_x = static_cast<unsigned int>(std::min<uint64_t>(max_block, n_combos));
   if (block_x == 0)
     block_x = 1;
   uint64_t g = (n_combos + block_x - 1) / block_x;
@@ -315,7 +322,7 @@ extern "C" int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t
   void *args[] = {&sv_d, &mat_d, &n_combos};
 
   unsigned int grid_x, block_x;
-  launch_dims(n_combos, grid_x, block_x);
+  launch_dims(n_combos, n_gate_qubits, grid_x, block_x);
 
   std::string err;
   CUresult rc = cuLaunchKernel(static_cast<CUfunction>(cu_function), grid_x, 1, 1, block_x, 1, 1,

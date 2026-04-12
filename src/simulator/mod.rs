@@ -1,35 +1,56 @@
-//! Generic simulator parameterized by backend.
+//! Backend-generic circuit simulator.
+//!
+//! [`Simulator`] owns long-lived backend state (kernel manager, kernel-gen
+//! spec, thread count) and exposes three per-run methods, each returning a
+//! distinct result type:
+//!
+//! - [`Simulator::simulate`] — run once, return the final quantum state.
+//! - [`Simulator::sample_trajectory`] — ensemble-sample a noisy circuit,
+//!   return a measurement histogram.
+//! - [`Simulator::bench`] — compile once, execute adaptively within a time
+//!   budget, return raw per-iter timing samples.
+//!
+//! One simulator can handle many runs; the kernel cache persists across
+//! calls so duplicate gates across runs are deduplicated.
+//!
+//! # Explicit optimization
+//!
+//! The simulator does not apply fusion. Callers build a [`CircuitGraph`],
+//! optionally call [`fusion::optimize`](crate::fusion::optimize), then pass
+//! the graph to one of the run methods. This keeps the optimization step
+//! visible at the call site.
 //!
 //! # Example
 //!
 //! ```no_run
-//! use cast::simulator::{Simulator, Cpu, SimulationMode};
-//! use cast::types::{QuantumGate, QuantumCircuit};
+//! use cast::simulator::{Simulator, Cpu, Representation};
+//! use cast::types::QuantumCircuit;
+//! use cast::CircuitGraph;
 //!
-//! let mut circuit = QuantumCircuit::new(4);
-//! circuit.add(QuantumGate::h(0));
-//! circuit.add(QuantumGate::cx(0, 1));
+//! let circuit = QuantumCircuit::from_qasm(
+//!     "OPENQASM 2.0; qreg q[2]; h q[0]; cx q[0],q[1];",
+//! ).unwrap();
+//! let graph = CircuitGraph::from_circuit(&circuit);
 //!
 //! let sim = Simulator::<Cpu>::f64();
-//! let result = sim.run(&circuit).unwrap();
-//! println!("amplitudes: {:?}", result.state.unwrap().amplitudes());
+//! let state = sim.simulate(&graph, Representation::StateVector).unwrap();
+//! println!("amplitudes: {:?}", state.amplitudes());
 //! ```
 
+mod bench;
 mod measure;
 mod trajectory;
 
-pub use trajectory::{ExploredBranch, TrajectoryResult};
+pub use bench::{PhaseTiming, RunTiming, TimingSource};
+pub use trajectory::{ExploredBranch, TrajectoryOpts, TrajectoryResult};
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
-use crate::cost_model::FusionConfig;
 use crate::cpu::{get_num_threads, CPUKernelGenSpec, CPUStatevector, CpuKernelManager};
-use crate::fusion;
-use crate::timing::TimingStats;
-use crate::types::{Complex, QuantumCircuit, QuantumGate};
+use crate::types::{Complex, QuantumGate};
 use crate::CircuitGraph;
 
 #[cfg(feature = "cuda")]
@@ -38,6 +59,9 @@ use crate::cuda::{CudaKernelGenSpec, CudaKernelManager, CudaStatevector};
 // ── Backend trait ────────────────────────────────────────────────────────────
 
 /// Sealed trait mapping a backend marker to its concrete types and operations.
+///
+/// Every method is `#[doc(hidden)]`: the Backend trait is an implementation
+/// detail of [`Simulator`], not a public extension point.
 pub trait Backend: sealed::Sealed + Sized {
     #[doc(hidden)]
     type Sv;
@@ -47,20 +71,29 @@ pub trait Backend: sealed::Sealed + Sized {
     type Mgr;
     #[doc(hidden)]
     type Spec: Copy;
+    /// Per-simulator state needed for apply (e.g., CPU thread count).
+    #[doc(hidden)]
+    type Extra;
 
     #[doc(hidden)]
     fn new_manager(spec: Self::Spec) -> Self::Mgr;
+    #[doc(hidden)]
+    fn default_extra() -> Self::Extra;
+
     #[doc(hidden)]
     fn new_sv(n_qubits: u32, spec: &Self::Spec) -> Result<Self::Sv>;
     #[doc(hidden)]
     fn init_sv(sv: &mut Self::Sv) -> Result<()>;
     #[doc(hidden)]
+    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv>;
+
+    /// Record a kernel for `gate` in the manager. Compilation may be lazy
+    /// (CPU batch JIT, finalized by [`finalize_compile`](Self::finalize_compile))
+    /// or eager (CUDA PTX + cubin).
+    #[doc(hidden)]
     fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId>;
-    /// Extra per-simulator state needed for apply (e.g., CPU thread count).
-    #[doc(hidden)]
-    type Extra;
-    #[doc(hidden)]
-    fn default_extra() -> Self::Extra;
+
+    /// Apply a compiled kernel to a statevector.
     #[doc(hidden)]
     fn apply(
         mgr: &Self::Mgr,
@@ -68,42 +101,39 @@ pub trait Backend: sealed::Sealed + Sized {
         sv: &mut Self::Sv,
         extra: &Self::Extra,
     ) -> Result<()>;
+
+    /// Drain any pending compile-phase work (CPU batch JIT). CUDA is a no-op.
     #[doc(hidden)]
-    fn sv_n_qubits(sv: &Self::Sv) -> u32;
+    fn finalize_compile(mgr: &Self::Mgr) -> Result<()>;
+
+    /// Ensure all queued `apply` calls have completed and the statevector is
+    /// readable. CPU is a no-op (apply is synchronous); CUDA calls `sync()`.
     #[doc(hidden)]
-    fn flush(mgr: &Self::Mgr) -> Result<()>;
-    /// Compute marginal measurement probabilities for trajectory simulation.
+    fn sync(mgr: &Self::Mgr) -> Result<()>;
+
+    /// Compute marginal measurement probabilities over `measured_qubits`.
+    /// Used by trajectory sampling.
     #[doc(hidden)]
     fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> Result<Vec<f64>>;
-    /// Clone a statevector (deep copy). Used for ensemble branching.
-    #[doc(hidden)]
-    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv>;
 
-    /// Compile and execute `gates` on a freshly initialized statevector, using
-    /// the backend-optimal pipelining strategy.
+    /// Which timing source [`time_one_exec`](Self::time_one_exec) reports
+    /// samples from. CPU = wall-clock; CUDA = GPU events.
+    #[doc(hidden)]
+    const EXEC_TIMING_SOURCE: TimingSource;
+
+    /// Run one iteration of "reset statevector and apply all kernels in
+    /// order", returning the measured iteration duration.
     ///
-    /// - **CPU**: compile all gates (batch JIT), then execute all sequentially.
-    ///   `compile_s` and `exec_s` are measured independently.
-    /// - **CUDA**: compile in a thread pool while launching in a windowed
-    ///   pipeline on the GPU stream.  Compile and execute overlap, so
-    ///   `compile_s = 0` and `exec_s = total_wall`; per-kernel CPU compile
-    ///   times are still available via the manager's stats if needed.
+    /// CPU reports wall time; CUDA reports the sum of per-kernel GPU event
+    /// times (excluding host launch overhead). Used by [`Simulator::bench`]
+    /// inside the adaptive timing loop.
     #[doc(hidden)]
-    fn execute_pipelined(
+    fn time_one_exec(
         mgr: &Self::Mgr,
-        spec: &Self::Spec,
+        sv: &mut Self::Sv,
+        kernel_ids: &[Self::KernelId],
         extra: &Self::Extra,
-        gates: &[Arc<QuantumGate>],
-        n_sv: u32,
-    ) -> Result<(Self::Sv, PipelineTimings)>;
-}
-
-/// Wall-time split returned by [`Backend::execute_pipelined`].
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PipelineTimings {
-    pub compile_s: f64,
-    pub exec_s: f64,
+    ) -> Result<Duration>;
 }
 
 mod sealed {
@@ -142,11 +172,11 @@ impl Backend for Cpu {
         sv.initialize();
         Ok(())
     }
+    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
+        Ok(sv.clone())
+    }
     fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId> {
         mgr.generate(gate)
-    }
-    fn sv_n_qubits(sv: &Self::Sv) -> u32 {
-        sv.n_qubits()
     }
     fn apply(
         mgr: &Self::Mgr,
@@ -156,43 +186,30 @@ impl Backend for Cpu {
     ) -> Result<()> {
         mgr.apply(id, sv, *n_threads)
     }
-    fn flush(_mgr: &Self::Mgr) -> Result<()> {
+    fn finalize_compile(mgr: &Self::Mgr) -> Result<()> {
+        mgr.finalize()
+    }
+    fn sync(_mgr: &Self::Mgr) -> Result<()> {
         Ok(())
     }
     fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> Result<Vec<f64>> {
         Ok(measure::marginal_probabilities_cpu(sv, measured_qubits))
     }
-    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
-        Ok(sv.clone())
-    }
-    fn execute_pipelined(
+
+    const EXEC_TIMING_SOURCE: TimingSource = TimingSource::Wall;
+
+    fn time_one_exec(
         mgr: &Self::Mgr,
-        spec: &Self::Spec,
-        extra: &Self::Extra,
-        gates: &[Arc<QuantumGate>],
-        n_sv: u32,
-    ) -> Result<(Self::Sv, PipelineTimings)> {
-        // CPU: compile all gates first (batch JIT), then execute all.
-        // Explicitly finalize the batch so the compile cost is attributed
-        // to compile_s rather than to the first apply.
-        let compile_t0 = Instant::now();
-        let ids: Vec<Self::KernelId> = gates
-            .iter()
-            .map(|g| Self::generate(mgr, g))
-            .collect::<Result<_>>()?;
-        mgr.finalize()?;
-        let compile_s = compile_t0.elapsed().as_secs_f64();
-
-        let exec_t0 = Instant::now();
-        let mut sv = Self::new_sv(n_sv, spec)?;
-        Self::init_sv(&mut sv)?;
-        for &kid in &ids {
-            Self::apply(mgr, kid, &mut sv, extra)?;
+        sv: &mut Self::Sv,
+        kernel_ids: &[Self::KernelId],
+        n_threads: &Self::Extra,
+    ) -> Result<Duration> {
+        let t0 = Instant::now();
+        Self::init_sv(sv)?;
+        for &kid in kernel_ids {
+            mgr.apply(kid, sv, *n_threads)?;
         }
-        Self::flush(mgr)?;
-        let exec_s = exec_t0.elapsed().as_secs_f64();
-
-        Ok((sv, PipelineTimings { compile_s, exec_s }))
+        Ok(t0.elapsed())
     }
 }
 
@@ -220,11 +237,11 @@ impl Backend for Cuda {
     fn init_sv(sv: &mut Self::Sv) -> Result<()> {
         sv.zero()
     }
+    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
+        sv.clone_device()
+    }
     fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId> {
         mgr.generate(gate)
-    }
-    fn sv_n_qubits(sv: &Self::Sv) -> u32 {
-        sv.n_qubits()
     }
     fn apply(
         mgr: &Self::Mgr,
@@ -234,7 +251,11 @@ impl Backend for Cuda {
     ) -> Result<()> {
         mgr.apply(id, sv)
     }
-    fn flush(mgr: &Self::Mgr) -> Result<()> {
+    fn finalize_compile(_mgr: &Self::Mgr) -> Result<()> {
+        // CUDA's `generate` compiles eagerly (PTX + cubin JIT). No batch.
+        Ok(())
+    }
+    fn sync(mgr: &Self::Mgr) -> Result<()> {
         mgr.sync()?;
         Ok(())
     }
@@ -248,66 +269,47 @@ impl Backend for Cuda {
             n_bins,
         ))
     }
-    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
-        sv.clone_device()
-    }
-    fn execute_pipelined(
+
+    const EXEC_TIMING_SOURCE: TimingSource = TimingSource::GpuEvents;
+
+    fn time_one_exec(
         mgr: &Self::Mgr,
-        spec: &Self::Spec,
+        sv: &mut Self::Sv,
+        kernel_ids: &[Self::KernelId],
         _extra: &Self::Extra,
-        gates: &[Arc<QuantumGate>],
-        n_sv: u32,
-    ) -> Result<(Self::Sv, PipelineTimings)> {
-        let mut sv = Self::new_sv(n_sv, spec)?;
-        Self::init_sv(&mut sv)?;
-        // Default window = LRU cache size, compile threads = 4.
-        let window_size = 4;
-        let n_compile_threads = 4;
-        let stats = mgr.execute_pipelined(gates, &mut sv, window_size, n_compile_threads)?;
-        // Compile and execute overlap in the pipelined CUDA path, so the
-        // entire wall is reported as exec_s.  Per-kernel CPU compile times
-        // remain available via `stats.kernels`.
-        let exec_s = stats.wall_time.as_secs_f64();
-        Ok((
-            sv,
-            PipelineTimings {
-                compile_s: 0.0,
-                exec_s,
-            },
-        ))
+    ) -> Result<Duration> {
+        Self::init_sv(sv)?;
+        for &kid in kernel_ids {
+            mgr.apply(kid, sv)?;
+        }
+        let stats = mgr.sync()?;
+        Ok(stats.kernels.iter().map(|k| k.gpu_time).sum())
     }
 }
 
 // ── QuantumState ─────────────────────────────────────────────────────────────
 
-/// Quantum state after simulation — either a pure statevector or a density matrix.
+/// Quantum state returned by [`Simulator::simulate`]: a pure statevector or
+/// a density matrix.
+///
+/// For a density matrix the underlying statevector has `2 * n_physical`
+/// qubits (a vectorised ρ), and `self.n_physical` records the logical
+/// (physical) qubit count.
 pub struct QuantumState<B: Backend> {
-    repr: StateRepr<B>,
-}
-
-enum StateRepr<B: Backend> {
-    Pure(B::Sv),
-    DensityMatrix { sv: B::Sv, n_physical: u32 },
+    sv: B::Sv,
+    n_physical: u32,
+    repr: Representation,
 }
 
 impl<B: Backend> QuantumState<B> {
     /// Number of physical qubits.
     pub fn n_qubits(&self) -> u32 {
-        match &self.repr {
-            StateRepr::Pure(sv) => B::sv_n_qubits(sv),
-            StateRepr::DensityMatrix { n_physical, .. } => *n_physical,
-        }
+        self.n_physical
     }
 
     /// Whether this is a pure state (vs density matrix).
     pub fn is_pure(&self) -> bool {
-        matches!(self.repr, StateRepr::Pure(_))
-    }
-
-    fn sv(&self) -> &B::Sv {
-        match &self.repr {
-            StateRepr::Pure(sv) | StateRepr::DensityMatrix { sv, .. } => sv,
-        }
+        matches!(self.repr, Representation::StateVector)
     }
 }
 
@@ -315,38 +317,39 @@ impl<B: Backend> QuantumState<B> {
 impl QuantumState<Cpu> {
     /// All amplitudes of the underlying statevector.
     pub fn amplitudes(&self) -> Vec<Complex> {
-        self.sv().amplitudes()
+        self.sv.amplitudes()
     }
 
     /// Single amplitude by index.
     pub fn amp(&self, idx: usize) -> Complex {
-        self.sv().amp(idx)
+        self.sv.amp(idx)
     }
 
     /// Diagonal populations: `|a_i|²` for pure states, `ρ[i,i]` for DM.
     pub fn populations(&self) -> Vec<f64> {
-        match &self.repr {
-            StateRepr::Pure(sv) => sv
+        match self.repr {
+            Representation::StateVector => self
+                .sv
                 .amplitudes()
                 .iter()
                 .map(|c| c.re * c.re + c.im * c.im)
                 .collect(),
-            StateRepr::DensityMatrix { sv, n_physical } => {
-                let n = *n_physical as usize;
+            Representation::DensityMatrix => {
+                let n = self.n_physical as usize;
                 let dim = 1usize << n;
-                (0..dim).map(|i| sv.amp(i | (i << n)).re).collect()
+                (0..dim).map(|i| self.sv.amp(i | (i << n)).re).collect()
             }
         }
     }
 
     /// Trace (squared norm for pure states, Tr(ρ) for density matrix).
     pub fn trace(&self) -> f64 {
-        match &self.repr {
-            StateRepr::Pure(sv) => sv.norm_squared(),
-            StateRepr::DensityMatrix { sv, n_physical } => {
-                let n = *n_physical as usize;
+        match self.repr {
+            Representation::StateVector => self.sv.norm_squared(),
+            Representation::DensityMatrix => {
+                let n = self.n_physical as usize;
                 let dim = 1usize << n;
-                (0..dim).map(|i| sv.amp(i | (i << n)).re).sum()
+                (0..dim).map(|i| self.sv.amp(i | (i << n)).re).sum()
             }
         }
     }
@@ -356,20 +359,19 @@ impl QuantumState<Cpu> {
 impl QuantumState<Cuda> {
     /// Download all amplitudes from GPU to host.
     pub fn download_amplitudes(&self) -> Result<Vec<(f64, f64)>> {
-        self.sv().download()
+        self.sv.download()
     }
 
     /// Download and compute populations.
     pub fn populations(&self) -> Result<Vec<f64>> {
-        match &self.repr {
-            StateRepr::Pure(sv) => {
-                let amps = sv.download()?;
+        let amps = self.sv.download()?;
+        match self.repr {
+            Representation::StateVector => {
                 Ok(amps.iter().map(|(re, im)| re * re + im * im).collect())
             }
-            StateRepr::DensityMatrix { sv, n_physical } => {
-                let n = *n_physical as usize;
+            Representation::DensityMatrix => {
+                let n = self.n_physical as usize;
                 let dim = 1usize << n;
-                let amps = sv.download()?;
                 Ok((0..dim).map(|i| amps[i | (i << n)].0).collect())
             }
         }
@@ -377,62 +379,43 @@ impl QuantumState<Cuda> {
 
     /// Trace (computed on GPU for pure states, downloaded for DM).
     pub fn trace(&self) -> Result<f64> {
-        match &self.repr {
-            StateRepr::Pure(sv) => sv.norm_squared(),
-            StateRepr::DensityMatrix { sv, n_physical } => {
-                let n = *n_physical as usize;
+        match self.repr {
+            Representation::StateVector => self.sv.norm_squared(),
+            Representation::DensityMatrix => {
+                let n = self.n_physical as usize;
                 let dim = 1usize << n;
-                let amps = sv.download()?;
+                let amps = self.sv.download()?;
                 Ok((0..dim).map(|i| amps[i | (i << n)].0).sum())
             }
         }
     }
 }
 
-// ── Public types ─────────────────────────────────────────────────────────────
+// ── Representation ───────────────────────────────────────────────────────────
 
-/// Simulation mode.
-#[derive(Clone, Debug)]
-pub enum SimulationMode {
+/// State representation: pure statevector or density matrix. Orthogonal to
+/// sampling strategy — [`Simulator::sample_trajectory`] has its own options
+/// struct and always operates on statevectors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Representation {
     /// Pure-state simulation on n qubits. Errors if the circuit contains
-    /// noisy gates.
+    /// non-unitary gates.
     StateVector,
     /// Density-matrix simulation on 2n virtual qubits. Supports noisy gates
-    /// via superoperator lifting.
+    /// via superoperator lifting (each gate is transformed into a
+    /// superoperator acting on the doubled state space).
     DensityMatrix,
-    /// Trajectory-based noisy simulation: deterministic ensemble branching
-    /// with batch measurement sampling. Produces a measurement histogram
-    /// over the circuit's `measured_qubits`.
-    Trajectory {
-        /// Total number of measurement samples to generate.
-        n_samples: u64,
-        /// RNG seed for measurement sampling (None = entropy).
-        seed: Option<u64>,
-        /// Maximum number of concurrent statevectors in the ensemble.
-        /// `None` = auto-detect from available memory. `Some(1)` = single
-        /// deterministic trajectory (highest-probability branch only).
-        max_ensemble: Option<usize>,
-    },
-}
-
-/// Result of a simulation run.
-pub struct SimulationResult<B: Backend> {
-    /// Final quantum state (`None` for trajectory mode).
-    pub state: Option<QuantumState<B>>,
-    /// Execution time statistics.
-    pub timing: TimingStats,
-    /// Kernel compilation wall time (seconds).
-    pub compile_time_s: f64,
-    /// Trajectory simulation data (only for [`SimulationMode::Trajectory`]).
-    pub trajectory_data: Option<TrajectoryResult>,
 }
 
 // ── Simulator ────────────────────────────────────────────────────────────────
 
-/// Unified quantum circuit simulator, generic over backend.
+/// Backend-generic simulator. Owns long-lived backend state (kernel manager,
+/// spec, thread count) and provides three per-run methods, each returning a
+/// distinct result type.
+///
+/// A single simulator can handle many runs; the kernel cache persists across
+/// calls, so duplicate gates are deduplicated across invocations.
 pub struct Simulator<B: Backend> {
-    mode: SimulationMode,
-    fusion_config: Option<FusionConfig>,
     pub(crate) mgr: B::Mgr,
     pub(crate) spec: B::Spec,
     pub(crate) extra: B::Extra,
@@ -443,8 +426,6 @@ impl Simulator<Cpu> {
     /// Create a CPU simulator with the given spec.
     pub fn new(spec: CPUKernelGenSpec) -> Self {
         Self {
-            mode: SimulationMode::StateVector,
-            fusion_config: None,
             mgr: Cpu::new_manager(spec),
             spec,
             extra: Cpu::default_extra(),
@@ -474,8 +455,6 @@ impl Simulator<Cuda> {
     /// Create a CUDA simulator with the given spec.
     pub fn new(spec: CudaKernelGenSpec) -> Self {
         Self {
-            mode: SimulationMode::StateVector,
-            fusion_config: None,
             mgr: Cuda::new_manager(spec),
             spec,
             extra: (),
@@ -491,138 +470,119 @@ impl Simulator<Cuda> {
     pub fn f32() -> Self {
         Self::new(CudaKernelGenSpec::f32())
     }
+
+    /// Per-kernel compilation stats for debugging.
+    /// Returns `(id, n_gate_qubits, precision, ptx_virtual_regs, ptx_lines, compile_ms)`.
+    pub fn kernel_stats(
+        &self,
+    ) -> Vec<(
+        crate::cuda::CudaKernelId,
+        u32,
+        crate::cuda::CudaPrecision,
+        u32,
+        usize,
+        f64,
+    )> {
+        self.mgr.kernel_stats()
+    }
 }
 
 // Generic methods.
 impl<B: Backend> Simulator<B> {
-    /// Set the simulation mode.
-    pub fn with_mode(mut self, mode: SimulationMode) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    /// Set the fusion configuration. Applied only by [`run`](Self::run), not
-    /// [`run_graph`](Self::run_graph).
-    pub fn with_fusion(mut self, config: FusionConfig) -> Self {
-        self.fusion_config = Some(config);
-        self
-    }
-
-    /// Run simulation on a [`QuantumCircuit`]. Builds an internal
-    /// [`CircuitGraph`], applies fusion (if configured), and simulates.
+    /// Run `graph` once and return the final quantum state.
     ///
-    /// For trajectory mode, dead-gate elimination is applied automatically
-    /// based on [`QuantumCircuit::measured_qubits`].
-    pub fn run(&self, circuit: &QuantumCircuit) -> Result<SimulationResult<B>> {
-        // For trajectory mode, eliminate gates that can't influence measured qubits.
-        let circuit = if matches!(self.mode, SimulationMode::Trajectory { .. }) {
-            circuit.eliminate_dead_gates()
-        } else {
-            circuit.clone()
-        };
-
-        let mut graph = CircuitGraph::new();
-        graph.ensure_n_qubits(circuit.n_qubits() as usize);
-        for gate in circuit.gates() {
-            graph.insert_gate(Arc::clone(gate));
-        }
-        if let Some(ref config) = self.fusion_config {
-            fusion::optimize(&mut graph, config);
-        }
-        self.run_graph(&graph, circuit.measured_qubits())
-    }
-
-    /// Run simulation on a pre-built circuit graph (no fusion applied).
-    ///
-    /// `measured_qubits` is used only for trajectory mode — it specifies
-    /// which qubits to measure at the end of the circuit.
-    pub fn run_graph(
+    /// For `Representation::StateVector`, every gate must be unitary.
+    /// For `Representation::DensityMatrix`, gates are lifted to superoperators
+    /// acting on a 2n-qubit virtual statevector, so noisy gates are supported.
+    pub fn simulate(
         &self,
-        circuit: &CircuitGraph,
-        measured_qubits: &[u32],
-    ) -> Result<SimulationResult<B>> {
-        let n_physical = circuit.n_qubits() as u32;
-        let (gates, n_sv) = self.prepare_gates(circuit, n_physical)?;
+        graph: &CircuitGraph,
+        repr: Representation,
+    ) -> Result<QuantumState<B>> {
+        let n_physical = graph.n_qubits() as u32;
+        let (gates, n_sv) = prepare_gates(graph, n_physical, repr)?;
 
-        match &self.mode {
-            SimulationMode::StateVector | SimulationMode::DensityMatrix => {
-                let (sv, timings) =
-                    B::execute_pipelined(&self.mgr, &self.spec, &self.extra, &gates, n_sv)?;
+        let kernel_ids = self.compile_batch(&gates)?;
 
-                let state = match &self.mode {
-                    SimulationMode::DensityMatrix => QuantumState {
-                        repr: StateRepr::DensityMatrix { sv, n_physical },
-                    },
-                    _ => QuantumState {
-                        repr: StateRepr::Pure(sv),
-                    },
-                };
-
-                Ok(SimulationResult {
-                    state: Some(state),
-                    timing: crate::timing::stats_from_samples(&[timings.exec_s]),
-                    compile_time_s: timings.compile_s,
-                    trajectory_data: None,
-                })
-            }
-            SimulationMode::Trajectory { .. } => {
-                let t0 = Instant::now();
-                let kernel_ids = self.compile_gates(&gates)?;
-                let compile_time_s = t0.elapsed().as_secs_f64();
-                let prepared = trajectory::PreparedCircuit {
-                    gates,
-                    kernel_ids,
-                    n_sv,
-                };
-                self.execute_trajectory(&prepared, measured_qubits, compile_time_s)
-            }
+        let mut sv = B::new_sv(n_sv, &self.spec)
+            .with_context(|| format!("allocating {n_sv}-qubit statevector"))?;
+        B::init_sv(&mut sv)?;
+        for (i, &kid) in kernel_ids.iter().enumerate() {
+            B::apply(&self.mgr, kid, &mut sv, &self.extra)
+                .with_context(|| format!("applying kernel at gate index {i}"))?;
         }
+        B::sync(&self.mgr)?;
+
+        Ok(QuantumState {
+            sv,
+            n_physical,
+            repr,
+        })
     }
 
-    fn prepare_gates(
+    /// Compile and finalize all kernels for `gates`, returning their ids in
+    /// gate order. Shared helper for `simulate` and `bench`; callers that
+    /// need compile-time measurement take it themselves.
+    pub(crate) fn compile_batch(
         &self,
-        circuit: &CircuitGraph,
-        n_physical: u32,
-    ) -> Result<(Vec<Arc<QuantumGate>>, u32)> {
-        let gates = circuit.gates_in_row_order();
-        match &self.mode {
-            SimulationMode::StateVector => {
-                for gate in &gates {
-                    if !gate.is_unitary() {
-                        anyhow::bail!(
-                            "StateVector mode does not support noisy gates; \
-                             use DensityMatrix or Trajectory mode"
-                        );
-                    }
-                }
-                Ok((gates, n_physical))
-            }
-            SimulationMode::DensityMatrix => {
-                let dm_gates: Vec<Arc<QuantumGate>> = gates
-                    .iter()
-                    .map(|g| Arc::new(g.to_density_matrix_gate(n_physical as usize)))
-                    .collect();
-                Ok((dm_gates, 2 * n_physical))
-            }
-            SimulationMode::Trajectory { .. } => Ok((gates, n_physical)),
+        gates: &[Arc<QuantumGate>],
+    ) -> Result<Vec<B::KernelId>> {
+        let mut ids: Vec<B::KernelId> = Vec::with_capacity(gates.len());
+        for (i, gate) in gates.iter().enumerate() {
+            ids.push(self.compile_one_gate(i, gate)?);
         }
-    }
-
-    fn compile_gates(&self, gates: &[Arc<QuantumGate>]) -> Result<Vec<Option<B::KernelId>>> {
-        let skip_noisy = matches!(self.mode, SimulationMode::Trajectory { .. });
-        let mut ids = Vec::with_capacity(gates.len());
-        for gate in gates {
-            if skip_noisy && !gate.is_unitary() {
-                ids.push(None);
-            } else {
-                ids.push(Some(B::generate(&self.mgr, gate)?));
-            }
-        }
+        B::finalize_compile(&self.mgr)?;
         Ok(ids)
+    }
+
+    /// Generate a kernel for a single gate, wrapping any error with the
+    /// gate's circuit position. Shared between [`compile_batch`] and the
+    /// trajectory compile paths.
+    pub(crate) fn compile_one_gate(
+        &self,
+        gate_index: usize,
+        gate: &Arc<QuantumGate>,
+    ) -> Result<B::KernelId> {
+        B::generate(&self.mgr, gate)
+            .with_context(|| format!("generating kernel for gate index {gate_index}"))
     }
 
     pub(crate) fn apply_one(&self, kid: B::KernelId, sv: &mut B::Sv) -> Result<()> {
         B::apply(&self.mgr, kid, sv, &self.extra)
+    }
+}
+
+/// Extract gates from the graph and perform any representation-specific
+/// transformation (e.g., DM superoperator lifting). Returns `(gates, n_sv)`.
+///
+/// Shared by [`Simulator::simulate`] and [`Simulator::bench`]. Trajectory
+/// simulation has its own gate-preparation path in [`trajectory`].
+pub(crate) fn prepare_gates(
+    graph: &CircuitGraph,
+    n_physical: u32,
+    repr: Representation,
+) -> Result<(Vec<Arc<QuantumGate>>, u32)> {
+    let gates = graph.gates_in_row_order();
+    match repr {
+        Representation::StateVector => {
+            for (i, gate) in gates.iter().enumerate() {
+                if !gate.is_unitary() {
+                    anyhow::bail!(
+                        "gate index {i} is non-unitary; Representation::StateVector \
+                         requires unitary gates (use DensityMatrix or sample_trajectory \
+                         for noisy circuits)"
+                    );
+                }
+            }
+            Ok((gates, n_physical))
+        }
+        Representation::DensityMatrix => {
+            let dm_gates: Vec<Arc<QuantumGate>> = gates
+                .iter()
+                .map(|g| Arc::new(g.to_density_matrix_gate(n_physical as usize)))
+                .collect();
+            Ok((dm_gates, 2 * n_physical))
+        }
     }
 }
 
