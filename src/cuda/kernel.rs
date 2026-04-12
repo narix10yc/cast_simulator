@@ -561,11 +561,7 @@ impl ManagerInner {
     /// Ensures the module for `kernel` is resident in one of the LRU slots,
     /// loading (and possibly evicting the least-recently-used entry) as needed.
     /// Returns `cu_function` for immediate use.
-    fn ensure_module(
-        &mut self,
-        kernel: &CudaKernel,
-        id: CudaKernelId,
-    ) -> anyhow::Result<CuPtr> {
+    fn ensure_module(&mut self, kernel: &CudaKernel, id: CudaKernelId) -> anyhow::Result<CuPtr> {
         // ── Cache hit ────────────────────────────────────────────────────────
         let hit_idx = self
             .loaded
@@ -658,7 +654,12 @@ impl ManagerInner {
                 sv_dptr: item.sv_dptr,
                 sv_n_qubits: item.sv_n_qubits,
             };
-            pairs.push(record_launch(&params, item.kernel_id, &kernel, &mut err_buf)?);
+            pairs.push(record_launch(
+                &params,
+                item.kernel_id,
+                &kernel,
+                &mut err_buf,
+            )?);
         }
         Ok(pairs)
     }
@@ -1054,8 +1055,7 @@ impl CudaKernelManager {
         // Local module cache: CudaKernelId → (CUmodule, CUfunction).
         // Modules stay loaded for the duration of this call so that
         // repeated kernel IDs do not trigger redundant load/unload cycles.
-        let mut module_cache: HashMap<CudaKernelId, (CuPtr, CuPtr)> =
-            HashMap::new();
+        let mut module_cache: HashMap<CudaKernelId, (CuPtr, CuPtr)> = HashMap::new();
 
         // Bounded work channel with capacity proportional to the thread pool,
         // so large circuits don't buffer the entire gate list upfront.
@@ -1116,11 +1116,7 @@ impl CudaKernelManager {
                 }
 
                 // 2. Wait for gate `next` to finish compiling (in order).
-                let kid = Self::await_compiled(
-                    next,
-                    &mut compiled,
-                    &result_rx,
-                )?;
+                let kid = Self::await_compiled(next, &mut compiled, &result_rx)?;
 
                 // 3. Look up and validate the kernel, then load/launch.
                 let pair = self.pipelined_launch(

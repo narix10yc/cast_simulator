@@ -494,11 +494,7 @@ impl<B: Backend> Simulator<B> {
     /// For `Representation::StateVector`, every gate must be unitary.
     /// For `Representation::DensityMatrix`, gates are lifted to superoperators
     /// acting on a 2n-qubit virtual statevector, so noisy gates are supported.
-    pub fn simulate(
-        &self,
-        graph: &CircuitGraph,
-        repr: Representation,
-    ) -> Result<QuantumState<B>> {
+    pub fn simulate(&self, graph: &CircuitGraph, repr: Representation) -> Result<QuantumState<B>> {
         let n_physical = graph.n_qubits() as u32;
         let (gates, n_sv) = prepare_gates(graph, n_physical, repr)?;
 
@@ -523,10 +519,7 @@ impl<B: Backend> Simulator<B> {
     /// Compile and finalize all kernels for `gates`, returning their ids in
     /// gate order. Shared helper for `simulate` and `bench`; callers that
     /// need compile-time measurement take it themselves.
-    pub(crate) fn compile_batch(
-        &self,
-        gates: &[Arc<QuantumGate>],
-    ) -> Result<Vec<B::KernelId>> {
+    pub(crate) fn compile_batch(&self, gates: &[Arc<QuantumGate>]) -> Result<Vec<B::KernelId>> {
         let mut ids: Vec<B::KernelId> = Vec::with_capacity(gates.len());
         for (i, gate) in gates.iter().enumerate() {
             ids.push(self.compile_one_gate(i, gate)?);

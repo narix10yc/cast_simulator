@@ -285,8 +285,14 @@ fn bench_one_config(
     let n_gates = graph.gates_in_row_order().len();
     let n_rows = graph.n_rows();
 
-    let (compile_s, timing) =
-        run_bench(&graph, backend, precision, budget_s, force_dense, kernel_stats)?;
+    let (compile_s, timing) = run_bench(
+        &graph,
+        backend,
+        precision,
+        budget_s,
+        force_dense,
+        kernel_stats,
+    )?;
 
     Ok(BenchResult {
         label: label.to_string(),
@@ -323,11 +329,7 @@ fn main() -> Result<()> {
                     CliPrecision::F32 => CPUKernelGenSpec::f32(),
                     CliPrecision::F64 => CPUKernelGenSpec::f64(),
                 };
-                cast::profile::measure_cpu(
-                    &spec,
-                    args.profile_qubits,
-                    args.profile_budget,
-                )?
+                cast::profile::measure_cpu(&spec, args.profile_qubits, args.profile_budget)?
             }
             Backend::Cuda => {
                 #[cfg(feature = "cuda")]
@@ -374,7 +376,12 @@ fn main() -> Result<()> {
     let configs: Vec<(FusionMode, FusionConfig)> = args
         .fusion
         .iter()
-        .map(|&mode| (mode, mode.build_config(&hw_profile, args.max_size, zero_tol)))
+        .map(|&mode| {
+            (
+                mode,
+                mode.build_config(&hw_profile, args.max_size, zero_tol),
+            )
+        })
         .collect();
 
     // ── Print header ────────────────────────────────────────────────────────
@@ -395,10 +402,9 @@ fn main() -> Result<()> {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| path.display().to_string());
 
-        let qasm = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        let circuit =
-            parse_qasm(&qasm).with_context(|| format!("parsing {}", path.display()))?;
+        let qasm =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let circuit = parse_qasm(&qasm).with_context(|| format!("parsing {}", path.display()))?;
         let graph = CircuitGraph::from_qasm_circuit(&circuit);
 
         for (mode, config) in &configs {
