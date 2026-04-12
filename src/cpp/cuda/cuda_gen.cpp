@@ -193,7 +193,12 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
   const unsigned k = static_cast<unsigned>(n_qubits);
   const unsigned K = 1u << k;
 
-  std::vector<Value *> re_amp_ptrs(K), im_amp_ptrs(K);
+  // Vector type for complex pair (re, im) — enables ld.global.v2 / st.global.v2
+  // in the NVPTX backend, doubling memory-transaction utilization for the
+  // interleaved [re₀, im₀, re₁, im₁, …] layout.
+  auto *vec2_ty = FixedVectorType::get(scalar_ty, 2);
+
+  std::vector<Value *> amp_ptrs(K);  // base pointer per amplitude (re position)
   std::vector<Value *> re_amps(K), im_amps(K);
 
   // Compute the offset for each of the K amplitude slots in the combo.
@@ -205,10 +210,10 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
         delta |= (1ull << qubits[b]);
 
     uint64_t off2 = 2ull * delta;
-    re_amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2, "re.ptr");
-    im_amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2 + 1, "im.ptr");
-    re_amps[i] = B.CreateLoad(scalar_ty, re_amp_ptrs[i], "re.amp");
-    im_amps[i] = B.CreateLoad(scalar_ty, im_amp_ptrs[i], "im.amp");
+    amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2, "amp.ptr");
+    auto *pair = B.CreateLoad(vec2_ty, amp_ptrs[i], "amp.pair");
+    re_amps[i] = B.CreateExtractElement(pair, (uint64_t)0, "re.amp");
+    im_amps[i] = B.CreateExtractElement(pair, (uint64_t)1, "im.amp");
   }
 
   // For each output row r:  new[r] = sum_c  M[r,c] * old[c]
@@ -236,8 +241,10 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
     }
 
     auto *new_re = B.CreateFSub(acc_re0, acc_re1, "new.re");
-    B.CreateStore(new_re, re_amp_ptrs[r]);
-    B.CreateStore(acc_im, im_amp_ptrs[r]);
+    Value *out = PoisonValue::get(vec2_ty);
+    out = B.CreateInsertElement(out, new_re, (uint64_t)0, "out.re");
+    out = B.CreateInsertElement(out, acc_im, (uint64_t)1, "out.im");
+    B.CreateStore(out, amp_ptrs[r]);
   }
 }
 
