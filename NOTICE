@@ -1,0 +1,47 @@
+CAST Quantum Circuit Simulator
+Copyright 2026 The CAST Authors
+
+Developed primarily at Imperial College London.
+
+This product is licensed under the Apache License, Version 2.0 (see
+LICENSE). The "The CAST Authors" designation in the copyright line above
+refers to all contributors listed in the project's git history.
+
+--------------------------------------------------------------------------
+Third-party build-time dependencies (not redistributed)
+--------------------------------------------------------------------------
+
+* The LLVM Project (https://llvm.org/)
+
+  CAST's JIT code generation uses LLVM (ORC JIT for CPU, NVPTX for
+  CUDA) via C++ FFI. CAST links against the system LLVM libraries at
+  build time; no LLVM source or binary is included in this repository.
+  LLVM is distributed under the Apache License 2.0 with LLVM Exceptions
+  (https://llvm.org/LICENSE.txt).
+
+* NVIDIA CUDA Toolkit (https://developer.nvidia.com/cuda-toolkit)
+
+  The optional `cuda` feature links against libcuda and libnvJitLink at
+  build time. CUDA is distributed by NVIDIA under its own license terms;
+  no CUDA source or binary is included in this repository.
+
+--------------------------------------------------------------------------
+Third-party code vendored in this repository (not part of the cast crate)
+--------------------------------------------------------------------------
+
+The `external/` directory contains third-party assets used for
+benchmarking and reference only. These are NOT part of the compiled
+`cast` library and retain their original licenses.
+
+* external/NWQ-Sim/
+
+  NWQ-Sim, an HPC quantum-circuit simulator by Ang Li et al. (Pacific
+  Northwest National Laboratory), vendored for head-to-head benchmarking
+  against CAST. Distributed under the MIT License. See
+  external/NWQ-Sim/LICENSE and external/NWQ-Sim/NOTICE for details.
+
+* external/DAC25__Quantum_Simulation.pdf
+* external/Quantum_Circuit_Simulation_Journal.pdf
+
+  Preprint and journal submission PDFs of CAST papers, included for
+  reference when evaluating the simulator's results.

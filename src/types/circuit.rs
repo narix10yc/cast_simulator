@@ -9,8 +9,10 @@ use crate::types::QuantumGate;
 /// A sequence of quantum gates forming a circuit.
 ///
 /// This is the primary user-facing circuit type. Build circuits programmatically
-/// or parse from OpenQASM, then pass to [`Simulator::run`]. Internally converted
-/// to a [`CircuitGraph`] for scheduling and fusion before simulation.
+/// or parse from OpenQASM, then convert to a
+/// [`CircuitGraph`](crate::CircuitGraph) via
+/// [`CircuitGraph::from_circuit`](crate::CircuitGraph::from_circuit) and pass
+/// to a [`Simulator`](crate::simulator::Simulator) method.
 #[derive(Clone, Debug)]
 pub struct QuantumCircuit {
     gates: Vec<Arc<QuantumGate>>,
@@ -174,7 +176,8 @@ impl QuantumCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulator::{Cpu, Simulator};
+    use crate::simulator::{Cpu, Representation, Simulator};
+    use crate::CircuitGraph;
     #[test]
     #[should_panic(expected = "out of range")]
     fn add_rejects_out_of_range_qubit() {
@@ -203,9 +206,12 @@ mod tests {
         // All 2^n amplitudes should have magnitude 1/√(2^n).
         let n = 8u32;
         let circuit = QuantumCircuit::qft(n, true);
+        let graph = CircuitGraph::from_circuit(&circuit);
         let sim = Simulator::<Cpu>::f64();
-        let result = sim.run(&circuit).unwrap();
-        let pops = result.state.unwrap().populations();
+        let pops = sim
+            .simulate(&graph, Representation::StateVector)
+            .unwrap()
+            .populations();
         let expected = 1.0 / (1u64 << n) as f64;
         for (i, &p) in pops.iter().enumerate() {
             assert!(
@@ -235,8 +241,16 @@ mod tests {
             c_noswap.add((**g).clone());
         }
 
-        let amps_swap = sim.run(&c_swap).unwrap().state.unwrap().amplitudes();
-        let amps_noswap = sim.run(&c_noswap).unwrap().state.unwrap().amplitudes();
+        let g_swap = CircuitGraph::from_circuit(&c_swap);
+        let g_noswap = CircuitGraph::from_circuit(&c_noswap);
+        let amps_swap = sim
+            .simulate(&g_swap, Representation::StateVector)
+            .unwrap()
+            .amplitudes();
+        let amps_noswap = sim
+            .simulate(&g_noswap, Representation::StateVector)
+            .unwrap()
+            .amplitudes();
 
         let bit_rev = |x: usize, bits: u32| -> usize {
             let mut r = 0;
@@ -277,8 +291,12 @@ mod tests {
             circuit.add((**g).clone());
         }
 
+        let graph = CircuitGraph::from_circuit(&circuit);
         let sim = Simulator::<Cpu>::f64();
-        let pops = sim.run(&circuit).unwrap().state.unwrap().populations();
+        let pops = sim
+            .simulate(&graph, Representation::StateVector)
+            .unwrap()
+            .populations();
 
         // QFT(no-swap)^2 is bit-reversal. |00...0⟩ reversed = |00...0⟩,
         // so population should be concentrated on |0⟩.

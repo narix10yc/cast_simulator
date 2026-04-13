@@ -176,10 +176,10 @@ CAST_NUM_THREADS=32 cargo run --bin profile_hw --release
 ### Cached Profiles
 
 Saved profiles are JSON files in `profiles/` (gitignored) and can be loaded by
-`bench_fusion` via `--profile profiles/cuda_f64.json` to skip re-profiling:
+`bench` via `--profile profiles/cuda_f64.json` to skip re-profiling:
 
 ```sh
-cargo run --bin bench_fusion --features cuda --release -- \
+cargo run --bin bench --features cuda --release -- \
       --backend cuda --profile profiles/cuda_f64.json \
       examples/journal_examples/qft-cx-30.qasm
 ```
@@ -189,7 +189,7 @@ cargo run --bin bench_fusion --features cuda --release -- \
 - [`src/profile.rs`](src/profile.rs) — Adaptive sweep engine, `measure()`, `measure_cpu()`, `measure_cuda()`
 - [`src/cost_model.rs`](src/cost_model.rs) — `HardwareProfile`, `HardwareAdaptiveCostModel`, `FusionConfig`
 - [`src/bin/profile_hw.rs`](src/bin/profile_hw.rs) — CLI for running profiles
-- [`src/bin/bench_fusion.rs`](src/bin/bench_fusion.rs) — Fusion benchmark, consumes profiles
+- [`src/bin/bench.rs`](src/bin/bench.rs) — Fusion benchmark, consumes profiles
 
 ## CUDA Build And Test
 
@@ -228,3 +228,14 @@ If you find this work useful, please consider citing:
   year={2025}
 }
 ```
+
+## License
+
+CAST is licensed under the Apache License 2.0 — see [LICENSE](LICENSE) for the
+full text and [NOTICE](NOTICE) for attribution and third-party dependency
+information.
+
+CAST links against LLVM (Apache 2.0 with LLVM Exceptions) and, optionally,
+the NVIDIA CUDA Toolkit at build time. Neither is redistributed with this
+repository. The `external/` directory contains third-party assets used for
+benchmarking and reference only; each retains its own license.

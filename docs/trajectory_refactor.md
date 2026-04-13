@@ -1,5 +1,12 @@
 # Trajectory Simulation Refactor
 
+> **Historical design note.** This document describes an earlier refactor
+> proposal and uses the pre-2026 `Simulator` API (`with_mode`,
+> `SimulationMode`, `SimulationResult`). The current API uses
+> `Simulator::sample_trajectory(&graph, &opts)` returning `TrajectoryResult`
+> directly — see [`simulation_workflow.md`](simulation_workflow.md) and
+> [`noise.md`](noise.md) for up-to-date usage.
+
 ## Motivation
 
 Trajectory (Monte Carlo wavefunction) simulation exists to produce measurement

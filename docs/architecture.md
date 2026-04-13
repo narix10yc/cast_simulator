@@ -49,9 +49,7 @@ src/
 │   │   └── cuda_kernels.cu Device-side reduction/scale kernels (compiled by nvcc)
 └── bin/
     ├── profile_hw.rs       CLI: roofline hardware profiler
-    ├── bench_fusion.rs     CLI: benchmark fusion strategies on QASM files
-    ├── bench_ablation.rs   CLI: dense vs sparse kernel ablation
-    └── bench_noisy_qft.rs  CLI: benchmark noisy QFT density-matrix simulation
+    └── bench.rs            CLI: benchmark fusion strategies on QASM files
 ```
 
 ## Core Data Flow

@@ -44,7 +44,7 @@ impl CostModel for SizeOnlyCostModel {
 // ── Hardware profile ─────────────────────────────────────────────────────────
 
 /// The device a [`HardwareProfile`] was measured on.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "backend")]
 pub enum Device {
     #[serde(rename = "cpu")]
@@ -92,7 +92,7 @@ impl std::fmt::Display for Device {
 /// measured.  Stored inside the profile so that cached JSON files are
 /// self-documenting and consumers can verify the profile matches their
 /// intended simulation configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileConfig {
     /// Device and backend that was profiled.
     pub device: Device,

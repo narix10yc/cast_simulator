@@ -3,15 +3,32 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use super::measure::batch_sample;
-use super::{Backend, SimulationResult};
+use super::Backend;
 use crate::types::QuantumGate;
+use crate::CircuitGraph;
 
 // ── Public types ─────────────────────────────────────────────────────────────
+
+/// Options for [`Simulator::sample_trajectory`](super::Simulator::sample_trajectory).
+#[derive(Clone, Debug)]
+pub struct TrajectoryOpts {
+    /// Qubits to measure at the end of the circuit. The histogram keys are
+    /// bitstrings over these qubits in the order given.
+    pub measured_qubits: Vec<u32>,
+    /// Total number of measurement samples to generate across the ensemble.
+    pub n_samples: u64,
+    /// RNG seed for measurement sampling. `None` uses system entropy.
+    pub seed: Option<u64>,
+    /// Maximum number of concurrent statevectors in the ensemble.
+    /// `None` defaults to `Some(1)` (single deterministic trajectory —
+    /// highest-probability branch only). Larger values explore more noise
+    /// paths at the cost of more memory.
+    pub max_ensemble: Option<usize>,
+}
 
 /// A single explored noise branch and its contribution to the histogram.
 #[derive(Clone, Debug)]
@@ -57,61 +74,66 @@ struct Member<Sv> {
     noise_path: Vec<usize>,
 }
 
-/// Prepared circuit data ready for trajectory simulation.
-pub(crate) struct PreparedCircuit<K> {
-    pub gates: Vec<Arc<QuantumGate>>,
-    pub kernel_ids: Vec<Option<K>>,
-    pub n_sv: u32,
-}
-
-// ── Simulator extension ──────────────────────────────────────────────────────
+// ── Simulator::sample_trajectory ─────────────────────────────────────────────
 
 impl<B: Backend> super::Simulator<B> {
-    pub(crate) fn execute_trajectory(
+    /// Ensemble-sample a noisy circuit.
+    ///
+    /// Runs the circuit deterministically, branching at each noisy gate into
+    /// the top `max_ensemble` highest-weight continuations (pruning the
+    /// tail). At the end of the circuit, measurement samples are drawn from
+    /// each surviving branch proportionally to its weight.
+    ///
+    /// There is no [`Representation`](super::Representation) parameter:
+    /// trajectory sampling *is* the alternative to density-matrix simulation
+    /// for noisy circuits. It always acts on pure statevectors and handles
+    /// noise via ensemble branching, so combining it with `DensityMatrix`
+    /// would be meaningless.
+    ///
+    /// The caller is responsible for any upstream optimization
+    /// (fusion, dead-gate elimination). For trajectory simulation specifically,
+    /// [`QuantumCircuit::eliminate_dead_gates`](crate::types::QuantumCircuit::eliminate_dead_gates)
+    /// on the source circuit is recommended — it removes gates that cannot
+    /// influence the measured qubits.
+    pub fn sample_trajectory(
         &self,
-        prepared: &PreparedCircuit<B::KernelId>,
-        measured_qubits: &[u32],
-        compile_time_s: f64,
-    ) -> Result<SimulationResult<B>> {
-        let (n_samples, _, _) = self.trajectory_params();
+        graph: &CircuitGraph,
+        opts: &TrajectoryOpts,
+    ) -> Result<TrajectoryResult> {
+        let n_physical = graph.n_qubits() as u32;
+        let gates = graph.gates_in_row_order();
 
-        let t_noise = Instant::now();
-        let noise_table = self.compile_noise_kernels(&prepared.gates)?;
-        let total_compile_s = compile_time_s + t_noise.elapsed().as_secs_f64();
+        // Compile unitary (base) kernels; noisy gates have None entries because
+        // their work is expanded into per-branch kernels below.
+        let base_ids = self.compile_base_kernels(&gates)?;
+        let noise_table = self.compile_noise_kernels(&gates)?;
+        B::finalize_compile(&self.mgr)?;
 
-        let t_sim = Instant::now();
-        let ensemble = self.simulate_ensemble(prepared, &noise_table)?;
-        let sim_s = t_sim.elapsed().as_secs_f64();
+        let max_ensemble = opts.max_ensemble.unwrap_or(1).max(1);
+        let ensemble =
+            self.simulate_ensemble(n_physical, &gates, &base_ids, &noise_table, max_ensemble)?;
 
-        let t_sample = Instant::now();
-        let (histogram, branches, explored_weight) =
-            self.sample_ensemble(&ensemble, measured_qubits)?;
-        let sample_s = t_sample.elapsed().as_secs_f64();
+        let (histogram, branches, explored_weight) = self.sample_ensemble(&ensemble, opts)?;
 
-        Ok(SimulationResult {
-            state: None,
-            timing: crate::timing::stats_from_samples(&[sim_s + sample_s]),
-            compile_time_s: total_compile_s,
-            trajectory_data: Some(TrajectoryResult {
-                histogram,
-                n_samples,
-                branches,
-                explored_weight,
-            }),
+        Ok(TrajectoryResult {
+            histogram,
+            n_samples: opts.n_samples,
+            branches,
+            explored_weight,
         })
     }
 
-    /// Extract trajectory parameters from `self.mode`.
-    /// Returns `(n_samples, seed, max_ensemble)`.
-    fn trajectory_params(&self) -> (u64, Option<u64>, usize) {
-        match &self.mode {
-            super::SimulationMode::Trajectory {
-                n_samples,
-                seed,
-                max_ensemble,
-            } => (*n_samples, *seed, max_ensemble.unwrap_or(1).max(1)),
-            _ => unreachable!("called in non-trajectory mode"),
+    /// Compile the unitary gates; noisy gates get `None` entries.
+    fn compile_base_kernels(&self, gates: &[Arc<QuantumGate>]) -> Result<Vec<Option<B::KernelId>>> {
+        let mut ids = Vec::with_capacity(gates.len());
+        for (i, gate) in gates.iter().enumerate() {
+            if gate.is_unitary() {
+                ids.push(Some(self.compile_one_gate(i, gate)?));
+            } else {
+                ids.push(None);
+            }
         }
+        Ok(ids)
     }
 
     /// Compile kernels for every noise branch in the circuit.
@@ -123,12 +145,15 @@ impl<B: Backend> super::Simulator<B> {
         let mut kernels: Vec<Option<Vec<B::KernelId>>> = Vec::with_capacity(gates.len());
         let mut weights: Vec<Option<Vec<f64>>> = Vec::with_capacity(gates.len());
 
-        for gate in gates {
+        for (i, gate) in gates.iter().enumerate() {
             if let Some(noise) = gate.noise_model() {
-                let mut kids = Vec::new();
-                for (_, kraus) in noise.branches() {
+                let mut kids = Vec::with_capacity(noise.branches().len());
+                for (branch_idx, (_, kraus)) in noise.branches().iter().enumerate() {
                     let g = Arc::new(QuantumGate::new(kraus.clone(), gate.qubits().to_vec()));
-                    kids.push(B::generate(&self.mgr, &g)?);
+                    let id = self
+                        .compile_one_gate(i, &g)
+                        .with_context(|| format!("noise branch {branch_idx} for gate index {i}"))?;
+                    kids.push(id);
                 }
                 kernels.push(Some(kids));
                 weights.push(Some(noise.branches().iter().map(|(p, _)| *p).collect()));
@@ -145,12 +170,13 @@ impl<B: Backend> super::Simulator<B> {
     /// prune to `max_ensemble` members by weight at each noise gate.
     fn simulate_ensemble(
         &self,
-        prepared: &PreparedCircuit<B::KernelId>,
+        n_physical: u32,
+        gates: &[Arc<QuantumGate>],
+        base_ids: &[Option<B::KernelId>],
         noise_table: &NoiseKernelTable<B::KernelId>,
+        max_ensemble: usize,
     ) -> Result<Vec<Member<B::Sv>>> {
-        let (_, _, max_ensemble) = self.trajectory_params();
-
-        let mut sv0 = B::new_sv(prepared.n_sv, &self.spec)?;
+        let mut sv0 = B::new_sv(n_physical, &self.spec)?;
         B::init_sv(&mut sv0)?;
         let mut ensemble: Vec<Member<B::Sv>> = vec![Member {
             sv: sv0,
@@ -158,10 +184,11 @@ impl<B: Backend> super::Simulator<B> {
             noise_path: Vec::new(),
         }];
 
-        for (i, gate) in prepared.gates.iter().enumerate() {
+        for (i, gate) in gates.iter().enumerate() {
             if gate.is_unitary() {
+                let kid = base_ids[i].expect("unitary gate should have a base kernel id");
                 for member in &mut ensemble {
-                    self.apply_one(prepared.kernel_ids[i].unwrap(), &mut member.sv)?;
+                    self.apply_one(kid, &mut member.sv)?;
                 }
             } else {
                 let branch_kernels = noise_table.kernels[i].as_ref().unwrap();
@@ -188,7 +215,7 @@ impl<B: Backend> super::Simulator<B> {
                     ensemble[0].noise_path.push(b_idx);
                     self.apply_one(branch_kernels[b_idx], &mut ensemble[0].sv)?;
                 } else {
-                    B::flush(&self.mgr)?;
+                    B::sync(&self.mgr)?;
 
                     let mut parent_refs = vec![0usize; ensemble.len()];
                     for &(m_idx, _, _) in candidates {
@@ -224,7 +251,7 @@ impl<B: Backend> super::Simulator<B> {
                 }
             }
         }
-        B::flush(&self.mgr)?;
+        B::sync(&self.mgr)?;
         Ok(ensemble)
     }
 
@@ -233,14 +260,12 @@ impl<B: Backend> super::Simulator<B> {
     fn sample_ensemble(
         &self,
         ensemble: &[Member<B::Sv>],
-        measured_qubits: &[u32],
+        opts: &TrajectoryOpts,
     ) -> Result<(HashMap<u64, u64>, Vec<ExploredBranch>, f64)> {
         use rand::prelude::*;
         use rand::rngs::StdRng;
 
-        let (n_samples, seed, _) = self.trajectory_params();
-
-        let mut rng: StdRng = match seed {
+        let mut rng: StdRng = match opts.seed {
             Some(s) => StdRng::seed_from_u64(s),
             None => StdRng::from_entropy(),
         };
@@ -248,19 +273,19 @@ impl<B: Backend> super::Simulator<B> {
         let total_weight: f64 = ensemble.iter().map(|m| m.weight).sum();
         let mut histogram: HashMap<u64, u64> = HashMap::new();
         let mut branches: Vec<ExploredBranch> = Vec::with_capacity(ensemble.len());
-        let mut samples_remaining = n_samples;
+        let mut samples_remaining = opts.n_samples;
 
         for (idx, member) in ensemble.iter().enumerate() {
             let member_samples = if idx == ensemble.len() - 1 {
                 samples_remaining
             } else {
-                let s = ((member.weight / total_weight) * n_samples as f64).floor() as u64;
+                let s = ((member.weight / total_weight) * opts.n_samples as f64).floor() as u64;
                 s.min(samples_remaining)
             };
             samples_remaining = samples_remaining.saturating_sub(member_samples);
 
             if member_samples > 0 {
-                let probs = B::marginal_probabilities(&member.sv, measured_qubits)?;
+                let probs = B::marginal_probabilities(&member.sv, &opts.measured_qubits)?;
                 let member_hist = batch_sample(&probs, member_samples, &mut rng);
                 for (outcome, count) in member_hist {
                     *histogram.entry(outcome).or_insert(0) += count;

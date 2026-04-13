@@ -12,8 +12,10 @@
 
 use cast::cost_model::FusionConfig;
 use cast::cpu::{CPUKernelGenSpec, MatrixLoadMode, SimdWidth};
-use cast::simulator::{Cpu, Simulator};
+use cast::fusion;
+use cast::simulator::{Cpu, Representation, Simulator};
 use cast::types::{Precision, QuantumCircuit, QuantumGate};
+use cast::CircuitGraph;
 use std::f64::consts::PI;
 
 #[cfg(feature = "cuda")]
@@ -128,36 +130,36 @@ fn cpu_spec(simd: SimdWidth) -> CPUKernelGenSpec {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+fn build_graph(circuit: &QuantumCircuit, fusion_cfg: Option<FusionConfig>) -> CircuitGraph {
+    let mut graph = CircuitGraph::from_circuit(circuit);
+    if let Some(cfg) = fusion_cfg {
+        fusion::optimize(&mut graph, &cfg);
+    }
+    graph
+}
+
 fn run_cpu_with(
     circuit: &QuantumCircuit,
     spec: CPUKernelGenSpec,
     n_threads: u32,
-    fusion: Option<FusionConfig>,
+    fusion_cfg: Option<FusionConfig>,
 ) -> Vec<f64> {
     let sim = Simulator::<Cpu>::new(spec).with_threads(n_threads);
-    let sim = if let Some(f) = fusion {
-        sim.with_fusion(f)
-    } else {
-        sim
-    };
-    sim.run(circuit).unwrap().state.unwrap().populations()
+    let graph = build_graph(circuit, fusion_cfg);
+    sim.simulate(&graph, Representation::StateVector)
+        .unwrap()
+        .populations()
 }
 
-fn run_cpu_populations(circuit: &QuantumCircuit, fusion: Option<FusionConfig>) -> Vec<f64> {
-    run_cpu_with(circuit, CPUKernelGenSpec::f64(), 0, fusion)
+fn run_cpu_populations(circuit: &QuantumCircuit, fusion_cfg: Option<FusionConfig>) -> Vec<f64> {
+    run_cpu_with(circuit, CPUKernelGenSpec::f64(), 0, fusion_cfg)
 }
 
 #[cfg(feature = "cuda")]
-fn run_cuda_populations(circuit: &QuantumCircuit, fusion: Option<FusionConfig>) -> Vec<f64> {
+fn run_cuda_populations(circuit: &QuantumCircuit, fusion_cfg: Option<FusionConfig>) -> Vec<f64> {
     let sim = Simulator::<Cuda>::f64();
-    let sim = if let Some(f) = fusion {
-        sim.with_fusion(f)
-    } else {
-        sim
-    };
-    sim.run(circuit)
-        .unwrap()
-        .state
+    let graph = build_graph(circuit, fusion_cfg);
+    sim.simulate(&graph, Representation::StateVector)
         .unwrap()
         .populations()
         .unwrap()

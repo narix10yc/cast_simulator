@@ -55,7 +55,7 @@ export LLVM_CONFIG=~/llvm/${version}/release-install/bin/llvm-config
 # Further Documentation
 
 - **Architecture, data flow, kernel details:** see [docs/architecture.md](docs/architecture.md)
-- **CLI tools (profile_hw, bench_fusion, bench_ablation, bench_noisy_qft):** see [docs/tools.md](docs/tools.md)
+- **CLI tools (profile_hw, bench):** see [docs/tools.md](docs/tools.md)
 - **Fusion algorithm and cost model:** see [docs/fusion.md](docs/fusion.md)
 - **Noisy simulation and density matrices:** see [docs/noise.md](docs/noise.md)
 - **NWQ-Sim baseline comparison:** see [docs/nwqsim_baseline.md](docs/nwqsim_baseline.md)

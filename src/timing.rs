@@ -3,6 +3,8 @@
 use std::fmt;
 use std::time::{Duration, Instant};
 
+use anyhow::Result;
+
 /// Statistics returned by [`time_adaptive`] and [`time_adaptive_with`].
 #[derive(Debug, Clone)]
 pub struct TimingStats {
@@ -75,21 +77,15 @@ pub fn stats_from_samples(samples: &[f64]) -> TimingStats {
     }
 }
 
-/// Adaptively times a fallible closure that reports its own duration.
+// ── Core adaptive loop ───────────────────────────────────────────────────────
+
+/// Adaptive budget logic shared by all public timing helpers.
 ///
-/// Like [`time_adaptive`], but instead of wall-clock timing the closure, the
-/// closure itself returns a [`Duration`] representing the cost of the
-/// operation it wants measured.  The adaptive budget logic still uses
-/// wall-clock time so that the total profiling session respects the budget,
-/// but the *samples* come from the closure's reported durations.
-///
-/// This is useful when the interesting cost is a sub-operation (e.g. GPU
-/// kernel time measured via hardware events) rather than the full closure
-/// wall-clock time which may include launch overhead.
-pub fn time_adaptive_with<E>(
-    mut f: impl FnMut() -> Result<Duration, E>,
-    budget_s: f64,
-) -> Result<TimingStats, E> {
+/// Runs `f` until either a `1.5×` over-budget probe aborts the session
+/// (returns a single sample), or until the full budget is consumed following
+/// a `1:3` warmup:measurement split.  Returns the raw per-iter sample
+/// durations in seconds.
+fn run_adaptive_loop(f: &mut dyn FnMut() -> Result<Duration>, budget_s: f64) -> Result<Vec<f64>> {
     const WARMUP_FRACTION: f64 = 0.25;
     const OVER_BUDGET_FACTOR: f64 = 1.5;
 
@@ -101,15 +97,7 @@ pub fn time_adaptive_with<E>(
     let est_per_iter = probe_wall.max(1e-9);
 
     if probe_wall > budget_s * OVER_BUDGET_FACTOR {
-        let s = probe_duration.as_secs_f64();
-        return Ok(TimingStats {
-            n_iters: 1,
-            mean_s: s,
-            stddev_s: 0.0,
-            cv: 0.0,
-            min_s: s,
-            max_s: s,
-        });
+        return Ok(vec![probe_duration.as_secs_f64()]);
     }
 
     // Phase 2: fill remaining warmup budget with un-timed iterations.
@@ -128,11 +116,44 @@ pub fn time_adaptive_with<E>(
     for _ in 0..n_timed {
         samples.push(f()?.as_secs_f64());
     }
-
-    Ok(stats_from_samples(&samples))
+    Ok(samples)
 }
 
-/// Adaptively times a fallible closure within a wall-time `budget_s`.
+// ── Public API ───────────────────────────────────────────────────────────────
+
+/// Adaptively times a fallible closure that reports its own duration,
+/// returning the raw per-iter samples in seconds.
+///
+/// Like [`time_adaptive_samples`], but instead of wall-clock timing the
+/// closure, the closure itself returns a [`Duration`] representing the cost
+/// of the operation it wants measured. The adaptive budget logic still uses
+/// wall-clock time so that the total profiling session respects the budget,
+/// but the *samples* come from the closure's reported durations.
+///
+/// This is useful when the interesting cost is a sub-operation (e.g. GPU
+/// kernel time measured via hardware events) rather than the full closure
+/// wall-clock time which may include launch overhead.
+pub fn time_adaptive_samples_with(
+    mut f: impl FnMut() -> Result<Duration>,
+    budget_s: f64,
+) -> Result<Vec<f64>> {
+    run_adaptive_loop(&mut f, budget_s)
+}
+
+/// Adaptively times a fallible closure returning [`Duration`], summarised
+/// as a [`TimingStats`].
+///
+/// Thin wrapper around [`time_adaptive_samples_with`] followed by
+/// [`stats_from_samples`].
+pub fn time_adaptive_with(
+    f: impl FnMut() -> Result<Duration>,
+    budget_s: f64,
+) -> Result<TimingStats> {
+    time_adaptive_samples_with(f, budget_s).map(|s| stats_from_samples(&s))
+}
+
+/// Adaptively times a fallible closure within a wall-time `budget_s`,
+/// returning the raw per-iter samples in seconds.
 ///
 /// A single probe run starts the clock and estimates per-iteration cost.
 /// If that one run already exceeds `1.5 × budget_s`, it is returned as the
@@ -140,11 +161,8 @@ pub fn time_adaptive_with<E>(
 /// Otherwise the budget is split: ~1/4 for warmup (probe + extra un-timed
 /// passes), ~3/4 for timed measurements. Fast operations get many warmup
 /// passes; slow ones keep only the single probe as warmup.
-pub fn time_adaptive<E>(
-    mut f: impl FnMut() -> Result<(), E>,
-    budget_s: f64,
-) -> Result<TimingStats, E> {
-    time_adaptive_with(
+pub fn time_adaptive_samples(mut f: impl FnMut() -> Result<()>, budget_s: f64) -> Result<Vec<f64>> {
+    time_adaptive_samples_with(
         || {
             let t = Instant::now();
             f()?;
@@ -152,4 +170,13 @@ pub fn time_adaptive<E>(
         },
         budget_s,
     )
+}
+
+/// Adaptively times a fallible closure within a wall-time `budget_s`,
+/// summarised as a [`TimingStats`].
+///
+/// Thin wrapper around [`time_adaptive_samples`] followed by
+/// [`stats_from_samples`].
+pub fn time_adaptive(f: impl FnMut() -> Result<()>, budget_s: f64) -> Result<TimingStats> {
+    time_adaptive_samples(f, budget_s).map(|s| stats_from_samples(&s))
 }

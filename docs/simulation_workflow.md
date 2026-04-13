@@ -7,6 +7,19 @@ from circuit construction through kernel execution to result extraction.
 
 ![CAST Simulation Workflow](simulation_workflow.png)
 
+CAST separates three concerns that were historically tangled together:
+
+1. **Circuit** — a `QuantumCircuit` / `CircuitGraph` holds the gates.
+2. **Optimization** — `fusion::optimize` rewrites the graph. Invoked by the
+   *caller*, not the simulator.
+3. **Execution** — `Simulator<B>` owns backend state (kernel manager, spec,
+   thread count) and provides three per-run methods:
+   [`simulate`](../src/simulator/mod.rs), [`sample_trajectory`](../src/simulator/trajectory.rs),
+   and [`bench`](../src/simulator/bench.rs).
+
+One simulator can handle many runs; the kernel cache persists across calls,
+so duplicate gates across runs are deduplicated.
+
 ## Step 1: Build a Circuit
 
 ### Programmatic construction
@@ -18,21 +31,18 @@ let mut circuit = QuantumCircuit::new(4);  // 4 qubits
 circuit.add(QuantumGate::h(0));
 circuit.add(QuantumGate::cx(0, 1));
 circuit.add(QuantumGate::depolarizing(0, 0.01));  // noisy gate
-circuit.measure(&[0, 1]);  // which qubits to measure (used by trajectory mode)
+circuit.measure(&[0, 1]);  // used by eliminate_dead_gates below
 ```
 
-`QuantumCircuit` (defined in `src/types/circuit.rs`) stores
-`Vec<Arc<QuantumGate>>`, a qubit count, and a `measured_qubits` list. Each
-`add()` validates that qubit indices are within bounds and wraps the gate in
-an `Arc` (cheap reference-counted pointer — no deep copy when the circuit is
-later consumed).
-
-`measure()` specifies which qubits are measured at the end of the circuit.
-This is used by trajectory mode for dead-gate elimination and measurement
-sampling. For statevector/density-matrix modes it is ignored.
+`QuantumCircuit` stores `Vec<Arc<QuantumGate>>`, a qubit count, and a
+`measured_qubits` list. `measure()` records which qubits the caller plans to
+measure; it is consumed by `eliminate_dead_gates` and nothing else (the
+simulator does not read it).
 
 `eliminate_dead_gates()` returns a pruned copy of the circuit, removing gates
 that cannot influence any measured qubit via backward liveness analysis.
+Recommended for trajectory simulation of large circuits with sparse
+measurements.
 
 ### From OpenQASM
 
@@ -42,9 +52,8 @@ let circuit = QuantumCircuit::from_qasm(
 )?;
 ```
 
-Internally calls `quantum_gate_from_qasm_gate()` to convert each
-`openqasm::Gate` (enum of named gates: H, CX, RZ, etc.) to a `QuantumGate`
-(matrix + qubit indices). No intermediate `CircuitGraph` is created.
+Each parsed `openqasm::Gate` is converted to a `QuantumGate` (matrix + qubit
+indices).
 
 ### Gate representation
 
@@ -59,33 +68,52 @@ struct QuantumGate {
 ```
 
 Noise branches `[(p_i, U_i)]` represent a probability-weighted unitary
-channel. Probabilities sum to 1.0. Each `U_i` has the same dimension as
-`matrix`. Standard noise constructors:
+channel. Probabilities sum to 1.0.
 
-- `QuantumGate::depolarizing(qubit, p)` → identity + `[(1-p, I), (p/3, X), (p/3, Y), (p/3, Z)]`
-- `QuantumGate::h(0).with_depolarizing(0.01)` → H gate with attached noise
+## Step 2: Build a CircuitGraph (and optionally fuse)
 
-## Step 2: Create a Simulator
+The simulator never touches `QuantumCircuit` directly. Callers convert to a
+`CircuitGraph` — a 2D grid of rows × qubits that represents the circuit
+schedule — and then optionally apply fusion as a separate, visible step:
 
 ```rust
-use cast::simulator::{Simulator, Cpu, Cuda, SimulationMode};
+use cast::CircuitGraph;
+use cast::fusion;
 use cast::cost_model::FusionConfig;
 
-// CPU, F64 precision, statevector mode (default)
-let sim = Simulator::<Cpu>::f64();
+let mut graph = CircuitGraph::from_circuit(&circuit);
 
-// CUDA, F64, density-matrix mode with fusion
-let sim = Simulator::<Cuda>::f64()
-    .with_mode(SimulationMode::DensityMatrix)
-    .with_fusion(FusionConfig::hardware_adaptive(&profile, 4));
+// Optional: apply a fusion strategy.
+fusion::optimize(&mut graph, &FusionConfig::size_only(3));
+```
 
-// CPU, trajectory mode (measured qubits come from the circuit)
-let sim = Simulator::<Cpu>::f64()
-    .with_mode(SimulationMode::Trajectory {
-        n_samples: 10_000,
-        seed: Some(42),
-        max_ensemble: Some(4),
-    });
+`fusion::optimize` runs two phases:
+
+1. **Phase 1 — Size-2 canonicalization**: absorb 1-qubit gates into adjacent
+   multi-qubit gates; merge adjacent 2-qubit gates on the same wires.
+2. **Phase 2 — Agglomerative fusion**: iteratively merge gates across rows up
+   to a size limit, accepting only fusions where the cost model predicts a
+   benefit.
+
+Noisy gates act as fusion barriers — they are never merged.
+
+Keeping fusion outside the simulator means the caller sees exactly what
+transformations are applied, and the same fused graph can be reused across
+multiple simulator methods.
+
+## Step 3: Create a Simulator
+
+```rust
+use cast::simulator::{Simulator, Cpu, Cuda};
+
+// CPU, F64 precision
+let sim_cpu = Simulator::<Cpu>::f64();
+
+// CPU, F32 precision with 16 worker threads
+let sim_cpu32 = Simulator::<Cpu>::f32().with_threads(16);
+
+// CUDA, F64
+let sim_cuda = Simulator::<Cuda>::f64();
 ```
 
 `Simulator<B>` is generic over a sealed `Backend` trait. `B` determines:
@@ -93,61 +121,98 @@ let sim = Simulator::<Cpu>::f64()
 | | `Cpu` | `Cuda` |
 |--|-------|--------|
 | Statevector | `CPUStatevector` (SIMD-aligned, split re/im) | `CudaStatevector` (GPU device memory, interleaved) |
-| Kernel manager | `CpuKernelManager` (LLVM OrcJIT) | `CudaKernelManager` (LLVM → PTX → cubin) |
+| Kernel manager | `CpuKernelManager` (LLVM OrcJIT, batched) | `CudaKernelManager` (LLVM → PTX → cubin) |
 | Spec | `CPUKernelGenSpec` (precision, SIMD width, tolerances) | `CudaKernelGenSpec` (precision, tolerances, SM version) |
 | Apply semantics | Synchronous (threaded dispatch) | Asynchronous (enqueue + `sync()`) |
+| Exec timing | Wall-clock per iter | Summed CUDA event times |
 
-The Backend trait abstracts: `new_sv`, `init_sv`, `generate`, `apply`, `flush`,
-`marginal_probabilities`, `clone_sv`. All dispatch is resolved at compile time
-— no runtime enum matching.
+The `Backend` trait is an implementation detail of `Simulator` — every method
+is `#[doc(hidden)]`. User code only interacts with the three per-run methods
+on `Simulator<B>`.
 
-## Step 3: Run the Simulation
+## Step 4: Run
+
+`Simulator<B>` has three per-run methods, each returning a distinct result
+type. Pick the one that matches your need.
+
+### 4a. `simulate` — return a state
 
 ```rust
-let result = sim.run(&circuit)?;
+use cast::simulator::Representation;
+
+let state = sim_cpu.simulate(&graph, Representation::StateVector)?;
+let pops = state.populations();
 ```
 
-### 3a. Build CircuitGraph (inside `run()`)
+For `Representation::StateVector`, every gate must be unitary. For
+`Representation::DensityMatrix`, gates are lifted to superoperators acting on
+a 2n-qubit virtual statevector (so noisy gates are supported):
 
-`QuantumCircuit` gates are inserted into a `CircuitGraph` — a 2D grid of
-rows × qubits that represents the circuit schedule. Gates in the same row
-act on disjoint qubits and can execute in any order.
+```rust
+let state = sim_cpu.simulate(&graph, Representation::DensityMatrix)?;
+assert!((state.trace() - 1.0).abs() < 1e-10);
+```
 
-### 3b. Apply fusion (inside `run()`, if configured)
+Internally: compile all kernels (with `finalize_compile` on CPU), allocate a
+statevector, initialize to |0⟩, apply all kernels in order, sync, and return
+the state.
 
-`fusion::optimize()` runs two phases:
+### 4b. `sample_trajectory` — return a measurement histogram
 
-1. **Phase 1 — Size-2 canonicalization**: absorb 1-qubit gates into adjacent
-   multi-qubit gates; merge adjacent 2-qubit gates on the same wires.
+```rust
+use cast::simulator::TrajectoryOpts;
 
-2. **Phase 2 — Agglomerative fusion**: iteratively merge gates across rows
-   up to a size limit, accepting only fusions where the cost model predicts
-   a benefit.
+let opts = TrajectoryOpts {
+    measured_qubits: vec![0, 1],
+    n_samples: 10_000,
+    seed: Some(42),
+    max_ensemble: Some(4),
+};
+let traj = sim_cpu.sample_trajectory(&graph, &opts)?;
 
-Noisy gates act as fusion barriers — they are never merged.
+println!("explored weight: {:.4}", traj.explored_weight);
+for (outcome, &count) in &traj.histogram {
+    println!("  |{outcome:b}⟩ → {count}");
+}
+```
 
-### 3c. Prepare gates (inside `run_graph()`)
+Trajectory mode ensemble-branches through noise paths (pruning to the top
+`max_ensemble` highest-weight continuations at each noisy gate), then samples
+measurement outcomes across surviving branches proportionally to weight.
 
-The fused gate list is extracted from the CircuitGraph in row-major order.
-Mode-specific transformation:
+For large circuits with sparse measurements, apply
+`circuit.eliminate_dead_gates()` to the source `QuantumCircuit` before
+building the graph — this removes gates that cannot affect the measured
+qubits.
 
-| Mode | Transform | SV qubits |
-|------|-----------|-----------|
-| StateVector | Validate no noisy gates; use as-is | n |
-| DensityMatrix | Each gate → `to_density_matrix_gate(n)` (superoperator) | 2n |
-| Trajectory | Use as-is; noisy gates handled per-trajectory | n |
+### 4c. `bench` — return timing samples
 
-For **DensityMatrix**, each gate is lifted to a superoperator:
-- Noiseless gate U: `S = U ⊗ conj(U)` (4^k × 4^k matrix on 2k virtual qubits)
-- Noisy gate `[(p_i, U_i)]`: `S = Σ p_i · (U_i·U) ⊗ conj(U_i·U)`
+```rust
+let timings = sim_cpu.bench(&graph, Representation::StateVector, 5.0)?;
+println!(
+    "compile {:.3}s, exec {:.3}ms ± {:.3}ms ({} iters)",
+    timings.compile.mean_s(),
+    timings.exec.mean_s() * 1e3,
+    timings.exec.stddev_s() * 1e3,
+    timings.exec.n(),
+);
+```
 
-### 3d. Compile kernels
+`bench` compiles once, then adaptively re-runs the apply loop within the
+`exec_budget_s` wall-time budget. Returns raw per-iter samples. CPU samples
+are wall-clock (`Instant::now`); CUDA samples are summed CUDA event times
+(excluding host launch overhead).
+
+Trajectory simulation is not benchmarked — its cost profile is dominated by
+per-sample work that isn't usefully repeated in a loop.
+
+## Kernel compilation
 
 Each gate's matrix is compiled to a native kernel via the LLVM JIT pipeline:
 
 **CPU path:**
 ```
-QuantumGate.matrix → C++ FFI → LLVM IR (vectorized, SIMD) → O1 → OrcJIT → native function pointer
+QuantumGate.matrix → C++ FFI → LLVM IR (vectorized, SIMD) → O1 → OrcJIT batch → native function pointer
 ```
 
 **CUDA path:**
@@ -156,148 +221,61 @@ QuantumGate.matrix → C++ FFI → LLVM IR → O1 → NVPTX PTX → cubin (drive
 ```
 
 The kernel generator classifies each matrix entry:
-- **Zero** (|entry| < ztol): skip entirely — no multiply, no memory access
-- **±1** (|1 - |entry|| < otol): fold into sign flip — no multiply
-- **General**: bake as immediate constant — one FMA
 
-This sparsity-aware codegen is the key to CAST's performance advantage and
-its favorable F32 precision properties (sparse gates accumulate zero rounding
-error).
+- **Zero** (|entry| < ztol): skip entirely — no multiply, no memory access.
+- **±1** (|1 − |entry|| < otol): fold into sign flip — no multiply.
+- **General**: bake as immediate constant — one FMA.
 
-For **Trajectory** mode, noisy gate kernels are skipped. Instead, each noise
-branch `U_i · matrix` is pre-composed and compiled separately. Sampling
-distributions (`WeightedIndex`) are also pre-built.
+This sparsity-aware codegen is the key to CAST's performance. `ztol` and
+`otol` are fields on the kernel-gen spec; toggling them requires building a
+new `Simulator` with a modified spec (the `bench` CLI does this via its
+`--force-dense` flag).
 
-### 3e. Execute
+On CPU, `generate` is lazy: it accumulates LLVM IR and defers JIT until
+`finalize_compile` flushes the batch. On CUDA, `generate` is eager (PTX and
+cubin are produced immediately).
 
-#### StateVector / DensityMatrix
-
-```
-allocate statevector (n or 2n qubits)
-initialize to |0⟩ (or |0⟩⟨0|)
-for each compiled kernel:
-    B::apply(kernel_id, &mut sv)     // CPU: synchronous; CUDA: enqueued
-B::flush()                           // CPU: no-op; CUDA: sync stream
-```
-
-#### Trajectory (Ensemble)
-
-`Simulator::run()` first calls `circuit.eliminate_dead_gates()` to remove
-gates that cannot influence the measured qubits, then proceeds with the
-pruned circuit.
-
-```
-compile noise-branch kernels (deduplicated via matrix-bytes cache)
-initialize ensemble = [single |0⟩ statevector, weight=1.0]
-
-for each gate:
-    if noiseless:
-        apply kernel to every ensemble member
-    if noisy:
-        expand: each member × each noise branch → candidates
-        sort candidates by weight descending
-        keep top M (max_ensemble) candidates
-        clone/move statevectors, apply branch kernel
-
-B::flush()
-
-sample measurement outcomes:
-    for each ensemble member:
-        compute marginal probabilities over measured_qubits
-        batch-sample proportional to member weight
-    aggregate into histogram
-```
-
-The key insight: noise branches store `(probability, unitary)`. The composed
-operation `U_noise · U_gate` is always unitary, so applying it preserves
-||ψ|| = 1 exactly. Ensemble pruning keeps the M highest-weight branches
-at each noise gate, bounding approximation error by `1 − explored_weight`.
-
-## Step 4: Inspect Results
+## QuantumState inspection
 
 ```rust
-let result = sim.run(&circuit)?;
+// CPU
+let state: QuantumState<Cpu> = sim_cpu.simulate(&graph, Representation::StateVector)?;
+state.n_qubits();       // u32 — physical qubit count
+state.is_pure();        // bool
+state.amplitudes();     // Vec<Complex> — full statevector
+state.amp(idx);         // Complex — single amplitude
+state.populations();    // Vec<f64> — |a_i|² or ρ[i,i]
+state.trace();          // f64 — ||ψ||² or Tr(ρ)
 
-// SimulationResult<B> fields:
-result.state           // Option<QuantumState<B>> (None for trajectory mode)
-result.timing          // TimingStats (execution time)
-result.compile_time_s  // kernel JIT time
-result.trajectory_data // Option<TrajectoryResult>
+// CUDA — all methods return Result because they involve host transfer
+let state: QuantumState<Cuda> = sim_cuda.simulate(&graph, Representation::StateVector)?;
+state.download_amplitudes()?;  // Vec<(f64, f64)>
+state.populations()?;          // Vec<f64>
+state.trace()?;                // f64
 ```
 
-### QuantumState<B>
-
-The state is either `Pure` (statevector) or `DensityMatrix` (vectorized ρ),
-determined by the simulation mode:
-
-| Mode | `state` | `is_pure()` |
-|------|---------|-------------|
-| StateVector | `Some(Pure)` | true |
-| DensityMatrix | `Some(DensityMatrix)` | false |
-| Trajectory | `None` | — |
-
-### CPU inspection (QuantumState<Cpu>)
-
-```rust
-let state = result.state.unwrap();    // None for trajectory mode
-state.n_qubits()      // u32 — physical qubit count
-state.is_pure()        // bool
-state.amplitudes()     // Vec<Complex> — full statevector
-state.amp(idx)         // Complex — single amplitude
-state.populations()    // Vec<f64> — |a_i|² or ρ[i,i]
-state.trace()          // f64 — ||ψ||² or Tr(ρ)
-```
-
-### CUDA inspection (QuantumState<Cuda>)
-
-```rust
-let state = result.state.unwrap();
-state.download_amplitudes()  // Result<Vec<(f64, f64)>>
-state.populations()          // Result<Vec<f64>>
-state.trace()                // Result<f64>
-```
-
-CUDA methods return `Result` because they involve GPU → host data transfer.
-`trace()` on a pure state uses the GPU-side reduction kernel (92% peak
+`trace()` on a pure CUDA state uses a GPU-side reduction kernel (92% peak
 bandwidth on RTX 5090).
 
-### Trajectory data
-
-```rust
-if let Some(traj) = result.trajectory_data {
-    println!("samples: {}", traj.n_samples);
-    println!("explored weight: {:.4}", traj.explored_weight);
-    for branch in &traj.branches {
-        println!("  weight={:.4}, path={:?}, samples={}",
-            branch.weight, branch.noise_path, branch.n_samples);
-    }
-    for (outcome, &count) in &traj.histogram {
-        println!("  |{outcome:b}⟩ → {count}");
-    }
-}
-```
-
-## Summary of Type Flow
+## Summary of type flow
 
 ```
 QuantumGate          — gate unitary + qubits + noise branches
     │
 QuantumCircuit       — ordered sequence of Arc<QuantumGate> + qubit count
-    │                  + measured_qubits (user-facing, from code or QASM)
     │
-    ├─ Simulator::run()
-    │     │
-    │  CircuitGraph   — 2D gate grid for scheduling + fusion (internal)
-    │     │
-    │  fusion::optimize()
-    │     │
-    │  gate list: Vec<Arc<QuantumGate>>
-    │     │
-    │  ├─ StateVector: validate, compile, execute
-    │  ├─ DensityMatrix: lift to superoperators, compile, execute
-    │  └─ Trajectory: compile base + noise branches, sample + execute
+    ▼
+  (caller)  CircuitGraph::from_circuit
     │
-SimulationResult<B>  — state + timing + compile time + trajectory data
+CircuitGraph         — 2D gate grid for scheduling + fusion
     │
-QuantumState<B>      — Pure(Sv) or DensityMatrix { sv, n_physical }
+    ▼
+  (caller)  fusion::optimize  (optional, explicit)
+    │
+CircuitGraph (fused)
+    │
+    ▼
+  Simulator<B>::simulate          ──► QuantumState<B>
+  Simulator<B>::sample_trajectory ──► TrajectoryResult
+  Simulator<B>::bench             ──► RunTiming
 ```

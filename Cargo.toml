@@ -2,6 +2,9 @@
 name = "cast"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+description = "Backend-generic quantum circuit simulator with JIT-compiled, sparsity-aware kernels and hardware-adaptive gate fusion for CPU (LLVM ORC JIT) and CUDA (NVPTX) backends."
+readme = "README.md"
 
 [lib]
 path = "src/lib.rs"
@@ -25,13 +28,5 @@ name = "profile_hw"
 path = "src/bin/profile_hw.rs"
 
 [[bin]]
-name = "bench_fusion"
-path = "src/bin/bench_fusion.rs"
-
-[[bin]]
-name = "bench_noisy_qft"
-path = "src/bin/bench_noisy_qft.rs"
-
-[[bin]]
-name = "noisy_hadamard_layer"
-path = "src/bin/noisy_hadamard_layer.rs"
+name = "bench"
+path = "src/bin/bench.rs"

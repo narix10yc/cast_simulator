@@ -330,6 +330,55 @@ fn adaptive_sweep(
     Ok(profile)
 }
 
+// ── Fit from externally-collected samples ───────────────────────────────────
+
+/// Build a [`HardwareProfile`] from a pre-collected set of sweep samples.
+///
+/// Use this to fuse multiple independent profile runs into one consensus
+/// profile: concatenate the `raw` arrays from several profiles into one
+/// `Vec<SweepEntry>` and pass it here. A larger sample set across several
+/// runs gives a more robust piecewise-roofline fit than any single run —
+/// the peak-bandwidth probe alone has ±4–5% run-to-run variance on typical
+/// GPUs, and an averaged fit suppresses that noise proportionally to
+/// `sqrt(n_runs)`.
+///
+/// Returns `Err` if `samples` is empty.
+pub fn fit_from_samples(
+    config: ProfileConfig,
+    samples: Vec<SweepEntry>,
+) -> anyhow::Result<HardwareProfile> {
+    anyhow::ensure!(
+        !samples.is_empty(),
+        "fit_from_samples: need at least one SweepEntry"
+    );
+    let mut sweep: Vec<ProbeResult> = samples
+        .iter()
+        .map(|s| ProbeResult {
+            ai: s.ai,
+            gflops_s: s.gflops_s,
+            gib_s: s.gib_s,
+        })
+        .collect();
+    sweep.sort_by(|a, b| a.ai.total_cmp(&b.ai));
+
+    let params = fit_roofline(&sweep);
+    let r2 = roofline_r2(&sweep, &params);
+    if r2 < R2_WARN {
+        eprintln!(
+            "  fit_from_samples: Warning: roofline fit R\u{00b2} = {r2:.3} \
+             (< {R2_WARN}); crossover estimate may be unreliable."
+        );
+    }
+
+    let peak_bw_gib_s = sweep.iter().map(|p| p.gib_s).fold(0.0_f64, f64::max);
+    let peak_gflops_s = sweep.iter().map(|p| p.gflops_s).fold(0.0_f64, f64::max);
+
+    let mut profile =
+        HardwareProfile::from_measurements(config, peak_bw_gib_s, peak_gflops_s, params.bw_slope);
+    profile.raw = samples;
+    Ok(profile)
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Profiles hardware by sweeping gate kernels across arithmetic intensities.

@@ -137,6 +137,18 @@ impl CircuitGraph {
         graph
     }
 
+    /// Builds a [`CircuitGraph`] from a [`QuantumCircuit`](crate::types::QuantumCircuit)
+    /// by cloning each gate [`Arc`] and inserting it in order. The resulting
+    /// graph has the same n_qubits as the source circuit.
+    pub fn from_circuit(circuit: &crate::types::QuantumCircuit) -> Self {
+        let mut graph = Self::new();
+        graph.ensure_n_qubits(circuit.n_qubits() as usize);
+        for gate in circuit.gates() {
+            graph.insert_gate(Arc::clone(gate));
+        }
+        graph
+    }
+
     /// Number of qubit wires tracked by the graph.
     pub fn n_qubits(&self) -> usize {
         self.n_qubits
@@ -163,14 +175,14 @@ impl CircuitGraph {
         self.rows.is_empty() && self.gates.is_empty()
     }
 
-    pub fn check_consistency(&self) -> Result<(), String> {
+    pub fn check_consistency(&self) -> anyhow::Result<()> {
         for (row_idx, row) in self.rows.iter().enumerate() {
             if row.len() != self.n_qubits {
-                return Err(format!(
+                anyhow::bail!(
                     "row {row_idx} has width {}, expected {}",
                     row.len(),
                     self.n_qubits
-                ));
+                );
             }
         }
 
@@ -180,31 +192,29 @@ impl CircuitGraph {
         for (row_idx, row) in self.rows.iter().enumerate() {
             for gate_id in row.gate_ids() {
                 let Some(gate) = self.gate(gate_id) else {
-                    return Err(format!(
-                        "row {row_idx} references dead or invalid gate id {gate_id}"
-                    ));
+                    anyhow::bail!("row {row_idx} references dead or invalid gate id {gate_id}");
                 };
 
                 if let Some(previous_row) = seen_gate_rows.insert(gate_id, row_idx) {
                     if previous_row != row_idx {
-                        return Err(format!(
+                        anyhow::bail!(
                             "gate id {gate_id} appears on multiple rows: {previous_row} and {row_idx}"
-                        ));
+                        );
                     }
                 }
 
                 for &qubit in gate.qubits() {
                     let q = qubit as usize;
                     if q >= self.n_qubits {
-                        return Err(format!(
+                        anyhow::bail!(
                             "gate id {gate_id} targets qubit {q} outside graph width {}",
                             self.n_qubits
-                        ));
+                        );
                     }
                     if row.gate_id_at(q) != Some(gate_id) {
-                        return Err(format!(
+                        anyhow::bail!(
                             "gate id {gate_id} is missing from row {row_idx} at qubit {q}"
-                        ));
+                        );
                     }
                 }
 
@@ -212,9 +222,9 @@ impl CircuitGraph {
                     if row.gate_id_at(qubit) == Some(gate_id)
                         && !gate.qubits().contains(&(qubit as u32))
                     {
-                        return Err(format!(
+                        anyhow::bail!(
                             "row {row_idx} contains gate id {gate_id} at unrelated qubit {qubit}"
-                        ));
+                        );
                     }
                 }
 
@@ -225,12 +235,10 @@ impl CircuitGraph {
         for (gate_id, gate) in self.gates.iter().enumerate() {
             match gate {
                 Some(_) if !seen_gate_ids.contains(&gate_id) => {
-                    return Err(format!("live gate id {gate_id} is not placed in any row"));
+                    anyhow::bail!("live gate id {gate_id} is not placed in any row");
                 }
                 None if seen_gate_ids.contains(&gate_id) => {
-                    return Err(format!(
-                        "dead gate id {gate_id} is still referenced by a row"
-                    ));
+                    anyhow::bail!("dead gate id {gate_id} is still referenced by a row");
                 }
                 _ => {}
             }
@@ -578,7 +586,7 @@ mod tests {
         graph.gates[0] = Some(Arc::new(QuantumGate::x(0)));
         graph.rows[0].clear_gate(&[0]);
 
-        let err = graph.check_consistency().unwrap_err();
+        let err = graph.check_consistency().unwrap_err().to_string();
         assert!(err.contains("not placed in any row"));
     }
 
@@ -588,7 +596,7 @@ mod tests {
         graph.insert_gate(QuantumGate::x(0));
         graph.gates[0] = None;
 
-        let err = graph.check_consistency().unwrap_err();
+        let err = graph.check_consistency().unwrap_err().to_string();
         assert!(err.contains("dead or invalid gate id"));
     }
 

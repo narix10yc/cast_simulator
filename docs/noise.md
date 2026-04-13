@@ -61,13 +61,15 @@ sv[ket_idx | (bra_idx << n)] = ρ[ket_idx, bra_idx]
 - **Noiseless** gate `U`: `S = U ⊗ conj(U)`
 - **Noisy** gate with Kraus ops `[(pᵢ, Kᵢ)]`: `S = Σ pᵢ · Kᵢ ⊗ conj(Kᵢ)`
 
-The `Simulator` handles this automatically in `DensityMatrix` mode.
+`Simulator::simulate(&graph, Representation::DensityMatrix)` handles this
+lifting automatically.
 
 ## Worked Example
 
 ```rust
-use cast::simulator::{Simulator, Cpu, SimulationMode};
+use cast::simulator::{Simulator, Cpu, Representation, TrajectoryOpts};
 use cast::types::{QuantumCircuit, QuantumGate};
+use cast::CircuitGraph;
 
 // Build a noisy circuit.
 let mut circuit = QuantumCircuit::new(2);
@@ -76,26 +78,23 @@ circuit.add(QuantumGate::depolarizing(0, 0.01));
 circuit.add(QuantumGate::cx(0, 1));
 circuit.add(QuantumGate::depolarizing(0, 0.01));
 circuit.add(QuantumGate::depolarizing(1, 0.01));
-circuit.measure(&[0, 1]);  // measure both qubits
+
+let graph = CircuitGraph::from_circuit(&circuit);
+let sim = Simulator::<Cpu>::f64();
 
 // Density-matrix simulation.
-let sim = Simulator::<Cpu>::f64()
-    .with_mode(SimulationMode::DensityMatrix);
-let result = sim.run(&circuit).unwrap();
-let state = result.state.unwrap();
+let state = sim.simulate(&graph, Representation::DensityMatrix).unwrap();
 let trace = state.trace();       // should be ~1.0
 let pops = state.populations();  // diagonal of ρ
 
 // Trajectory simulation (same circuit, less memory).
-// measured_qubits come from the circuit.
-let sim = Simulator::<Cpu>::f64()
-    .with_mode(SimulationMode::Trajectory {
-        n_samples: 10_000,
-        seed: Some(42),
-        max_ensemble: Some(4),
-    });
-let result = sim.run(&circuit).unwrap();
-let traj = result.trajectory_data.unwrap();
+let opts = TrajectoryOpts {
+    measured_qubits: vec![0, 1],
+    n_samples: 10_000,
+    seed: Some(42),
+    max_ensemble: Some(4),
+};
+let traj = sim.sample_trajectory(&graph, &opts).unwrap();
 println!("explored weight: {:.4}", traj.explored_weight);
 for (outcome, &count) in &traj.histogram {
     println!("  |{outcome:b}⟩ → {count}");
@@ -108,30 +107,34 @@ Noisy gates participate in fusion. When two noisy gates are fused, their
 Kraus operators are composed via Cartesian product: each `Kᵢ · Kⱼ` pair
 becomes a branch in the fused gate's noise model.
 
+Apply fusion as a separate step before calling the simulator:
+
 ```rust
-let sim = Simulator::<Cpu>::f64()
-    .with_mode(SimulationMode::DensityMatrix)
-    .with_fusion(FusionConfig::size_only(4));
-let result = sim.run(&circuit).unwrap();
+use cast::cost_model::FusionConfig;
+use cast::fusion;
+
+let mut graph = CircuitGraph::from_circuit(&circuit);
+fusion::optimize(&mut graph, &FusionConfig::size_only(4));
+let state = sim.simulate(&graph, Representation::DensityMatrix).unwrap();
 ```
 
 ## Extracting Results
 
-`SimulationResult<B>` contains `state: Option<QuantumState<B>>` (None for
-trajectory mode) and `trajectory_data: Option<TrajectoryResult>`:
+Each `Simulator` method returns a concrete result type — no `Option` fields
+or mode-dependent unwrapping.
 
 ```rust
-// StateVector / DensityMatrix:
-let state = result.state.unwrap();
-state.n_qubits()       // u32
-state.is_pure()        // true for StateVector, false for DM
-state.populations()    // Vec<f64> — |aᵢ|² or ρ[i,i]
-state.trace()          // f64 — ||ψ||² or Tr(ρ)
+// Statevector or density matrix: QuantumState<B>
+let state = sim.simulate(&graph, Representation::DensityMatrix).unwrap();
+state.n_qubits();    // u32
+state.is_pure();     // true for StateVector, false for DensityMatrix
+state.populations(); // Vec<f64> — |aᵢ|² or ρ[i,i]
+state.trace();       // f64 — ||ψ||² or Tr(ρ)
 
-// Trajectory:
-let traj = result.trajectory_data.unwrap();
-traj.histogram         // HashMap<u64, u64> — bitstring → count
-traj.n_samples         // u64
-traj.branches          // Vec<ExploredBranch>
-traj.explored_weight   // f64 (≤ 1.0)
+// Trajectory: TrajectoryResult
+let traj = sim.sample_trajectory(&graph, &opts).unwrap();
+traj.histogram;       // HashMap<u64, u64> — bitstring → count
+traj.n_samples;       // u64
+traj.branches;        // Vec<ExploredBranch>
+traj.explored_weight; // f64 (≤ 1.0)
 ```

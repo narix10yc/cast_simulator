@@ -1,14 +1,18 @@
 use super::*;
+use crate::types::QuantumCircuit;
 
 const TEST_QUBITS: u32 = 6;
 
-fn test_circuit(gates: Vec<QuantumGate>, measured: &[u32]) -> QuantumCircuit {
+/// Build a [`CircuitGraph`] from a flat gate list. The `_measured` parameter
+/// is retained for symmetry with trajectory tests but is not stored on the
+/// graph — trajectory tests pass measured qubits explicitly via
+/// [`TrajectoryOpts`].
+fn test_graph(gates: Vec<QuantumGate>) -> CircuitGraph {
     let mut circuit = QuantumCircuit::new(TEST_QUBITS);
     for g in gates {
         circuit.add(g);
     }
-    circuit.measure(measured);
-    circuit
+    CircuitGraph::from_circuit(&circuit)
 }
 
 // ── Statevector / density matrix ─────────────────────────────────────────
@@ -16,9 +20,8 @@ fn test_circuit(gates: Vec<QuantumGate>, measured: &[u32]) -> QuantumCircuit {
 #[test]
 fn statevector_h_gate() {
     let sim = Simulator::<Cpu>::f64();
-    let circuit = test_circuit(vec![QuantumGate::h(0)], &[]);
-    let result = sim.run(&circuit).unwrap();
-    let state = result.state.unwrap();
+    let graph = test_graph(vec![QuantumGate::h(0)]);
+    let state = sim.simulate(&graph, Representation::StateVector).unwrap();
     assert!(state.is_pure());
     let pops = state.populations();
     assert!((pops[0] - 0.5).abs() < 1e-10);
@@ -28,26 +31,19 @@ fn statevector_h_gate() {
 #[test]
 fn statevector_rejects_noisy_gates() {
     let sim = Simulator::<Cpu>::f64();
-    let circuit = test_circuit(
-        vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)],
-        &[],
-    );
-    assert!(sim.run(&circuit).is_err());
+    let graph = test_graph(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
+    assert!(sim.simulate(&graph, Representation::StateVector).is_err());
 }
 
 #[test]
 fn density_matrix_trace_preserved() {
-    let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::DensityMatrix);
-    let circuit = test_circuit(
-        vec![
-            QuantumGate::h(0),
-            QuantumGate::cx(0, 1),
-            QuantumGate::depolarizing(0, 0.05),
-        ],
-        &[],
-    );
-    let result = sim.run(&circuit).unwrap();
-    let state = result.state.unwrap();
+    let sim = Simulator::<Cpu>::f64();
+    let graph = test_graph(vec![
+        QuantumGate::h(0),
+        QuantumGate::cx(0, 1),
+        QuantumGate::depolarizing(0, 0.05),
+    ]);
+    let state = sim.simulate(&graph, Representation::DensityMatrix).unwrap();
     assert!(!state.is_pure());
     let trace = state.trace();
     assert!(
@@ -65,25 +61,34 @@ fn from_qasm() {
     assert_eq!(circuit.len(), 3);
 
     let sim = Simulator::<Cpu>::f64();
-    let result = sim.run(&circuit).unwrap();
-    assert!(result.state.unwrap().is_pure());
+    let graph = CircuitGraph::from_circuit(&circuit);
+    let state = sim.simulate(&graph, Representation::StateVector).unwrap();
+    assert!(state.is_pure());
 }
 
 // ── Trajectory / ensemble ────────────────────────────────────────────────
+//
+// Dead-gate elimination is the caller's responsibility under the new API;
+// these tests either have no dead gates or call `eliminate_dead_gates`
+// explicitly before building the graph.
+
+fn traj_opts(measured: &[u32], n_samples: u64, max_ensemble: usize) -> TrajectoryOpts {
+    TrajectoryOpts {
+        measured_qubits: measured.to_vec(),
+        n_samples,
+        seed: Some(42),
+        max_ensemble: Some(max_ensemble),
+    }
+}
 
 #[test]
 fn trajectory_h_gate_histogram() {
-    // H(0) on 4-qubit circuit, no noise. Measure qubit 0.
-    // Should get ~50/50 histogram for outcomes 0 and 1.
-    let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
-        n_samples: 10000,
-        seed: Some(42),
-        max_ensemble: Some(1),
-    });
-    let circuit = test_circuit(vec![QuantumGate::h(0)], &[0]);
-    let result = sim.run(&circuit).unwrap();
-    assert!(result.state.is_none());
-    let traj = result.trajectory_data.unwrap();
+    // H(0), no noise. Measure qubit 0. Expect ~50/50.
+    let sim = Simulator::<Cpu>::f64();
+    let graph = test_graph(vec![QuantumGate::h(0)]);
+    let traj = sim
+        .sample_trajectory(&graph, &traj_opts(&[0], 10000, 1))
+        .unwrap();
     assert_eq!(traj.n_samples, 10000);
     assert_eq!(traj.histogram.values().sum::<u64>(), 10000);
     let count_0 = traj.histogram.get(&0).copied().unwrap_or(0);
@@ -101,18 +106,11 @@ fn trajectory_h_gate_histogram() {
 
 #[test]
 fn trajectory_deterministic_branch() {
-    let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
-        n_samples: 100,
-        seed: Some(42),
-        max_ensemble: Some(1),
-    });
-    let circuit = test_circuit(
-        vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)],
-        &[0],
-    );
-    let result = sim.run(&circuit).unwrap();
-    assert!(result.state.is_none());
-    let traj = result.trajectory_data.unwrap();
+    let sim = Simulator::<Cpu>::f64();
+    let graph = test_graph(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
+    let traj = sim
+        .sample_trajectory(&graph, &traj_opts(&[0], 100, 1))
+        .unwrap();
     assert_eq!(traj.branches.len(), 1);
     assert_eq!(traj.branches[0].noise_path, vec![0]);
     assert!((traj.branches[0].weight - 0.9).abs() < 1e-10);
@@ -121,24 +119,15 @@ fn trajectory_deterministic_branch() {
 
 #[test]
 fn ensemble_m4_explores_more_weight() {
-    let circuit = test_circuit(
-        vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)],
-        &[0],
-    );
+    let sim = Simulator::<Cpu>::f64();
+    let graph = test_graph(vec![QuantumGate::h(0), QuantumGate::depolarizing(0, 0.1)]);
 
-    let sim_m1 = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
-        n_samples: 1000,
-        seed: Some(42),
-        max_ensemble: Some(1),
-    });
-    let t1 = sim_m1.run(&circuit).unwrap().trajectory_data.unwrap();
-
-    let sim_m4 = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
-        n_samples: 1000,
-        seed: Some(42),
-        max_ensemble: Some(4),
-    });
-    let t4 = sim_m4.run(&circuit).unwrap().trajectory_data.unwrap();
+    let t1 = sim
+        .sample_trajectory(&graph, &traj_opts(&[0], 1000, 1))
+        .unwrap();
+    let t4 = sim
+        .sample_trajectory(&graph, &traj_opts(&[0], 1000, 4))
+        .unwrap();
 
     assert_eq!(t1.branches.len(), 1);
     assert_eq!(t4.branches.len(), 4);
@@ -157,24 +146,25 @@ fn ensemble_m4_explores_more_weight() {
 
 #[test]
 fn ensemble_matches_dm_populations() {
-    let circuit = test_circuit(
-        vec![
-            QuantumGate::h(0),
-            QuantumGate::depolarizing(0, 0.1),
-            QuantumGate::cx(0, 1),
-        ],
-        &[0, 1],
-    );
+    let sim = Simulator::<Cpu>::f64();
+    let graph = test_graph(vec![
+        QuantumGate::h(0),
+        QuantumGate::depolarizing(0, 0.1),
+        QuantumGate::cx(0, 1),
+    ]);
 
-    let sim_dm = Simulator::<Cpu>::f64().with_mode(SimulationMode::DensityMatrix);
-    let dm_pops = sim_dm.run(&circuit).unwrap().state.unwrap().populations();
+    let dm_pops = sim
+        .simulate(&graph, Representation::DensityMatrix)
+        .unwrap()
+        .populations();
 
-    let sim_traj = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
+    let opts = TrajectoryOpts {
+        measured_qubits: vec![0, 1],
         n_samples: 100_000,
         seed: Some(99),
         max_ensemble: Some(64),
-    });
-    let traj = sim_traj.run(&circuit).unwrap().trajectory_data.unwrap();
+    };
+    let traj = sim.sample_trajectory(&graph, &opts).unwrap();
 
     assert!(
         (traj.explored_weight - 1.0).abs() < 1e-10,
@@ -195,22 +185,17 @@ fn ensemble_matches_dm_populations() {
 
 #[test]
 fn ensemble_multi_noise_pruning() {
-    let circuit = test_circuit(
-        vec![
-            QuantumGate::h(0),
-            QuantumGate::depolarizing(0, 0.1),
-            QuantumGate::cx(0, 1),
-            QuantumGate::depolarizing(1, 0.1),
-        ],
-        &[0, 1],
-    );
+    let sim = Simulator::<Cpu>::f64();
+    let graph = test_graph(vec![
+        QuantumGate::h(0),
+        QuantumGate::depolarizing(0, 0.1),
+        QuantumGate::cx(0, 1),
+        QuantumGate::depolarizing(1, 0.1),
+    ]);
 
-    let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
-        n_samples: 10000,
-        seed: Some(42),
-        max_ensemble: Some(2),
-    });
-    let traj = sim.run(&circuit).unwrap().trajectory_data.unwrap();
+    let traj = sim
+        .sample_trajectory(&graph, &traj_opts(&[0, 1], 10000, 2))
+        .unwrap();
 
     assert_eq!(traj.branches.len(), 2);
     assert!(traj.branches[0].weight >= traj.branches[1].weight);
@@ -229,19 +214,21 @@ fn ensemble_multi_noise_pruning() {
 
 #[test]
 fn ensemble_with_dce_partial_measure() {
+    // Explicitly call eliminate_dead_gates to drop the dead H(2)/CX(2,3) that
+    // cannot influence the measured qubit 0.
     let mut circuit = QuantumCircuit::new(TEST_QUBITS);
     circuit.add(QuantumGate::h(0));
     circuit.add(QuantumGate::depolarizing(0, 0.1));
-    circuit.add(QuantumGate::h(2)); // dead: only affects q2
-    circuit.add(QuantumGate::cx(2, 3)); // dead: only affects q2,q3
+    circuit.add(QuantumGate::h(2)); // dead
+    circuit.add(QuantumGate::cx(2, 3)); // dead
     circuit.measure(&[0]);
+    let circuit = circuit.eliminate_dead_gates();
+    let graph = CircuitGraph::from_circuit(&circuit);
 
-    let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
-        n_samples: 5000,
-        seed: Some(42),
-        max_ensemble: Some(4),
-    });
-    let traj = sim.run(&circuit).unwrap().trajectory_data.unwrap();
+    let sim = Simulator::<Cpu>::f64();
+    let traj = sim
+        .sample_trajectory(&graph, &traj_opts(&[0], 5000, 4))
+        .unwrap();
 
     assert_eq!(traj.branches.len(), 4);
     assert!((traj.explored_weight - 1.0).abs() < 1e-10);
@@ -263,14 +250,12 @@ fn ensemble_with_dce_partial_measure() {
 
 #[test]
 fn ensemble_noiseless_circuit() {
-    let circuit = test_circuit(vec![QuantumGate::h(0), QuantumGate::cx(0, 1)], &[0, 1]);
+    let sim = Simulator::<Cpu>::f64();
+    let graph = test_graph(vec![QuantumGate::h(0), QuantumGate::cx(0, 1)]);
 
-    let sim = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
-        n_samples: 1000,
-        seed: Some(42),
-        max_ensemble: Some(10),
-    });
-    let traj = sim.run(&circuit).unwrap().trajectory_data.unwrap();
+    let traj = sim
+        .sample_trajectory(&graph, &traj_opts(&[0, 1], 1000, 10))
+        .unwrap();
 
     assert_eq!(traj.branches.len(), 1);
     assert!((traj.branches[0].weight - 1.0).abs() < 1e-10);
@@ -282,26 +267,27 @@ fn ensemble_noiseless_circuit() {
 
 #[test]
 fn ensemble_multi_noise_matches_dm() {
-    let circuit = test_circuit(
-        vec![
-            QuantumGate::h(0),
-            QuantumGate::depolarizing(0, 0.05),
-            QuantumGate::cx(0, 1),
-            QuantumGate::depolarizing(0, 0.05),
-            QuantumGate::depolarizing(1, 0.05),
-        ],
-        &[0, 1],
-    );
+    let sim = Simulator::<Cpu>::f64();
+    let graph = test_graph(vec![
+        QuantumGate::h(0),
+        QuantumGate::depolarizing(0, 0.05),
+        QuantumGate::cx(0, 1),
+        QuantumGate::depolarizing(0, 0.05),
+        QuantumGate::depolarizing(1, 0.05),
+    ]);
 
-    let sim_dm = Simulator::<Cpu>::f64().with_mode(SimulationMode::DensityMatrix);
-    let dm_pops = sim_dm.run(&circuit).unwrap().state.unwrap().populations();
+    let dm_pops = sim
+        .simulate(&graph, Representation::DensityMatrix)
+        .unwrap()
+        .populations();
 
-    let sim_traj = Simulator::<Cpu>::f64().with_mode(SimulationMode::Trajectory {
+    let opts = TrajectoryOpts {
+        measured_qubits: vec![0, 1],
         n_samples: 200_000,
         seed: Some(123),
         max_ensemble: Some(64),
-    });
-    let traj = sim_traj.run(&circuit).unwrap().trajectory_data.unwrap();
+    };
+    let traj = sim.sample_trajectory(&graph, &opts).unwrap();
 
     assert!(
         (traj.explored_weight - 1.0).abs() < 1e-10,

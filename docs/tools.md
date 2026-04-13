@@ -1,6 +1,6 @@
 # CLI Tools
 
-CAST ships four command-line binaries for hardware profiling and benchmarking.
+CAST ships two command-line binaries for hardware profiling and benchmarking.
 All require `LLVM_CONFIG` to be set (see the README).
 
 ## profile_hw — Hardware Profiler
@@ -65,39 +65,80 @@ for low-AI gates and shifts the crossover AI downward compared to a
 30-qubit statevector (16 GiB) that streams entirely from HBM.
 
 At large scales (30+ SV qubits), the statevector far exceeds any cache and
-the roofline stabilises — profiles at 30 and 32 qubits will agree closely.
+the roofline stabilizes — profiles at 30 and 32 qubits will agree closely.
 But in the transition zone (24-30 qubits), cache effects can meaningfully
 shift the crossover, so the profile qubit count should match the target
 simulation size for best results.
 
 ### Saved Profiles
 
-Profiles are saved as JSON and can be loaded by `bench_fusion`,
-`bench_ablation`, and `bench_noisy_qft` via `--profile <path>` to skip
-re-profiling.
+Profiles are saved as JSON and can be loaded by `bench` via
+`--profile <path>` to skip re-profiling.
+
+### Merging Multiple Runs
+
+Because peak memory bandwidth has ±4–5% run-to-run variance on typical
+GPUs, any single profile is noisy. Profile multiple times and merge for
+a more robust consensus profile:
+
+```sh
+# Five independent runs
+for i in 1 2 3 4 5; do
+    cargo run --bin profile_hw --features cuda --release -- \
+        --backend cuda --precision f64 -n 30 --budget 180 \
+        --save-profiles tmp/profiles_runs/run${i}/
+done
+
+# Merge into one profile
+cargo run --bin profile_hw --features cuda --release -- \
+    --merge tmp/profiles_runs/run{1,2,3,4,5}/cuda_f64.json \
+    --merge-out profiles/cuda_f64.json
+```
+
+See [docs/hardware_profiling.md](hardware_profiling.md) for a full
+discussion of run-to-run variance and the merge workflow.
 
 ---
 
-## bench_fusion — Fusion Strategy Benchmark
+## bench — Fusion Strategy Benchmark
 
-Loads OpenQASM circuit files, applies several fusion strategies, then times
-execution on the selected backend.
+Loads OpenQASM circuit files, applies each requested fusion strategy, then
+times execution on the selected backend via `Simulator::bench`.
+Compile and execute phases are reported separately; the execute phase is
+sampled adaptively within `--bench-budget` wall seconds.
 
 ### Quick Start
 
 ```sh
-# CPU backend, single circuit
-cargo run --bin bench_fusion --release -- \
-      --backend cpu examples/journal_examples/qft-cx-30.qasm
+# Default: all three fusion modes × one circuit, CUDA backend, cached profile
+cargo run --bin bench --features cuda --release -- \
+      --profile profiles/cuda_f64.json \
+      examples/journal_examples/qft-cx-30.qasm
 
-# CUDA backend with cached profile
-cargo run --bin bench_fusion --features cuda --release -- \
-      --backend cuda --profile profiles/cuda_f64.json \
-      examples/journal_examples/ala-30.qasm
+# All 30-qubit circuits, default fusion modes
+cargo run --bin bench --features cuda --release -- \
+      --profile profiles/cuda_f64.json \
+      examples/journal_examples/*-30*.qasm
 
-# All 30-qubit circuits
-cargo run --bin bench_fusion --features cuda --release -- \
-      --backend cuda examples/journal_examples/*-30*.qasm
+# CPU backend, only hardware-adaptive fusion
+cargo run --bin bench --release -- \
+      --backend cpu --fusion hw-adaptive \
+      examples/journal_examples/qft-cx-30.qasm
+
+# Two selected modes, comma-separated
+cargo run --bin bench --features cuda --release -- \
+      --profile profiles/cuda_f64.json \
+      --fusion none,hw-adaptive \
+      examples/journal_examples/mexp-17.qasm
+
+# Sparse-vs-dense ablation: run twice with and without --force-dense,
+# then compare rows (identical other args).
+cargo run --bin bench --features cuda --release -- \
+      --profile profiles/cuda_f64.json --fusion hw-adaptive \
+      examples/journal_examples/mexp-17.qasm
+cargo run --bin bench --features cuda --release -- \
+      --profile profiles/cuda_f64.json --fusion hw-adaptive --force-dense \
+      examples/journal_examples/mexp-17.qasm
 ```
 
 ### Options
@@ -105,135 +146,35 @@ cargo run --bin bench_fusion --features cuda --release -- \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--backend {cpu,cuda}` | `cuda` | Simulation backend |
+| `--fusion <MODES>` | `none,size-only,hw-adaptive` | Fusion modes to benchmark (CSV or repeated flag) |
 | `--profile <PATH>` | — | Cached HardwareProfile JSON (skips profiling) |
 | `--profile-qubits <N>` | `30` | SV qubits for profiling |
 | `--profile-budget <S>` | `20` | Profiling time budget (seconds) |
-| `--max-size <N>` | `4` | Max gate size for hw-adaptive fusion |
-| `--bench-budget <S>` | `5` | Time budget per benchmark run (seconds) |
+| `--max-size <N>` | `4` | Max gate size for `size-only` and `hw-adaptive` fusion |
+| `--bench-budget <S>` | `5` | Exec-phase time budget per benchmark row (seconds) |
 | `--force-dense` | off | Disable sparsity-aware codegen (ztol=0) |
-| `--fusion-log` | off | Print per-decision fusion log for hw-adaptive |
+| `--fusion-log` | off | Print per-decision fusion log for each hw-adaptive row |
 | Files (positional) | required | One or more `.qasm` files |
 
-### Fusion Configs Compared
+### Fusion Modes
 
-| Config | Description |
-|--------|-------------|
-| `no-fusion` | `size_only(1)` — Phase 1 canonicalization only |
-| `default` | `size_only(3)` — fuse up to 3-qubit gates |
-| `aggressive` | `size_only(4)` — fuse up to 4-qubit gates |
-| `hw-adaptive` | Roofline-guided fusion up to `--max-size` |
+| Mode | Description |
+|------|-------------|
+| `none` | No fusion (`size_only(1)`, Phase 1 canonicalization only) |
+| `size-only` | Size-gated fusion up to `--max-size` qubits |
+| `hw-adaptive` | Roofline-guided fusion up to `--max-size` qubits |
 
 ### Output
 
-A table per circuit with columns: Config, Gates, Depth, Cold-Start (kernel
-compilation time), GPU/Exec time (with ± stddev), and iteration count.
+One row per `(circuit, fusion mode)` pair. Columns:
 
----
-
-## bench_ablation — Dense vs Sparse Kernel Ablation
-
-For each input circuit, applies the selected fusion strategy, then runs the
-fused circuit twice — once with sparsity-aware kernels (default) and once
-with dense kernels (ztol=0). Reports per-gate sparsity statistics and the
-speedup from sparsity exploitation.
-
-### Quick Start
-
-```sh
-# CUDA backend, hw-adaptive fusion
-cargo run --bin bench_ablation --features cuda --release -- \
-      --backend cuda --profile profiles/cuda_f64.json \
-      examples/journal_examples/*-30.qasm
-
-# No fusion (measure raw per-gate sparsity benefit)
-cargo run --bin bench_ablation --features cuda --release -- \
-      --backend cuda --profile profiles/cuda_f64.json \
-      --fusion no-fusion examples/journal_examples/mexp-20.qasm
-```
-
-### Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--backend {cpu,cuda}` | `cuda` | Simulation backend |
-| `--fusion {no-fusion,default,aggressive,hw-adaptive}` | `hw-adaptive` | Fusion strategy |
-| `--profile <PATH>` | — | Cached HardwareProfile JSON |
-| `--profile-qubits <N>` | `30` | SV qubits for profiling |
-| `--profile-budget <S>` | `20` | Profiling time budget (seconds) |
-| `--max-size <N>` | `4` | Max gate size for hw-adaptive fusion |
-| `--bench-budget <S>` | `5` | Time budget per benchmark run (seconds) |
-| Files (positional) | required | One or more `.qasm` files |
-
-### Output
-
-A table per circuit with columns: Qubits, Gates, Depth, mean AI,
-AI range, Sparse time, Dense time, Speedup (dense/sparse), JIT compile
-times for both modes, and JIT ratio.
-
----
-
-## bench_noisy_qft — Noisy QFT Benchmark
-
-Builds an n-qubit QFT circuit with depolarizing noise, lifts it to a
-density-matrix circuit on 2n virtual qubits, then benchmarks execution under
-multiple fusion strategies.
-
-### Quick Start
-
-```sh
-# Default: 14-qubit QFT, CPU only, 20s budget per config
-cargo run --bin bench_noisy_qft --release
-
-# Smaller circuit for a quick run
-cargo run --bin bench_noisy_qft --release -- -n 8
-
-# With CUDA
-cargo run --bin bench_noisy_qft --features cuda --release -- -n 10
-
-# Custom noise and budget
-cargo run --bin bench_noisy_qft --release -- --noise-p 0.01 --bench-budget 10
-
-# With per-backend cached profiles
-cargo run --bin bench_noisy_qft --features cuda --release -- \
-      --cpu-profile profiles/cpu_f64.json --cuda-profile profiles/cuda_f64.json
-```
-
-### Options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-n, --n-qubits <N>` | `14` | Physical qubits in the QFT (DM SV has 2N qubits) |
-| `--noise-p <P>` | `0.005` | Depolarizing error probability per gate |
-| `--bench-budget <S>` | `20` | Time budget per benchmark run (seconds) |
-| `--max-size <N>` | `6` | Max virtual-qubit gate size for fusion |
-| `--cpu-profile <PATH>` | — | Cached CPU HardwareProfile JSON |
-| `--cuda-profile <PATH>` | — | Cached CUDA HardwareProfile JSON |
-| `--profile-budget <S>` | `20` | Profiling budget (seconds) |
-| `--profile-qubits <N>` | auto (= 2n) | SV qubits for profiling |
-
-### Fusion Configs Compared
-
-| Config | Description |
-|--------|-------------|
-| `unfused` | Raw DM circuit, no fusion at all |
-| `fused(4)` | Fuse up to 4-qubit DM gates (2 physical qubits) |
-| `fused(6)` | Fuse up to 6-qubit DM gates (3 physical qubits) |
-| `hw-adaptive` | Roofline-guided fusion up to `--max-size` |
-
-DM gates always have even virtual-qubit counts, so fusion steps by 2.
-
-### Memory Requirements
-
-The density-matrix statevector for n physical qubits has 2^(2n) complex F64
-amplitudes:
-
-| n | SV qubits | Memory |
-|---|-----------|--------|
-| 8 | 16 | 1 MiB |
-| 10 | 20 | 16 MiB |
-| 12 | 24 | 256 MiB |
-| 14 | 28 | 4 GiB |
-| 16 | 32 | 64 GiB |
+- **Circuit** — QASM file stem
+- **Fusion** — fusion mode label (`none`, `size-only`, `hw-adaptive`)
+- **Gates** — post-fusion gate count
+- **Depth** — post-fusion circuit depth (row count)
+- **Compile** — cold-start wall time to generate and finalize all kernels
+- **Exec time** — adaptively-sampled execution time (wall on CPU, summed
+  CUDA event times on GPU), printed as `mean ± stddev (N iters)`
 
 ---
 
