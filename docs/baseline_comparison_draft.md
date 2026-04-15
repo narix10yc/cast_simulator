@@ -15,7 +15,7 @@ SM 120, 32 GiB, CUDA 13.2). The circuits span representative structures:
 variational ansatze (ala, hea, hes), random circuits (rqc), structured
 entanglement (iqp, qft-cx), quantum volume (qvc), and integer comparison
 (icmp). All experiments use the adaptive fusion mode for CAST
-(`hw-adaptive`, max fused gate size 4).
+(`hw-adaptive`, max fused gate size 6).
 
 ### Baseline Configuration
 
@@ -27,10 +27,10 @@ framework overhead that is not part of the simulation engine.
 
 | Simulator | Version | Precision | Fusion | Timing metric |
 |-----------|---------|-----------|--------|---------------|
-| **CAST** | 0.1.0 | F32 / F64 | hw-adaptive (max 4q) | CUDA-event kernel time |
+| **CAST** | 0.1.0 | F32 / F64 | hw-adaptive (max 6q) | CUDA-event kernel time |
 | **Qiskit-Aer** | 0.17.2 | F32 / F64 | best of {off, max 2q, max 5q} | C++ `metadata['time_taken']` |
 | **Qibo** | 0.3.2 (qibojit+cupy) | F32 / F64 | none (no built-in fusion) | Python wall-clock |
-| **QSim** | 0.22.0 (cuStateVec) | F32 only | built-in (max 4q) | C++ `simu time` (verbosity=2) |
+| **QSim** | 0.22.0 (cuStateVec) | F32 only | built-in (max 4q) | C++ `simu time` (excludes init+fuse) |
 
 Qiskit-Aer's fusion aggregates gates into up to N-qubit unitaries,
 controlled by `fusion_max_qubit`. We tested N in {off, 2, 3, 4, 5}
@@ -51,9 +51,11 @@ CUDA module loading before timing begins.
 ### FP64 Results
 
 At double precision, CAST is the only simulator that generates
-JIT-compiled, sparsity-aware fused kernels. QSim is omitted (FP32 only)
-and Qulacs is omitted (CPU only, no GPU wheel for the current CUDA
-toolkit).
+JIT-compiled, sparsity-aware fused kernels. QSim is omitted because
+cuStateVec only supports single-precision gate application (the
+`float_type` parameter of `custatevecApplyMatrix` accepts only
+`CUDA_C_32F`). Qulacs is omitted (CPU only, no GPU wheel for the
+current CUDA toolkit).
 
 | Circuit | CAST | Qiskit-Aer | Qibo | Speedup |
 |---------|------|------------|------|---------|
@@ -66,8 +68,11 @@ toolkit).
 | qvc     | 9.27 s | 23.6 s  | 77.5 s | 2.5x |
 | rqc     | 2.63 s | 15.2 s  | 16.3 s | 5.8x |
 
-Qiskit-Aer values use the best of {fusion off, fusion max 5q} per circuit;
-hea uses fusion off (20.5 s vs 23.3 s with fusion on).
+Qiskit-Aer values use the best of {fusion off, default (max 5q)} per
+circuit; max 2q was not tested at F64. hea and icmp use fusion off
+(20.5 s / 14.4 s vs 23.3 s / 14.7 s with default fusion). qft-cp-30
+is omitted from baseline data (CAST-only circuit added for the journal
+revision).
 
 CAST outperforms the best baseline on every circuit, with speedups
 ranging from 2.5x (hea, qvc) to 12.3x (icmp). The advantage is most
@@ -243,6 +248,28 @@ the difficulty of selecting a single global fusion parameter and
 motivates CAST's per-gate, per-backend cost-model approach.
 
 ---
+
+### Data Quality Notes
+
+- CAST data in Sections 8.3-8.4 was collected with `--max-size 4`. The
+  default is now 6; a re-run will produce faster CAST times (1.1-1.7x on
+  CPU, expected similar on GPU) and wider baseline gaps.
+- All baseline measurements are single-iteration (budget constraints at
+  30q GPU scale). CAST measurements have 1-12 iterations depending on
+  per-circuit cost. Single-sample variance at 30q is below 0.1% CoV
+  (verified on icmp-30 6-iter runs), so single-iteration data is reliable
+  for these circuits.
+- Baseline data was collected before the tightened timing scripts
+  (sub-metric capture, provenance embedding). A re-run with the updated
+  `sweep.py` will add `exec_only_mean_ms`, `fusion_mean_ms`, and system
+  provenance to all records.
+- qft-cp-30 is absent from all baseline runs (CAST-only addition for the
+  journal revision). A baseline re-run should include it.
+- QSim (cuStateVec) supports F32 only; all F64 tables omit QSim.
+- Qiskit-Aer F64 fusion tuning only tested {off, default (max 5q)};
+  max 2q was not swept at F64. Given the F32 results where max 2q wins
+  on 5/8 circuits, a max 2q F64 sweep is recommended before final paper
+  data.
 
 *Reproduction artifacts: `external/baselines/sweep.py` orchestrates the
 full sweep; `external/baselines/run_baseline.py --no-fusion` runs each

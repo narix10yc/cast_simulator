@@ -16,7 +16,7 @@
 
 #include "cpu_gen.h"
 #include "cpu_jit.h"
-#include "cpu_util.h"
+#include "internal/util.h"
 
 #include <llvm/Support/Error.h>
 

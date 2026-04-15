@@ -147,3 +147,39 @@ Re-run the full 5-run merge workflow when:
 The `profiles/` directory is gitignored: each user re-profiles for their
 own hardware. Keep the raw per-run files in `tmp/profiles_runs/` if you
 want to diff subsequent merges.
+
+## CPU profiling notes
+
+CPU profiling uses the same adaptive roofline sweep as CUDA, but with
+wall-clock timing (`Instant::now`) instead of CUDA events.
+
+Key difference: at 30 qubits the CPU profiler's max probed AI (64, from
+`MAX_GATE_QUBITS=6`) does not reach the compute-bound regime on a
+32-core Threadripper 7970X. The fitted "peak compute" is the highest
+bandwidth-limited throughput, not the true FLOP ceiling. The roofline R²
+is moderate for AVX2 (0.62-0.99 depending on run) because the transition
+region is noisy on CPU. AVX-512 R² is negative — the transition region
+behaves differently at wider SIMD widths.
+
+For CPU benchmarks, AVX2 (256-bit) is recommended: it matches AVX-512
+performance on bandwidth-bound 30q workloads and produces a more stable
+roofline fit. The `bench` binary accepts `--simd 256` to override the
+default (native auto-detect).
+
+### Implications for hw-adaptive fusion on CPU
+
+The CPU crossover AI (~45-52 on the Threadripper 7970X at 30q) is much
+higher than the GPU's (~8.6). This limits the discriminative power of
+hw-adaptive fusion:
+
+| Max fused gate size | Max AI (dense) | GPU cost (÷8.6) | CPU cost (÷51.7) |
+|---:|---:|---:|---:|
+| 4q | ~32 | 3.7 | 1.0 (memory-bound) |
+| 5q | ~64 | 7.4 | 1.2 |
+| 6q | ~128 | 14.9 | 2.5 |
+
+At `--max-size 4`, all fused gates remain below the CPU crossover, so
+hw-adaptive and size-only produce identical results. At `--max-size 6`,
+dense 6-qubit gates cross the threshold (cost = 2.5), enabling
+hw-adaptive to reject some unprofitable fusions. In practice, this
+matters only on circuits with dense fused gates (qvc-30: 5.8% gain).

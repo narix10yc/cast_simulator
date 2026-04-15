@@ -1,10 +1,10 @@
-#ifndef CAST_SIMULATOR_SRC_CPP_CPU_UTIL_H
-#define CAST_SIMULATOR_SRC_CPP_CPU_UTIL_H
+#ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_UTIL_H
+#define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_UTIL_H
 
 // Internal helpers shared across cpu.cpp, cpu_gen.cpp, and cpu_jit.cpp.
 // All functions are inline to avoid a separate translation unit.
 
-#include "cast_cpu.h"
+#include "../cast_cpu.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -81,4 +81,4 @@ inline bool expected_matrix_len(size_t n_qubits, size_t *out_len) {
 
 } // namespace cast_cpu_detail
 
-#endif // CAST_SIMULATOR_SRC_CPP_CPU_UTIL_H
+#endif // CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_UTIL_H

@@ -104,8 +104,8 @@ larger gates cost `1.0`.  Always accepts fusions that stay within the budget
 (`benefit_margin = 0`).  No hardware awareness.
 
 Useful presets:
-- `FusionConfig::default()` = `size_only(3)`
-- `FusionConfig::aggressive()` = `size_only(4)`
+- `FusionConfig::default()` = `size_only(6)`
+- `FusionConfig::aggressive()` = `size_only(6)`
 
 ### Hardware-Adaptive (`FusionConfig::hardware_adaptive(profile, max_size)`)
 

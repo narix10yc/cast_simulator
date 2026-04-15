@@ -1,6 +1,6 @@
 #include "cpu_jit.h"
 
-#include "cpu_util.h"
+#include "internal/util.h"
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/LegacyPassManager.h>

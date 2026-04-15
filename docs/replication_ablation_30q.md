@@ -186,17 +186,108 @@ system-wide JIT cache (`~/.nv/ComputeCache`) being warm after the 5 profile
 runs. First-run compile cost is still 2+ seconds on a cold cache; repeated
 runs benefit from the driver cache regardless of CAST-level behaviour.
 
+## CPU Ablation
+
+AMD Threadripper 7970X (32 cores, AVX2 256-bit, F64), `--max-size 6`,
+`--bench-budget 60`. Profile: BW = 99.5 GiB/s, Compute = 342.6 GFLOPs/s,
+Crossover AI = 51.7 (R² = 0.624; see hardware_profiling.md for discussion).
+
+### Raw results
+
+| Circuit | Fusion | Gates | Depth | Compile | Exec |
+|---|---|---:|---:|---:|---:|
+| ala-30 | none | 270 | 18 | 1.22 s | 87.0 s |
+| ala-30 | size-only | 51 | 17 | 13.7 s | 21.1 s |
+| ala-30 | hw-adaptive | 51 | 17 | 13.8 s | 21.6 s |
+| hea-30 | none | 441 | 59 | 1.53 s | 117 s |
+| hea-30 | size-only | 110 | 50 | 17.4 s | 40.1 s |
+| hea-30 | hw-adaptive | 114 | 52 | 11.1 s | 40.7 s |
+| hes-30 | none | 201 | 82 | 874 ms | 41.7 s |
+| hes-30 | size-only | 51 | 32 | 2.70 s | 17.0 s |
+| hes-30 | hw-adaptive | 52 | 33 | 1.52 s | 17.0 s |
+| icmp-30 | none | 137 | 124 | 518 ms | 37.3 s |
+| icmp-30 | size-only | 14 | 14 | 3.30 s | 5.95 s |
+| icmp-30 | hw-adaptive | 14 | 14 | 3.33 s | 6.02 s |
+| iqp-30 | none | 336 | 52 | 1.47 s | 63.8 s |
+| iqp-30 | size-only | 71 | 38 | 2.78 s | 22.5 s |
+| iqp-30 | hw-adaptive | 71 | 38 | 2.77 s | 22.5 s |
+| qft-cp-30 | none | 450 | 58 | 1.89 s | 53.1 s |
+| qft-cp-30 | size-only | 56 | 20 | 4.78 s | 17.2 s |
+| qft-cp-30 | hw-adaptive | 56 | 20 | 4.72 s | 17.2 s |
+| qft-cx-30 | none | 450 | 58 | 1.89 s | 95.7 s |
+| qft-cx-30 | size-only | 56 | 20 | 4.76 s | 19.7 s |
+| qft-cx-30 | hw-adaptive | 56 | 20 | 4.74 s | 19.7 s |
+| qvc-30 | none | 437 | 30 | 2.81 s | 141 s |
+| qvc-30 | size-only | 112 | 43 | 66.6 s | 57.0 s |
+| qvc-30 | hw-adaptive | 139 | 47 | 19.3 s | 53.7 s |
+| rqc-30 | none | 197 | 20 | 1.08 s | 60.1 s |
+| rqc-30 | size-only | 49 | 25 | 14.5 s | 20.9 s |
+| rqc-30 | hw-adaptive | 51 | 25 | 12.2 s | 20.7 s |
+
+### Normalized speedups (exec time, none = 1.00)
+
+| Circuit | none | size-only | hw-adaptive | size→adaptive |
+|---|---:|---:|---:|---:|
+| ala-30 | 1.000 | 0.243 | 0.248 | −2.4 % |
+| hea-30 | 1.000 | 0.343 | 0.348 | −1.5 % |
+| hes-30 | 1.000 | 0.408 | 0.408 | 0.0 % |
+| icmp-30 | 1.000 | 0.160 | 0.161 | −1.2 % |
+| iqp-30 | 1.000 | 0.353 | 0.353 | 0.0 % |
+| qft-cp-30 | 1.000 | 0.324 | 0.324 | 0.0 % |
+| qft-cx-30 | 1.000 | 0.206 | 0.206 | 0.0 % |
+| qvc-30 | 1.000 | 0.404 | 0.381 | **+5.8 %** |
+| rqc-30 | 1.000 | 0.348 | 0.345 | +1.0 % |
+
+### Interpretation
+
+Size-only fusion (max 6q) gives **1.5-6.3x** speedups across all circuits.
+The best reduction is 84% on icmp-30 (0.160 normalized), where the
+controlled-phase chain fuses down to 14 gates.
+
+**hw-adaptive vs size-only**: on most circuits these are identical, because
+the CPU's crossover AI (51.7) is high enough that even dense 6-qubit fused
+gates (AI ≈ 128, cost = 128/51.7 = 2.5) remain profitable to fuse when
+replacing 3+ gates. The one exception is **qvc-30**, where hw-adaptive
+backs off to 139 gates (vs 112 for size-only), yielding a 5.8% exec
+improvement — the same circuit where hw-adaptive diverges most on GPU.
+
+**Compile time is significant at max-size 6**: JIT compilation of 5-6 qubit
+fused kernels is expensive (qvc-30 size-only: 66.6 s compile for 57.0 s
+exec). hw-adaptive mitigates this by rejecting some large fusions: qvc-30
+hw-adaptive compiles in 19.3 s (3.5x faster) while also being faster to
+execute. For single-shot workloads, total wall time (compile + exec) favors
+hw-adaptive more strongly than exec time alone.
+
+### Impact of max-size 4 vs 6
+
+For reference, the same benchmarks with `--max-size 4` showed:
+- Gate counts ~2x higher (e.g. ala-30: 90 gates at max-4 vs 51 at max-6)
+- Exec times 1.1-1.7x slower across all circuits
+- hw-adaptive identical to size-only on every circuit (no gate above
+  crossover AI with 4-qubit cap)
+
+Raw output: `benchmarks/cpu_f64_w256_32t_*.txt`.
+
 ## Reproduction
 
+GPU:
 ```sh
 target/release/bench \
     --profile profiles/cuda_f64.json \
     --bench-budget 5 \
     --fusion none,size-only,hw-adaptive \
-    --max-size 4 \
     examples/journal_examples/{ala,hea,hes,icmp,iqp,qft-cx,qft-cp,qvc,rqc}-30.qasm
 ```
 
-For stable multi-iteration statistics (rather than single-sample probes),
-use `--bench-budget 60` — this lets the adaptive timer do several full
-passes per configuration at the 30q FP64 scale.
+CPU:
+```sh
+target/release/bench \
+    --backend cpu --simd 256 --threads 32 --precision f64 \
+    --bench-budget 60 \
+    --fusion none,size-only,hw-adaptive \
+    examples/journal_examples/{ala,hea,hes,icmp,iqp,qft-cx,qft-cp,qvc,rqc}-30.qasm
+```
+
+Default `--max-size` is 6. For stable multi-iteration statistics, use
+`--bench-budget 60` — this lets the adaptive timer do several full passes
+per configuration at the 30q FP64 scale.

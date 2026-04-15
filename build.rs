@@ -9,7 +9,15 @@ const CPU_FFI_SOURCES: &[&str] = &[
     "src/cpp/cpu/cpu_gen.cpp",
     "src/cpp/cpu/cpu_jit.h",
     "src/cpp/cpu/cpu_jit.cpp",
-    "src/cpp/cpu/cpu_util.h",
+    "src/cpp/cpu/internal/util.h",
+    "src/cpp/cpu/internal/bit_layout.h",
+    "src/cpp/cpu/internal/bit_layout.cpp",
+    "src/cpp/cpu/internal/shuffle_masks.h",
+    "src/cpp/cpu/internal/shuffle_masks.cpp",
+    "src/cpp/cpu/internal/matrix_data.h",
+    "src/cpp/cpu/internal/matrix_data.cpp",
+    "src/cpp/cpu/internal/kernel_codegen.h",
+    "src/cpp/cpu/internal/kernel_codegen.cpp",
 ];
 
 const CUDA_FFI_SOURCES: &[&str] = &[
@@ -51,6 +59,10 @@ fn build_cpu_ffi(out_dir: &Path, llvm_config: &Path) {
             "src/cpp/cpu/cpu.cpp",
             "src/cpp/cpu/cpu_gen.cpp",
             "src/cpp/cpu/cpu_jit.cpp",
+            "src/cpp/cpu/internal/bit_layout.cpp",
+            "src/cpp/cpu/internal/shuffle_masks.cpp",
+            "src/cpp/cpu/internal/matrix_data.cpp",
+            "src/cpp/cpu/internal/kernel_codegen.cpp",
         ],
         "libcast_cpu_ffi.a",
         "",
