@@ -47,7 +47,7 @@ llvm::Error cast_cpu_optimize_kernel_ir(CastCpuGeneratedKernel &generated) {
   llvm::StandardInstrumentations si(M.getContext(), false);
   si.registerCallbacks(pic, &mam);
 
-  llvm::PipelineTuningOptions pto;
+  llvm::PipelineTuningOptions const pto;
   // Pass nullptr for the TargetMachine: kernels are already explicitly
   // vectorized via SIMD intrinsics, so target auto-vectorization is not needed.
   llvm::PassBuilder pb(nullptr, pto, std::nullopt, &pic);
@@ -88,7 +88,7 @@ llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedK
     if (!target)
       return llvm::createStringError("assembly emission: " + err_str);
 
-    llvm::TargetOptions options;
+    llvm::TargetOptions const options;
     auto tm = std::unique_ptr<llvm::TargetMachine>(target->createTargetMachine(
         triple, llvm::sys::getHostCPUName().str(), /*features=*/"", options, llvm::Reloc::PIC_));
     if (!tm)
@@ -127,7 +127,7 @@ llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedK
 
   // Copy matrix for StackLoad kernels.
   cast_cpu_complex64_t *matrix_ptr = nullptr;
-  size_t matrix_len = generated.matrix.size();
+  size_t const matrix_len = generated.matrix.size();
   if (matrix_len > 0) {
     const size_t nbytes = matrix_len * sizeof(cast_cpu_complex64_t);
     matrix_ptr = static_cast<cast_cpu_complex64_t *>(std::malloc(nbytes));

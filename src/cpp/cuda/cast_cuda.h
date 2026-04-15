@@ -43,7 +43,7 @@ int cast_cuda_compile_gate_ptx(const cast_cuda_kernel_gen_spec_t *spec,
                                const uint32_t *qubits, size_t n_qubits, char **out_ptx,
                                char **out_func_name, uint32_t *out_n_gate_qubits,
                                uint8_t *out_precision, char *err_buf, size_t err_buf_len);
-void cast_cuda_str_free(char *s);
+void cast_cuda_str_free(const char *s);
 
 // -- Device capability query (cuda feature) --
 
@@ -62,7 +62,7 @@ int cast_cuda_stream_sync(void *stream, char *err_buf, size_t err_buf_len);
 
 int cast_cuda_ptx_to_cubin(const char *ptx_data, uint8_t **out_cubin, size_t *out_cubin_len,
                            char *err_buf, size_t err_buf_len);
-void cast_cuda_cubin_free(uint8_t *cubin);
+void cast_cuda_cubin_free(const uint8_t *cubin);
 
 // -- Module loading and kernel launch (cuda feature) --
 

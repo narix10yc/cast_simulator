@@ -224,7 +224,7 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
                         const std::vector<IRMatData> &mat_data, Value *sv_ptr, Type *scalar_ty) {
   B.setFastMathFlags(FastMathFlags::getFast());
 
-  const unsigned k = static_cast<unsigned>(n_qubits);
+  const auto k = static_cast<unsigned>(n_qubits);
   const unsigned K = 1u << k;
 
   // Vector type for complex pair (re, im) — enables ld.global.v2 / st.global.v2
@@ -232,7 +232,7 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
   // interleaved [re₀, im₀, re₁, im₁, …] layout.
   auto *vec2_ty = FixedVectorType::get(scalar_ty, 2);
 
-  std::vector<Value *> amp_ptrs(K);  // base pointer per amplitude (re position)
+  std::vector<Value *> amp_ptrs(K); // base pointer per amplitude (re position)
   std::vector<Value *> re_amps(K), im_amps(K);
 
   // Compute the offset for each of the K amplitude slots in the combo.
@@ -243,7 +243,7 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
       if (i & (1u << b))
         delta |= (1ull << qubits[b]);
 
-    uint64_t off2 = 2ull * delta;
+    uint64_t const off2 = 2ull * delta;
     amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2, "amp.ptr");
     auto *pair = B.CreateLoad(vec2_ty, amp_ptrs[i], "amp.pair");
     re_amps[i] = B.CreateExtractElement(pair, (uint64_t)0, "re.amp");

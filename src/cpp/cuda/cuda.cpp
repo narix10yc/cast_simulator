@@ -1,4 +1,18 @@
-#include "cuda.h"
+// Rust ↔ C ABI boundary for the CUDA kernel pipeline.
+//
+// Error handling convention: internal helpers (cast_cuda_generate_kernel_ir,
+// cast_cuda_compile_kernel) propagate via llvm::Expected<T> / llvm::Error.
+// This file is the *only* place those are converted into the C `err_buf` +
+// return-code contract.
+//
+// The `try { ... } catch (...)` blocks here are the C-ABI safety net: an
+// exception must not propagate across extern "C" into Rust (UB). In practice
+// only allocation failures (std::bad_alloc from `new`, std::make_unique,
+// std::vector growth) reach these handlers — any LLVM/logic error is already
+// surfaced via llvm::Error within the protected region. Do NOT add try/catch
+// inside helpers that return llvm::Error; keep the boundary thin.
+
+#include "cast_cuda.h"
 
 #include "cuda_gen.h"
 #include "cuda_jit.h"
@@ -78,4 +92,4 @@ extern "C" int cast_cuda_compile_gate_ptx(const cast_cuda_kernel_gen_spec_t *spe
   }
 }
 
-extern "C" void cast_cuda_str_free(char *s) { delete[] s; }
+extern "C" void cast_cuda_str_free(const char *s) { delete[] s; }

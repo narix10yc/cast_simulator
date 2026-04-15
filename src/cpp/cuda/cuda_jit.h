@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CUDA_JIT_H
 #define CAST_SIMULATOR_SRC_CPP_CUDA_JIT_H
 
-#include "cuda.h"
+#include "cast_cuda.h"
 
 #include <cstdint>
 #include <llvm/IR/LLVMContext.h>
@@ -17,11 +17,11 @@
 struct CastCudaGeneratedKernel {
   cast_cuda_kernel_gen_spec_t spec{};
   uint32_t n_gate_qubits = 0;
-  std::string func_name{};
-  std::unique_ptr<llvm::LLVMContext> context{};
-  std::unique_ptr<llvm::Module> module{};
-  std::unique_ptr<llvm::TargetMachine> tm{}; ///< created once, reused for PTX emission
-  std::string ir{}; ///< cached after cast_cuda_optimize_kernel_ir
+  std::string func_name;
+  std::unique_ptr<llvm::LLVMContext> context;
+  std::unique_ptr<llvm::Module> module;
+  std::unique_ptr<llvm::TargetMachine> tm; ///< created once, reused for PTX emission
+  std::string ir;                          ///< cached after cast_cuda_optimize_kernel_ir
   bool optimized = false;
 };
 
@@ -29,8 +29,8 @@ struct CastCudaGeneratedKernel {
 struct CastCudaCompiledKernel {
   uint32_t n_gate_qubits = 0;
   cast_cuda_precision_t precision = CAST_CUDA_PRECISION_F64;
-  std::string func_name{};
-  std::string ptx{};
+  std::string func_name;
+  std::string ptx;
 };
 
 /// Runs O1 with the NVPTX target machine, caches the IR text, sets

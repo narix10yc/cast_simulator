@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CPU_JIT_H
 #define CAST_SIMULATOR_SRC_CPP_CPU_JIT_H
 
-#include "cpu.h"
+#include "cast_cpu.h"
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/IR/LLVMContext.h>
@@ -14,12 +14,12 @@
 
 struct CastCpuGeneratedKernel {
   cast_cpu_kernel_metadata_t metadata{};
-  std::string func_name{};
-  std::unique_ptr<llvm::LLVMContext> context{};
-  std::unique_ptr<llvm::Module> module{};
-  std::vector<cast_cpu_complex64_t> matrix{};
+  std::string func_name;
+  std::unique_ptr<llvm::LLVMContext> context;
+  std::unique_ptr<llvm::Module> module;
+  std::vector<cast_cpu_complex64_t> matrix;
   /// Populated by cast_cpu_optimize_kernel_ir; empty until then.
-  std::string ir{};
+  std::string ir;
   bool optimized = false;
   /// Set by cast_cpu_kernel_generator_request_asm before finish().
   /// When false, cast_cpu_jit_compile_kernel skips assembly emission.

@@ -1,4 +1,18 @@
-#include "cpu.h"
+// Rust ↔ C ABI boundary for the CPU kernel pipeline.
+//
+// Error handling convention: internal helpers (cast_cpu_generate_kernel_ir,
+// cast_cpu_jit_create, cast_cpu_optimize_kernel_ir, cast_cpu_jit_compile_kernel)
+// propagate via llvm::Expected<T> / llvm::Error. This file is the *only* place
+// those are converted into the C `err_buf` + return-code contract.
+//
+// The `try { ... } catch (...)` blocks here are the C-ABI safety net: an
+// exception must not propagate across extern "C" into Rust (UB). In practice
+// only allocation failures (std::bad_alloc from `new`, std::make_unique,
+// std::vector growth) reach these handlers — any LLVM/logic error is already
+// surfaced via llvm::Error within the protected region. Do NOT add try/catch
+// inside helpers that return llvm::Error; keep the boundary thin.
+
+#include "cast_cpu.h"
 
 #include "cpu_gen.h"
 #include "cpu_jit.h"
@@ -18,12 +32,12 @@
 using namespace cast_cpu_detail;
 
 struct cast_cpu_kernel_generator_t {
-  std::vector<CastCpuGeneratedKernel> kernels{};
+  std::vector<CastCpuGeneratedKernel> kernels;
   cast_cpu_kernel_id_t next_kernel_id = 0;
 };
 
 struct cast_cpu_jit_session_t {
-  std::unique_ptr<llvm::orc::LLJIT> jit{};
+  std::unique_ptr<llvm::orc::LLJIT> jit;
 };
 
 extern "C" cast_cpu_kernel_generator_t *cast_cpu_kernel_generator_new(void) {
@@ -160,7 +174,7 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
   }
 
   try {
-    auto jit = cast_cpu_jit_create(static_cast<unsigned>(std::thread::hardware_concurrency()));
+    auto jit = cast_cpu_jit_create(std::thread::hardware_concurrency());
     if (!jit) {
       write_error_message(err_buf, err_buf_len, llvm::toString(jit.takeError()));
       return 1;
@@ -180,9 +194,8 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
     for (size_t i = 0; i < n; ++i) {
       if (auto err =
               cast_cpu_jit_compile_kernel(*session->jit, generator->kernels[i], records[i])) {
-        // Free inner fields of already-populated records, then the array.
+        // Frees the records' inner fields AND the array itself.
         cast_cpu_jit_kernel_records_free(records, i);
-        std::free(records);
         delete session;
         write_error_message(err_buf, err_buf_len, llvm::toString(std::move(err)));
         return 1;

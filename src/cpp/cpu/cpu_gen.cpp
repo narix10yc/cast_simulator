@@ -18,8 +18,8 @@ namespace {
 // ---------------------------------------------------------------------------
 // `CAST_BLOCK_GEMM_T` — experimental blocked matvec.
 //
-// Unset / "" / "0"  → legacy straight-line matvec (default).
-// "4" / "8" / "16"  → emit matvec as blocks of T output rows with explicit
+// Unset / "" / "0"  => legacy straight-line matvec (default).
+// "4" / "8" / "16"  => emit matvec as blocks of T output rows with explicit
 //                      basic-block boundaries and `store volatile` /
 //                      `load volatile` through a stack-allocated scratch
 //                      buffer that retires block accumulators between
@@ -218,12 +218,12 @@ static ShuffleMasks compute_shuffle_masks(const BitLayout &layout, unsigned s, u
   // --- Merge masks: iterative merge-sort for reassembling lo-partitions ---
   {
     std::vector<int> current(out.re_split.begin(), out.re_split.begin() + s);
-    for (size_t round = 0; round < layout.lo_bits.size(); ++round) {
+    for (unsigned int lo_bit : layout.lo_bits) {
       const int half = static_cast<int>(current.size());
 
       std::vector<int> rhs(half);
       for (int i = 0; i < half; ++i)
-        rhs[i] = current[i] | (1 << layout.lo_bits[round]);
+        rhs[i] = current[i] | (1 << lo_bit);
 
       out.merge.emplace_back(half * 2);
       auto &mask = out.merge.back();
@@ -289,11 +289,26 @@ static std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder,
 }
 
 // ---------------------------------------------------------------------------
+// IR emission result types
+// ---------------------------------------------------------------------------
+
+struct LoadedAmplitudes {
+  std::vector<llvm::Value *> re;   // K elements: re[hi * LK + li]
+  std::vector<llvm::Value *> im;   // K elements
+  std::vector<llvm::Value *> ptrs; // HK pointers (for stores later)
+};
+
+struct MatvecResult {
+  std::vector<llvm::Value *> re; // LK elements
+  std::vector<llvm::Value *> im; // LK elements
+};
+
+// ---------------------------------------------------------------------------
 // Kernel IR generation context
 //
 // Bundles the derived constants, LLVM types, and precomputed data needed by
 // the IR emission helpers below.  Constructed once in the public entry point
-// and passed by reference to each phase.
+// and each emission phase is a member function.
 // ---------------------------------------------------------------------------
 
 struct KernelCodegen {
@@ -306,8 +321,8 @@ struct KernelCodegen {
   unsigned LK;       // lo-qubit combinations = 2^lk
   unsigned hk;       // hi-qubit count
   unsigned HK;       // hi-qubit combinations = 2^hk
-  unsigned s;        // SIMD lanes = 2^simd_s
-  unsigned simd_s;   // log2(SIMD lanes)
+  unsigned S;        // SIMD lanes = 2^s
+  unsigned s;        // log2(S)
   unsigned vec_size; // interleaved vector width = 2^sep_bit
 
   unsigned simd_width_bytes;
@@ -324,7 +339,62 @@ struct KernelCodegen {
   unsigned block_gemm_t;
   llvm::Value *mv_re_scratch = nullptr; // set iff block_gemm_t > 0 && LK > block_gemm_t
   llvm::Value *mv_im_scratch = nullptr;
+
+  // Primary inputs drive `K = 2^k`, `LK = 2^lk`, `HK = 2^hk`, `S = 2^s`,
+  // and `vec_size = 2^layout.sep_bit`.  If block-GEMM is active (T > 0 and
+  // LK >= 4·T) the matvec scratch is allocated in `entry_bb` and the
+  // mv_*_scratch pointers are set; otherwise they stay null.
+  KernelCodegen(llvm::IRBuilder<> &builder, unsigned k, unsigned lk, unsigned hk, unsigned s,
+                const BitLayout &layout, const ShuffleMasks &smasks,
+                const std::vector<IRMatData> &mat_data, llvm::Type *scalar_ty, llvm::Type *vec_ty,
+                unsigned simd_width_bytes, unsigned block_gemm_t, llvm::BasicBlock &entry_bb);
+
+  // Allocate per-hi-block scratch space in the function's entry block.
+  // Called by the constructor when the block-GEMM experiment is active.
+  std::pair<llvm::Value *, llvm::Value *> alloca_matvec_scratch(llvm::BasicBlock &entry_bb) const;
+
+  // Emit the SV base pointer for a given task_id.
+  llvm::Value *emit_sv_base_ptr(llvm::Value *p_sv, llvm::Value *task_id);
+
+  // Phase 1: per-hi-qubit aligned load + shuffle-split into re/im vectors.
+  LoadedAmplitudes emit_load_amplitudes(llvm::Value *ptr_sv_begin);
+
+  // Phase 2: complex matrix-vector multiply — straight-line accumulator chain.
+  MatvecResult emit_matvec(const LoadedAmplitudes &amps, unsigned hi);
+
+  // Phase 2b: complex matvec tiled into T-row blocks with volatile retirement.
+  MatvecResult emit_matvec_blocked(const LoadedAmplitudes &amps, unsigned hi, unsigned T,
+                                   llvm::Value *re_scratch, llvm::Value *im_scratch);
+
+  // Phase 3: merge lo-partitions + interleave re/im + aligned store.
+  void emit_merge_and_store(MatvecResult &result, llvm::Value *p_sv_hi);
+
+  // All-lo tiled load/matvec/store path (hi_bits empty, HK=1).
+  void emit_loop_body_tiled_all_lo(llvm::Value *ptr_sv_begin);
+
+  // Full loop body: dispatches between the tiled-all-lo and general paths.
+  void emit_loop_body(llvm::Value *ptr_sv_begin);
 };
+
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
+
+KernelCodegen::KernelCodegen(llvm::IRBuilder<> &builder, unsigned k, unsigned lk, unsigned hk,
+                             unsigned s, const BitLayout &layout, const ShuffleMasks &smasks,
+                             const std::vector<IRMatData> &mat_data, llvm::Type *scalar_ty,
+                             llvm::Type *vec_ty, unsigned simd_width_bytes, unsigned block_gemm_t,
+                             llvm::BasicBlock &entry_bb)
+    : B(builder), k(k), K(1u << k), lk(lk), LK(1u << lk), hk(hk), HK(1u << hk), S(1u << s), s(s),
+      vec_size(1u << layout.sep_bit), simd_width_bytes(simd_width_bytes), layout(layout),
+      smasks(smasks), mat_data(mat_data), scalar_ty(scalar_ty), vec_ty(vec_ty),
+      block_gemm_t(block_gemm_t) {
+  if (block_gemm_t > 0 && LK >= 4 * block_gemm_t) {
+    auto scratch = alloca_matvec_scratch(entry_bb);
+    mv_re_scratch = scratch.first;
+    mv_im_scratch = scratch.second;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Phase 1: Load amplitudes
@@ -333,35 +403,29 @@ struct KernelCodegen {
 // into separate re/im vectors for each lo-qubit partition.
 // ---------------------------------------------------------------------------
 
-struct LoadedAmplitudes {
-  std::vector<llvm::Value *> re;   // K elements: re[hi * LK + li]
-  std::vector<llvm::Value *> im;   // K elements
-  std::vector<llvm::Value *> ptrs; // HK pointers (for stores later)
-};
-
-static LoadedAmplitudes emit_load_amplitudes(KernelCodegen &cg, llvm::Value *ptr_sv_begin) {
+LoadedAmplitudes KernelCodegen::emit_load_amplitudes(llvm::Value *ptr_sv_begin) {
   LoadedAmplitudes amps;
-  amps.re.resize(cg.K);
-  amps.im.resize(cg.K);
-  amps.ptrs.resize(cg.HK);
+  amps.re.resize(K);
+  amps.im.resize(K);
+  amps.ptrs.resize(HK);
 
-  for (unsigned hi = 0; hi < cg.HK; ++hi) {
+  for (unsigned hi = 0; hi < HK; ++hi) {
     uint64_t idx_shift = 0;
-    for (unsigned hbit = 0; hbit < cg.hk; ++hbit) {
+    for (unsigned hbit = 0; hbit < hk; ++hbit) {
       if (hi & (1u << hbit))
-        idx_shift += uint64_t(1) << cg.layout.hi_bits[hbit];
+        idx_shift += uint64_t(1) << layout.hi_bits[hbit];
     }
-    idx_shift >>= cg.layout.sep_bit;
+    idx_shift >>= layout.sep_bit;
 
-    amps.ptrs[hi] = cg.B.CreateConstGEP1_64(cg.vec_ty, ptr_sv_begin, idx_shift, "ptr.sv.hi");
-    auto *amp_full = cg.B.CreateAlignedLoad(cg.vec_ty, amps.ptrs[hi],
-                                            llvm::Align(cg.simd_width_bytes), "sv.full");
+    amps.ptrs[hi] = B.CreateConstGEP1_64(vec_ty, ptr_sv_begin, idx_shift, "ptr.sv.hi");
+    auto *amp_full =
+        B.CreateAlignedLoad(vec_ty, amps.ptrs[hi], llvm::Align(simd_width_bytes), "sv.full");
 
-    for (unsigned li = 0; li < cg.LK; ++li) {
-      amps.re[hi * cg.LK + li] = cg.B.CreateShuffleVector(
-          amp_full, llvm::ArrayRef<int>(cg.smasks.re_split.data() + li * cg.s, cg.s), "re");
-      amps.im[hi * cg.LK + li] = cg.B.CreateShuffleVector(
-          amp_full, llvm::ArrayRef<int>(cg.smasks.im_split.data() + li * cg.s, cg.s), "im");
+    for (unsigned li = 0; li < LK; ++li) {
+      amps.re[hi * LK + li] = B.CreateShuffleVector(
+          amp_full, llvm::ArrayRef<int>(smasks.re_split.data() + li * S, S), "re");
+      amps.im[hi * LK + li] = B.CreateShuffleVector(
+          amp_full, llvm::ArrayRef<int>(smasks.im_split.data() + li * S, S), "im");
     }
   }
 
@@ -378,35 +442,29 @@ static LoadedAmplitudes emit_load_amplitudes(KernelCodegen &cg, llvm::Value *ptr
 // adjacent fmul+fadd pairs are contracted into FMAs by the backend.
 // ---------------------------------------------------------------------------
 
-struct MatvecResult {
-  std::vector<llvm::Value *> re; // LK elements
-  std::vector<llvm::Value *> im; // LK elements
-};
-
-static MatvecResult emit_matvec(KernelCodegen &cg, const LoadedAmplitudes &amps, unsigned hi) {
-  auto *zero_vec =
-      llvm::ConstantAggregateZero::get(llvm::VectorType::get(cg.scalar_ty, cg.s, false));
+MatvecResult KernelCodegen::emit_matvec(const LoadedAmplitudes &amps, unsigned hi) {
+  auto *zero_vec = llvm::ConstantAggregateZero::get(llvm::VectorType::get(scalar_ty, S, false));
 
   MatvecResult result;
-  result.re.resize(cg.LK, nullptr);
-  result.im.resize(cg.LK, nullptr);
+  result.re.resize(LK, nullptr);
+  result.im.resize(LK, nullptr);
 
-  for (unsigned li = 0; li < cg.LK; ++li) {
-    const unsigned r = hi * cg.LK + li;
-    for (unsigned c = 0; c < cg.K; ++c) {
-      const auto &e = cg.mat_data[r * cg.K + c];
+  for (unsigned li = 0; li < LK; ++li) {
+    const unsigned r = hi * LK + li;
+    for (unsigned c = 0; c < K; ++c) {
+      const auto &e = mat_data[r * K + c];
 
-      auto *re_re = cg.B.CreateFMul(e.re_vec, amps.re[c], "re.re");
-      auto *im_im = cg.B.CreateFMul(e.im_vec, amps.im[c], "im.im");
-      auto *re_contrib = cg.B.CreateFSub(re_re, im_im, "re.contrib");
+      auto *re_re = B.CreateFMul(e.re_vec, amps.re[c], "re.re");
+      auto *im_im = B.CreateFMul(e.im_vec, amps.im[c], "im.im");
+      auto *re_contrib = B.CreateFSub(re_re, im_im, "re.contrib");
       result.re[li] =
-          result.re[li] ? cg.B.CreateFAdd(result.re[li], re_contrib, "acc.re") : re_contrib;
+          result.re[li] ? B.CreateFAdd(result.re[li], re_contrib, "acc.re") : re_contrib;
 
-      auto *re_im = cg.B.CreateFMul(e.re_vec, amps.im[c], "re.im");
-      auto *im_re = cg.B.CreateFMul(e.im_vec, amps.re[c], "im.re");
-      auto *im_contrib = cg.B.CreateFAdd(re_im, im_re, "im.contrib");
+      auto *re_im = B.CreateFMul(e.re_vec, amps.im[c], "re.im");
+      auto *im_re = B.CreateFMul(e.im_vec, amps.re[c], "im.re");
+      auto *im_contrib = B.CreateFAdd(re_im, im_re, "im.contrib");
       result.im[li] =
-          result.im[li] ? cg.B.CreateFAdd(result.im[li], im_contrib, "acc.im") : im_contrib;
+          result.im[li] ? B.CreateFAdd(result.im[li], im_contrib, "acc.im") : im_contrib;
     }
     if (result.re[li] == nullptr)
       result.re[li] = zero_vec;
@@ -441,18 +499,18 @@ static MatvecResult emit_matvec(KernelCodegen &cg, const LoadedAmplitudes &amps,
 // point at the `done` BB.
 // ---------------------------------------------------------------------------
 
-static MatvecResult emit_matvec_blocked(KernelCodegen &cg, const LoadedAmplitudes &amps,
-                                        unsigned hi, unsigned T, llvm::Value *re_scratch,
-                                        llvm::Value *im_scratch) {
+MatvecResult KernelCodegen::emit_matvec_blocked(const LoadedAmplitudes &amps, unsigned hi,
+                                                unsigned T, llvm::Value *re_scratch,
+                                                llvm::Value *im_scratch) {
   assert(T > 0);
-  assert(cg.LK > T && "caller must gate on K > T (only blocks when it helps)");
+  assert(LK > T && "caller must gate on K > T (only blocks when it helps)");
 
-  auto *vec_s_ty = llvm::VectorType::get(cg.scalar_ty, cg.s, false);
+  auto *vec_s_ty = llvm::VectorType::get(scalar_ty, S, false);
   auto *zero_vec = llvm::ConstantAggregateZero::get(vec_s_ty);
-  const auto align = llvm::Align(cg.simd_width_bytes);
+  const auto align = llvm::Align(simd_width_bytes);
 
-  const unsigned n_blocks = (cg.LK + T - 1) / T;
-  auto *func = cg.B.GetInsertBlock()->getParent();
+  const unsigned n_blocks = (LK + T - 1) / T;
+  auto *func = B.GetInsertBlock()->getParent();
   auto &ctx = func->getContext();
 
   // Pre-create block BBs + final BB so each block ends with a br to the
@@ -463,15 +521,14 @@ static MatvecResult emit_matvec_blocked(KernelCodegen &cg, const LoadedAmplitude
     block_bbs[i] = llvm::BasicBlock::Create(
         ctx, "matvec.blk." + std::to_string(hi) + "." + std::to_string(i), func);
   }
-  block_bbs[n_blocks] =
-      llvm::BasicBlock::Create(ctx, "matvec.done." + std::to_string(hi), func);
+  block_bbs[n_blocks] = llvm::BasicBlock::Create(ctx, "matvec.done." + std::to_string(hi), func);
 
-  cg.B.CreateBr(block_bbs[0]);
+  B.CreateBr(block_bbs[0]);
 
   for (unsigned bi = 0; bi < n_blocks; ++bi) {
-    cg.B.SetInsertPoint(block_bbs[bi]);
+    B.SetInsertPoint(block_bbs[bi]);
     const unsigned r_start = bi * T;
-    const unsigned r_end = std::min(r_start + T, cg.LK);
+    const unsigned r_end = std::min(r_start + T, LK);
     const unsigned block_sz = r_end - r_start;
 
     std::vector<llvm::Value *> acc_re(block_sz, nullptr);
@@ -480,21 +537,21 @@ static MatvecResult emit_matvec_blocked(KernelCodegen &cg, const LoadedAmplitude
     // Inner c-loop iterates the full K columns, accumulating into this
     // block's T rows.  The ordering (c outer, ti inner) keeps amp[c] as
     // a short-lived reference within each iteration.
-    for (unsigned c = 0; c < cg.K; ++c) {
+    for (unsigned c = 0; c < K; ++c) {
       for (unsigned ti = 0; ti < block_sz; ++ti) {
         const unsigned li = r_start + ti;
-        const unsigned r = hi * cg.LK + li;
-        const auto &e = cg.mat_data[r * cg.K + c];
+        const unsigned r = hi * LK + li;
+        const auto &e = mat_data[r * K + c];
 
-        auto *re_re = cg.B.CreateFMul(e.re_vec, amps.re[c], "re.re");
-        auto *im_im = cg.B.CreateFMul(e.im_vec, amps.im[c], "im.im");
-        auto *re_contrib = cg.B.CreateFSub(re_re, im_im, "re.contrib");
-        acc_re[ti] = acc_re[ti] ? cg.B.CreateFAdd(acc_re[ti], re_contrib, "acc.re") : re_contrib;
+        auto *re_re = B.CreateFMul(e.re_vec, amps.re[c], "re.re");
+        auto *im_im = B.CreateFMul(e.im_vec, amps.im[c], "im.im");
+        auto *re_contrib = B.CreateFSub(re_re, im_im, "re.contrib");
+        acc_re[ti] = acc_re[ti] ? B.CreateFAdd(acc_re[ti], re_contrib, "acc.re") : re_contrib;
 
-        auto *re_im = cg.B.CreateFMul(e.re_vec, amps.im[c], "re.im");
-        auto *im_re = cg.B.CreateFMul(e.im_vec, amps.re[c], "im.re");
-        auto *im_contrib = cg.B.CreateFAdd(re_im, im_re, "im.contrib");
-        acc_im[ti] = acc_im[ti] ? cg.B.CreateFAdd(acc_im[ti], im_contrib, "acc.im") : im_contrib;
+        auto *re_im = B.CreateFMul(e.re_vec, amps.im[c], "re.im");
+        auto *im_re = B.CreateFMul(e.im_vec, amps.re[c], "im.re");
+        auto *im_contrib = B.CreateFAdd(re_im, im_re, "im.contrib");
+        acc_im[ti] = acc_im[ti] ? B.CreateFAdd(acc_im[ti], im_contrib, "acc.im") : im_contrib;
       }
     }
 
@@ -505,27 +562,27 @@ static MatvecResult emit_matvec_blocked(KernelCodegen &cg, const LoadedAmplitude
       const unsigned li = r_start + ti;
       auto *v_re = acc_re[ti] ? acc_re[ti] : zero_vec;
       auto *v_im = acc_im[ti] ? acc_im[ti] : zero_vec;
-      auto *p_re = cg.B.CreateConstGEP1_32(vec_s_ty, re_scratch, li, "p.re.scratch");
-      auto *p_im = cg.B.CreateConstGEP1_32(vec_s_ty, im_scratch, li, "p.im.scratch");
-      auto *st_re = cg.B.CreateAlignedStore(v_re, p_re, align);
-      auto *st_im = cg.B.CreateAlignedStore(v_im, p_im, align);
+      auto *p_re = B.CreateConstGEP1_32(vec_s_ty, re_scratch, li, "p.re.scratch");
+      auto *p_im = B.CreateConstGEP1_32(vec_s_ty, im_scratch, li, "p.im.scratch");
+      auto *st_re = B.CreateAlignedStore(v_re, p_re, align);
+      auto *st_im = B.CreateAlignedStore(v_im, p_im, align);
       st_re->setVolatile(true);
       st_im->setVolatile(true);
     }
 
-    cg.B.CreateBr(block_bbs[bi + 1]);
+    B.CreateBr(block_bbs[bi + 1]);
   }
 
   // Final BB: volatile-reload the full result array.
-  cg.B.SetInsertPoint(block_bbs[n_blocks]);
+  B.SetInsertPoint(block_bbs[n_blocks]);
   MatvecResult result;
-  result.re.resize(cg.LK);
-  result.im.resize(cg.LK);
-  for (unsigned li = 0; li < cg.LK; ++li) {
-    auto *p_re = cg.B.CreateConstGEP1_32(vec_s_ty, re_scratch, li, "p.re.load");
-    auto *p_im = cg.B.CreateConstGEP1_32(vec_s_ty, im_scratch, li, "p.im.load");
-    auto *v_re = cg.B.CreateAlignedLoad(vec_s_ty, p_re, align, "blk.re");
-    auto *v_im = cg.B.CreateAlignedLoad(vec_s_ty, p_im, align, "blk.im");
+  result.re.resize(LK);
+  result.im.resize(LK);
+  for (unsigned li = 0; li < LK; ++li) {
+    auto *p_re = B.CreateConstGEP1_32(vec_s_ty, re_scratch, li, "p.re.load");
+    auto *p_im = B.CreateConstGEP1_32(vec_s_ty, im_scratch, li, "p.im.load");
+    auto *v_re = B.CreateAlignedLoad(vec_s_ty, p_re, align, "blk.re");
+    auto *v_im = B.CreateAlignedLoad(vec_s_ty, p_im, align, "blk.im");
     llvm::cast<llvm::LoadInst>(v_re)->setVolatile(true);
     llvm::cast<llvm::LoadInst>(v_im)->setVolatile(true);
     result.re[li] = v_re;
@@ -535,17 +592,17 @@ static MatvecResult emit_matvec_blocked(KernelCodegen &cg, const LoadedAmplitude
 }
 
 // Allocates per-hi-block scratch space in the function's entry block.
-// Returns {re_scratch, im_scratch}; both of type `[LK × <s × scalar>]*`.
+// Returns {re_scratch, im_scratch}; both of type `[LK × <S × scalar>]*`.
 // Call once per kernel, before `emit_loop_body`.
-static std::pair<llvm::Value *, llvm::Value *>
-alloca_matvec_scratch(KernelCodegen &cg, llvm::BasicBlock &entry_bb) {
+std::pair<llvm::Value *, llvm::Value *>
+KernelCodegen::alloca_matvec_scratch(llvm::BasicBlock &entry_bb) const {
   llvm::IRBuilder<> entry_builder(&entry_bb, entry_bb.getFirstInsertionPt());
-  auto *vec_s_ty = llvm::VectorType::get(cg.scalar_ty, cg.s, false);
-  auto *n_elems = entry_builder.getInt32(cg.LK);
+  auto *vec_s_ty = llvm::VectorType::get(scalar_ty, S, false);
+  auto *n_elems = entry_builder.getInt32(LK);
   auto *re = entry_builder.CreateAlloca(vec_s_ty, n_elems, "mv.re.scratch");
   auto *im = entry_builder.CreateAlloca(vec_s_ty, n_elems, "mv.im.scratch");
-  re->setAlignment(llvm::Align(cg.simd_width_bytes));
-  im->setAlignment(llvm::Align(cg.simd_width_bytes));
+  re->setAlignment(llvm::Align(simd_width_bytes));
+  im->setAlignment(llvm::Align(simd_width_bytes));
   return {re, im};
 }
 
@@ -556,96 +613,95 @@ alloca_matvec_scratch(KernelCodegen &cg, llvm::BasicBlock &entry_bb) {
 // interleave re/im into [re0, im0, re1, im1, ...], and do an aligned store.
 // ---------------------------------------------------------------------------
 
-static void emit_merge_and_store(KernelCodegen &cg, MatvecResult &result, llvm::Value *p_sv_hi) {
-  for (unsigned round = 0; round < cg.lk; ++round) {
-    for (unsigned pair = 0; pair < (cg.LK >> round >> 1); ++pair) {
+void KernelCodegen::emit_merge_and_store(MatvecResult &result, llvm::Value *p_sv_hi) {
+  for (unsigned round = 0; round < lk; ++round) {
+    for (unsigned pair = 0; pair < (LK >> round >> 1); ++pair) {
       const unsigned idx_l = pair << round << 1;
       const unsigned idx_r = idx_l | (1u << round);
-      result.re[idx_l] = cg.B.CreateShuffleVector(result.re[idx_l], result.re[idx_r],
-                                                  cg.smasks.merge[round], "re.merged");
-      result.im[idx_l] = cg.B.CreateShuffleVector(result.im[idx_l], result.im[idx_r],
-                                                  cg.smasks.merge[round], "im.merged");
+      result.re[idx_l] = B.CreateShuffleVector(result.re[idx_l], result.re[idx_r],
+                                               smasks.merge[round], "re.merged");
+      result.im[idx_l] = B.CreateShuffleVector(result.im[idx_l], result.im[idx_r],
+                                               smasks.merge[round], "im.merged");
     }
   }
 
-  auto *merged =
-      cg.B.CreateShuffleVector(result.re[0], result.im[0], cg.smasks.reim_merge, "amp.merged");
-  cg.B.CreateAlignedStore(merged, p_sv_hi, llvm::Align(cg.simd_width_bytes));
+  auto *merged = B.CreateShuffleVector(result.re[0], result.im[0], smasks.reim_merge, "amp.merged");
+  B.CreateAlignedStore(merged, p_sv_hi, llvm::Align(simd_width_bytes));
 }
 
 // ---------------------------------------------------------------------------
 // Emit the SV base pointer for a given task_id
 // ---------------------------------------------------------------------------
 
-static llvm::Value *emit_sv_base_ptr(KernelCodegen &cg, llvm::Value *p_sv, llvm::Value *task_id) {
-  if (cg.layout.hi_bits.empty()) {
-    return cg.B.CreateGEP(cg.vec_ty, p_sv, task_id, "ptr.sv.begin");
+llvm::Value *KernelCodegen::emit_sv_base_ptr(llvm::Value *p_sv, llvm::Value *task_id) {
+  if (layout.hi_bits.empty()) {
+    return B.CreateGEP(vec_ty, p_sv, task_id, "ptr.sv.begin");
   }
 
-  const auto segs = compute_hi_ptr_segments(cg.layout.hi_bits, cg.layout.sep_bit);
-  llvm::Value *idx = cg.B.getInt64(0);
+  const auto segs = compute_hi_ptr_segments(layout.hi_bits, layout.sep_bit);
+  llvm::Value *idx = B.getInt64(0);
   for (const auto &seg : segs) {
-    auto *part = cg.B.CreateAnd(task_id, seg.src_mask, "idx.part");
+    auto *part = B.CreateAnd(task_id, seg.src_mask, "idx.part");
     if (seg.dst_shift > 0)
-      part = cg.B.CreateShl(part, (uint64_t)seg.dst_shift, "idx.part");
-    idx = cg.B.CreateAdd(idx, part, "idx");
+      part = B.CreateShl(part, (uint64_t)seg.dst_shift, "idx.part");
+    idx = B.CreateAdd(idx, part, "idx");
   }
-  return cg.B.CreateGEP(cg.vec_ty, p_sv, idx, "ptr.sv.begin");
+  return B.CreateGEP(vec_ty, p_sv, idx, "ptr.sv.begin");
 }
 
 // ---------------------------------------------------------------------------
 // Tiled-load path for the all-lo case (hi_bits empty, HK=1).
 //
 // Replaces the single `<vec_size × scalar>` aligned load plus stride
-// shufflevector extractions with `vec_size / s` aligned loads at native
+// shufflevector extractions with `vec_size / S` aligned loads at native
 // SIMD width, and the inverse on the store side.  This avoids LLVM's
 // type-legalisation blowup for large vec_size (which explodes compile
 // time at k≥5 when targets concentrate at low qubit positions).
 //
 // Correctness contract: the amp vector produced for (li, re/im) must have
 // lane si equal to the statevector element at vector index
-// re_split[li*s+si] (or im_split for im).  We decompose each such index
-// into (chunk = idx >> simd_s, lane = idx & (s-1)) and use
+// re_split[li*S+si] (or im_split for im).  We decompose each such index
+// into (chunk = idx >> s, lane = idx & (S-1)) and use
 // extractelement/insertelement on native-width chunks.  The store phase
 // performs the inverse scatter.
 // ---------------------------------------------------------------------------
 
-static void emit_loop_body_tiled_all_lo(KernelCodegen &cg, llvm::Value *ptr_sv_begin) {
-  assert(cg.layout.hi_bits.empty());
-  assert(cg.HK == 1);
-  const unsigned num_chunks = cg.vec_size / cg.s;
+void KernelCodegen::emit_loop_body_tiled_all_lo(llvm::Value *ptr_sv_begin) {
+  assert(layout.hi_bits.empty());
+  assert(HK == 1);
+  const unsigned num_chunks = vec_size / S;
   assert(num_chunks >= 2);
-  const unsigned s_mask = cg.s - 1;
-  auto *chunk_ty = llvm::VectorType::get(cg.scalar_ty, cg.s, false);
-  const auto align = llvm::Align(cg.simd_width_bytes);
+  const unsigned s_mask = S - 1;
+  auto *chunk_ty = llvm::VectorType::get(scalar_ty, S, false);
+  const auto align = llvm::Align(simd_width_bytes);
 
   // 1. Load all native-width chunks in one pass.
   std::vector<llvm::Value *> chunks(num_chunks);
   for (unsigned c = 0; c < num_chunks; ++c) {
-    auto *ptr = cg.B.CreateConstGEP1_32(chunk_ty, ptr_sv_begin, c, "ptr.chunk");
-    chunks[c] = cg.B.CreateAlignedLoad(chunk_ty, ptr, align, "chunk");
+    auto *ptr = B.CreateConstGEP1_32(chunk_ty, ptr_sv_begin, c, "ptr.chunk");
+    chunks[c] = B.CreateAlignedLoad(chunk_ty, ptr, align, "chunk");
   }
 
   // 2. Build amp vectors by gathering lanes from the chunks using the
   //    existing re_split / im_split index tables.
   auto *undef_vec = llvm::UndefValue::get(chunk_ty);
   LoadedAmplitudes amps;
-  amps.re.resize(cg.LK);
-  amps.im.resize(cg.LK);
+  amps.re.resize(LK);
+  amps.im.resize(LK);
   amps.ptrs.assign(1, ptr_sv_begin); // Unused for HK=1 (matvec only reads .re/.im).
 
-  for (unsigned li = 0; li < cg.LK; ++li) {
+  for (unsigned li = 0; li < LK; ++li) {
     llvm::Value *re_vec = undef_vec;
     llvm::Value *im_vec = undef_vec;
-    for (unsigned si = 0; si < cg.s; ++si) {
-      const unsigned re_idx = static_cast<unsigned>(cg.smasks.re_split[li * cg.s + si]);
-      const unsigned im_idx = static_cast<unsigned>(cg.smasks.im_split[li * cg.s + si]);
-      auto *re_elem = cg.B.CreateExtractElement(chunks[re_idx >> cg.simd_s],
-                                                uint64_t(re_idx & s_mask), "re.e");
-      auto *im_elem = cg.B.CreateExtractElement(chunks[im_idx >> cg.simd_s],
-                                                uint64_t(im_idx & s_mask), "im.e");
-      re_vec = cg.B.CreateInsertElement(re_vec, re_elem, uint64_t(si), "re.v");
-      im_vec = cg.B.CreateInsertElement(im_vec, im_elem, uint64_t(si), "im.v");
+    for (unsigned si = 0; si < S; ++si) {
+      const auto re_idx = static_cast<unsigned>(smasks.re_split[li * S + si]);
+      const auto im_idx = static_cast<unsigned>(smasks.im_split[li * S + si]);
+      auto *re_elem =
+          B.CreateExtractElement(chunks[re_idx >> s], uint64_t(re_idx & s_mask), "re.e");
+      auto *im_elem =
+          B.CreateExtractElement(chunks[im_idx >> s], uint64_t(im_idx & s_mask), "im.e");
+      re_vec = B.CreateInsertElement(re_vec, re_elem, uint64_t(si), "re.v");
+      im_vec = B.CreateInsertElement(im_vec, im_elem, uint64_t(si), "im.v");
     }
     amps.re[li] = re_vec;
     amps.im[li] = im_vec;
@@ -653,35 +709,35 @@ static void emit_loop_body_tiled_all_lo(KernelCodegen &cg, llvm::Value *ptr_sv_b
 
   // 3. Matvec: dispatch to blocked variant if the experiment is enabled
   //    and the gate is large enough to subdivide.
-  auto result = (cg.block_gemm_t > 0 && cg.LK >= 4 * cg.block_gemm_t)
-                    ? emit_matvec_blocked(cg, amps, /*hi=*/0, cg.block_gemm_t,
-                                          cg.mv_re_scratch, cg.mv_im_scratch)
-                    : emit_matvec(cg, amps, /*hi=*/0);
+  auto result =
+      (block_gemm_t > 0 && LK >= 4 * block_gemm_t)
+          ? emit_matvec_blocked(amps, /*hi=*/0, block_gemm_t, mv_re_scratch, mv_im_scratch)
+          : emit_matvec(amps, /*hi=*/0);
 
   // 4. Scatter result lanes back into native-width chunks.  Initial undef
   //    is fine: every lane of every chunk is reached exactly once by the
-  //    nested loop below (LK·s = K = 2^k amps × s lanes = 2·LK·s lane
-  //    writes total = 2^(k+simd_s+1) = vec_size = num_chunks·s, half re
+  //    nested loop below (LK·S = K = 2^k amps × S lanes = 2·LK·S lane
+  //    writes total = 2^(k+s+1) = vec_size = num_chunks·S, half re
   //    half im).
   std::vector<llvm::Value *> out_chunks(num_chunks, undef_vec);
-  for (unsigned li = 0; li < cg.LK; ++li) {
-    for (unsigned si = 0; si < cg.s; ++si) {
-      const unsigned re_idx = static_cast<unsigned>(cg.smasks.re_split[li * cg.s + si]);
-      const unsigned im_idx = static_cast<unsigned>(cg.smasks.im_split[li * cg.s + si]);
-      auto *re_elem = cg.B.CreateExtractElement(result.re[li], uint64_t(si), "re.out.e");
-      auto *im_elem = cg.B.CreateExtractElement(result.im[li], uint64_t(si), "im.out.e");
-      const unsigned re_c = re_idx >> cg.simd_s;
-      const unsigned im_c = im_idx >> cg.simd_s;
-      out_chunks[re_c] = cg.B.CreateInsertElement(out_chunks[re_c], re_elem,
-                                                  uint64_t(re_idx & s_mask), "out.re");
-      out_chunks[im_c] = cg.B.CreateInsertElement(out_chunks[im_c], im_elem,
-                                                  uint64_t(im_idx & s_mask), "out.im");
+  for (unsigned li = 0; li < LK; ++li) {
+    for (unsigned si = 0; si < S; ++si) {
+      const auto re_idx = static_cast<unsigned>(smasks.re_split[li * S + si]);
+      const auto im_idx = static_cast<unsigned>(smasks.im_split[li * S + si]);
+      auto *re_elem = B.CreateExtractElement(result.re[li], uint64_t(si), "re.out.e");
+      auto *im_elem = B.CreateExtractElement(result.im[li], uint64_t(si), "im.out.e");
+      const unsigned re_c = re_idx >> s;
+      const unsigned im_c = im_idx >> s;
+      out_chunks[re_c] =
+          B.CreateInsertElement(out_chunks[re_c], re_elem, uint64_t(re_idx & s_mask), "out.re");
+      out_chunks[im_c] =
+          B.CreateInsertElement(out_chunks[im_c], im_elem, uint64_t(im_idx & s_mask), "out.im");
     }
   }
 
   for (unsigned c = 0; c < num_chunks; ++c) {
-    auto *ptr = cg.B.CreateConstGEP1_32(chunk_ty, ptr_sv_begin, c, "ptr.out");
-    cg.B.CreateAlignedStore(out_chunks[c], ptr, align);
+    auto *ptr = B.CreateConstGEP1_32(chunk_ty, ptr_sv_begin, c, "ptr.out");
+    B.CreateAlignedStore(out_chunks[c], ptr, align);
   }
 }
 
@@ -689,31 +745,30 @@ static void emit_loop_body_tiled_all_lo(KernelCodegen &cg, llvm::Value *ptr_sv_b
 // Emit the full loop body: load → matvec → merge/store for each hi block
 // ---------------------------------------------------------------------------
 
-static void emit_loop_body(KernelCodegen &cg, llvm::Value *ptr_sv_begin) {
+void KernelCodegen::emit_loop_body(llvm::Value *ptr_sv_begin) {
   // Tile only when all targets are lo_bits (HK=1 — with hi iterations the
   // per-hi load is already a native-width slice) AND the mega-load would
   // exceed one native-width vector (otherwise there is no legalisation to
   // avoid).
   //
-  // At s=16 (F32 W512) the tiled path emits 2·s = 32 extract/insert pairs
+  // At S=16 (F32 W512) the tiled path emits 2·S = 32 extract/insert pairs
   // per amp vector, which InstCombine converts to 16-wide shufflevectors;
   // native codegen of those outweighs the legalisation savings on this
   // single variant (empirically a net +50% at k=6).  Gate it out; all
   // other {precision, SIMD} combinations show a net win on the isolated
   // microbench.
-  if (cg.layout.hi_bits.empty() && cg.vec_size > cg.s && cg.s <= 8) {
-    emit_loop_body_tiled_all_lo(cg, ptr_sv_begin);
+  if (layout.hi_bits.empty() && vec_size > S && S <= 8) {
+    emit_loop_body_tiled_all_lo(ptr_sv_begin);
     return;
   }
 
-  auto amps = emit_load_amplitudes(cg, ptr_sv_begin);
+  auto amps = emit_load_amplitudes(ptr_sv_begin);
 
-  for (unsigned hi = 0; hi < cg.HK; ++hi) {
-    auto result = (cg.block_gemm_t > 0 && cg.LK >= 4 * cg.block_gemm_t)
-                      ? emit_matvec_blocked(cg, amps, hi, cg.block_gemm_t,
-                                            cg.mv_re_scratch, cg.mv_im_scratch)
-                      : emit_matvec(cg, amps, hi);
-    emit_merge_and_store(cg, result, amps.ptrs[hi]);
+  for (unsigned hi = 0; hi < HK; ++hi) {
+    auto result = (block_gemm_t > 0 && LK >= 4 * block_gemm_t)
+                      ? emit_matvec_blocked(amps, hi, block_gemm_t, mv_re_scratch, mv_im_scratch)
+                      : emit_matvec(amps, hi);
+    emit_merge_and_store(result, amps.ptrs[hi]);
   }
 }
 
@@ -747,22 +802,20 @@ llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
     return llvm::createStringError("matrix length does not match the target qubit count");
 
   // --- Derived constants ---
-  const unsigned simd_s = cast_cpu_detail::get_simd_s(spec.simd_width, spec.precision);
-  assert(simd_s > 0 && simd_s <= 4);
-  const unsigned s = 1u << simd_s;
-  const unsigned k = static_cast<unsigned>(n_qubits);
+  const unsigned s = cast_cpu_detail::get_simd_s(spec.simd_width, spec.precision);
+  assert(s > 0 && s <= 4);
+  const unsigned S = 1u << s;
+  const auto k = static_cast<unsigned>(n_qubits);
   const unsigned K = 1u << k;
   const MatrixView mat_view{matrix, static_cast<uint32_t>(K)};
 
-  const BitLayout layout = compute_bit_layout(qubits, n_qubits, simd_s);
+  const BitLayout layout = compute_bit_layout(qubits, n_qubits, s);
   const unsigned lk = layout.lo_bits.size();
-  const unsigned LK = 1u << lk;
   const unsigned hk = layout.hi_bits.size();
-  const unsigned HK = 1u << hk;
   const unsigned vec_size = 1u << layout.sep_bit;
   const unsigned simd_width_bytes = static_cast<unsigned>(spec.simd_width) / 8u;
 
-  const ShuffleMasks smasks = compute_shuffle_masks(layout, s, simd_s, vec_size);
+  const ShuffleMasks smasks = compute_shuffle_masks(layout, S, s, vec_size);
 
   // --- IR setup ---
   auto &ctx = module.getContext();
@@ -800,29 +853,21 @@ llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
       builder.getPtrTy(), builder.CreateStructGEP(launch_ty, launch_arg, 3, "launch.mat.ptr"),
       "mat");
 
-  const auto mat_data = build_matrix_data(builder, spec, mat_view, args.p_mat, simd_s);
+  const auto mat_data = build_matrix_data(builder, spec, mat_view, args.p_mat, s);
 
-  // --- Block-GEMM experiment: read env var and, if active, allocate the
-  //     matvec scratch buffer in the entry block (one allocation per
-  //     kernel, reused across loop iterations).  Gated on `LK >= 4·T`:
+  // --- Block-GEMM experiment: read env var; the constructor below allocates
+  //     the matvec scratch buffer in `entry_bb` when `block_gemm_t > 0` and
+  //     `LK >= 4·T`.  That gate matters:
   //     - LK=1 (hi-heavy) has one accumulator per hi iteration → blocking
   //       can't reduce pressure;
   //     - LK ≤ 2·T gives too few blocks to amortise the volatile-store
   //       overhead (empirically regresses k=4 runtime by ~8%);
   //     - LK ≥ 4·T is the empirical break-even (k=5 neutral, k=6 clear win).
   const unsigned block_gemm_t = get_block_gemm_tile();
-  const bool block_gemm_active = block_gemm_t > 0 && LK >= 4 * block_gemm_t;
 
   // --- Construct codegen context ---
-  KernelCodegen cg{
-      builder,          k,      K,      lk,       LK,        hk,    HK, s, simd_s, vec_size,
-      simd_width_bytes, layout, smasks, mat_data, scalar_ty, vec_ty, block_gemm_t};
-
-  if (block_gemm_active) {
-    auto scratch = alloca_matvec_scratch(cg, *entry_bb);
-    cg.mv_re_scratch = scratch.first;
-    cg.mv_im_scratch = scratch.second;
-  }
+  KernelCodegen cg(builder, k, lk, hk, s, layout, smasks, mat_data, scalar_ty, vec_ty,
+                   simd_width_bytes, block_gemm_t, *entry_bb);
 
   // --- Loop ---
   builder.CreateBr(loop_bb);
@@ -832,8 +877,8 @@ llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
   builder.CreateCondBr(builder.CreateICmpSLT(task_id, args.ctr_end, "cond"), loop_body_bb, ret_bb);
 
   builder.SetInsertPoint(loop_body_bb);
-  auto *ptr_sv_begin = emit_sv_base_ptr(cg, args.p_sv, task_id);
-  emit_loop_body(cg, ptr_sv_begin);
+  auto *ptr_sv_begin = cg.emit_sv_base_ptr(args.p_sv, task_id);
+  cg.emit_loop_body(ptr_sv_begin);
 
   // emit_loop_body may have split the body across additional BBs (e.g.
   // block-GEMM's per-block BBs).  Use GetInsertBlock() to get the actual

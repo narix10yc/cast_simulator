@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CPU_GEN_H
 #define CAST_SIMULATOR_SRC_CPP_CPU_GEN_H
 
-#include "cpu.h"
+#include "cast_cpu.h"
 
 #include <llvm/Support/Error.h>
 

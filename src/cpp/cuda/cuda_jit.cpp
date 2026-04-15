@@ -31,14 +31,14 @@ static llvm::Expected<std::unique_ptr<llvm::TargetMachine>> create_nvptx_tm(uint
                                                                             uint32_t sm_minor) {
   ensure_nvptx_initialized();
 
-  llvm::Triple triple("nvptx64-nvidia-cuda");
+  llvm::Triple const triple("nvptx64-nvidia-cuda");
   std::string err;
   const auto *target = llvm::TargetRegistry::lookupTarget(triple, err);
   if (!target)
     return llvm::createStringError("NVPTX target not found: " + err);
 
-  std::string arch = "sm_" + std::to_string(sm_major) + std::to_string(sm_minor);
-  llvm::TargetOptions options;
+  std::string const arch = "sm_" + std::to_string(sm_major) + std::to_string(sm_minor);
+  llvm::TargetOptions const options;
   auto tm = std::unique_ptr<llvm::TargetMachine>(
       target->createTargetMachine(triple, arch, /*features=*/"", options,
                                   /*reloc=*/std::nullopt));
@@ -99,7 +99,7 @@ llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated) {
   llvm::StandardInstrumentations si(M.getContext(), /*DebugLogging=*/false);
   si.registerCallbacks(pic, &mam);
 
-  llvm::PipelineTuningOptions pto;
+  llvm::PipelineTuningOptions const pto;
   // Pass the NVPTX TM so backend-specific analyses (e.g. TTI) are available.
   llvm::PassBuilder pb(generated.tm.get(), pto, std::nullopt, &pic);
   pb.registerLoopAnalyses(lam);
