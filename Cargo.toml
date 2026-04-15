@@ -30,3 +30,7 @@ path = "src/bin/profile_hw.rs"
 [[bin]]
 name = "bench"
 path = "src/bin/bench.rs"
+
+[[bin]]
+name = "bench_compile"
+path = "src/bin/bench_compile.rs"

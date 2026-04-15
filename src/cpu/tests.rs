@@ -867,4 +867,485 @@ mod tests {
             1e-10,
         );
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Kernel-generator bit-layout coverage
+    //
+    // Pins the numerical output of the CPU JIT across every bit-layout
+    // shape the generator can produce and every supported {precision,
+    // simd_width} combination.  Serves as a safety net for refactors of
+    // emit_load_amplitudes / emit_merge_and_store (src/cpp/cpu/cpu_gen.cpp)
+    // — e.g. tiling the lo-heavy `<vec_size x double>` mega-load into
+    // native-width aligned loads so LLVM type legalisation stops inflating
+    // compile time.  Reference is `CPUStatevector::apply_gate` (scalar).
+    // ═══════════════════════════════════════════════════════════════════════
+
+    mod layout_coverage {
+        use super::*;
+        use crate::types::ComplexSquareMatrix;
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+
+        // ── Seed-stable gate constructors ────────────────────────────────
+
+        fn seeded_rng(seed: u64) -> StdRng {
+            StdRng::seed_from_u64(seed)
+        }
+
+        fn random_unitary(qubits: &[u32], seed: u64) -> QuantumGate {
+            let mut rng = seeded_rng(seed);
+            QuantumGate::random_unitary_with_rng(qubits, &mut rng)
+        }
+
+        fn random_sparse(qubits: &[u32], sparsity: f64, seed: u64) -> QuantumGate {
+            let mut rng = seeded_rng(seed);
+            QuantumGate::random_sparse_with_rng(qubits, sparsity, &mut rng)
+        }
+
+        fn identity_gate(qubits: &[u32]) -> QuantumGate {
+            let n = 1usize << qubits.len();
+            let mut data = vec![Complex::default(); n * n];
+            for i in 0..n {
+                data[i * n + i] = Complex::new(1.0, 0.0);
+            }
+            QuantumGate::new(ComplexSquareMatrix::from_vec(n, data), qubits.to_vec())
+        }
+
+        fn zero_gate(qubits: &[u32]) -> QuantumGate {
+            let n = 1usize << qubits.len();
+            let data = vec![Complex::default(); n * n];
+            QuantumGate::new(ComplexSquareMatrix::from_vec(n, data), qubits.to_vec())
+        }
+
+        // Random diagonal unitary: |d_ii| = 1, off-diagonals exactly 0.
+        // Stresses structural-zero detection (ztol) uniformly.
+        fn diagonal_unitary(qubits: &[u32], seed: u64) -> QuantumGate {
+            let mut rng = seeded_rng(seed);
+            let n = 1usize << qubits.len();
+            let mut data = vec![Complex::default(); n * n];
+            for i in 0..n {
+                let theta: f64 = rng.gen_range(0.0..std::f64::consts::TAU);
+                data[i * n + i] = Complex::new(theta.cos(), theta.sin());
+            }
+            QuantumGate::new(ComplexSquareMatrix::from_vec(n, data), qubits.to_vec())
+        }
+
+        // Random signed-permutation unitary: exactly one ±1 per row/column.
+        // Every non-zero entry must fold to the ±1 branch.
+        fn permutation_gate(qubits: &[u32], seed: u64) -> QuantumGate {
+            let mut rng = seeded_rng(seed);
+            let n = 1usize << qubits.len();
+            let mut perm: Vec<usize> = (0..n).collect();
+            for i in (1..n).rev() {
+                let j = rng.gen_range(0..=i);
+                perm.swap(i, j);
+            }
+            let mut data = vec![Complex::default(); n * n];
+            for row in 0..n {
+                let sign = if rng.gen_bool(0.5) { 1.0 } else { -1.0 };
+                data[row * n + perm[row]] = Complex::new(sign, 0.0);
+            }
+            QuantumGate::new(ComplexSquareMatrix::from_vec(n, data), qubits.to_vec())
+        }
+
+        // Conjugate transpose (unitary inverse when the input is unitary).
+        fn dagger(g: &QuantumGate) -> QuantumGate {
+            let edge = g.matrix().edge_size();
+            let src = g.matrix();
+            let mut data = vec![Complex::default(); edge * edge];
+            for r in 0..edge {
+                for c in 0..edge {
+                    let v = src.get(r, c);
+                    data[c * edge + r] = Complex::new(v.re, -v.im);
+                }
+            }
+            QuantumGate::new(
+                ComplexSquareMatrix::from_vec(edge, data),
+                g.qubits().to_vec(),
+            )
+        }
+
+        // ── Spec matrix ─────────────────────────────────────────────────
+
+        // All six {precision, simd_width} combinations the CPU path supports.
+        fn all_specs() -> [(Precision, SimdWidth, f64); 6] {
+            [
+                (Precision::F64, SimdWidth::W128, 1e-10),
+                (Precision::F64, SimdWidth::W256, 1e-10),
+                (Precision::F64, SimdWidth::W512, 1e-10),
+                (Precision::F32, SimdWidth::W128, 5e-5),
+                (Precision::F32, SimdWidth::W256, 5e-5),
+                (Precision::F32, SimdWidth::W512, 5e-5),
+            ]
+        }
+
+        // Statevector size generous enough that every spec variant's
+        // sep_bit fits (simd_s ∈ [1, 4]).
+        fn sv_size_for(qubits: &[u32]) -> u32 {
+            let max_q = qubits.iter().copied().max().unwrap_or(0);
+            let k = qubits.len() as u32;
+            (max_q + 4).max(k + 6)
+        }
+
+        fn check_one(
+            gate: &QuantumGate,
+            n_qubits_sv: u32,
+            precision: Precision,
+            simd_width: SimdWidth,
+            tol: f64,
+            n_threads: u32,
+            check_norm: bool,
+        ) {
+            let spec = default_spec(precision, simd_width);
+            let gate_arc = Arc::new(gate.clone());
+            let mgr = CpuKernelManager::new(spec);
+            let id = mgr.generate(&gate_arc).expect("generate kernel");
+
+            let mut sv_jit = seeded_statevector(n_qubits_sv, precision, simd_width);
+            let mut sv_ref = sv_jit.clone();
+
+            sv_ref.apply_gate(&gate_arc);
+            mgr.apply(id, &mut sv_jit, n_threads).expect("apply kernel");
+
+            assert_statevectors_close(&sv_jit, &sv_ref, tol);
+            if check_norm {
+                assert!(
+                    (sv_jit.norm() - 1.0).abs() < tol,
+                    "unit-norm violated ({:?}/{:?}): norm={}",
+                    precision,
+                    simd_width,
+                    sv_jit.norm()
+                );
+            }
+        }
+
+        // Run the gate against every spec variant at n_threads=1.
+        fn check_all_specs(gate: &QuantumGate, check_norm: bool) {
+            let n_qubits_sv = sv_size_for(gate.qubits());
+            for (precision, simd_width, tol) in all_specs() {
+                check_one(gate, n_qubits_sv, precision, simd_width, tol, 1, check_norm);
+            }
+        }
+
+        // Single-spec convenience: production default (F64, W512).
+        // Used when we want broad scenario coverage without paying the
+        // 6× compile cost of sweeping all specs.
+        fn check_default_spec(gate: &QuantumGate, check_norm: bool) {
+            check_one(
+                gate,
+                sv_size_for(gate.qubits()),
+                Precision::F64,
+                SimdWidth::W512,
+                1e-10,
+                1,
+                check_norm,
+            );
+        }
+
+        // ── Shape A: pure lo-heavy, contiguous targets q=[0..k) ─────────
+        //
+        // This is the bit-layout shape that produces the `<vec_size x f64>`
+        // mega-load in `emit_load_amplitudes`.  lk=k, hk=0.
+
+        #[test]
+        fn shape_all_lo_contiguous_k_sweep_f64_w512() {
+            // k-sweep at a single spec to keep runtime bounded; F64 W512
+            // is the production default and has simd_s=3.
+            for k in 1..=6u32 {
+                let qs: Vec<u32> = (0..k).collect();
+                let gate = random_unitary(&qs, 0x1_0000 + k as u64);
+                check_one(
+                    &gate,
+                    sv_size_for(&qs),
+                    Precision::F64,
+                    SimdWidth::W512,
+                    1e-10,
+                    1,
+                    true,
+                );
+            }
+        }
+
+        #[test]
+        fn shape_all_lo_contiguous_k6_every_spec() {
+            // Worst-case vec_size for every simd_s; full spec matrix.
+            let qs: Vec<u32> = (0..6).collect();
+            let gate = random_unitary(&qs, 0x1_A006);
+            check_all_specs(&gate, true);
+        }
+
+        #[test]
+        fn shape_all_lo_contiguous_k4_every_spec() {
+            // Mid-size lo-heavy — runs fast enough to cover all six specs.
+            let qs: Vec<u32> = (0..4).collect();
+            let gate = random_unitary(&qs, 0x1_A004);
+            check_all_specs(&gate, true);
+        }
+
+        // ── Shape B: all-lo with gaps (lk=k still, sep_bit varies) ──────
+
+        #[test]
+        fn shape_all_lo_with_gaps() {
+            // Single spec to keep runtime bounded — each scenario is a
+            // 6-qubit gate whose compile dominates.
+            let scenarios: &[&[u32]] = &[
+                &[0, 1, 2, 3, 4, 6], // one gap at position 5
+                &[0, 1, 2, 3, 5, 6], // gap inside the target span
+                &[0, 1, 3, 4, 6, 7], // two interior gaps
+                &[0, 1, 2, 3, 4, 7], // one wide gap
+            ];
+            for (i, qs) in scenarios.iter().enumerate() {
+                let gate = random_unitary(qs, 0x2_0000 + i as u64);
+                check_default_spec(&gate, true);
+            }
+        }
+
+        // ── Shape C: pure all-hi (existing fast path — regression guard) ─
+
+        #[test]
+        fn shape_all_hi_contiguous() {
+            // First target ≥ simd_s on every variant (simd_s ≤ 4).
+            // These compile fast (~300 ms), so every spec is affordable.
+            let scenarios: &[&[u32]] = &[
+                &[5, 6, 7, 8, 9, 10],
+                &[6, 7, 8, 9, 10, 11],
+                &[5],
+                &[5, 6],
+            ];
+            for (i, qs) in scenarios.iter().enumerate() {
+                let gate = random_unitary(qs, 0x3_0000 + i as u64);
+                check_all_specs(&gate, true);
+            }
+        }
+
+        // ── Shape D: mixed layouts, 0 < lk < k ───────────────────────────
+
+        #[test]
+        fn shape_mixed_lk_varies() {
+            let scenarios: &[&[u32]] = &[
+                &[0, 5, 6, 7, 8, 9],  // lk=1 on simd_s ≥ 1
+                &[0, 1, 5, 6, 7, 8],  // lk=2 on simd_s ≥ 2
+                &[0, 1, 2, 5, 6, 7],  // lk=3 on simd_s ≥ 3
+                &[0, 2, 4, 6, 8, 10], // spread, lk varies per simd_s
+            ];
+            for (i, qs) in scenarios.iter().enumerate() {
+                let gate = random_unitary(qs, 0x4_0000 + i as u64);
+                check_default_spec(&gate, true);
+            }
+        }
+
+        // ── Shape E: targets straddling the simd_s boundary ──────────────
+        //
+        // Different simd_s values place the same qubit on different sides
+        // of the boundary.  Single- and two-qubit cases exercise every
+        // placement relative to simd_s ∈ {1, 2, 3, 4}.
+
+        #[test]
+        fn shape_straddles_simd_boundary_1q() {
+            for pos in [0u32, 1, 2, 3, 4, 5] {
+                let gate = random_unitary(&[pos], 0x5_0000 + pos as u64);
+                check_all_specs(&gate, true);
+            }
+        }
+
+        #[test]
+        fn shape_straddles_simd_boundary_2q() {
+            let scenarios: &[&[u32]] = &[&[0, 1], &[1, 2], &[2, 3], &[3, 4], &[0, 4], &[1, 5]];
+            for (i, qs) in scenarios.iter().enumerate() {
+                let gate = random_unitary(qs, 0x6_0000 + i as u64);
+                check_all_specs(&gate, true);
+            }
+        }
+
+        // ── Matrix content classes on the worst-case lo-heavy layout ────
+
+        #[test]
+        fn content_identity_on_all_lo_k6() {
+            // Identity → every off-diagonal = 0 folded by InstCombine, so
+            // this runs fast enough to sweep all specs.
+            let qs: Vec<u32> = (0..6).collect();
+            check_all_specs(&identity_gate(&qs), true);
+        }
+
+        #[test]
+        fn content_diagonal_on_all_lo_k6() {
+            // Diagonal unitary — off-diagonals are structural zeros; fast.
+            let qs: Vec<u32> = (0..6).collect();
+            check_all_specs(&diagonal_unitary(&qs, 0x7_D001), true);
+        }
+
+        #[test]
+        fn content_permutation_on_all_lo_k6() {
+            // Permutation — one ±1 per row, exercises the otol branch.
+            let qs: Vec<u32> = (0..6).collect();
+            check_all_specs(&permutation_gate(&qs, 0x7_D002), true);
+        }
+
+        #[test]
+        fn content_sparse_densities_on_all_lo_k6() {
+            // Sparsity triggers the zero-fold path in the kernel generator.
+            // random_sparse is NOT unitary, so we skip the norm check.
+            let qs: Vec<u32> = (0..6).collect();
+            for (i, &d) in [0.5f64, 0.25, 0.1].iter().enumerate() {
+                let gate = random_sparse(&qs, d, 0x7_5000 + i as u64);
+                check_default_spec(&gate, false);
+            }
+        }
+
+        #[test]
+        fn content_zero_matrix_on_all_lo_k6() {
+            // Degenerate: every output amp must be 0.  Guards against
+            // NaN/inf leakage in the accumulator-init path.
+            let qs: Vec<u32> = (0..6).collect();
+            let gate = zero_gate(&qs);
+            let n_qubits_sv = sv_size_for(&qs);
+            for (precision, simd_width, tol) in all_specs() {
+                check_one(&gate, n_qubits_sv, precision, simd_width, tol, 1, false);
+            }
+        }
+
+        // ── StackLoad mode over the worst-case lo-heavy layout ──────────
+
+        #[test]
+        fn stack_load_mode_on_all_lo_k6() {
+            let qs: Vec<u32> = (0..6).collect();
+            let gate_arc = Arc::new(random_unitary(&qs, 0x8_F001));
+            let n_qubits_sv = sv_size_for(&qs);
+            for (precision, simd_width, tol) in all_specs() {
+                let spec = CPUKernelGenSpec {
+                    precision,
+                    simd_width,
+                    mode: MatrixLoadMode::StackLoad,
+                    ztol: match precision {
+                        Precision::F32 => 1e-6,
+                        Precision::F64 => 1e-12,
+                    },
+                    otol: match precision {
+                        Precision::F32 => 1e-6,
+                        Precision::F64 => 1e-12,
+                    },
+                };
+                let mgr = CpuKernelManager::new(spec);
+                let id = mgr.generate(&gate_arc).expect("generate");
+                let mut sv_jit = seeded_statevector(n_qubits_sv, precision, simd_width);
+                let mut sv_ref = sv_jit.clone();
+                sv_ref.apply_gate(&gate_arc);
+                mgr.apply(id, &mut sv_jit, 1).expect("apply");
+                assert_statevectors_close(&sv_jit, &sv_ref, tol);
+                assert!((sv_jit.norm() - 1.0).abs() < tol);
+            }
+        }
+
+        // ── Multi-threaded execution on the worst-case layout ────────────
+
+        #[test]
+        fn multi_thread_on_all_lo_k6() {
+            let qs: Vec<u32> = (0..6).collect();
+            let gate = random_unitary(&qs, 0x9_0001);
+            let n_qubits_sv = sv_size_for(&qs);
+            for &n_threads in &[1u32, 2, 4, 8] {
+                check_one(
+                    &gate,
+                    n_qubits_sv,
+                    Precision::F64,
+                    SimdWidth::W512,
+                    1e-10,
+                    n_threads,
+                    true,
+                );
+            }
+        }
+
+        // ── U · U† = I round-trip on the worst-case layout ───────────────
+
+        #[test]
+        fn unitary_dagger_roundtrip_on_all_lo_k6() {
+            let qs: Vec<u32> = (0..6).collect();
+            let u = random_unitary(&qs, 0xA_0001);
+            let ud = dagger(&u);
+
+            let spec = default_spec(Precision::F64, SimdWidth::W512);
+            let u_arc = Arc::new(u);
+            let ud_arc = Arc::new(ud);
+            let mgr = CpuKernelManager::new(spec);
+            let id_u = mgr.generate(&u_arc).expect("gen u");
+            let id_ud = mgr.generate(&ud_arc).expect("gen ud");
+
+            let n_qubits_sv = sv_size_for(u_arc.qubits());
+            let sv_start = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
+            let mut sv = sv_start.clone();
+            mgr.apply(id_u, &mut sv, 1).expect("apply u");
+            mgr.apply(id_ud, &mut sv, 1).expect("apply ud");
+            assert_statevectors_close(&sv, &sv_start, 1e-10);
+        }
+
+        // ── Minimum SV size (edge of valid input) ────────────────────────
+        //
+        // Exercises the smallest SV that still produces a non-zero task
+        // count and the next few sizes up — boundary bugs in the
+        // sv-base-pointer math tend to appear at the minimum.
+
+        #[test]
+        fn minimum_sv_size_edges() {
+            let qs: Vec<u32> = (0..6).collect();
+            let gate = random_unitary(&qs, 0xB_0001);
+            for n_qubits_sv in [9u32, 10, 11, 12] {
+                check_one(
+                    &gate,
+                    n_qubits_sv,
+                    Precision::F64,
+                    SimdWidth::W512,
+                    1e-10,
+                    1,
+                    true,
+                );
+            }
+        }
+
+        // ── Multiple random seeds (property-style robustness) ────────────
+
+        #[test]
+        fn random_seed_robustness_all_lo_k6() {
+            // Eight independent random unitaries — catches bugs that depend
+            // on specific matrix patterns (e.g. accidental ±1 coincidence
+            // within ImmValue ztol/otol tolerances).
+            let qs: Vec<u32> = (0..6).collect();
+            for seed in 0..8u64 {
+                let gate = random_unitary(&qs, 0xC_0000 + seed);
+                check_one(
+                    &gate,
+                    sv_size_for(&qs),
+                    Precision::F64,
+                    SimdWidth::W512,
+                    1e-10,
+                    1,
+                    true,
+                );
+            }
+        }
+
+        // ── Kernel-manager dedup must return the same numerical result ──
+
+        #[test]
+        fn dedup_returns_identical_results() {
+            let qs: Vec<u32> = (0..6).collect();
+            let gate = Arc::new(random_unitary(&qs, 0xD_0001));
+            let spec = default_spec(Precision::F64, SimdWidth::W512);
+            let mgr = CpuKernelManager::new(spec);
+            let id_a = mgr.generate(&gate).expect("generate a");
+            let id_b = mgr.generate(&gate).expect("generate b");
+            // Dedup should have returned the same kernel id.
+            assert_eq!(id_a, id_b);
+
+            let mut sv_a =
+                seeded_statevector(sv_size_for(gate.qubits()), spec.precision, spec.simd_width);
+            let mut sv_b = sv_a.clone();
+            mgr.apply(id_a, &mut sv_a, 1).expect("apply a");
+            mgr.apply(id_b, &mut sv_b, 1).expect("apply b");
+            // Bit-identical: dedup maps both ids to the same compiled kernel.
+            for idx in 0..sv_a.len() {
+                assert_eq!(sv_a.amp(idx), sv_b.amp(idx));
+            }
+        }
+    }
 }
