@@ -15,7 +15,9 @@ fn test_graph(gates: Vec<QuantumGate>) -> CircuitGraph {
     CircuitGraph::from_circuit(&circuit)
 }
 
-// ── Statevector / density matrix ─────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Statevector / density matrix
+// ---------------------------------------------------------------------------
 
 #[test]
 fn statevector_h_gate() {
@@ -66,7 +68,10 @@ fn from_qasm() {
     assert!(state.is_pure());
 }
 
-// ── Trajectory / ensemble ────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Trajectory / ensemble
+// ---------------------------------------------------------------------------
+
 //
 // Dead-gate elimination is the caller's responsibility under the new API;
 // these tests either have no dead gates or call `eliminate_dead_gates`
@@ -306,7 +311,9 @@ fn ensemble_multi_noise_matches_dm() {
     }
 }
 
-// ── CUDA ─────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CUDA
+// ---------------------------------------------------------------------------
 
 #[test]
 #[cfg(feature = "cuda")]

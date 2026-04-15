@@ -11,7 +11,9 @@ pub use kernel::{CPUKernelGenSpec, CpuKernelManager, KernelId};
 #[cfg(test)]
 mod tests;
 
-// ── Thread count ──────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Thread count
+// ---------------------------------------------------------------------------
 
 /// Returns the worker thread count for JIT kernel dispatch.
 ///
@@ -25,7 +27,9 @@ pub fn get_num_threads() -> u32 {
         .unwrap_or_else(|| num_cpus::get() as u32)
 }
 
-// ── SIMD width detection ────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// SIMD width detection
+// ---------------------------------------------------------------------------
 
 /// Detects the widest SIMD register width supported by the current CPU.
 ///

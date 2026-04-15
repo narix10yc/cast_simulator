@@ -4,14 +4,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 
 use super::measure::batch_sample;
 use super::Backend;
 use crate::types::QuantumGate;
 use crate::CircuitGraph;
 
-// ── Public types ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 
 /// Options for [`Simulator::sample_trajectory`](super::Simulator::sample_trajectory).
 #[derive(Clone, Debug)]
@@ -57,7 +59,9 @@ pub struct TrajectoryResult {
     pub explored_weight: f64,
 }
 
-// ── Internal types ───────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
 
 /// Pre-compiled noise kernels and branch weights for each gate in the circuit.
 /// Unitary gates have `None` entries.
@@ -74,7 +78,9 @@ struct Member<Sv> {
     noise_path: Vec<usize>,
 }
 
-// ── Simulator::sample_trajectory ─────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Simulator::sample_trajectory
+// ---------------------------------------------------------------------------
 
 impl<B: Backend> super::Simulator<B> {
     /// Ensemble-sample a noisy circuit.
@@ -99,7 +105,7 @@ impl<B: Backend> super::Simulator<B> {
         &self,
         graph: &CircuitGraph,
         opts: &TrajectoryOpts,
-    ) -> Result<TrajectoryResult> {
+    ) -> anyhow::Result<TrajectoryResult> {
         let n_physical = graph.n_qubits() as u32;
         let gates = graph.gates_in_row_order();
 
@@ -124,7 +130,10 @@ impl<B: Backend> super::Simulator<B> {
     }
 
     /// Compile the unitary gates; noisy gates get `None` entries.
-    fn compile_base_kernels(&self, gates: &[Arc<QuantumGate>]) -> Result<Vec<Option<B::KernelId>>> {
+    fn compile_base_kernels(
+        &self,
+        gates: &[Arc<QuantumGate>],
+    ) -> anyhow::Result<Vec<Option<B::KernelId>>> {
         let mut ids = Vec::with_capacity(gates.len());
         for (i, gate) in gates.iter().enumerate() {
             if gate.is_unitary() {
@@ -141,7 +150,7 @@ impl<B: Backend> super::Simulator<B> {
     fn compile_noise_kernels(
         &self,
         gates: &[Arc<QuantumGate>],
-    ) -> Result<NoiseKernelTable<B::KernelId>> {
+    ) -> anyhow::Result<NoiseKernelTable<B::KernelId>> {
         let mut kernels: Vec<Option<Vec<B::KernelId>>> = Vec::with_capacity(gates.len());
         let mut weights: Vec<Option<Vec<f64>>> = Vec::with_capacity(gates.len());
 
@@ -175,11 +184,11 @@ impl<B: Backend> super::Simulator<B> {
         base_ids: &[Option<B::KernelId>],
         noise_table: &NoiseKernelTable<B::KernelId>,
         max_ensemble: usize,
-    ) -> Result<Vec<Member<B::Sv>>> {
-        let mut sv0 = B::new_sv(n_physical, &self.spec)?;
-        B::init_sv(&mut sv0)?;
+    ) -> anyhow::Result<Vec<Member<B::Sv>>> {
+        let mut sv = B::new_sv(n_physical, &self.spec)?;
+        B::init_sv(&mut sv)?;
         let mut ensemble: Vec<Member<B::Sv>> = vec![Member {
-            sv: sv0,
+            sv,
             weight: 1.0,
             noise_path: Vec::new(),
         }];
@@ -261,7 +270,7 @@ impl<B: Backend> super::Simulator<B> {
         &self,
         ensemble: &[Member<B::Sv>],
         opts: &TrajectoryOpts,
-    ) -> Result<(HashMap<u64, u64>, Vec<ExploredBranch>, f64)> {
+    ) -> anyhow::Result<(HashMap<u64, u64>, Vec<ExploredBranch>, f64)> {
         use rand::prelude::*;
         use rand::rngs::StdRng;
 

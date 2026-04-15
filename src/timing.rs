@@ -3,8 +3,6 @@
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-
 /// Statistics returned by [`time_adaptive`] and [`time_adaptive_with`].
 #[derive(Debug, Clone)]
 pub struct TimingStats {
@@ -77,7 +75,9 @@ pub fn stats_from_samples(samples: &[f64]) -> TimingStats {
     }
 }
 
-// ── Core adaptive loop ───────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Core adaptive loop
+// ---------------------------------------------------------------------------
 
 /// Adaptive budget logic shared by all public timing helpers.
 ///
@@ -85,7 +85,10 @@ pub fn stats_from_samples(samples: &[f64]) -> TimingStats {
 /// (returns a single sample), or until the full budget is consumed following
 /// a `1:3` warmup:measurement split.  Returns the raw per-iter sample
 /// durations in seconds.
-fn run_adaptive_loop(f: &mut dyn FnMut() -> Result<Duration>, budget_s: f64) -> Result<Vec<f64>> {
+fn run_adaptive_loop(
+    f: &mut dyn FnMut() -> anyhow::Result<Duration>,
+    budget_s: f64,
+) -> anyhow::Result<Vec<f64>> {
     const WARMUP_FRACTION: f64 = 0.25;
     const OVER_BUDGET_FACTOR: f64 = 1.5;
 
@@ -119,7 +122,9 @@ fn run_adaptive_loop(f: &mut dyn FnMut() -> Result<Duration>, budget_s: f64) -> 
     Ok(samples)
 }
 
-// ── Public API ───────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 /// Adaptively times a fallible closure that reports its own duration,
 /// returning the raw per-iter samples in seconds.
@@ -134,9 +139,9 @@ fn run_adaptive_loop(f: &mut dyn FnMut() -> Result<Duration>, budget_s: f64) -> 
 /// kernel time measured via hardware events) rather than the full closure
 /// wall-clock time which may include launch overhead.
 pub fn time_adaptive_samples_with(
-    mut f: impl FnMut() -> Result<Duration>,
+    mut f: impl FnMut() -> anyhow::Result<Duration>,
     budget_s: f64,
-) -> Result<Vec<f64>> {
+) -> anyhow::Result<Vec<f64>> {
     run_adaptive_loop(&mut f, budget_s)
 }
 
@@ -146,9 +151,9 @@ pub fn time_adaptive_samples_with(
 /// Thin wrapper around [`time_adaptive_samples_with`] followed by
 /// [`stats_from_samples`].
 pub fn time_adaptive_with(
-    f: impl FnMut() -> Result<Duration>,
+    f: impl FnMut() -> anyhow::Result<Duration>,
     budget_s: f64,
-) -> Result<TimingStats> {
+) -> anyhow::Result<TimingStats> {
     time_adaptive_samples_with(f, budget_s).map(|s| stats_from_samples(&s))
 }
 
@@ -161,7 +166,10 @@ pub fn time_adaptive_with(
 /// Otherwise the budget is split: ~1/4 for warmup (probe + extra un-timed
 /// passes), ~3/4 for timed measurements. Fast operations get many warmup
 /// passes; slow ones keep only the single probe as warmup.
-pub fn time_adaptive_samples(mut f: impl FnMut() -> Result<()>, budget_s: f64) -> Result<Vec<f64>> {
+pub fn time_adaptive_samples(
+    mut f: impl FnMut() -> anyhow::Result<()>,
+    budget_s: f64,
+) -> anyhow::Result<Vec<f64>> {
     time_adaptive_samples_with(
         || {
             let t = Instant::now();
@@ -177,6 +185,9 @@ pub fn time_adaptive_samples(mut f: impl FnMut() -> Result<()>, budget_s: f64) -
 ///
 /// Thin wrapper around [`time_adaptive_samples`] followed by
 /// [`stats_from_samples`].
-pub fn time_adaptive(f: impl FnMut() -> Result<()>, budget_s: f64) -> Result<TimingStats> {
+pub fn time_adaptive(
+    f: impl FnMut() -> anyhow::Result<()>,
+    budget_s: f64,
+) -> anyhow::Result<TimingStats> {
     time_adaptive_samples(f, budget_s).map(|s| stats_from_samples(&s))
 }

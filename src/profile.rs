@@ -51,7 +51,9 @@ use std::time::Instant;
 use crate::cost_model::{Device, HardwareProfile, ProfileConfig, SweepEntry};
 use crate::types::QuantumGate;
 
-// ── Constants ────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 /// Largest gate size (qubits); caps the probed AI range at `2^MAX_GATE_QUBITS`.
 const MAX_GATE_QUBITS: u32 = 6;
@@ -71,7 +73,9 @@ const MAX_REFINE_ROUNDS: u32 = 5;
 /// Maximum new probe candidates per refinement round.
 const MAX_CANDIDATES_PER_ROUND: usize = 3;
 
-// ── Probe result ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Probe result
+// ---------------------------------------------------------------------------
 
 /// A single measured data point from the roofline sweep.
 ///
@@ -86,7 +90,9 @@ struct ProbeResult {
     gib_s: f64,
 }
 
-// ── Roofline parameters ──────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Roofline parameters
+// ---------------------------------------------------------------------------
 
 /// Parameters of a fitted two-segment roofline model.
 ///
@@ -114,7 +120,9 @@ impl RooflineParams {
     }
 }
 
-// ── Roofline fitting ─────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Roofline fitting
+// ---------------------------------------------------------------------------
 
 /// Fits a two-segment piecewise roofline to measured sweep data.
 ///
@@ -166,7 +174,9 @@ fn roofline_r2(sweep: &[ProbeResult], params: &RooflineParams) -> f64 {
     1.0 - ss_res / ss_tot
 }
 
-// ── Progress bar ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Progress bar
+// ---------------------------------------------------------------------------
 
 /// Renders a single-line progress bar on stderr, overwriting the previous line.
 ///
@@ -202,7 +212,9 @@ fn progress_bar(
     let _ = std::io::stderr().flush();
 }
 
-// ── Adaptive sweep ───────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Adaptive sweep
+// ---------------------------------------------------------------------------
 
 /// Drives the adaptive roofline sweep shared between CPU and CUDA profiling.
 ///
@@ -330,7 +342,9 @@ fn adaptive_sweep(
     Ok(profile)
 }
 
-// ── Fit from externally-collected samples ───────────────────────────────────
+// ---------------------------------------------------------------------------
+// Fit from externally-collected samples
+// ---------------------------------------------------------------------------
 
 /// Build a [`HardwareProfile`] from a pre-collected set of sweep samples.
 ///
@@ -379,7 +393,9 @@ pub fn fit_from_samples(
     Ok(profile)
 }
 
-// ── Public entry point ────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
 
 /// Profiles hardware by sweeping gate kernels across arithmetic intensities.
 ///
@@ -429,7 +445,9 @@ pub fn measure(
     )
 }
 
-// ── Backend convenience functions ────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Backend convenience functions
+// ---------------------------------------------------------------------------
 
 /// Profiles CPU hardware.
 ///

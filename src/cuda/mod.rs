@@ -47,11 +47,10 @@ pub fn device_sm() -> anyhow::Result<(u32, u32)> {
         let status = unsafe {
             ffi::cast_cuda_device_sm(&mut major, &mut minor, err_buf.as_mut_ptr(), err_buf.len())
         };
-        if status == 0 {
-            Ok((major, minor))
-        } else {
-            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+        if status != 0 {
+            anyhow::bail!(error_from_buf(&err_buf));
         }
+        Ok((major, minor))
     }
 }
 
@@ -67,11 +66,10 @@ pub fn cuda_free_memory_bytes() -> anyhow::Result<(u64, u64)> {
     let status = unsafe {
         ffi::cast_cuda_free_memory(&mut free, &mut total, err_buf.as_mut_ptr(), err_buf.len())
     };
-    if status == 0 {
-        Ok((free, total))
-    } else {
-        Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+    if status != 0 {
+        anyhow::bail!(error_from_buf(&err_buf));
     }
+    Ok((free, total))
 }
 
 pub(super) fn error_from_buf(buf: &[c_char]) -> String {

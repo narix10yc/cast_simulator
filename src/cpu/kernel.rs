@@ -57,7 +57,9 @@ pub type KernelId = u64;
 
 const ERR_BUF_LEN: usize = 1024;
 
-// ── FFI declarations ──────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// FFI declarations
+// ---------------------------------------------------------------------------
 
 /// Mirrors the "Exported to Rust" section of `src/cpp/cpu/cpu.h`.
 ///
@@ -164,7 +166,9 @@ mod ffi {
     }
 }
 
-// ── CastCpuLaunchArgs ─────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CastCpuLaunchArgs
+// ---------------------------------------------------------------------------
 
 /// Matches `cast_cpu_launch_args_t` in `cpu.h`.
 /// Each JIT-compiled kernel reads its work range and matrix pointer from this struct.
@@ -176,7 +180,9 @@ struct CpuLaunchArgs {
     p_mat: *mut c_void,
 }
 
-// ── MatrixBuffer ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// MatrixBuffer
+// ---------------------------------------------------------------------------
 
 /// Typed matrix buffer for StackLoad dispatch; ensures correct scalar alignment.
 /// Built once at kernel construction time and reused across all `apply` calls.
@@ -215,7 +221,9 @@ impl MatrixBuffer {
     }
 }
 
-// ── FFI helpers ───────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// FFI helpers
+// ---------------------------------------------------------------------------
 
 /// Runs O1 optimisation on the kernel and returns the LLVM IR text (two-call
 /// pattern: first call queries length, second fills the buffer).
@@ -235,7 +243,7 @@ fn ffi_emit_ir(gen: *mut ffi::KernelGenerator, kernel_id: KernelId) -> anyhow::R
         )
     };
     if status != 0 {
-        return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        anyhow::bail!(error_from_buf(&err_buf));
     }
 
     let mut ir_buf = vec![0u8; ir_len + 1];
@@ -251,14 +259,16 @@ fn ffi_emit_ir(gen: *mut ffi::KernelGenerator, kernel_id: KernelId) -> anyhow::R
         )
     };
     if status != 0 {
-        return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        anyhow::bail!(error_from_buf(&err_buf));
     }
 
     ir_buf.truncate(ir_len);
     String::from_utf8(ir_buf).map_err(|e| anyhow::anyhow!("IR is not valid UTF-8: {e}"))
 }
 
-// ── JIT session / generator RAII handles ─────────────────────────────────
+// ---------------------------------------------------------------------------
+// JIT session / generator RAII handles
+// ---------------------------------------------------------------------------
 
 /// RAII wrapper for a C++ LLJIT session.  Shared via `Arc` across all
 /// kernels compiled in the same batch — the session (and thus the compiled
@@ -314,7 +324,7 @@ impl GeneratorHandle {
         // `finish` deletes the C++ generator on success.  On failure the
         // generator is left intact — our Drop will clean it up.
         if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
 
         // Ownership transferred to the C++ side on success — prevent our
@@ -333,7 +343,9 @@ impl Drop for GeneratorHandle {
     }
 }
 
-// ── CpuKernelManager ──────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CpuKernelManager
+// ---------------------------------------------------------------------------
 
 /// A single compiled kernel owned by the manager.
 ///
@@ -360,21 +372,17 @@ struct KernelEntry {
 }
 
 impl KernelEntry {
-    /// Applies this kernel to `statevector` in-place using a thread pool.
-    fn apply_kernel(&self, statevector: &mut CPUStatevector, n_threads: u32) -> anyhow::Result<()> {
-        if statevector.precision() != self.precision {
-            return Err(anyhow::anyhow!(
-                "statevector precision does not match kernel"
-            ));
+    /// Applies this kernel to `sv` in-place using a thread pool.
+    fn apply_kernel(&self, sv: &mut CPUStatevector, n_threads: u32) -> anyhow::Result<()> {
+        if sv.precision() != self.precision {
+            anyhow::bail!("statevector precision does not match kernel");
         }
-        if statevector.simd_width() != self.simd_width {
-            return Err(anyhow::anyhow!(
-                "statevector SIMD width does not match kernel"
-            ));
+        if sv.simd_width() != self.simd_width {
+            anyhow::bail!("statevector SIMD width does not match kernel");
         }
 
         let n_gate_qubits = self.gate.n_qubits() as u32;
-        let n_qubits = statevector.n_qubits();
+        let n_qubits = sv.n_qubits();
         let simd_s = get_simd_s(self.simd_width, self.precision);
         let n_task_bits = n_qubits
             .checked_sub(n_gate_qubits + simd_s)
@@ -396,8 +404,8 @@ impl KernelEntry {
             n_threads,
         );
 
-        let entry = self.func;
-        let sv_addr = statevector.raw_mut_ptr() as usize;
+        let func = self.func;
+        let sv_addr = sv.raw_mut_ptr() as usize;
         let p_mat_addr = self.matrix_buf.as_ptr() as usize;
 
         // SAFETY:
@@ -421,7 +429,7 @@ impl KernelEntry {
                         ctr_end,
                         p_mat: p_mat_addr as *mut c_void,
                     };
-                    unsafe { entry(&mut args as *mut CpuLaunchArgs as *mut c_void) };
+                    unsafe { func(&mut args as *mut CpuLaunchArgs as *mut c_void) };
                 });
             }
         });
@@ -447,7 +455,9 @@ struct PendingKernel {
     ir_text: Option<String>,
 }
 
-// ── Kernel deduplication ─────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Kernel deduplication
+// ---------------------------------------------------------------------------
 
 /// Key capturing every input that affects the compiled kernel output.
 ///
@@ -525,8 +535,8 @@ struct CpuManagerInner {
 /// let mgr = CpuKernelManager::new(spec);
 /// let k1 = mgr.generate(&gate_a)?;         // LLVM IR (deferred JIT)
 /// let k2 = mgr.generate(&gate_b)?;         // batched with k1
-/// mgr.apply(k1, &mut statevector, 0)?;     // auto-finalizes both
-/// mgr.apply(k2, &mut statevector, 0)?;     // already compiled
+/// mgr.apply(k1, &mut sv, 0)?;     // auto-finalizes both
+/// mgr.apply(k2, &mut sv, 0)?;     // already compiled
 /// ```
 ///
 /// Kernels are accumulated in a shared C++ generator during [`generate`]
@@ -671,7 +681,7 @@ impl CpuKernelManager {
             )
         };
         if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
 
         // ── Diagnostics (IR + asm capture) ────────────────────────────────
@@ -693,7 +703,7 @@ impl CpuKernelManager {
                 )
             };
             if status != 0 {
-                return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+                anyhow::bail!(error_from_buf(&err_buf));
             }
         }
 
@@ -837,7 +847,7 @@ impl CpuKernelManager {
                 return Ok(entry.clone());
             }
             if !inner.pending.iter().any(|(kid, _)| *kid == id) {
-                return Err(anyhow::anyhow!("kernel id {} not found", id));
+                anyhow::bail!("kernel id {} not found", id);
             }
         }
         // Kernel is pending — finalize the batch.
@@ -877,7 +887,7 @@ impl CpuKernelManager {
             .map(|(_, p)| p.gate.clone())
     }
 
-    /// Applies the kernel identified by `id` to `statevector` in-place.
+    /// Applies the kernel identified by `id` to `sv` in-place.
     ///
     /// `n_threads`: number of worker threads. Pass `0` to use the hardware
     /// thread count.
@@ -888,12 +898,12 @@ impl CpuKernelManager {
     pub fn apply(
         &self,
         id: KernelId,
-        statevector: &mut CPUStatevector,
+        sv: &mut CPUStatevector,
         n_threads: u32,
     ) -> anyhow::Result<()> {
         let entry = self.ensure_compiled(id)?;
         // Lock released — kernel execution does not block the manager.
-        entry.apply_kernel(statevector, n_threads)
+        entry.apply_kernel(sv, n_threads)
     }
 
     /// Times a kernel adaptively within `budget_s` seconds.
@@ -903,15 +913,17 @@ impl CpuKernelManager {
     pub fn time_adaptive(
         &self,
         id: KernelId,
-        statevector: &mut CPUStatevector,
+        sv: &mut CPUStatevector,
         n_threads: u32,
         budget_s: f64,
     ) -> anyhow::Result<crate::timing::TimingStats> {
-        crate::timing::time_adaptive(|| self.apply(id, statevector, n_threads), budget_s)
+        crate::timing::time_adaptive(|| self.apply(id, sv, n_threads), budget_s)
     }
 }
 
-// ── Utilities ─────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
 
 /// Reads a null-terminated C string from `buf` and returns it as a `String`.
 fn error_from_buf(buf: &[c_char]) -> String {

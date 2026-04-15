@@ -15,7 +15,9 @@ use crate::types::QuantumGate;
 /// CUevent) passed through the FFI layer.
 type CuPtr = *mut std::ffi::c_void;
 
-// ── CudaKernel ───────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CudaKernel
+// ---------------------------------------------------------------------------
 
 /// A compiled CUDA kernel, ready to be loaded and launched.
 ///
@@ -97,7 +99,9 @@ impl fmt::Debug for CudaKernel {
     }
 }
 
-// ── LRU module cache ──────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// LRU module cache
+// ---------------------------------------------------------------------------
 
 /// Default number of CUmodule slots in the manager's LRU cache.
 #[cfg(feature = "cuda")]
@@ -161,10 +165,7 @@ impl EventPair {
             ffi::cast_cuda_event_synchronize(self.end_ev, err_buf.as_mut_ptr(), err_buf.len())
         };
         if status != 0 {
-            return Err(anyhow::anyhow!(
-                "event_synchronize: {}",
-                error_from_buf(err_buf)
-            ));
+            anyhow::bail!("event_synchronize: {}", error_from_buf(err_buf));
         }
         self.collect_timing(err_buf)
     }
@@ -185,10 +186,7 @@ impl EventPair {
             )
         };
         if status != 0 {
-            return Err(anyhow::anyhow!(
-                "event_elapsed_ms: {}",
-                error_from_buf(err_buf)
-            ));
+            anyhow::bail!("event_elapsed_ms: {}", error_from_buf(err_buf));
         }
         Ok(KernelExecTime {
             kernel_id: self.kernel_id,
@@ -201,7 +199,9 @@ impl EventPair {
     }
 }
 
-// ── Kernel deduplication ─────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Kernel deduplication
+// ---------------------------------------------------------------------------
 
 /// Key capturing every input that affects the compiled CUDA kernel output.
 /// The spec is fixed per manager, so only the gate-specific fields vary.
@@ -231,7 +231,9 @@ impl DedupKey {
     }
 }
 
-// ── Shared FFI helpers ──────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Shared FFI helpers
+// ---------------------------------------------------------------------------
 
 /// GPU-side parameters for a single kernel launch.
 #[cfg(feature = "cuda")]
@@ -267,11 +269,11 @@ fn record_launch(
     };
     if status != 0 {
         unsafe { ffi::cast_cuda_event_destroy(start_ev) };
-        return Err(anyhow::anyhow!(
+        anyhow::bail!(
             "kernel {} launch failed: {}",
             kernel_id,
             error_from_buf(err_buf)
-        ));
+        );
     }
 
     let end_ev = match create_and_record_event(params.stream, err_buf) {
@@ -318,10 +320,7 @@ fn load_cubin_module(
         )
     };
     if cu_module.is_null() {
-        return Err(anyhow::anyhow!(
-            "cubin load failed: {}",
-            error_from_buf(err_buf)
-        ));
+        anyhow::bail!("cubin load failed: {}", error_from_buf(err_buf));
     }
     let func_cstr = CString::new(func_name.as_bytes())
         .map_err(|e| anyhow::anyhow!("func_name contains null byte: {e}"))?;
@@ -335,10 +334,7 @@ fn load_cubin_module(
     };
     if cu_function.is_null() {
         unsafe { ffi::cast_cuda_module_unload(cu_module) };
-        return Err(anyhow::anyhow!(
-            "module_get_function failed: {}",
-            error_from_buf(err_buf)
-        ));
+        anyhow::bail!("module_get_function failed: {}", error_from_buf(err_buf));
     }
     Ok((cu_module, cu_function))
 }
@@ -352,19 +348,13 @@ fn create_and_record_event(
 ) -> anyhow::Result<CuPtr> {
     let ev = unsafe { ffi::cast_cuda_event_create(err_buf.as_mut_ptr(), err_buf.len()) };
     if ev.is_null() {
-        return Err(anyhow::anyhow!(
-            "event_create failed: {}",
-            error_from_buf(err_buf)
-        ));
+        anyhow::bail!("event_create failed: {}", error_from_buf(err_buf));
     }
     let status =
         unsafe { ffi::cast_cuda_event_record(ev, stream, err_buf.as_mut_ptr(), err_buf.len()) };
     if status != 0 {
         unsafe { ffi::cast_cuda_event_destroy(ev) };
-        return Err(anyhow::anyhow!(
-            "event_record failed: {}",
-            error_from_buf(err_buf)
-        ));
+        anyhow::bail!("event_record failed: {}", error_from_buf(err_buf));
     }
     Ok(ev)
 }
@@ -425,7 +415,7 @@ fn compile_gate(
     let _name_guard = CStrGuard(out_func_name);
 
     if status != 0 {
-        return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+        anyhow::bail!(error_from_buf(&err_buf));
     }
 
     // Safety: C++ guarantees non-null, null-terminated strings on success.
@@ -473,10 +463,7 @@ fn compile_gate(
         };
         let jit_compile_time = jit_t0.elapsed();
         if status != 0 {
-            return Err(anyhow::anyhow!(
-                "PTX → cubin failed: {}",
-                error_from_buf(&err_buf)
-            ));
+            anyhow::bail!("PTX → cubin failed: {}", error_from_buf(&err_buf));
         }
         // Safety: raw_cubin points to cubin_len bytes allocated by C++.
         let bytes = unsafe { std::slice::from_raw_parts(raw_cubin, cubin_len) }.to_vec();
@@ -500,7 +487,9 @@ fn compile_gate(
     Ok((kernel, n_gate_qubits, precision))
 }
 
-// ── ManagerInner ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// ManagerInner
+// ---------------------------------------------------------------------------
 
 struct ManagerInner {
     kernels: HashMap<CudaKernelId, Arc<CudaKernel>>,
@@ -552,7 +541,7 @@ impl ManagerInner {
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
         let stream = unsafe { ffi::cast_cuda_stream_create(err_buf.as_mut_ptr(), err_buf.len()) };
         if stream.is_null() {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
         self.stream = Some(stream);
         Ok(stream)
@@ -665,7 +654,9 @@ impl ManagerInner {
     }
 }
 
-// ── Public timing types ───────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Public timing types
+// ---------------------------------------------------------------------------
 
 /// Timing metadata for a single kernel launch within a [`CudaKernelManager::sync`] call.
 #[cfg(feature = "cuda")]
@@ -691,14 +682,16 @@ pub struct SyncStats {
     pub wall_time: Duration,
 }
 
-// ── CudaKernelManager ────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CudaKernelManager
+// ---------------------------------------------------------------------------
 
 /// CUDA kernel manager: generate → enqueue → sync.
 ///
 /// ```ignore
 /// let mgr = CudaKernelManager::new(spec);
 /// let kid = mgr.generate(&gate)?;      // LLVM IR → PTX → cubin
-/// mgr.apply(kid, &mut statevector)?;   // enqueue (non-blocking)
+/// mgr.apply(kid, &mut sv)?;            // enqueue (non-blocking)
 /// mgr.sync()?;                         // flush queue, wait for GPU
 /// ```
 ///
@@ -962,7 +955,7 @@ impl CudaKernelManager {
             unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) };
         if status != 0 {
             // pairs drops here, destroying all events via Drop.
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
 
         let wall_time = wall_t0.elapsed();
@@ -1071,7 +1064,7 @@ impl CudaKernelManager {
             // ── Feed thread ─────────────────────────────────────────────────
             // Runs in its own thread so the bounded channel provides
             // backpressure without blocking the compile workers.
-            let feed_gates = &*gates;
+            let feed_gates = gates;
             s.spawn(move || {
                 for (i, gate) in feed_gates.iter().enumerate() {
                     if work_tx.send((i, gate.clone())).is_err() {
@@ -1136,7 +1129,7 @@ impl CudaKernelManager {
             if unsafe { ffi::cast_cuda_stream_sync(stream, err_buf.as_mut_ptr(), err_buf.len()) }
                 != 0
             {
-                return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+                anyhow::bail!(error_from_buf(&err_buf));
             }
 
             while let Some(pair) = window.pop_front() {
@@ -1194,10 +1187,7 @@ impl CudaKernelManager {
                 }
                 Ok(Err(e)) => return Err(e),
                 Err(_) => {
-                    return Err(anyhow::anyhow!(
-                        "compile workers exited before gate {} was compiled",
-                        idx
-                    ));
+                    anyhow::bail!("compile workers exited before gate {} was compiled", idx);
                 }
             }
         }
@@ -1207,6 +1197,7 @@ impl CudaKernelManager {
     /// Look up a compiled kernel, load its module (from cache or cubin),
     /// and launch it on `stream` via [`record_launch`].
     #[cfg(feature = "cuda")]
+    #[allow(clippy::too_many_arguments)]
     fn pipelined_launch(
         &self,
         kid: CudaKernelId,

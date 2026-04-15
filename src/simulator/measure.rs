@@ -5,8 +5,6 @@ use std::collections::HashMap;
 use crate::cpu::CPUStatevector;
 use crate::types::compress_bits;
 
-// ── Measurement sampling ─────────────────────────────────────────────────────
-
 /// Convert measured qubit indices (u32) to usize positions for `compress_bits`.
 pub(crate) fn qubit_positions(measured_qubits: &[u32]) -> Vec<usize> {
     measured_qubits.iter().map(|&q| q as usize).collect()

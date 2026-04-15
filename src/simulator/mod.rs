@@ -47,7 +47,7 @@ pub use trajectory::{ExploredBranch, TrajectoryOpts, TrajectoryResult};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 
 use crate::cpu::{get_num_threads, CPUKernelGenSpec, CPUStatevector, CpuKernelManager};
 use crate::types::{Complex, QuantumGate};
@@ -56,7 +56,9 @@ use crate::CircuitGraph;
 #[cfg(feature = "cuda")]
 use crate::cuda::{CudaKernelGenSpec, CudaKernelManager, CudaStatevector};
 
-// ── Backend trait ────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Backend trait
+// ---------------------------------------------------------------------------
 
 /// Sealed trait mapping a backend marker to its concrete types and operations.
 ///
@@ -81,17 +83,17 @@ pub trait Backend: sealed::Sealed + Sized {
     fn default_extra() -> Self::Extra;
 
     #[doc(hidden)]
-    fn new_sv(n_qubits: u32, spec: &Self::Spec) -> Result<Self::Sv>;
+    fn new_sv(n_qubits: u32, spec: &Self::Spec) -> anyhow::Result<Self::Sv>;
     #[doc(hidden)]
-    fn init_sv(sv: &mut Self::Sv) -> Result<()>;
+    fn init_sv(sv: &mut Self::Sv) -> anyhow::Result<()>;
     #[doc(hidden)]
-    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv>;
+    fn clone_sv(sv: &Self::Sv) -> anyhow::Result<Self::Sv>;
 
     /// Record a kernel for `gate` in the manager. Compilation may be lazy
     /// (CPU batch JIT, finalized by [`finalize_compile`](Self::finalize_compile))
     /// or eager (CUDA PTX + cubin).
     #[doc(hidden)]
-    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId>;
+    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> anyhow::Result<Self::KernelId>;
 
     /// Apply a compiled kernel to a statevector.
     #[doc(hidden)]
@@ -100,21 +102,21 @@ pub trait Backend: sealed::Sealed + Sized {
         id: Self::KernelId,
         sv: &mut Self::Sv,
         extra: &Self::Extra,
-    ) -> Result<()>;
+    ) -> anyhow::Result<()>;
 
     /// Drain any pending compile-phase work (CPU batch JIT). CUDA is a no-op.
     #[doc(hidden)]
-    fn finalize_compile(mgr: &Self::Mgr) -> Result<()>;
+    fn finalize_compile(mgr: &Self::Mgr) -> anyhow::Result<()>;
 
     /// Ensure all queued `apply` calls have completed and the statevector is
     /// readable. CPU is a no-op (apply is synchronous); CUDA calls `sync()`.
     #[doc(hidden)]
-    fn sync(mgr: &Self::Mgr) -> Result<()>;
+    fn sync(mgr: &Self::Mgr) -> anyhow::Result<()>;
 
     /// Compute marginal measurement probabilities over `measured_qubits`.
     /// Used by trajectory sampling.
     #[doc(hidden)]
-    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> Result<Vec<f64>>;
+    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> anyhow::Result<Vec<f64>>;
 
     /// Which timing source [`time_one_exec`](Self::time_one_exec) reports
     /// samples from. CPU = wall-clock; CUDA = GPU events.
@@ -133,7 +135,7 @@ pub trait Backend: sealed::Sealed + Sized {
         sv: &mut Self::Sv,
         kernel_ids: &[Self::KernelId],
         extra: &Self::Extra,
-    ) -> Result<Duration>;
+    ) -> anyhow::Result<Duration>;
 }
 
 mod sealed {
@@ -143,7 +145,9 @@ mod sealed {
     impl Sealed for super::Cuda {}
 }
 
-// ── CPU backend ──────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CPU backend
+// ---------------------------------------------------------------------------
 
 /// CPU simulation backend.
 pub struct Cpu;
@@ -161,21 +165,21 @@ impl Backend for Cpu {
     fn default_extra() -> Self::Extra {
         get_num_threads()
     }
-    fn new_sv(n_qubits: u32, spec: &Self::Spec) -> Result<Self::Sv> {
+    fn new_sv(n_qubits: u32, spec: &Self::Spec) -> anyhow::Result<Self::Sv> {
         Ok(CPUStatevector::new(
             n_qubits,
             spec.precision,
             spec.simd_width,
         ))
     }
-    fn init_sv(sv: &mut Self::Sv) -> Result<()> {
+    fn init_sv(sv: &mut Self::Sv) -> anyhow::Result<()> {
         sv.initialize();
         Ok(())
     }
-    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
+    fn clone_sv(sv: &Self::Sv) -> anyhow::Result<Self::Sv> {
         Ok(sv.clone())
     }
-    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId> {
+    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> anyhow::Result<Self::KernelId> {
         mgr.generate(gate)
     }
     fn apply(
@@ -183,16 +187,16 @@ impl Backend for Cpu {
         id: Self::KernelId,
         sv: &mut Self::Sv,
         n_threads: &Self::Extra,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         mgr.apply(id, sv, *n_threads)
     }
-    fn finalize_compile(mgr: &Self::Mgr) -> Result<()> {
+    fn finalize_compile(mgr: &Self::Mgr) -> anyhow::Result<()> {
         mgr.finalize()
     }
-    fn sync(_mgr: &Self::Mgr) -> Result<()> {
+    fn sync(_mgr: &Self::Mgr) -> anyhow::Result<()> {
         Ok(())
     }
-    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> Result<Vec<f64>> {
+    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> anyhow::Result<Vec<f64>> {
         Ok(measure::marginal_probabilities_cpu(sv, measured_qubits))
     }
 
@@ -203,7 +207,7 @@ impl Backend for Cpu {
         sv: &mut Self::Sv,
         kernel_ids: &[Self::KernelId],
         n_threads: &Self::Extra,
-    ) -> Result<Duration> {
+    ) -> anyhow::Result<Duration> {
         let t0 = Instant::now();
         Self::init_sv(sv)?;
         for &kid in kernel_ids {
@@ -213,7 +217,9 @@ impl Backend for Cpu {
     }
 }
 
-// ── CUDA backend ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CUDA backend
+// ---------------------------------------------------------------------------
 
 #[cfg(feature = "cuda")]
 /// CUDA simulation backend.
@@ -231,16 +237,16 @@ impl Backend for Cuda {
         CudaKernelManager::new(spec)
     }
     fn default_extra() -> Self::Extra {}
-    fn new_sv(n_qubits: u32, spec: &Self::Spec) -> Result<Self::Sv> {
+    fn new_sv(n_qubits: u32, spec: &Self::Spec) -> anyhow::Result<Self::Sv> {
         CudaStatevector::new(n_qubits, spec.precision)
     }
-    fn init_sv(sv: &mut Self::Sv) -> Result<()> {
+    fn init_sv(sv: &mut Self::Sv) -> anyhow::Result<()> {
         sv.zero()
     }
-    fn clone_sv(sv: &Self::Sv) -> Result<Self::Sv> {
+    fn clone_sv(sv: &Self::Sv) -> anyhow::Result<Self::Sv> {
         sv.clone_device()
     }
-    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> Result<Self::KernelId> {
+    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> anyhow::Result<Self::KernelId> {
         mgr.generate(gate)
     }
     fn apply(
@@ -248,18 +254,18 @@ impl Backend for Cuda {
         id: Self::KernelId,
         sv: &mut Self::Sv,
         _: &Self::Extra,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         mgr.apply(id, sv)
     }
-    fn finalize_compile(_mgr: &Self::Mgr) -> Result<()> {
+    fn finalize_compile(_mgr: &Self::Mgr) -> anyhow::Result<()> {
         // CUDA's `generate` compiles eagerly (PTX + cubin JIT). No batch.
         Ok(())
     }
-    fn sync(mgr: &Self::Mgr) -> Result<()> {
+    fn sync(mgr: &Self::Mgr) -> anyhow::Result<()> {
         mgr.sync()?;
         Ok(())
     }
-    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> Result<Vec<f64>> {
+    fn marginal_probabilities(sv: &Self::Sv, measured_qubits: &[u32]) -> anyhow::Result<Vec<f64>> {
         let amps = sv.download()?;
         let positions = measure::qubit_positions(measured_qubits);
         let n_bins = 1usize << measured_qubits.len();
@@ -277,7 +283,7 @@ impl Backend for Cuda {
         sv: &mut Self::Sv,
         kernel_ids: &[Self::KernelId],
         _extra: &Self::Extra,
-    ) -> Result<Duration> {
+    ) -> anyhow::Result<Duration> {
         Self::init_sv(sv)?;
         for &kid in kernel_ids {
             mgr.apply(kid, sv)?;
@@ -287,7 +293,9 @@ impl Backend for Cuda {
     }
 }
 
-// ── QuantumState ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// QuantumState
+// ---------------------------------------------------------------------------
 
 /// Quantum state returned by [`Simulator::simulate`]: a pure statevector or
 /// a density matrix.
@@ -358,12 +366,12 @@ impl QuantumState<Cpu> {
 #[cfg(feature = "cuda")]
 impl QuantumState<Cuda> {
     /// Download all amplitudes from GPU to host.
-    pub fn download_amplitudes(&self) -> Result<Vec<(f64, f64)>> {
+    pub fn download_amplitudes(&self) -> anyhow::Result<Vec<(f64, f64)>> {
         self.sv.download()
     }
 
     /// Download and compute populations.
-    pub fn populations(&self) -> Result<Vec<f64>> {
+    pub fn populations(&self) -> anyhow::Result<Vec<f64>> {
         let amps = self.sv.download()?;
         match self.repr {
             Representation::StateVector => {
@@ -378,7 +386,7 @@ impl QuantumState<Cuda> {
     }
 
     /// Trace (computed on GPU for pure states, downloaded for DM).
-    pub fn trace(&self) -> Result<f64> {
+    pub fn trace(&self) -> anyhow::Result<f64> {
         match self.repr {
             Representation::StateVector => self.sv.norm_squared(),
             Representation::DensityMatrix => {
@@ -391,7 +399,9 @@ impl QuantumState<Cuda> {
     }
 }
 
-// ── Representation ───────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Representation
+// ---------------------------------------------------------------------------
 
 /// State representation: pure statevector or density matrix. Orthogonal to
 /// sampling strategy — [`Simulator::sample_trajectory`] has its own options
@@ -407,7 +417,9 @@ pub enum Representation {
     DensityMatrix,
 }
 
-// ── Simulator ────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Simulator
+// ---------------------------------------------------------------------------
 
 /// Backend-generic simulator. Owns long-lived backend state (kernel manager,
 /// spec, thread count) and provides three per-run methods, each returning a
@@ -494,7 +506,11 @@ impl<B: Backend> Simulator<B> {
     /// For `Representation::StateVector`, every gate must be unitary.
     /// For `Representation::DensityMatrix`, gates are lifted to superoperators
     /// acting on a 2n-qubit virtual statevector, so noisy gates are supported.
-    pub fn simulate(&self, graph: &CircuitGraph, repr: Representation) -> Result<QuantumState<B>> {
+    pub fn simulate(
+        &self,
+        graph: &CircuitGraph,
+        repr: Representation,
+    ) -> anyhow::Result<QuantumState<B>> {
         let n_physical = graph.n_qubits() as u32;
         let (gates, n_sv) = prepare_gates(graph, n_physical, repr)?;
 
@@ -519,7 +535,10 @@ impl<B: Backend> Simulator<B> {
     /// Compile and finalize all kernels for `gates`, returning their ids in
     /// gate order. Shared helper for `simulate` and `bench`; callers that
     /// need compile-time measurement take it themselves.
-    pub(crate) fn compile_batch(&self, gates: &[Arc<QuantumGate>]) -> Result<Vec<B::KernelId>> {
+    pub(crate) fn compile_batch(
+        &self,
+        gates: &[Arc<QuantumGate>],
+    ) -> anyhow::Result<Vec<B::KernelId>> {
         let mut ids: Vec<B::KernelId> = Vec::with_capacity(gates.len());
         for (i, gate) in gates.iter().enumerate() {
             ids.push(self.compile_one_gate(i, gate)?);
@@ -535,12 +554,12 @@ impl<B: Backend> Simulator<B> {
         &self,
         gate_index: usize,
         gate: &Arc<QuantumGate>,
-    ) -> Result<B::KernelId> {
+    ) -> anyhow::Result<B::KernelId> {
         B::generate(&self.mgr, gate)
             .with_context(|| format!("generating kernel for gate index {gate_index}"))
     }
 
-    pub(crate) fn apply_one(&self, kid: B::KernelId, sv: &mut B::Sv) -> Result<()> {
+    pub(crate) fn apply_one(&self, kid: B::KernelId, sv: &mut B::Sv) -> anyhow::Result<()> {
         B::apply(&self.mgr, kid, sv, &self.extra)
     }
 }
@@ -554,7 +573,7 @@ pub(crate) fn prepare_gates(
     graph: &CircuitGraph,
     n_physical: u32,
     repr: Representation,
-) -> Result<(Vec<Arc<QuantumGate>>, u32)> {
+) -> anyhow::Result<(Vec<Arc<QuantumGate>>, u32)> {
     let gates = graph.gates_in_row_order();
     match repr {
         Representation::StateVector => {

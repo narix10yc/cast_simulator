@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
-
 use crate::types::QuantumGate;
 
 /// A sequence of quantum gates forming a circuit.
@@ -49,7 +47,7 @@ impl QuantumCircuit {
     }
 
     /// Parse an OpenQASM 2.0 string into a circuit.
-    pub fn from_qasm(qasm: &str) -> Result<Self> {
+    pub fn from_qasm(qasm: &str) -> anyhow::Result<Self> {
         let parsed = crate::openqasm::parse_qasm(qasm)?;
         Ok(Self::from_openqasm(&parsed))
     }
@@ -262,9 +260,9 @@ mod tests {
             r
         };
 
-        for j in 0..(1 << n) {
+        for (j, amp_swap) in amps_swap.iter().enumerate().take(1 << n) {
             let rev = bit_rev(j, n);
-            let diff = (amps_swap[j] - amps_noswap[rev]).norm();
+            let diff = (*amp_swap - amps_noswap[rev]).norm();
             assert!(
                 diff < 1e-10,
                 "amps_swap[{j}] != amps_noswap[{rev}]: diff = {diff}"

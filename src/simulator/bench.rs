@@ -8,13 +8,15 @@
 
 use std::time::Instant;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 
 use super::{prepare_gates, Backend, Representation, Simulator};
 use crate::timing::{stats_from_samples, time_adaptive_samples_with, TimingStats};
 use crate::CircuitGraph;
 
-// ── Timing sample types ──────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Timing sample types
+// ---------------------------------------------------------------------------
 
 /// Where a timing sample came from: wall-clock or hardware events.
 ///
@@ -112,7 +114,9 @@ pub struct RunTiming {
     pub exec: PhaseTiming,
 }
 
-// ── Simulator::bench ─────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Simulator::bench
+// ---------------------------------------------------------------------------
 
 impl<B: Backend> Simulator<B> {
     /// Compile the circuit once, then adaptively execute it within
@@ -134,7 +138,7 @@ impl<B: Backend> Simulator<B> {
         graph: &CircuitGraph,
         repr: Representation,
         exec_budget_s: f64,
-    ) -> Result<RunTiming> {
+    ) -> anyhow::Result<RunTiming> {
         let n_physical = graph.n_qubits() as u32;
         let (gates, n_sv) = prepare_gates(graph, n_physical, repr)?;
 

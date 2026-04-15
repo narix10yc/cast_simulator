@@ -36,7 +36,7 @@
 //!       examples/journal_examples/mexp-17.qasm
 //! ```
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use cast::cost_model::{FusionConfig, HardwareProfile};
 use cast::fusion;
 use cast::openqasm::parse_qasm;
@@ -49,7 +49,9 @@ use std::path::PathBuf;
 #[cfg(feature = "cuda")]
 use cast::simulator::Cuda;
 
-// ── CLI ──────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 #[value(rename_all = "lower")]
@@ -63,6 +65,29 @@ enum Backend {
 enum CliPrecision {
     F32,
     F64,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+enum CliSimd {
+    /// 128-bit (SSE2).
+    #[value(name = "128")]
+    W128,
+    /// 256-bit (AVX2).
+    #[value(name = "256")]
+    W256,
+    /// 512-bit (AVX-512).
+    #[value(name = "512")]
+    W512,
+}
+
+impl CliSimd {
+    fn to_simd_width(self) -> cast::cpu::SimdWidth {
+        match self {
+            CliSimd::W128 => cast::cpu::SimdWidth::W128,
+            CliSimd::W256 => cast::cpu::SimdWidth::W256,
+            CliSimd::W512 => cast::cpu::SimdWidth::W512,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
@@ -138,7 +163,7 @@ struct Args {
     profile_budget: f64,
 
     /// Maximum gate size for size-only and hardware-adaptive fusion.
-    #[arg(long, default_value_t = 4)]
+    #[arg(long, default_value_t = 6)]
     max_size: usize,
 
     /// Time budget per benchmark run in seconds. Adaptive timing splits this
@@ -164,9 +189,21 @@ struct Args {
     /// after each circuit. CUDA only.
     #[arg(long)]
     kernel_stats: bool,
+
+    /// CPU worker threads for kernel dispatch. Defaults to 32 (physical cores
+    /// on most workstation CPUs). Overrides the CAST_NUM_THREADS env var.
+    #[arg(long, default_value_t = 32)]
+    threads: u32,
+
+    /// SIMD register width for CPU kernels (128, 256, 512). Defaults to the
+    /// widest width supported by the current CPU.
+    #[arg(long, value_enum)]
+    simd: Option<CliSimd>,
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 struct BenchResult {
     label: String,
@@ -176,7 +213,10 @@ struct BenchResult {
     timing: TimingStats,
 }
 
-// ── Runner dispatch ──────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Runner dispatch
+// ---------------------------------------------------------------------------
+
 //
 // Each arm constructs a typed `Simulator<B>` and calls `bench_graph`, which
 // compiles the circuit once and adaptively executes it within `budget_s`.
@@ -189,8 +229,9 @@ fn run_bench(
     precision: CliPrecision,
     budget_s: f64,
     force_dense: bool,
-    kernel_stats: bool,
-) -> Result<(f64, TimingStats)> {
+    #[cfg_attr(not(feature = "cuda"), allow(unused_variables))] kernel_stats: bool,
+    simd: Option<CliSimd>,
+) -> anyhow::Result<(f64, TimingStats)> {
     let rt = match backend {
         Backend::Cpu => {
             use cast::cpu::CPUKernelGenSpec;
@@ -198,6 +239,9 @@ fn run_bench(
                 CliPrecision::F32 => CPUKernelGenSpec::f32(),
                 CliPrecision::F64 => CPUKernelGenSpec::f64(),
             };
+            if let Some(s) = simd {
+                spec.simd_width = s.to_simd_width();
+            }
             if force_dense {
                 spec.ztol = 0.0;
                 spec.otol = 0.0;
@@ -267,8 +311,11 @@ fn print_kernel_stats(sim: &Simulator<Cuda>) {
     }
 }
 
-// ── Benchmark logic ──────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Benchmark logic
+// ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn bench_one_config(
     label: &str,
     original: &CircuitGraph,
@@ -278,7 +325,8 @@ fn bench_one_config(
     budget_s: f64,
     force_dense: bool,
     kernel_stats: bool,
-) -> Result<BenchResult> {
+    simd: Option<CliSimd>,
+) -> anyhow::Result<BenchResult> {
     let mut graph = original.clone();
     fusion::optimize(&mut graph, config);
 
@@ -292,6 +340,7 @@ fn bench_one_config(
         budget_s,
         force_dense,
         kernel_stats,
+        simd,
     )?;
 
     Ok(BenchResult {
@@ -303,10 +352,15 @@ fn bench_one_config(
     })
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // Publish thread count so profiling and kernel dispatch both see it.
+    std::env::set_var("CAST_NUM_THREADS", args.threads.to_string());
 
     if args.fusion.is_empty() {
         anyhow::bail!("at least one --fusion mode must be given");
@@ -325,10 +379,13 @@ fn main() -> Result<()> {
         match args.backend {
             Backend::Cpu => {
                 use cast::cpu::CPUKernelGenSpec;
-                let spec = match args.precision {
+                let mut spec = match args.precision {
                     CliPrecision::F32 => CPUKernelGenSpec::f32(),
                     CliPrecision::F64 => CPUKernelGenSpec::f64(),
                 };
+                if let Some(s) = args.simd {
+                    spec.simd_width = s.to_simd_width();
+                }
                 cast::profile::measure_cpu(&spec, args.profile_qubits, args.profile_budget)?
             }
             Backend::Cuda => {
@@ -372,7 +429,14 @@ fn main() -> Result<()> {
     );
 
     // ── Build selected fusion configs ────────────────────────────────────────
-    let zero_tol = if args.force_dense { 0.0 } else { 1e-12 };
+    let zero_tol = if args.force_dense {
+        0.0
+    } else {
+        match args.precision {
+            CliPrecision::F32 => 1e-6,
+            CliPrecision::F64 => 1e-12,
+        }
+    };
     let configs: Vec<(FusionMode, FusionConfig)> = args
         .fusion
         .iter()
@@ -422,6 +486,7 @@ fn main() -> Result<()> {
                 args.bench_budget,
                 args.force_dense,
                 args.kernel_stats,
+                args.simd,
             )
             .with_context(|| format!("benchmarking {} with fusion={}", filename, mode.label()))?;
             println!(

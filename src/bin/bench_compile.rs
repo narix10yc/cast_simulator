@@ -3,11 +3,11 @@
 //! Decomposes the per-kernel compile cost into three phases:
 //!
 //!   * **ir**        — LLVM IRBuilder emission in `cast_cpu_generate_kernel_ir`
-//!                     (runs during `CpuKernelManager::generate`).
+//!     (runs during `CpuKernelManager::generate`).
 //!   * **opt**       — O1 module pipeline (`cast_cpu_optimize_kernel_ir`).
 //!   * **codegen**   — native code generation + LLJIT symbol resolution
-//!                     (`cast_cpu_jit_compile_kernel` → `jit.addIRModule`
-//!                     → `jit.lookup`).
+//!     (`cast_cpu_jit_compile_kernel` → `jit.addIRModule`
+//!     → `jit.lookup`).
 //!
 //! Measurement recipe (three fresh managers per rep, same matrix):
 //!
@@ -359,7 +359,14 @@ fn main() -> anyhow::Result<()> {
             let qubits: Vec<u32> = (0..k).collect();
             let label = format!("k={}  q=[0..{})", k, k);
             let slug = format!("k{}", k);
-            let mut row = measure(spec, &qubits, args.density, args.reps, capture, runtime_opts)?;
+            let mut row = measure(
+                spec,
+                &qubits,
+                args.density,
+                args.reps,
+                capture,
+                runtime_opts,
+            )?;
             row.label = label;
             print_row(&row);
             write_dumps(&row, &slug)?;

@@ -21,14 +21,16 @@
 //!       --merge-out profiles/cuda_f64.json
 //! ```
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use cast::cost_model::{HardwareProfile, ProfileConfig, SweepEntry};
 use cast::profile;
 use cast::sysinfo::{self, MAX_DEFAULT_QUBITS, MIN_DEFAULT_QUBITS};
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
-// ── CLI ──────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
 #[value(rename_all = "lower")]
@@ -109,7 +111,9 @@ impl Args {
     }
 }
 
-// ── Memory helpers ───────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Memory helpers
+// ---------------------------------------------------------------------------
 
 const GIB: f64 = (1u64 << 30) as f64;
 
@@ -187,7 +191,9 @@ fn resolve_n_qubits(args: &Args) -> u32 {
     n
 }
 
-// ── Output formatting ────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Output formatting
+// ---------------------------------------------------------------------------
 
 fn print_short(p: &HardwareProfile, wall_s: f64) {
     println!(
@@ -232,7 +238,9 @@ fn print_table(profiles: &[(HardwareProfile, f64)]) {
     println!("  {line}\n");
 }
 
-// ── Error helpers ────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Error helpers
+// ---------------------------------------------------------------------------
 
 fn oom_hint(backend: &str, precision: &str, n_qubits: u32) -> String {
     let scalar_bytes = if precision == "F64" { 8 } else { 4 };
@@ -244,13 +252,15 @@ fn oom_hint(backend: &str, precision: &str, n_qubits: u32) -> String {
     )
 }
 
-// ── Merge mode ───────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Merge mode
+// ---------------------------------------------------------------------------
 
 /// Load several HardwareProfile JSON files, validate that they were all
 /// measured under the same `ProfileConfig`, concatenate their raw sweep
 /// samples, and re-fit the roofline from the pooled data. Prints the merged
 /// profile and optionally writes it to `out_path`.
-fn run_merge(inputs: &[PathBuf], out_path: Option<&std::path::Path>) -> Result<()> {
+fn run_merge(inputs: &[PathBuf], out_path: Option<&std::path::Path>) -> anyhow::Result<()> {
     anyhow::ensure!(
         inputs.len() >= 2,
         "--merge needs at least two input profiles (got {})",
@@ -313,9 +323,11 @@ fn run_merge(inputs: &[PathBuf], out_path: Option<&std::path::Path>) -> Result<(
     Ok(())
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     // ── Merge mode ───────────────────────────────────────────────────────────

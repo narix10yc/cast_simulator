@@ -16,7 +16,9 @@ fn default_spec() -> CudaKernelGenSpec {
     CudaKernelGenSpec::f64()
 }
 
-// ── PTX generation (no CUDA device required) ──────────────────────────────────
+// ---------------------------------------------------------------------------
+// PTX generation (no CUDA device required)
+// ---------------------------------------------------------------------------
 
 #[test]
 fn test_h_gate_emit_ptx() {
@@ -70,7 +72,9 @@ fn test_unknown_kernel_id_returns_error() {
     );
 }
 
-// ── GPU execution tests (require a CUDA device) ───────────────────────────────
+// ---------------------------------------------------------------------------
+// GPU execution tests (require a CUDA device)
+// ---------------------------------------------------------------------------
 
 #[test]
 fn test_statevector_zero_state() {
@@ -79,9 +83,9 @@ fn test_statevector_zero_state() {
     let amps = sv.download().expect("download");
     assert_eq!(amps.len(), 8);
     assert!((amps[0].0 - 1.0).abs() < 1e-14, "|0> re should be 1");
-    for i in 1..8 {
+    for (i, amp) in amps.iter().enumerate().skip(1) {
         assert!(
-            amps[i].0.abs() < 1e-14 && amps[i].1.abs() < 1e-14,
+            amp.0.abs() < 1e-14 && amp.1.abs() < 1e-14,
             "amp[{i}] should be 0"
         );
     }
@@ -150,9 +154,9 @@ fn test_apply_on_larger_statevector() {
     let s = std::f64::consts::FRAC_1_SQRT_2;
     assert!((amps[0].0 - s).abs() < 1e-10, "amp[0] ≈ 1/√2");
     assert!((amps[1].0 - s).abs() < 1e-10, "amp[1] ≈ 1/√2");
-    for i in 2..16 {
+    for (i, amp) in amps.iter().enumerate().skip(2) {
         assert!(
-            amps[i].0.abs() < 1e-10 && amps[i].1.abs() < 1e-10,
+            amp.0.abs() < 1e-10 && amp.1.abs() < 1e-10,
             "amp[{i}] should be 0"
         );
     }

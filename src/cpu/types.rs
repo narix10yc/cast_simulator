@@ -1,5 +1,3 @@
-// ── Enums & config ────────────────────────────────────────────────────────────
-
 /// SIMD register width, in bits.
 ///
 /// This controls how many amplitudes are processed together per SIMD lane.

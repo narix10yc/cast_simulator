@@ -10,7 +10,9 @@ pub trait CostModel: Send + Sync {
     fn cost_of(&self, gate: &QuantumGate) -> f64;
 }
 
-// ── Size-only cost model ─────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Size-only cost model
+// ---------------------------------------------------------------------------
 
 /// Binary accept/reject model: gates that fit within the qubit and
 /// arithmetic-intensity budgets are "free" (`1e-10`); everything else is
@@ -41,7 +43,9 @@ impl CostModel for SizeOnlyCostModel {
     }
 }
 
-// ── Hardware profile ─────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Hardware profile
+// ---------------------------------------------------------------------------
 
 /// The device a [`HardwareProfile`] was measured on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,7 +225,9 @@ impl HardwareProfile {
     }
 }
 
-// ── Hardware-adaptive cost model ─────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Hardware-adaptive cost model
+// ---------------------------------------------------------------------------
 
 /// Roofline-based cost model: `cost = max(1.0, ai / crossover_ai)`.
 ///
@@ -268,7 +274,9 @@ impl CostModel for HardwareAdaptiveCostModel {
     }
 }
 
-// ── Fusion config ────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Fusion config
+// ---------------------------------------------------------------------------
 
 /// Gate-fusion optimizer configuration.
 ///
@@ -288,7 +296,7 @@ pub struct FusionConfig {
 
 impl Default for FusionConfig {
     fn default() -> Self {
-        Self::size_only(3)
+        Self::size_only(6)
     }
 }
 
@@ -319,7 +327,7 @@ impl FusionConfig {
     }
 
     pub fn aggressive() -> Self {
-        Self::size_only(4)
+        Self::size_only(6)
     }
 
     /// Roofline-adaptive fusion.  `zero_tol` should match the kernel
@@ -360,7 +368,9 @@ impl FusionConfig {
     }
 }
 
-// ── Fusion log ───────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Fusion log
+// ---------------------------------------------------------------------------
 
 /// A single recorded fusion decision from the agglomerative optimizer.
 #[derive(Debug, Clone)]
@@ -440,7 +450,9 @@ impl FusionLog {
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

@@ -85,7 +85,7 @@ impl CudaStatevector {
             )
         };
         if dptr == 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
         Ok(Self {
             dptr,
@@ -129,11 +129,10 @@ impl CudaStatevector {
                 err_buf.len(),
             )
         };
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+        if status != 0 {
+            anyhow::bail!(error_from_buf(&err_buf));
         }
+        Ok(())
     }
 
     /// Uploads amplitudes from a host slice of `(re, im)` pairs.
@@ -159,11 +158,10 @@ impl CudaStatevector {
                 err_buf.len(),
             )
         };
-        if status == 0 {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(error_from_buf(&err_buf)))
+        if status != 0 {
+            anyhow::bail!(error_from_buf(&err_buf));
         }
+        Ok(())
     }
 
     /// Downloads all amplitudes to the host as `(re, im)` pairs.
@@ -181,7 +179,7 @@ impl CudaStatevector {
             )
         };
         if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
         Ok(flat.chunks_exact(2).map(|c| (c[0], c[1])).collect())
     }
@@ -201,7 +199,7 @@ impl CudaStatevector {
             )
         };
         if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
         Ok(result)
     }
@@ -225,7 +223,7 @@ impl CudaStatevector {
             )
         };
         if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
         Ok(())
     }
@@ -246,7 +244,7 @@ impl CudaStatevector {
             )
         };
         if status != 0 {
-            return Err(anyhow::anyhow!(error_from_buf(&err_buf)));
+            anyhow::bail!(error_from_buf(&err_buf));
         }
         // No sync needed: subsequent kernels on the default stream are
         // guaranteed to execute after this memcpy completes.

@@ -4,8 +4,6 @@ use rand::Rng;
 
 use super::{Complex, ComplexSquareMatrix, NoiseModel};
 
-// ── QuantumGate ─────────────────────────────────────────────────────────────
-
 /// A quantum gate: a unitary matrix paired with target qubit indices, optionally
 /// carrying a [`NoiseModel`] of full Kraus operators.
 ///

@@ -93,8 +93,8 @@ fn apply_cuda(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let mgr = CudaKernelManager::new(cuda_spec());
     let kid = mgr.generate(&gate).expect("cuda: generate kernel");
 
-    let mut sv = CudaStatevector::new(n_sv_qubits as u32, CudaPrecision::F64)
-        .expect("cuda: alloc statevector");
+    let mut sv =
+        CudaStatevector::new(n_sv_qubits, CudaPrecision::F64).expect("cuda: alloc statevector");
     sv.upload(init).expect("cuda: upload");
     mgr.apply(kid, &mut sv).expect("cuda: apply");
     mgr.sync().expect("cuda: sync");
@@ -265,7 +265,7 @@ fn compare_sequential_h_then_x() {
     let mgr = CudaKernelManager::new(cuda_spec());
     let h_kid = mgr.generate(&Arc::new(QuantumGate::h(0))).unwrap();
     let x_kid = mgr.generate(&Arc::new(QuantumGate::x(0))).unwrap();
-    let mut cuda_sv = CudaStatevector::new(n_sv as u32, CudaPrecision::F64).unwrap();
+    let mut cuda_sv = CudaStatevector::new(n_sv, CudaPrecision::F64).unwrap();
     cuda_sv.upload(&init).unwrap();
     mgr.apply(h_kid, &mut cuda_sv).unwrap();
     mgr.apply(x_kid, &mut cuda_sv).unwrap();
@@ -300,7 +300,7 @@ fn compare_h_squared_is_identity() {
     // CUDA: H^2 — apply the same kernel twice.
     let mgr = CudaKernelManager::new(cuda_spec());
     let h_kid = mgr.generate(&Arc::new(QuantumGate::h(0))).unwrap();
-    let mut cuda_sv = CudaStatevector::new(n_sv as u32, CudaPrecision::F64).unwrap();
+    let mut cuda_sv = CudaStatevector::new(n_sv, CudaPrecision::F64).unwrap();
     cuda_sv.upload(&init).unwrap();
     mgr.apply(h_kid, &mut cuda_sv).unwrap();
     mgr.apply(h_kid, &mut cuda_sv).unwrap();
@@ -428,8 +428,7 @@ fn apply_cuda_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let gate = Arc::new(gate.clone());
     let mgr = CudaKernelManager::new(spec);
     let kid = mgr.generate(&gate).expect("cuda f32: generate");
-    let mut sv =
-        CudaStatevector::new(n_sv_qubits as u32, CudaPrecision::F32).expect("cuda f32: alloc");
+    let mut sv = CudaStatevector::new(n_sv_qubits, CudaPrecision::F32).expect("cuda f32: alloc");
     sv.upload(init).expect("cuda f32: upload");
     mgr.apply(kid, &mut sv).expect("cuda f32: apply");
     mgr.sync().expect("cuda f32: sync");
