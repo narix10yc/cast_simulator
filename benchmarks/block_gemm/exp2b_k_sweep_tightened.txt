@@ -1,0 +1,48 @@
+=== k=4 T=0 ===
+Precision F64  SIMD W512  ztol=1e-12  density=1  force_dense=false
+row                           ir (ms)  opt (ms)    cg (ms) total (ms)   ir lines
+q=[0, 1, 2, 3]                    1.4      33.7      100.6      135.7       2585
+  exec @  1 thr     13.3 ms  ±  1.88 ms  (124 iters, cv=0.141)
+  exec @  4 thr     4.26 ms  ±   518 µs  (368 iters, cv=0.121)
+  exec @ 32 thr     1.23 ms  ±   211 µs  (1080 iters, cv=0.171)
+
+=== k=4 T=8 ===
+Precision F64  SIMD W512  ztol=1e-12  density=1  force_dense=false
+row                           ir (ms)  opt (ms)    cg (ms) total (ms)   ir lines
+q=[0, 1, 2, 3]                    1.4      31.5      104.8      137.7       2585
+  exec @  1 thr     13.9 ms  ±  1.96 ms  (120 iters, cv=0.141)
+  exec @  4 thr     3.78 ms  ±   505 µs  (381 iters, cv=0.134)
+  exec @ 32 thr     1.21 ms  ±   192 µs  (1182 iters, cv=0.158)
+
+=== k=5 T=0 ===
+Precision F64  SIMD W512  ztol=1e-12  density=1  force_dense=false
+row                           ir (ms)  opt (ms)    cg (ms) total (ms)   ir lines
+q=[0, 1, 2, 3, 4]                 3.2     138.6      502.0      643.8       9241
+  exec @  1 thr     34.3 ms  ±  1.62 ms  ( 43 iters, cv=0.047)
+  exec @  4 thr     9.64 ms  ±   637 µs  (161 iters, cv=0.066)
+  exec @ 32 thr     2.05 ms  ±   282 µs  (527 iters, cv=0.137)
+
+=== k=5 T=8 ===
+Precision F64  SIMD W512  ztol=1e-12  density=1  force_dense=false
+row                           ir (ms)  opt (ms)    cg (ms) total (ms)   ir lines
+q=[0, 1, 2, 3, 4]                 2.9     121.8      453.2      577.9       9433
+  exec @  1 thr     34.6 ms  ±  1.67 ms  ( 44 iters, cv=0.048)
+  exec @  4 thr     9.57 ms  ±   685 µs  (159 iters, cv=0.072)
+  exec @ 32 thr     2.01 ms  ±   267 µs  (674 iters, cv=0.133)
+
+=== k=6 T=0 ===
+Precision F64  SIMD W512  ztol=1e-12  density=1  force_dense=false
+row                           ir (ms)  opt (ms)    cg (ms) total (ms)   ir lines
+q=[0, 1, 2, 3, 4, 5]              8.9     731.8     3117.4     3858.1      34841
+  exec @  1 thr     91.4 ms  ±  3.26 ms  ( 17 iters, cv=0.036)
+  exec @  4 thr     25.6 ms  ±   697 µs  ( 60 iters, cv=0.027)
+  exec @ 32 thr     4.37 ms  ±   688 µs  (272 iters, cv=0.158)
+
+=== k=6 T=8 ===
+Precision F64  SIMD W512  ztol=1e-12  density=1  force_dense=false
+row                           ir (ms)  opt (ms)    cg (ms) total (ms)   ir lines
+q=[0, 1, 2, 3, 4, 5]              9.1     659.4     2912.1     3580.6      35225
+  exec @  1 thr     68.7 ms  ±  1.89 ms  ( 21 iters, cv=0.028)
+  exec @  4 thr     19.8 ms  ±  1.00 ms  ( 76 iters, cv=0.051)
+  exec @ 32 thr     3.57 ms  ±   451 µs  (404 iters, cv=0.126)
+

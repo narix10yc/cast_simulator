@@ -1,0 +1,22 @@
+=== qvc-30 end-to-end: CAST_BLOCK_GEMM_T=0 (baseline) vs T=8 ===
+Binary: target/release/bench
+Invocation: --backend cpu --fusion size-only --max-size 6 --precision f64 \
+            --simd 256 --bench-budget 3 --profile-budget 15 --threads 32 \
+            examples/journal_examples/qvc-30.qasm
+Date: 2026-04-15
+
+--- T=0 baseline ---
+qvc-30           size-only          112     43     67.1 s 57.3 s (1 iter)
+real	2m28.989s
+user	35m17.767s
+sys	0m12.391s
+
+--- T=8 ---
+qvc-30           size-only          112     43     67.6 s 57.5 s (1 iter)
+real	2m35.411s
+user	36m1.965s
+sys	0m12.368s
+
+Interpretation: neutral (+0.7% compile, +0.3% exec — both within noise).
+qvc-30's fused gates are distributed across qubits 0–29; the LK ≥ 32
+gate matches only a minority of them.
