@@ -20,12 +20,10 @@ std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder,
       out[i].im_vec =
           llvm::ConstantVector::getSplat(ec, llvm::ConstantFP::get(scalar_ty, matrix.im(i)));
     } else {
-      auto *re_ptr = builder.CreateConstGEP1_32(scalar_ty, p_mat_arg, 2 * i, "re.mat.ptr");
-      out[i].re_vec = builder.CreateVectorSplat(ec, builder.CreateLoad(scalar_ty, re_ptr, "re.mat"),
-                                                "re.mat.vec");
-      auto *im_ptr = builder.CreateConstGEP1_32(scalar_ty, p_mat_arg, 2 * i + 1, "im.mat.ptr");
-      out[i].im_vec = builder.CreateVectorSplat(ec, builder.CreateLoad(scalar_ty, im_ptr, "im.mat"),
-                                                "im.mat.vec");
+      auto *re_ptr = builder.CreateConstGEP1_32(scalar_ty, p_mat_arg, 2 * i);
+      out[i].re_vec = builder.CreateVectorSplat(ec, builder.CreateLoad(scalar_ty, re_ptr));
+      auto *im_ptr = builder.CreateConstGEP1_32(scalar_ty, p_mat_arg, 2 * i + 1);
+      out[i].im_vec = builder.CreateVectorSplat(ec, builder.CreateLoad(scalar_ty, im_ptr));
     }
   }
   return out;

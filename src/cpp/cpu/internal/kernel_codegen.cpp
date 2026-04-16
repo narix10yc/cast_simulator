@@ -61,14 +61,14 @@ LoadedAmplitudes KernelCodegen::emit_load_amplitudes(llvm::Value *ptr_sv_begin) 
     }
     idx_shift >>= layout.sep_bit;
 
-    amps.ptrs[hi] = B.CreateConstGEP1_64(types.vec_ty, ptr_sv_begin, idx_shift, "ptr.sv.hi");
-    auto *amp_full = B.CreateAlignedLoad(types.vec_ty, amps.ptrs[hi], simd_align(), "sv.full");
+    amps.ptrs[hi] = B.CreateConstGEP1_64(types.vec_ty, ptr_sv_begin, idx_shift);
+    auto *amp_full = B.CreateAlignedLoad(types.vec_ty, amps.ptrs[hi], simd_align());
 
     for (unsigned li = 0; li < LK; ++li) {
-      amps.re[hi * LK + li] = B.CreateShuffleVector(
-          amp_full, llvm::ArrayRef<int>(smasks.re_split.data() + li * S, S), "re");
-      amps.im[hi * LK + li] = B.CreateShuffleVector(
-          amp_full, llvm::ArrayRef<int>(smasks.im_split.data() + li * S, S), "im");
+      amps.re[hi * LK + li] =
+          B.CreateShuffleVector(amp_full, llvm::ArrayRef<int>(smasks.re_split.data() + li * S, S));
+      amps.im[hi * LK + li] =
+          B.CreateShuffleVector(amp_full, llvm::ArrayRef<int>(smasks.im_split.data() + li * S, S));
     }
   }
 
@@ -95,15 +95,15 @@ MatvecResult KernelCodegen::emit_matvec(const LoadedAmplitudes &amps, unsigned h
     for (unsigned c = 0; c < K; ++c) {
       const auto &e = mat_data[r * K + c];
 
-      auto *re_re = B.CreateFMul(e.re_vec, amps.re[c], "re.re");
-      auto *im_im = B.CreateFMul(e.im_vec, amps.im[c], "im.im");
-      auto *re_contrib = B.CreateFSub(re_re, im_im, "re.contrib");
-      result.re[li] = c == 0 ? re_contrib : B.CreateFAdd(result.re[li], re_contrib, "acc.re");
+      auto *re_re = B.CreateFMul(e.re_vec, amps.re[c]);
+      auto *im_im = B.CreateFMul(e.im_vec, amps.im[c]);
+      auto *re_contrib = B.CreateFSub(re_re, im_im);
+      result.re[li] = c == 0 ? re_contrib : B.CreateFAdd(result.re[li], re_contrib);
 
-      auto *re_im = B.CreateFMul(e.re_vec, amps.im[c], "re.im");
-      auto *im_re = B.CreateFMul(e.im_vec, amps.re[c], "im.re");
-      auto *im_contrib = B.CreateFAdd(re_im, im_re, "im.contrib");
-      result.im[li] = c == 0 ? im_contrib : B.CreateFAdd(result.im[li], im_contrib, "acc.im");
+      auto *re_im = B.CreateFMul(e.re_vec, amps.im[c]);
+      auto *im_re = B.CreateFMul(e.im_vec, amps.re[c]);
+      auto *im_contrib = B.CreateFAdd(re_im, im_re);
+      result.im[li] = c == 0 ? im_contrib : B.CreateFAdd(result.im[li], im_contrib);
     }
   }
 
@@ -164,15 +164,15 @@ MatvecResult KernelCodegen::emit_matvec_blocked(const LoadedAmplitudes &amps, un
         const unsigned r = hi * LK + li;
         const auto &e = mat_data[r * K + c];
 
-        auto *re_re = B.CreateFMul(e.re_vec, amps.re[c], "re.re");
-        auto *im_im = B.CreateFMul(e.im_vec, amps.im[c], "im.im");
-        auto *re_contrib = B.CreateFSub(re_re, im_im, "re.contrib");
-        acc_re[ti] = c == 0 ? re_contrib : B.CreateFAdd(acc_re[ti], re_contrib, "acc.re");
+        auto *re_re = B.CreateFMul(e.re_vec, amps.re[c]);
+        auto *im_im = B.CreateFMul(e.im_vec, amps.im[c]);
+        auto *re_contrib = B.CreateFSub(re_re, im_im);
+        acc_re[ti] = c == 0 ? re_contrib : B.CreateFAdd(acc_re[ti], re_contrib);
 
-        auto *re_im = B.CreateFMul(e.re_vec, amps.im[c], "re.im");
-        auto *im_re = B.CreateFMul(e.im_vec, amps.re[c], "im.re");
-        auto *im_contrib = B.CreateFAdd(re_im, im_re, "im.contrib");
-        acc_im[ti] = c == 0 ? im_contrib : B.CreateFAdd(acc_im[ti], im_contrib, "acc.im");
+        auto *re_im = B.CreateFMul(e.re_vec, amps.im[c]);
+        auto *im_re = B.CreateFMul(e.im_vec, amps.re[c]);
+        auto *im_contrib = B.CreateFAdd(re_im, im_re);
+        acc_im[ti] = c == 0 ? im_contrib : B.CreateFAdd(acc_im[ti], im_contrib);
       }
     }
 
@@ -194,8 +194,8 @@ void KernelCodegen::retire_block_to_scratch(unsigned r_start, unsigned block_sz,
   for (unsigned ti = 0; ti < block_sz; ++ti) {
     const unsigned li = r_start + ti;
     assert(acc_re[ti] != nullptr && acc_im[ti] != nullptr);
-    auto *p_re = B.CreateConstGEP1_32(vec_s_ty, re_scratch, li, "p.re.scratch");
-    auto *p_im = B.CreateConstGEP1_32(vec_s_ty, im_scratch, li, "p.im.scratch");
+    auto *p_re = B.CreateConstGEP1_32(vec_s_ty, re_scratch, li);
+    auto *p_im = B.CreateConstGEP1_32(vec_s_ty, im_scratch, li);
     auto *st_re = B.CreateAlignedStore(acc_re[ti], p_re, align);
     auto *st_im = B.CreateAlignedStore(acc_im[ti], p_im, align);
     st_re->setVolatile(true);
@@ -213,10 +213,10 @@ MatvecResult KernelCodegen::reload_full_result_from_scratch(llvm::Value *re_scra
   result.re.resize(LK);
   result.im.resize(LK);
   for (unsigned li = 0; li < LK; ++li) {
-    auto *p_re = B.CreateConstGEP1_32(vec_s_ty, re_scratch, li, "p.re.load");
-    auto *p_im = B.CreateConstGEP1_32(vec_s_ty, im_scratch, li, "p.im.load");
-    auto *v_re = B.CreateAlignedLoad(vec_s_ty, p_re, align, "blk.re");
-    auto *v_im = B.CreateAlignedLoad(vec_s_ty, p_im, align, "blk.im");
+    auto *p_re = B.CreateConstGEP1_32(vec_s_ty, re_scratch, li);
+    auto *p_im = B.CreateConstGEP1_32(vec_s_ty, im_scratch, li);
+    auto *v_re = B.CreateAlignedLoad(vec_s_ty, p_re, align);
+    auto *v_im = B.CreateAlignedLoad(vec_s_ty, p_im, align);
     llvm::cast<llvm::LoadInst>(v_re)->setVolatile(true);
     llvm::cast<llvm::LoadInst>(v_im)->setVolatile(true);
     result.re[li] = v_re;
@@ -236,8 +236,8 @@ MatvecScratch KernelCodegen::alloca_matvec_scratch(llvm::BasicBlock &entry_bb) c
   llvm::IRBuilder<> entry_builder(&entry_bb, entry_bb.getFirstInsertionPt());
   auto *vec_s_ty = vec_s_type();
   auto *n_elems = entry_builder.getInt32(layout.LK());
-  auto *re = entry_builder.CreateAlloca(vec_s_ty, n_elems, "mv.re.scratch");
-  auto *im = entry_builder.CreateAlloca(vec_s_ty, n_elems, "mv.im.scratch");
+  auto *re = entry_builder.CreateAlloca(vec_s_ty, n_elems);
+  auto *im = entry_builder.CreateAlloca(vec_s_ty, n_elems);
   re->setAlignment(simd_align());
   im->setAlignment(simd_align());
   return {re, im};
@@ -251,48 +251,47 @@ void KernelCodegen::emit_merge_and_store(MatvecResult &result, llvm::Value *p_sv
     for (unsigned pair = 0; pair < (LK >> round >> 1); ++pair) {
       const unsigned idx_l = pair << round << 1;
       const unsigned idx_r = idx_l | (1u << round);
-      result.re[idx_l] = B.CreateShuffleVector(result.re[idx_l], result.re[idx_r],
-                                               smasks.merge[round], "re.merged");
-      result.im[idx_l] = B.CreateShuffleVector(result.im[idx_l], result.im[idx_r],
-                                               smasks.merge[round], "im.merged");
+      result.re[idx_l] =
+          B.CreateShuffleVector(result.re[idx_l], result.re[idx_r], smasks.merge[round]);
+      result.im[idx_l] =
+          B.CreateShuffleVector(result.im[idx_l], result.im[idx_r], smasks.merge[round]);
     }
   }
 
-  auto *merged = B.CreateShuffleVector(result.re[0], result.im[0], smasks.reim_merge, "amp.merged");
+  auto *merged = B.CreateShuffleVector(result.re[0], result.im[0], smasks.reim_merge);
   B.CreateAlignedStore(merged, p_sv_hi, simd_align());
 }
 
 llvm::Value *KernelCodegen::emit_sv_base_ptr(llvm::Value *p_sv, llvm::Value *task_id) {
   if (layout.hi_bits.empty()) {
-    return B.CreateGEP(types.vec_ty, p_sv, task_id, "ptr.sv.begin");
+    return B.CreateGEP(types.vec_ty, p_sv, task_id);
   }
 
   const auto segs = compute_hi_ptr_segments(layout.hi_bits, layout.sep_bit);
   llvm::Value *idx = B.getInt64(0);
   for (const auto &seg : segs) {
-    auto *part = B.CreateAnd(task_id, seg.src_mask, "idx.part");
+    auto *part = B.CreateAnd(task_id, seg.src_mask);
     if (seg.dst_shift > 0)
-      part = B.CreateShl(part, (uint64_t)seg.dst_shift, "idx.part");
-    idx = B.CreateAdd(idx, part, "idx");
+      part = B.CreateShl(part, (uint64_t)seg.dst_shift);
+    idx = B.CreateAdd(idx, part);
   }
-  return B.CreateGEP(types.vec_ty, p_sv, idx, "ptr.sv.begin");
+  return B.CreateGEP(types.vec_ty, p_sv, idx);
 }
 
-std::vector<llvm::Value *>
-KernelCodegen::load_all_chunks(llvm::Value *ptr_sv_begin, unsigned num_chunks,
-                               llvm::VectorType *chunk_ty) {
+std::vector<llvm::Value *> KernelCodegen::load_all_chunks(llvm::Value *ptr_sv_begin,
+                                                          unsigned num_chunks,
+                                                          llvm::VectorType *chunk_ty) {
   const auto align = simd_align();
   std::vector<llvm::Value *> chunks(num_chunks);
   for (unsigned c = 0; c < num_chunks; ++c) {
-    auto *ptr = B.CreateConstGEP1_32(chunk_ty, ptr_sv_begin, c, "ptr.chunk");
-    chunks[c] = B.CreateAlignedLoad(chunk_ty, ptr, align, "chunk");
+    auto *ptr = B.CreateConstGEP1_32(chunk_ty, ptr_sv_begin, c);
+    chunks[c] = B.CreateAlignedLoad(chunk_ty, ptr, align);
   }
   return chunks;
 }
 
-LoadedAmplitudes
-KernelCodegen::gather_amps_from_chunks(const std::vector<llvm::Value *> &chunks,
-                                       llvm::VectorType *chunk_ty) {
+LoadedAmplitudes KernelCodegen::gather_amps_from_chunks(const std::vector<llvm::Value *> &chunks,
+                                                        llvm::VectorType *chunk_ty) {
   const auto LK = layout.LK();
   const auto S = layout.S();
   const auto s = layout.s();
@@ -309,12 +308,10 @@ KernelCodegen::gather_amps_from_chunks(const std::vector<llvm::Value *> &chunks,
     for (unsigned si = 0; si < S; ++si) {
       const auto re_idx = static_cast<unsigned>(smasks.re_split[li * S + si]);
       const auto im_idx = static_cast<unsigned>(smasks.im_split[li * S + si]);
-      auto *re_elem =
-          B.CreateExtractElement(chunks[re_idx >> s], uint64_t(re_idx & s_mask), "re.e");
-      auto *im_elem =
-          B.CreateExtractElement(chunks[im_idx >> s], uint64_t(im_idx & s_mask), "im.e");
-      re_vec = B.CreateInsertElement(re_vec, re_elem, uint64_t(si), "re.v");
-      im_vec = B.CreateInsertElement(im_vec, im_elem, uint64_t(si), "im.v");
+      auto *re_elem = B.CreateExtractElement(chunks[re_idx >> s], uint64_t(re_idx & s_mask));
+      auto *im_elem = B.CreateExtractElement(chunks[im_idx >> s], uint64_t(im_idx & s_mask));
+      re_vec = B.CreateInsertElement(re_vec, re_elem, uint64_t(si));
+      im_vec = B.CreateInsertElement(im_vec, im_elem, uint64_t(si));
     }
     amps.re[li] = re_vec;
     amps.im[li] = im_vec;
@@ -324,9 +321,9 @@ KernelCodegen::gather_amps_from_chunks(const std::vector<llvm::Value *> &chunks,
 
 // Inverse of gather_amps_from_chunks.  Undef-init of chunks is safe: every
 // lane is reached exactly once (2·LK·S writes = vec_size).
-std::vector<llvm::Value *>
-KernelCodegen::scatter_result_into_chunks(const MatvecResult &result, unsigned num_chunks,
-                                          llvm::VectorType *chunk_ty) {
+std::vector<llvm::Value *> KernelCodegen::scatter_result_into_chunks(const MatvecResult &result,
+                                                                     unsigned num_chunks,
+                                                                     llvm::VectorType *chunk_ty) {
   const auto LK = layout.LK();
   const auto S = layout.S();
   const auto s = layout.s();
@@ -338,12 +335,12 @@ KernelCodegen::scatter_result_into_chunks(const MatvecResult &result, unsigned n
     for (unsigned si = 0; si < S; ++si) {
       const auto re_idx = static_cast<unsigned>(smasks.re_split[li * S + si]);
       const auto im_idx = static_cast<unsigned>(smasks.im_split[li * S + si]);
-      auto *re_elem = B.CreateExtractElement(result.re[li], uint64_t(si), "re.out.e");
-      auto *im_elem = B.CreateExtractElement(result.im[li], uint64_t(si), "im.out.e");
-      out_chunks[re_idx >> s] = B.CreateInsertElement(out_chunks[re_idx >> s], re_elem,
-                                                      uint64_t(re_idx & s_mask), "out.re");
-      out_chunks[im_idx >> s] = B.CreateInsertElement(out_chunks[im_idx >> s], im_elem,
-                                                      uint64_t(im_idx & s_mask), "out.im");
+      auto *re_elem = B.CreateExtractElement(result.re[li], uint64_t(si));
+      auto *im_elem = B.CreateExtractElement(result.im[li], uint64_t(si));
+      out_chunks[re_idx >> s] =
+          B.CreateInsertElement(out_chunks[re_idx >> s], re_elem, uint64_t(re_idx & s_mask));
+      out_chunks[im_idx >> s] =
+          B.CreateInsertElement(out_chunks[im_idx >> s], im_elem, uint64_t(im_idx & s_mask));
     }
   }
   return out_chunks;
@@ -353,7 +350,7 @@ void KernelCodegen::store_all_chunks(const std::vector<llvm::Value *> &out_chunk
                                      llvm::Value *ptr_sv_begin, llvm::VectorType *chunk_ty) {
   const auto align = simd_align();
   for (unsigned c = 0; c < out_chunks.size(); ++c) {
-    auto *ptr = B.CreateConstGEP1_32(chunk_ty, ptr_sv_begin, c, "ptr.out");
+    auto *ptr = B.CreateConstGEP1_32(chunk_ty, ptr_sv_begin, c);
     B.CreateAlignedStore(out_chunks[c], ptr, align);
   }
 }

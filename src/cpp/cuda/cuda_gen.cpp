@@ -176,7 +176,7 @@ static Value *emit_combo_offset(IRBuilder<> &B, Value *counter_v, const uint32_t
   assert(n_qubits > 0);
 
   auto *offset = static_cast<Value *>(B.getInt64(0ULL));
-  counter_v = B.CreateZExt(counter_v, B.getInt64Ty(), "i64.counter");
+  counter_v = B.CreateZExt(counter_v, B.getInt64Ty());
 
   const int k = static_cast<int>(n_qubits);
   const int highest_q = static_cast<int>(qubits[n_qubits - 1]);
@@ -196,16 +196,16 @@ static Value *emit_combo_offset(IRBuilder<> &B, Value *counter_v, const uint32_t
     if (mask == 0)
       continue;
 
-    tmp_counter = B.CreateAnd(counter_v, mask, "tmpCounter");
-    tmp_counter = B.CreateShl(tmp_counter, (q_idx - 1), "tmpCounter");
-    offset = B.CreateAdd(offset, tmp_counter, "tmpIdx");
+    tmp_counter = B.CreateAnd(counter_v, mask);
+    tmp_counter = B.CreateShl(tmp_counter, (q_idx - 1));
+    offset = B.CreateAdd(offset, tmp_counter);
     mask = 0ULL;
   }
 
   mask = ~((1ULL << (highest_q - k + 1)) - 1);
-  tmp_counter = B.CreateAnd(counter_v, mask, "tmpCounter");
-  tmp_counter = B.CreateShl(tmp_counter, k, "tmpCounter");
-  offset = B.CreateAdd(offset, tmp_counter, "offset");
+  tmp_counter = B.CreateAnd(counter_v, mask);
+  tmp_counter = B.CreateShl(tmp_counter, k);
+  offset = B.CreateAdd(offset, tmp_counter);
 
   return offset;
 }
@@ -244,10 +244,10 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
         delta |= (1ull << qubits[b]);
 
     uint64_t const off2 = 2ull * delta;
-    amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2, "amp.ptr");
-    auto *pair = B.CreateLoad(vec2_ty, amp_ptrs[i], "amp.pair");
-    re_amps[i] = B.CreateExtractElement(pair, (uint64_t)0, "re.amp");
-    im_amps[i] = B.CreateExtractElement(pair, (uint64_t)1, "im.amp");
+    amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2);
+    auto *pair = B.CreateLoad(vec2_ty, amp_ptrs[i]);
+    re_amps[i] = B.CreateExtractElement(pair, (uint64_t)0);
+    im_amps[i] = B.CreateExtractElement(pair, (uint64_t)1);
   }
 
   // For each output row r:  new[r] = sum_c  M[r,c] * old[c]
@@ -274,10 +274,10 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
         acc_im = B.CreateFAdd(acc_im, t3);
     }
 
-    auto *new_re = B.CreateFSub(acc_re0, acc_re1, "new.re");
+    auto *new_re = B.CreateFSub(acc_re0, acc_re1);
     Value *out = PoisonValue::get(vec2_ty);
-    out = B.CreateInsertElement(out, new_re, (uint64_t)0, "out.re");
-    out = B.CreateInsertElement(out, acc_im, (uint64_t)1, "out.im");
+    out = B.CreateInsertElement(out, new_re, (uint64_t)0);
+    out = B.CreateInsertElement(out, acc_im, (uint64_t)1);
     B.CreateStore(out, amp_ptrs[r]);
   }
 }
@@ -300,12 +300,12 @@ static void emit_persistent_grid_loop(IRBuilder<> &B, const uint32_t *qubits, si
   auto *nctaid = B.CreateIntrinsic(B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_nctaid_x, {});
 
   // global_tid = ctaid * ntid + tid
-  auto *global_tid = B.CreateAdd(B.CreateMul(ctaid, ntid), tid, "global.tid");
-  global_tid = B.CreateIntCast(global_tid, B.getInt64Ty(), /*isSigned=*/true, "global.tid");
+  auto *global_tid = B.CreateAdd(B.CreateMul(ctaid, ntid), tid);
+  global_tid = B.CreateIntCast(global_tid, B.getInt64Ty(), /*isSigned=*/true);
 
   // stride = nctaid * ntid  (total thread count)
-  auto *stride = B.CreateMul(nctaid, ntid, "combo.stride");
-  stride = B.CreateIntCast(stride, B.getInt64Ty(), true, "combo.stride");
+  auto *stride = B.CreateMul(nctaid, ntid);
+  stride = B.CreateIntCast(stride, B.getInt64Ty(), true);
 
   // Persistent-grid combo loop.
   auto *loop_bb = BasicBlock::Create(C, "cmb.chk", func);
@@ -317,22 +317,22 @@ static void emit_persistent_grid_loop(IRBuilder<> &B, const uint32_t *qubits, si
   B.CreateBr(loop_bb);
 
   B.SetInsertPoint(loop_bb);
-  auto *combo_id = B.CreatePHI(B.getInt64Ty(), 2, "combo");
+  auto *combo_id = B.CreatePHI(B.getInt64Ty(), 2);
   combo_id->addIncoming(global_tid, pre);
   B.CreateCondBr(B.CreateICmpULT(combo_id, combos_v), loop_body_bb, loop_done_bb);
 
   B.SetInsertPoint(loop_body_bb);
   {
     auto *sv_base = emit_combo_offset(B, combo_id, qubits, n_qubits);
-    sv_base = B.CreateShl(sv_base, 1, "sv.base.idx"); // ×2 for re/im interleave
-    sv_base = B.CreateGEP(scalar_ty, sv_root, sv_base, "sv.base");
+    sv_base = B.CreateShl(sv_base, 1); // ×2 for re/im interleave
+    sv_base = B.CreateGEP(scalar_ty, sv_root, sv_base);
     emit_matvec(B, qubits, n_qubits, mat_data, sv_base, scalar_ty);
     B.CreateBr(loop_inc_bb);
   }
 
   B.SetInsertPoint(loop_inc_bb);
   {
-    auto *combo_next = B.CreateAdd(combo_id, stride, "combo.next");
+    auto *combo_next = B.CreateAdd(combo_id, stride);
     combo_id->addIncoming(combo_next, loop_inc_bb);
     B.CreateBr(loop_bb);
   }

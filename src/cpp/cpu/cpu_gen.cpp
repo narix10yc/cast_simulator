@@ -94,17 +94,14 @@ LaunchArgs unpack_launch_args(llvm::IRBuilder<> &builder, llvm::Function *func,
                               llvm::StructType *launch_ty) {
   LaunchArgs args;
   auto *launch_arg = func->getArg(0);
-  args.p_sv = builder.CreateLoad(
-      builder.getPtrTy(), builder.CreateStructGEP(launch_ty, launch_arg, 0, "launch.sv.ptr"), "sv");
-  args.ctr_begin = builder.CreateLoad(
-      builder.getInt64Ty(),
-      builder.CreateStructGEP(launch_ty, launch_arg, 1, "launch.ctr.begin.ptr"), "ctr.begin");
-  args.ctr_end = builder.CreateLoad(
-      builder.getInt64Ty(), builder.CreateStructGEP(launch_ty, launch_arg, 2, "launch.ctr.end.ptr"),
-      "ctr.end");
-  args.p_mat = builder.CreateLoad(
-      builder.getPtrTy(), builder.CreateStructGEP(launch_ty, launch_arg, 3, "launch.mat.ptr"),
-      "mat");
+  args.p_sv =
+      builder.CreateLoad(builder.getPtrTy(), builder.CreateStructGEP(launch_ty, launch_arg, 0));
+  args.ctr_begin =
+      builder.CreateLoad(builder.getInt64Ty(), builder.CreateStructGEP(launch_ty, launch_arg, 1));
+  args.ctr_end =
+      builder.CreateLoad(builder.getInt64Ty(), builder.CreateStructGEP(launch_ty, launch_arg, 2));
+  args.p_mat =
+      builder.CreateLoad(builder.getPtrTy(), builder.CreateStructGEP(launch_ty, launch_arg, 3));
   return args;
 }
 
@@ -114,16 +111,16 @@ void emit_taskid_loop(llvm::IRBuilder<> &builder, KernelCodegen &cg, const Launc
                       const FunctionSkeleton &skel) {
   builder.CreateBr(skel.loop_bb);
   builder.SetInsertPoint(skel.loop_bb);
-  auto *task_id = builder.CreatePHI(builder.getInt64Ty(), 2, "taskid");
+  auto *task_id = builder.CreatePHI(builder.getInt64Ty(), 2);
   task_id->addIncoming(args.ctr_begin, skel.entry_bb);
-  builder.CreateCondBr(builder.CreateICmpSLT(task_id, args.ctr_end, "cond"), skel.loop_body_bb,
+  builder.CreateCondBr(builder.CreateICmpSLT(task_id, args.ctr_end), skel.loop_body_bb,
                        skel.ret_bb);
 
   builder.SetInsertPoint(skel.loop_body_bb);
   auto *ptr_sv_begin = cg.emit_sv_base_ptr(args.p_sv, task_id);
   cg.emit_loop_body(ptr_sv_begin);
 
-  auto *task_id_next = builder.CreateAdd(task_id, builder.getInt64(1), "taskid.next");
+  auto *task_id_next = builder.CreateAdd(task_id, builder.getInt64(1));
   auto *loop_tail_bb = builder.GetInsertBlock();
   task_id->addIncoming(task_id_next, loop_tail_bb);
   builder.CreateBr(skel.loop_bb);
