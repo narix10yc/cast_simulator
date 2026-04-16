@@ -5,19 +5,20 @@ Usage:
     python3 scripts/asm_stats.py dump/*.s
     python3 scripts/asm_stats.py dump/auto_k6.s dump/straight_k6.s   # side-by-side
 
-Detects architecture from instruction patterns (ARM64 vs x86-64) and reports:
-  - Total instructions
-  - Stack frame size (bytes)
-  - Spill stores / loads (stack-relative vector ops)
-  - FMA / multiply / add+sub counts
-  - Branch count
+Detects architecture from instruction patterns (ARM64 vs x86-64) and reports
+per-file instruction breakdown with percentages.
+
+Caveats (known, acceptable for our use case):
+  - Prologue callee-saves (stp d-regs) counted as spills (~4 extra each way).
+  - Block-mode volatile stores are indistinguishable from LLVM spills.
+  - Stack frame from max(sub sp, stp pre-decrement), not sum (~5% under).
 """
 
 from __future__ import annotations
 
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -32,6 +33,8 @@ class AsmStats:
     fma: int = 0
     mul: int = 0
     add_sub: int = 0
+    const_mat: int = 0
+    shuffle: int = 0
     branches: int = 0
     other: int = 0
 
@@ -47,6 +50,8 @@ _ARM64_SPILL_LOAD = re.compile(r"\bld[rp]\s+[qvd]\d+.*\[sp")
 _ARM64_FMA = re.compile(r"\bfml[as]\b")
 _ARM64_MUL = re.compile(r"\bfmul\b")
 _ARM64_ADDSUB = re.compile(r"\bf(?:add|sub)\b")
+_ARM64_CONST = re.compile(r"\b(?:movk?|dup\.\d+[sd])\b")
+_ARM64_SHUFFLE = re.compile(r"\b(?:zip[12]|uzp[12]|trn[12]|ext|tbl|mov\.16b)\b")
 _ARM64_BRANCH = re.compile(r"\b(?:b|b\.\w+|bl|blr|ret)\b")
 
 # ---------------------------------------------------------------------------
@@ -59,6 +64,8 @@ _X86_SPILL_LOAD = re.compile(r"\bvmov[au]p[sd]\s+[^,]*\(%rsp.*%[xyz]mm")
 _X86_FMA = re.compile(r"\bvfn?m(?:add|sub)")
 _X86_MUL = re.compile(r"\bvmulp[sd]\b")
 _X86_ADDSUB = re.compile(r"\bv(?:add|sub)p[sd]\b")
+_X86_CONST = re.compile(r"\b(?:vmovq|vpbroadcastq|vbroadcastsd)\b")
+_X86_SHUFFLE = re.compile(r"\b(?:vshuf|vperm|vunpck|vblend|vinser)")
 _X86_BRANCH = re.compile(r"\b(?:jmp|je|jne|jg|jge|jl|jle|ja|jae|jb|jbe|call|ret)\b")
 
 
@@ -81,7 +88,6 @@ def parse_file(path: Path) -> AsmStats:
 
     for raw_line in lines:
         line = raw_line.strip()
-        # Skip labels, directives, comments, blank lines.
         if not line or line.startswith(".") or line.startswith("//") or line.startswith("#"):
             continue
         if line.endswith(":"):
@@ -121,6 +127,12 @@ def _classify_arm64(line: str, s: AsmStats) -> None:
     if _ARM64_ADDSUB.search(line):
         s.add_sub += 1
         return
+    if _ARM64_SHUFFLE.search(line):
+        s.shuffle += 1
+        return
+    if _ARM64_CONST.search(line):
+        s.const_mat += 1
+        return
     if _ARM64_BRANCH.search(line):
         s.branches += 1
         return
@@ -147,27 +159,37 @@ def _classify_x86(line: str, s: AsmStats) -> None:
     if _X86_ADDSUB.search(line):
         s.add_sub += 1
         return
+    if _X86_SHUFFLE.search(line):
+        s.shuffle += 1
+        return
+    if _X86_CONST.search(line):
+        s.const_mat += 1
+        return
     if _X86_BRANCH.search(line):
         s.branches += 1
         return
     s.other += 1
 
 
-def print_table(all_stats: list[AsmStats]) -> None:
-    hdr = (
-        f"{'file':<40s} {'arch':<7s} {'insns':>7s} {'frame':>7s} "
-        f"{'spill_st':>8s} {'spill_ld':>8s} {'fma':>6s} {'mul':>6s} "
-        f"{'add/sub':>7s} {'branch':>7s}"
-    )
-    print(hdr)
-    print("-" * len(hdr))
+def _pct(n: int, total: int) -> str:
+    if total == 0:
+        return "  -"
+    return f"{100 * n / total:3.0f}%"
+
+
+def print_report(all_stats: list[AsmStats]) -> None:
     for s in all_stats:
-        name = Path(s.path).name
-        print(
-            f"{name:<40s} {s.arch:<7s} {s.total_insns:>7d} {s.stack_frame:>7d} "
-            f"{s.spill_stores:>8d} {s.spill_loads:>8d} {s.fma:>6d} {s.mul:>6d} "
-            f"{s.add_sub:>7d} {s.branches:>7d}"
-        )
+        n = s.total_insns
+        compute = s.fma + s.mul + s.add_sub
+        spills = s.spill_stores + s.spill_loads
+
+        print(f"  {Path(s.path).name}  ({s.arch}, {n:,} insns, stack {s.stack_frame:,} B)")
+        print(f"    compute   {compute:>7,}  {_pct(compute, n)}   (fma {s.fma:,}, mul {s.mul:,}, add/sub {s.add_sub:,})")
+        print(f"    const     {s.const_mat:>7,}  {_pct(s.const_mat, n)}   matrix constant materialization")
+        print(f"    spills    {spills:>7,}  {_pct(spills, n)}   (st {s.spill_stores:,}, ld {s.spill_loads:,})")
+        print(f"    shuffle   {s.shuffle:>7,}  {_pct(s.shuffle, n)}   lane permutations")
+        print(f"    other     {s.other:>7,}  {_pct(s.other, n)}   (branch {s.branches:,})")
+        print()
 
 
 def main() -> None:
@@ -183,7 +205,7 @@ def main() -> None:
             continue
         all_stats.append(parse_file(p))
 
-    print_table(all_stats)
+    print_report(all_stats)
 
 
 if __name__ == "__main__":
