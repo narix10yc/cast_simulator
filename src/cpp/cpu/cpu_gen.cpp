@@ -30,27 +30,6 @@ using cast_cpu_detail::MatrixView;
 using cast_cpu_detail::ShuffleMasks;
 using cast_cpu_detail::TypeBundle;
 
-// Two matvec modes:
-//   Straight — `emit_matvec` (default, one straight-line SSA tree).
-//   Block    — `emit_matvec_blocked` (opt-in, tiles output rows in T and
-//              retires via volatile scratch).
-//
-// Returns the requested tile T (power-of-two in [2,64]) or 0 for Straight.
-// Nonzero is a request — the per-kernel gate `LK ≥ 4·T` further filters it
-// at the dispatch sites.  Invalid env-var values return 0 silently.
-unsigned get_block_gemm_tile() {
-  const char *s = std::getenv("CAST_BLOCK_GEMM_T");
-  if (!s || s[0] == '\0')
-    return 0;
-  char *end = nullptr;
-  const long v = std::strtol(s, &end, 10);
-  if (!end || *end != '\0' || v <= 0)
-    return 0;
-  if (v < 2 || v > 64 || (v & (v - 1)) != 0)
-    return 0;
-  return static_cast<unsigned>(v);
-}
-
 // Live state unpacked from the opaque launch-args struct by the entry BB.
 struct LaunchArgs {
   llvm::Value *p_sv = nullptr;
@@ -181,10 +160,19 @@ llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
   const LaunchArgs args = unpack_launch_args(builder, skel.func, skel.launch_ty);
   const auto mat_data = build_matrix_data(builder, spec, mat_view, args.p_mat, scalar_ty, s);
 
-  // matvec_mode (Straight vs Block) is selected inside the ctor from
-  // (block_gemm_t, LK).  See KernelCodegen.
-  const unsigned block_gemm_t = get_block_gemm_tile();
-  KernelCodegen cg(builder, layout, simd_width_bytes, smasks, mat_data, types, block_gemm_t,
+  // Default 32 (matches AVX-512, NEON, SVE).  Override with CAST_VEC_REGS for
+  // A/B benchmarking (e.g. 9999 → force Straight on all gates).
+  static const unsigned vec_regs = [] {
+    const char *s = std::getenv("CAST_VEC_REGS");
+    if (s && s[0] != '\0') {
+      char *end = nullptr;
+      const long v = std::strtol(s, &end, 10);
+      if (end && *end == '\0' && v >= 2)
+        return static_cast<unsigned>(v);
+    }
+    return 32u;
+  }();
+  KernelCodegen cg(builder, layout, simd_width_bytes, smasks, mat_data, types, vec_regs,
                    *skel.entry_bb);
 
   emit_taskid_loop(builder, cg, args, skel);

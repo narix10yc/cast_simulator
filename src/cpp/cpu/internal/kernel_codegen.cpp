@@ -11,15 +11,31 @@
 
 namespace cast_cpu_detail {
 
+KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs) {
+  KernelStrategy s{};
+  const unsigned T = std::max(2u, vec_regs / 4);
+
+  if (layout.LK() >= vec_regs) {
+    s.matvec_mode = MatvecMode::Block;
+    s.tile_T = T;
+  }
+
+  bool all_lo = layout.hi_bits.empty();
+  bool needs_legalize = all_lo && layout.vec_size() > layout.S();
+  bool shuffle_cheap = layout.S() <= 8;
+  if (needs_legalize && shuffle_cheap)
+    s.load_mode = LoadMode::Tiled;
+
+  return s;
+}
+
 KernelCodegen::KernelCodegen(llvm::IRBuilder<> &builder, const BitLayout &layout,
                              unsigned simd_width_bytes, const ShuffleMasks &smasks,
                              const std::vector<IRMatData> &mat_data, const TypeBundle &types,
-                             unsigned block_gemm_t, llvm::BasicBlock &entry_bb)
+                             unsigned vec_regs, llvm::BasicBlock &entry_bb)
     : B(builder), layout(layout), simd_width_bytes(simd_width_bytes), smasks(smasks),
-      mat_data(mat_data), types(types), block_gemm_t(block_gemm_t),
-      matvec_mode((block_gemm_t > 0 && layout.LK() >= 4 * block_gemm_t) ? MatvecMode::Block
-                                                                        : MatvecMode::Straight) {
-  if (matvec_mode == MatvecMode::Block) {
+      mat_data(mat_data), types(types), strategy(choose_strategy(layout, vec_regs)) {
+  if (strategy.matvec_mode == MatvecMode::Block) {
     matvec_scratch = alloca_matvec_scratch(entry_bb);
   }
 }
@@ -104,7 +120,7 @@ MatvecResult KernelCodegen::emit_matvec(const LoadedAmplitudes &amps, unsigned h
 // pressure from 256 to 144 values.
 //
 // Caller contract: `re_scratch`/`im_scratch` are `alloca_matvec_scratch`
-// outputs; caller has gated `LK > T` (dispatch sites enforce `LK ≥ 4·T`,
+// outputs; choose_strategy() gates on `LK ≥ vec_regs` (≡ `LK ≥ 4·T`,
 // which amortizes the volatile-op overhead — see commit cd510df).  On
 // return the builder is in `matvec.done`; returned values are the reloads.
 MatvecResult KernelCodegen::emit_matvec_blocked(const LoadedAmplitudes &amps, unsigned hi,
@@ -210,8 +226,8 @@ MatvecResult KernelCodegen::reload_full_result_from_scratch(llvm::Value *re_scra
 }
 
 MatvecResult KernelCodegen::emit_matvec_dispatched(const LoadedAmplitudes &amps, unsigned hi) {
-  if (matvec_mode == MatvecMode::Block) {
-    return emit_matvec_blocked(amps, hi, block_gemm_t, matvec_scratch.re, matvec_scratch.im);
+  if (strategy.matvec_mode == MatvecMode::Block) {
+    return emit_matvec_blocked(amps, hi, strategy.tile_T, matvec_scratch.re, matvec_scratch.im);
   }
   return emit_matvec(amps, hi);
 }
@@ -260,29 +276,6 @@ llvm::Value *KernelCodegen::emit_sv_base_ptr(llvm::Value *p_sv, llvm::Value *tas
     idx = B.CreateAdd(idx, part, "idx");
   }
   return B.CreateGEP(types.vec_ty, p_sv, idx, "ptr.sv.begin");
-}
-
-// All-lo tiled path (hi_bits empty, HK=1): replace the single `<vec_size ×
-// scalar>` load + stride shuffles with `vec_size / S` native-width loads and
-// the inverse on store.  Avoids the LLVM type-legalisation blowup at k≥5
-// when targets concentrate at low positions.
-//
-// Amp lane si of (li, re/im) must equal sv[re_split[li*S+si]] (resp. im);
-// we decompose that index into (chunk = idx >> s, lane = idx & (S-1)) and
-// build with extractelement/insertelement on native chunks.
-void KernelCodegen::emit_loop_body_tiled_all_lo(llvm::Value *ptr_sv_begin) {
-  assert(layout.hi_bits.empty());
-  assert(layout.HK() == 1);
-  const unsigned num_chunks = layout.vec_size() / layout.S();
-  assert(num_chunks >= 2);
-  auto *chunk_ty = vec_s_type();
-
-  auto chunks = load_all_chunks(ptr_sv_begin, num_chunks, chunk_ty);
-  auto amps = gather_amps_from_chunks(chunks, chunk_ty);
-  amps.ptrs.assign(1, ptr_sv_begin); // Unused for HK=1; kept for struct contract.
-  auto result = emit_matvec_dispatched(amps, /*hi=*/0);
-  auto out_chunks = scatter_result_into_chunks(result, num_chunks, chunk_ty);
-  store_all_chunks(out_chunks, ptr_sv_begin, chunk_ty);
 }
 
 std::vector<llvm::Value *>
@@ -365,20 +358,24 @@ void KernelCodegen::store_all_chunks(const std::vector<llvm::Value *> &out_chunk
   }
 }
 
-// Full loop body: load → matvec → merge/store per hi block.  Tiled all-lo
-// path only when HK=1 and vec_size > S (otherwise no legalisation to
-// avoid).  S=16 (F32 W512) is gated out because 2·S extract/insert pairs
-// become 16-wide shufflevectors under InstCombine and net +50% at k=6.
+// Full loop body: load → matvec → merge/store.  LoadMode and MatvecMode are
+// selected by choose_strategy() and stored in `strategy`.
 void KernelCodegen::emit_loop_body(llvm::Value *ptr_sv_begin) {
-  if (layout.hi_bits.empty() && layout.vec_size() > layout.S() && layout.S() <= 8) {
-    emit_loop_body_tiled_all_lo(ptr_sv_begin);
-    return;
-  }
-
-  auto amps = emit_load_amplitudes(ptr_sv_begin);
-  for (unsigned hi = 0; hi < layout.HK(); ++hi) {
-    auto result = emit_matvec_dispatched(amps, hi);
-    emit_merge_and_store(result, amps.ptrs[hi]);
+  if (strategy.load_mode == LoadMode::Tiled) {
+    auto *chunk_ty = vec_s_type();
+    const unsigned num_chunks = layout.vec_size() / layout.S();
+    auto chunks = load_all_chunks(ptr_sv_begin, num_chunks, chunk_ty);
+    auto amps = gather_amps_from_chunks(chunks, chunk_ty);
+    amps.ptrs.assign(1, ptr_sv_begin);
+    auto result = emit_matvec_dispatched(amps, /*hi=*/0);
+    auto out_chunks = scatter_result_into_chunks(result, num_chunks, chunk_ty);
+    store_all_chunks(out_chunks, ptr_sv_begin, chunk_ty);
+  } else {
+    auto amps = emit_load_amplitudes(ptr_sv_begin);
+    for (unsigned hi = 0; hi < layout.HK(); ++hi) {
+      auto result = emit_matvec_dispatched(amps, hi);
+      emit_merge_and_store(result, amps.ptrs[hi]);
+    }
   }
 }
 

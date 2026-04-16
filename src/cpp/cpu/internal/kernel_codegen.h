@@ -35,8 +35,20 @@ struct MatvecScratch {
   bool engaged() const { return re != nullptr; }
 };
 
-// Straight — emit_matvec (default); Block — emit_matvec_blocked (opt-in).
+// Straight — emit_matvec (default); Block — emit_matvec_blocked.
 enum class MatvecMode { Straight, Block };
+
+// Mega — one wide aligned load + shuffle; Tiled — native-width chunked loads.
+enum class LoadMode { Mega, Tiled };
+
+// Full kernel emission strategy, selected once per kernel by choose_strategy().
+struct KernelStrategy {
+  LoadMode    load_mode   = LoadMode::Mega;
+  MatvecMode  matvec_mode = MatvecMode::Straight;
+  unsigned    tile_T      = 0; // meaningful iff Block
+};
+
+KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs);
 
 // scalar_ty = float or double; vec_ty = <vec_size() × scalar>.
 struct TypeBundle {
@@ -55,16 +67,12 @@ struct KernelCodegen {
   const std::vector<IRMatData> &mat_data;
   const TypeBundle &types;
 
-  // `block_gemm_t == 0` → Straight for this kernel.  `> 0` is a request;
-  // `matvec_mode` carries the final decision (gate `LK ≥ 4·T` applied in
-  // the ctor and stored here; no site below re-derives it).
-  unsigned block_gemm_t;
-  MatvecMode matvec_mode;
-  MatvecScratch matvec_scratch; // engaged() iff matvec_mode == Block
+  KernelStrategy strategy;       // selected by choose_strategy() in ctor
+  MatvecScratch matvec_scratch;  // engaged() iff strategy.matvec_mode == Block
 
   KernelCodegen(llvm::IRBuilder<> &builder, const BitLayout &layout, unsigned simd_width_bytes,
                 const ShuffleMasks &smasks, const std::vector<IRMatData> &mat_data,
-                const TypeBundle &types, unsigned block_gemm_t, llvm::BasicBlock &entry_bb);
+                const TypeBundle &types, unsigned vec_regs, llvm::BasicBlock &entry_bb);
 
   // Native-width complex-lane vector type (`<S × scalar>`) and SIMD alignment.
   llvm::VectorType *vec_s_type() const {
@@ -85,11 +93,11 @@ struct KernelCodegen {
   MatvecResult emit_matvec(const LoadedAmplitudes &amps, unsigned hi);
 
   // Phase 2 — Block: same arithmetic, output rows tiled in T with volatile
-  // retire/reload.  Caller gates `LK > T`; dispatch sites enforce `LK ≥ 4·T`.
+  // retire/reload.  choose_strategy() gates on `LK ≥ R` (≡ `LK ≥ 4·T`).
   MatvecResult emit_matvec_blocked(const LoadedAmplitudes &amps, unsigned hi, unsigned T,
                                    llvm::Value *re_scratch, llvm::Value *im_scratch);
 
-  // Phase 2 — Straight/Block dispatcher; the only consumer of matvec_mode.
+  // Phase 2 — Straight/Block dispatcher; reads strategy.matvec_mode.
   MatvecResult emit_matvec_dispatched(const LoadedAmplitudes &amps, unsigned hi);
 
   // Block-mode helpers.  Volatility retires accumulators between blocks —
@@ -103,8 +111,7 @@ struct KernelCodegen {
   // Phase 3: merge lo-partitions, interleave re/im, aligned store.
   void emit_merge_and_store(MatvecResult &result, llvm::Value *p_sv_hi);
 
-  void emit_loop_body_tiled_all_lo(llvm::Value *ptr_sv_begin);
-  void emit_loop_body(llvm::Value *ptr_sv_begin); // dispatches tiled vs general
+  void emit_loop_body(llvm::Value *ptr_sv_begin);
 
   // Tiled-all-lo helpers.  `chunk_ty` is `vec_s_type()`.
   std::vector<llvm::Value *> load_all_chunks(llvm::Value *ptr_sv_begin, unsigned num_chunks,
