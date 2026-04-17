@@ -20,8 +20,7 @@ KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs) {
     s.tile_T = T;
   }
 
-  bool all_lo = layout.hi_bits.empty();
-  bool needs_legalize = all_lo && layout.vec_size() > layout.S();
+  bool needs_legalize = layout.vec_size() > layout.S();
   bool shuffle_cheap = layout.S() <= 8;
   if (needs_legalize && shuffle_cheap)
     s.load_mode = LoadMode::Tiled;
