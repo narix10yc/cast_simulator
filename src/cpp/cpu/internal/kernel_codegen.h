@@ -86,8 +86,11 @@ struct KernelCodegen {
 
   llvm::Value *emit_sv_base_ptr(llvm::Value *p_sv, llvm::Value *task_id);
 
-  // Phase 1: per-hi aligned load + shuffle-split into re/im.
+  // Phase 1: load all K amplitudes.  Dispatches Mega/Tiled per partition.
   LoadedAmplitudes emit_load_amplitudes(llvm::Value *ptr_sv_begin);
+
+  // Pointer to the start of hi-combination `hi` within the statevector segment.
+  llvm::Value *compute_hi_ptr(llvm::Value *ptr_sv_begin, unsigned hi);
 
   // Phase 2 — Straight: one LK·K accumulator chain; LLVM owns regalloc.
   MatvecResult emit_matvec(const LoadedAmplitudes &amps, unsigned hi);
@@ -108,12 +111,15 @@ struct KernelCodegen {
                                llvm::Value *im_scratch);
   MatvecResult reload_full_result_from_scratch(llvm::Value *re_scratch, llvm::Value *im_scratch);
 
-  // Phase 3: merge lo-partitions, interleave re/im, aligned store.
+  // Phase 3: Mega/Tiled store dispatcher.
+  void emit_store_result(MatvecResult &result, llvm::Value *ptr_hi);
+
+  // Phase 3 Mega: merge lo-partitions, interleave re/im, aligned store.
   void emit_merge_and_store(MatvecResult &result, llvm::Value *p_sv_hi);
 
   void emit_loop_body(llvm::Value *ptr_sv_begin);
 
-  // Tiled-all-lo helpers.  `chunk_ty` is `vec_s_type()`.
+  // Tiled load/store helpers.  `chunk_ty` is `vec_s_type()`.
   std::vector<llvm::Value *> load_all_chunks(llvm::Value *ptr_sv_begin, unsigned num_chunks,
                                              llvm::VectorType *chunk_ty);
   LoadedAmplitudes gather_amps_from_chunks(const std::vector<llvm::Value *> &chunks,
