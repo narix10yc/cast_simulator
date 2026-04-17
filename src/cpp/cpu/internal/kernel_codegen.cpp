@@ -40,35 +40,51 @@ KernelCodegen::KernelCodegen(llvm::IRBuilder<> &builder, const BitLayout &layout
   }
 }
 
-// Phase 1 — one aligned vector load per hi combination, shuffle-split into
-// LK re/im vectors per partition.
+// Pointer to the start of hi-combination `hi` within the statevector segment.
+// Returns `ptr_sv_begin` unchanged when hi == 0 (or when there are no hi bits).
+llvm::Value *KernelCodegen::compute_hi_ptr(llvm::Value *ptr_sv_begin, unsigned hi) {
+  uint64_t idx_shift = 0;
+  for (unsigned hbit = 0; hbit < layout.hk(); ++hbit) {
+    if (hi & (1u << hbit))
+      idx_shift += uint64_t(1) << layout.hi_bits[hbit];
+  }
+  idx_shift >>= layout.sep_bit;
+  if (idx_shift == 0)
+    return ptr_sv_begin;
+  return B.CreateConstGEP1_64(types.vec_ty, ptr_sv_begin, idx_shift);
+}
+
+// Phase 1 — load all K amplitudes across HK hi-combinations.
+// Mega: one wide aligned load + ShuffleVector split per partition.
+// Tiled: native-width chunk loads + scalar gather per partition.
 LoadedAmplitudes KernelCodegen::emit_load_amplitudes(llvm::Value *ptr_sv_begin) {
-  const auto K = layout.K();
   const auto LK = layout.LK();
   const auto HK = layout.HK();
   const auto S = layout.S();
 
   LoadedAmplitudes amps;
-  amps.re.resize(K);
-  amps.im.resize(K);
+  amps.re.resize(layout.K());
+  amps.im.resize(layout.K());
   amps.ptrs.resize(HK);
 
   for (unsigned hi = 0; hi < HK; ++hi) {
-    uint64_t idx_shift = 0;
-    for (unsigned hbit = 0; hbit < layout.hk(); ++hbit) {
-      if (hi & (1u << hbit))
-        idx_shift += uint64_t(1) << layout.hi_bits[hbit];
-    }
-    idx_shift >>= layout.sep_bit;
+    amps.ptrs[hi] = compute_hi_ptr(ptr_sv_begin, hi);
 
-    amps.ptrs[hi] = B.CreateConstGEP1_64(types.vec_ty, ptr_sv_begin, idx_shift);
-    auto *amp_full = B.CreateAlignedLoad(types.vec_ty, amps.ptrs[hi], simd_align());
-
-    for (unsigned li = 0; li < LK; ++li) {
-      amps.re[hi * LK + li] =
-          B.CreateShuffleVector(amp_full, llvm::ArrayRef<int>(smasks.re_split.data() + li * S, S));
-      amps.im[hi * LK + li] =
-          B.CreateShuffleVector(amp_full, llvm::ArrayRef<int>(smasks.im_split.data() + li * S, S));
+    if (strategy.load_mode == LoadMode::Tiled) {
+      auto *chunk_ty = vec_s_type();
+      const unsigned num_chunks = layout.vec_size() / S;
+      auto chunks = load_all_chunks(amps.ptrs[hi], num_chunks, chunk_ty);
+      auto part = gather_amps_from_chunks(chunks, chunk_ty);
+      std::copy(part.re.begin(), part.re.end(), amps.re.begin() + hi * LK);
+      std::copy(part.im.begin(), part.im.end(), amps.im.begin() + hi * LK);
+    } else {
+      auto *amp_full = B.CreateAlignedLoad(types.vec_ty, amps.ptrs[hi], simd_align());
+      for (unsigned li = 0; li < LK; ++li) {
+        amps.re[hi * LK + li] = B.CreateShuffleVector(
+            amp_full, llvm::ArrayRef<int>(smasks.re_split.data() + li * S, S));
+        amps.im[hi * LK + li] = B.CreateShuffleVector(
+            amp_full, llvm::ArrayRef<int>(smasks.im_split.data() + li * S, S));
+      }
     }
   }
 
@@ -262,6 +278,18 @@ void KernelCodegen::emit_merge_and_store(MatvecResult &result, llvm::Value *p_sv
   B.CreateAlignedStore(merged, p_sv_hi, simd_align());
 }
 
+// Phase 3 — Mega/Tiled store dispatcher.
+void KernelCodegen::emit_store_result(MatvecResult &result, llvm::Value *ptr_hi) {
+  if (strategy.load_mode == LoadMode::Tiled) {
+    auto *chunk_ty = vec_s_type();
+    const unsigned num_chunks = layout.vec_size() / layout.S();
+    auto out_chunks = scatter_result_into_chunks(result, num_chunks, chunk_ty);
+    store_all_chunks(out_chunks, ptr_hi, chunk_ty);
+  } else {
+    emit_merge_and_store(result, ptr_hi);
+  }
+}
+
 llvm::Value *KernelCodegen::emit_sv_base_ptr(llvm::Value *p_sv, llvm::Value *task_id) {
   if (layout.hi_bits.empty()) {
     return B.CreateGEP(types.vec_ty, p_sv, task_id);
@@ -296,15 +324,15 @@ LoadedAmplitudes KernelCodegen::gather_amps_from_chunks(const std::vector<llvm::
   const auto S = layout.S();
   const auto s = layout.s();
   const unsigned s_mask = S - 1;
-  auto *undef_vec = llvm::UndefValue::get(chunk_ty);
+  auto *poison_vec = llvm::PoisonValue::get(chunk_ty);
 
   LoadedAmplitudes amps;
   amps.re.resize(LK);
   amps.im.resize(LK);
 
   for (unsigned li = 0; li < LK; ++li) {
-    llvm::Value *re_vec = undef_vec;
-    llvm::Value *im_vec = undef_vec;
+    llvm::Value *re_vec = poison_vec;
+    llvm::Value *im_vec = poison_vec;
     for (unsigned si = 0; si < S; ++si) {
       const auto re_idx = static_cast<unsigned>(smasks.re_split[li * S + si]);
       const auto im_idx = static_cast<unsigned>(smasks.im_split[li * S + si]);
@@ -319,8 +347,8 @@ LoadedAmplitudes KernelCodegen::gather_amps_from_chunks(const std::vector<llvm::
   return amps;
 }
 
-// Inverse of gather_amps_from_chunks.  Undef-init of chunks is safe: every
-// lane is reached exactly once (2·LK·S writes = vec_size).
+// Inverse of gather_amps_from_chunks.  Poison-init of chunks is safe: every
+// lane is written exactly once (2·LK·S writes = vec_size).
 std::vector<llvm::Value *> KernelCodegen::scatter_result_into_chunks(const MatvecResult &result,
                                                                      unsigned num_chunks,
                                                                      llvm::VectorType *chunk_ty) {
@@ -328,9 +356,9 @@ std::vector<llvm::Value *> KernelCodegen::scatter_result_into_chunks(const Matve
   const auto S = layout.S();
   const auto s = layout.s();
   const unsigned s_mask = S - 1;
-  auto *undef_vec = llvm::UndefValue::get(chunk_ty);
+  auto *poison_vec = llvm::PoisonValue::get(chunk_ty);
 
-  std::vector<llvm::Value *> out_chunks(num_chunks, undef_vec);
+  std::vector<llvm::Value *> out_chunks(num_chunks, poison_vec);
   for (unsigned li = 0; li < LK; ++li) {
     for (unsigned si = 0; si < S; ++si) {
       const auto re_idx = static_cast<unsigned>(smasks.re_split[li * S + si]);
@@ -355,24 +383,13 @@ void KernelCodegen::store_all_chunks(const std::vector<llvm::Value *> &out_chunk
   }
 }
 
-// Full loop body: load → matvec → merge/store.  LoadMode and MatvecMode are
+// Full loop body: load → matvec → store.  LoadMode and MatvecMode are
 // selected by choose_strategy() and stored in `strategy`.
 void KernelCodegen::emit_loop_body(llvm::Value *ptr_sv_begin) {
-  if (strategy.load_mode == LoadMode::Tiled) {
-    auto *chunk_ty = vec_s_type();
-    const unsigned num_chunks = layout.vec_size() / layout.S();
-    auto chunks = load_all_chunks(ptr_sv_begin, num_chunks, chunk_ty);
-    auto amps = gather_amps_from_chunks(chunks, chunk_ty);
-    amps.ptrs.assign(1, ptr_sv_begin);
-    auto result = emit_matvec_dispatched(amps, /*hi=*/0);
-    auto out_chunks = scatter_result_into_chunks(result, num_chunks, chunk_ty);
-    store_all_chunks(out_chunks, ptr_sv_begin, chunk_ty);
-  } else {
-    auto amps = emit_load_amplitudes(ptr_sv_begin);
-    for (unsigned hi = 0; hi < layout.HK(); ++hi) {
-      auto result = emit_matvec_dispatched(amps, hi);
-      emit_merge_and_store(result, amps.ptrs[hi]);
-    }
+  auto amps = emit_load_amplitudes(ptr_sv_begin);
+  for (unsigned hi = 0; hi < layout.HK(); ++hi) {
+    auto result = emit_matvec_dispatched(amps, hi);
+    emit_store_result(result, amps.ptrs[hi]);
   }
 }
 

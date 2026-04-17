@@ -159,6 +159,7 @@ llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
 
   // Default 32 (matches AVX-512, NEON, SVE).  Override with CAST_VEC_REGS for
   // A/B benchmarking (e.g. 9999 → force Straight on all gates).
+  // Note: `static` — read once at first call, cached for the process lifetime.
   static const unsigned vec_regs = [] {
     const char *s = std::getenv("CAST_VEC_REGS");
     if (s && s[0] != '\0') {
