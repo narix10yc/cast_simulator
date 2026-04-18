@@ -70,11 +70,16 @@ typedef struct cast_cpu_jit_session_t cast_cpu_jit_session_t;
 
 // -- Generator lifecycle --
 
+/// Error handling: returns NULL on failure. Rust side must check if the
+/// returned handle is null.
 cast_cpu_kernel_generator_t *cast_cpu_kernel_generator_new(void);
+
+/// Safe to call with NULL.
 void cast_cpu_kernel_generator_delete(cast_cpu_kernel_generator_t *generator);
 
 // -- Kernel generation --
 
+/// Error handling: returns non-zero on failure and writes a message to err_buf.
 int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
                                        const cast_cpu_kernel_gen_spec_t *spec,
                                        const cast_cpu_complex64_t *matrix, size_t matrix_len,
@@ -84,10 +89,12 @@ int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
 
 // -- Diagnostics --
 
+/// Error handling: returns non-zero on failure and writes a message to err_buf.
 int cast_cpu_kernel_generator_request_asm(cast_cpu_kernel_generator_t *generator,
                                           cast_cpu_kernel_id_t kernel_id, char *err_buf,
                                           size_t err_buf_len);
 
+/// Error handling: returns non-zero on failure and writes a message to err_buf.
 int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *generator,
                                       cast_cpu_kernel_id_t kernel_id, char *out_ir,
                                       size_t ir_buf_len, size_t *out_ir_len, char *err_buf,
@@ -95,17 +102,20 @@ int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *generator,
 
 // -- JIT compilation --
 
+/// Error handling: returns non-zero on failure and writes a message to err_buf.
 /// On success: deletes the generator and returns 0.
-/// On failure: returns non-zero and leaves the generator intact.
+/// On failure: leaves the generator intact.
 int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *generator,
                                      cast_cpu_jit_session_t **out_session,
                                      cast_cpu_jit_kernel_record_t **out_records,
                                      size_t *out_n_records, char *err_buf, size_t err_buf_len);
 
+/// Safe to call with NULL.
 void cast_cpu_jit_kernel_records_free(cast_cpu_jit_kernel_record_t *records, size_t n);
 
 // -- Session lifecycle --
 
+/// Safe to call with NULL.
 void cast_cpu_jit_session_delete(cast_cpu_jit_session_t *session);
 
 // ── Internal to C++ (not imported by Rust) ──────────────────────────────────

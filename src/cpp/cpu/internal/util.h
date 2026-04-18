@@ -13,7 +13,7 @@
 
 namespace cast_cpu_detail {
 
-inline void write_error_message(char *err_buf, size_t err_buf_len, const std::string &msg) {
+inline void write_err_buf(char *err_buf, size_t err_buf_len, const std::string &msg) {
   if (err_buf == nullptr || err_buf_len == 0)
     return;
   const size_t n = std::min(err_buf_len - 1, msg.size());
@@ -21,7 +21,7 @@ inline void write_error_message(char *err_buf, size_t err_buf_len, const std::st
   err_buf[n] = '\0';
 }
 
-inline void clear_error_buffer(char *err_buf, size_t err_buf_len) {
+inline void clear_err_buf(char *err_buf, size_t err_buf_len) {
   if (err_buf != nullptr && err_buf_len > 0)
     err_buf[0] = '\0';
 }

@@ -1,16 +1,11 @@
-// Rust ↔ C ABI boundary for the CPU kernel pipeline.
+// Rust-C ABI boundary for the CPU kernel pipeline.
 //
-// Error handling convention: internal helpers (cast_cpu_generate_kernel_ir,
-// cast_cpu_jit_create, cast_cpu_optimize_kernel_ir, cast_cpu_jit_compile_kernel)
-// propagate via llvm::Expected<T> / llvm::Error. This file is the *only* place
-// those are converted into the C `err_buf` + return-code contract.
+// Error handling: internal helpers propagate via LLVM error handling system (`llvm::Expected<T>`
+// and `llvm::Error). 
 //
-// The `try { ... } catch (...)` blocks here are the C-ABI safety net: an
-// exception must not propagate across extern "C" into Rust (UB). In practice
-// only allocation failures (std::bad_alloc from `new`, std::make_unique,
-// std::vector growth) reach these handlers — any LLVM/logic error is already
-// surfaced via llvm::Error within the protected region. Do NOT add try/catch
-// inside helpers that return llvm::Error; keep the boundary thin.
+// At the FFI boundary, we use try-catch blocks for possible C++ std::exception (such as
+// std::bad_alloc of `new`). These exceptions must not cross the FFI boundary to Rust.
+// Rust side needs to catch these flags accordingly (nullptr, return value checks).
 
 #include "../include/cast_cpu.h"
 
@@ -57,15 +52,15 @@ extern "C" int cast_cpu_kernel_generator_generate(
     const cast_cpu_complex64_t *matrix, size_t matrix_len, const uint32_t *qubits, size_t n_qubits,
     cast_cpu_kernel_id_t *out_kernel_id, char *err_buf, size_t err_buf_len) {
   if (generator == nullptr) {
-    write_error_message(err_buf, err_buf_len, "generator must not be null");
+    write_err_buf(err_buf, err_buf_len, "generator must not be null");
     return 1;
   }
   if (spec == nullptr) {
-    write_error_message(err_buf, err_buf_len, "spec must not be null");
+    write_err_buf(err_buf, err_buf_len, "spec must not be null");
     return 1;
   }
   if (out_kernel_id == nullptr) {
-    write_error_message(err_buf, err_buf_len, "out_kernel_id must not be null");
+    write_err_buf(err_buf, err_buf_len, "out_kernel_id must not be null");
     return 1;
   }
 
@@ -86,19 +81,19 @@ extern "C" int cast_cpu_kernel_generator_generate(
     auto func = cast_cpu_generate_kernel_ir(*spec, matrix, matrix_len, qubits, n_qubits,
                                             kernel.func_name, *kernel.module);
     if (!func) {
-      write_error_message(err_buf, err_buf_len, llvm::toString(func.takeError()));
+      write_err_buf(err_buf, err_buf_len, llvm::toString(func.takeError()));
       return 1;
     }
 
     generator->kernels.push_back(std::move(kernel));
     *out_kernel_id = generator->kernels.back().metadata.kernel_id;
-    clear_error_buffer(err_buf, err_buf_len);
+    clear_err_buf(err_buf, err_buf_len);
     return 0;
   } catch (const std::exception &ex) {
-    write_error_message(err_buf, err_buf_len, ex.what());
+    write_err_buf(err_buf, err_buf_len, ex.what());
     return 1;
   } catch (...) {
-    write_error_message(err_buf, err_buf_len, "unknown error in kernel generation");
+    write_err_buf(err_buf, err_buf_len, "unknown error in kernel generation");
     return 1;
   }
 }
@@ -107,18 +102,18 @@ extern "C" int cast_cpu_kernel_generator_request_asm(cast_cpu_kernel_generator_t
                                                      cast_cpu_kernel_id_t kernel_id, char *err_buf,
                                                      size_t err_buf_len) {
   if (generator == nullptr) {
-    write_error_message(err_buf, err_buf_len, "generator must not be null");
+    write_err_buf(err_buf, err_buf_len, "generator must not be null");
     return 1;
   }
   auto it = std::find_if(
       generator->kernels.begin(), generator->kernels.end(),
       [kernel_id](const CastCpuGeneratedKernel &k) { return k.metadata.kernel_id == kernel_id; });
   if (it == generator->kernels.end()) {
-    write_error_message(err_buf, err_buf_len, "kernel id not found in generator");
+    write_err_buf(err_buf, err_buf_len, "kernel id not found in generator");
     return 1;
   }
   it->capture_asm = true;
-  clear_error_buffer(err_buf, err_buf_len);
+  clear_err_buf(err_buf, err_buf_len);
   return 0;
 }
 
@@ -127,7 +122,7 @@ extern "C" int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *ge
                                                  size_t ir_buf_len, size_t *out_ir_len,
                                                  char *err_buf, size_t err_buf_len) {
   if (generator == nullptr) {
-    write_error_message(err_buf, err_buf_len, "generator must not be null");
+    write_err_buf(err_buf, err_buf_len, "generator must not be null");
     return 1;
   }
 
@@ -135,13 +130,13 @@ extern "C" int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *ge
       generator->kernels.begin(), generator->kernels.end(),
       [kernel_id](const CastCpuGeneratedKernel &k) { return k.metadata.kernel_id == kernel_id; });
   if (it == generator->kernels.end()) {
-    write_error_message(err_buf, err_buf_len, "kernel id not found in generator");
+    write_err_buf(err_buf, err_buf_len, "kernel id not found in generator");
     return 1;
   }
 
   // Optimize (idempotent) and populate it->ir if not done yet.
   if (auto err = cast_cpu_optimize_kernel_ir(*it)) {
-    write_error_message(err_buf, err_buf_len, llvm::toString(std::move(err)));
+    write_err_buf(err_buf, err_buf_len, llvm::toString(std::move(err)));
     return 1;
   }
 
@@ -155,7 +150,7 @@ extern "C" int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *ge
     out_ir[n] = '\0';
   }
 
-  clear_error_buffer(err_buf, err_buf_len);
+  clear_err_buf(err_buf, err_buf_len);
   return 0;
 }
 
@@ -165,18 +160,18 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
                                                 size_t *out_n_records, char *err_buf,
                                                 size_t err_buf_len) {
   if (generator == nullptr) {
-    write_error_message(err_buf, err_buf_len, "generator must not be null");
+    write_err_buf(err_buf, err_buf_len, "generator must not be null");
     return 1;
   }
   if (out_session == nullptr || out_records == nullptr || out_n_records == nullptr) {
-    write_error_message(err_buf, err_buf_len, "output pointers must not be null");
+    write_err_buf(err_buf, err_buf_len, "output pointers must not be null");
     return 1;
   }
 
   try {
     auto jit = cast_cpu_jit_create(std::thread::hardware_concurrency());
     if (!jit) {
-      write_error_message(err_buf, err_buf_len, llvm::toString(jit.takeError()));
+      write_err_buf(err_buf, err_buf_len, llvm::toString(jit.takeError()));
       return 1;
     }
 
@@ -184,7 +179,7 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
     auto *records = static_cast<cast_cpu_jit_kernel_record_t *>(
         std::calloc(n, sizeof(cast_cpu_jit_kernel_record_t)));
     if (!records && n > 0) {
-      write_error_message(err_buf, err_buf_len, "failed to allocate kernel records");
+      write_err_buf(err_buf, err_buf_len, "failed to allocate kernel records");
       return 1;
     }
 
@@ -197,7 +192,7 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
         // Frees the records' inner fields AND the array itself.
         cast_cpu_jit_kernel_records_free(records, i);
         delete session;
-        write_error_message(err_buf, err_buf_len, llvm::toString(std::move(err)));
+        write_err_buf(err_buf, err_buf_len, llvm::toString(std::move(err)));
         return 1;
       }
     }
@@ -205,16 +200,16 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
     *out_session = session;
     *out_records = records;
     *out_n_records = n;
-    clear_error_buffer(err_buf, err_buf_len);
+    clear_err_buf(err_buf, err_buf_len);
 
     // Ownership transferred; caller must not use generator again.
     delete generator;
     return 0;
   } catch (const std::exception &ex) {
-    write_error_message(err_buf, err_buf_len, ex.what());
+    write_err_buf(err_buf, err_buf_len, ex.what());
     return 1;
   } catch (...) {
-    write_error_message(err_buf, err_buf_len, "unknown error while initializing JIT");
+    write_err_buf(err_buf, err_buf_len, "unknown error while initializing JIT");
     return 1;
   }
 }
