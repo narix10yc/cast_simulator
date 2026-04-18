@@ -14,6 +14,8 @@ pub mod fusion;
 
 pub mod openqasm;
 
+pub mod ffi;
+
 pub mod cpu;
 
 #[cfg(feature = "cuda")]

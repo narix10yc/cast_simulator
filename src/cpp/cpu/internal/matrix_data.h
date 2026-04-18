@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_H
 #define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_H
 
-#include "../cast_cpu.h"
+#include "../../include/cast_cpu.h"
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Type.h>

@@ -1,4 +1,4 @@
-#include "cast_cuda.h"
+#include "../include/cast_cuda.h"
 #include "cuda_util.h"
 
 #include <cuda.h>

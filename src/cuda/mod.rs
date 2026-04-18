@@ -26,8 +26,8 @@ pub use kernel::{KernelExecTime, SyncStats};
 pub use statevector::CudaStatevector;
 pub use types::{CudaKernelGenSpec, CudaKernelId, CudaPrecision};
 
-/// Raw FFI bindings to `src/cpp/cuda/cuda.h`.  See `ffi.rs` for details.
-pub(super) mod ffi;
+/// Raw FFI bindings — re-exported from `crate::ffi::cuda`.
+pub(super) use crate::ffi::cuda as ffi;
 
 /// Get the CUDA compute capability.
 ///

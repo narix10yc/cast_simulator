@@ -4,7 +4,7 @@
 // Internal helpers shared across cpu.cpp, cpu_gen.cpp, and cpu_jit.cpp.
 // All functions are inline to avoid a separate translation unit.
 
-#include "../cast_cpu.h"
+#include "../../include/cast_cpu.h"
 
 #include <algorithm>
 #include <cstddef>

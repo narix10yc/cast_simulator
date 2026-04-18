@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CPU_JIT_H
 #define CAST_SIMULATOR_SRC_CPP_CPU_JIT_H
 
-#include "cast_cpu.h"
+#include "../include/cast_cpu.h"
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/IR/LLVMContext.h>

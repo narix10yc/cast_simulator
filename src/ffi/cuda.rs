@@ -1,6 +1,6 @@
-//! Raw FFI bindings to `src/cpp/cuda/cuda.h`.
+//! Raw FFI bindings to `src/cpp/include/cast_cuda.h`.
 //!
-//! Covers gate PTX compilation, device queries, stream management, PTX→cubin
+//! Covers gate PTX compilation, device queries, stream management, PTX->cubin
 //! JIT linking, module/kernel launch, device-side reductions, async memcpy,
 //! and CUDA timing events.
 //!
@@ -8,7 +8,7 @@
 //! `sv_upload`, `sv_download`) are declared privately inside `statevector.rs`
 //! because they are only used there.
 
-use super::CudaKernelGenSpec;
+use crate::cuda::CudaKernelGenSpec;
 use std::ffi::c_char;
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ unsafe extern "C" {
         err_buf_len: usize,
     ) -> i32;
 
-    // -- PTX → cubin JIT compilation ------------------------------------------
+    // -- PTX -> cubin JIT compilation ------------------------------------------
 
     #[cfg(feature = "cuda")]
     pub fn cast_cuda_ptx_to_cubin(

@@ -12,7 +12,7 @@
 // surfaced via llvm::Error within the protected region. Do NOT add try/catch
 // inside helpers that return llvm::Error; keep the boundary thin.
 
-#include "cast_cpu.h"
+#include "../include/cast_cpu.h"
 
 #include "cpu_gen.h"
 #include "cpu_jit.h"

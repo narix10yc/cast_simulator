@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CUDA_JIT_H
 #define CAST_SIMULATOR_SRC_CPP_CUDA_JIT_H
 
-#include "cast_cuda.h"
+#include "../include/cast_cuda.h"
 
 #include <cstdint>
 #include <llvm/IR/LLVMContext.h>

@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CUDA_GEN_H
 #define CAST_SIMULATOR_SRC_CPP_CUDA_GEN_H
 
-#include "cast_cuda.h"
+#include "../include/cast_cuda.h"
 
 #include <llvm/Support/Error.h>
 
