@@ -4,7 +4,7 @@
 //! - [`cpu`] — `cast_cpu.h` (LLVM JIT kernel pipeline)
 //! - [`cuda`] — `cast_cuda.h` (NVPTX codegen, CUDA driver, device kernels)
 
-pub mod cpu;
+pub(crate) mod cpu;
 
 #[cfg(feature = "cuda")]
-pub mod cuda;
+pub(crate) mod cuda;

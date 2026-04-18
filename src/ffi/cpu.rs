@@ -9,40 +9,40 @@ use std::ffi::{c_char, c_void};
 /// `cast_cpu_complex64_t`
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct c64 {
-    pub re: f64,
-    pub im: f64,
+pub(crate) struct c64 {
+    pub(crate) re: f64,
+    pub(crate) im: f64,
 }
 
 /// `cast_cpu_kernel_metadata_t`
 #[repr(C)]
-pub struct KernelMetadata {
-    pub kernel_id: KernelId,
-    pub precision: Precision,
-    pub simd_width: SimdWidth,
-    pub mode: MatrixLoadMode,
-    pub n_gate_qubits: u32,
+pub(crate) struct KernelMetadata {
+    pub(crate) kernel_id: KernelId,
+    pub(crate) precision: Precision,
+    pub(crate) simd_width: SimdWidth,
+    pub(crate) mode: MatrixLoadMode,
+    pub(crate) n_gate_qubits: u32,
 }
 
 /// `cast_cpu_jit_kernel_record_t`
 #[repr(C)]
-pub struct KernelRecord {
-    pub metadata: KernelMetadata,
-    pub entry: Option<unsafe extern "C" fn(*mut c_void)>,
-    pub matrix: *mut c64,
-    pub matrix_len: usize,
-    pub asm_text: *mut c_char,
+pub(crate) struct KernelRecord {
+    pub(crate) metadata: KernelMetadata,
+    pub(crate) entry: Option<unsafe extern "C" fn(*mut c_void)>,
+    pub(crate) matrix: *mut c64,
+    pub(crate) matrix_len: usize,
+    pub(crate) asm_text: *mut c_char,
 }
 
 /// `cast_cpu_kernel_generator_t` (opaque)
 #[repr(C)]
-pub struct KernelGenerator {
+pub(crate) struct KernelGenerator {
     _private: [u8; 0],
 }
 
 /// `cast_cpu_jit_session_t` (opaque)
 #[repr(C)]
-pub struct JitSession {
+pub(crate) struct JitSession {
     _private: [u8; 0],
 }
 
@@ -50,11 +50,11 @@ pub struct JitSession {
 
 unsafe extern "C" {
     // -- Generator lifecycle --
-    pub fn cast_cpu_kernel_generator_new() -> *mut KernelGenerator;
-    pub fn cast_cpu_kernel_generator_delete(generator: *mut KernelGenerator);
+    pub(crate) fn cast_cpu_kernel_generator_new() -> *mut KernelGenerator;
+    pub(crate) fn cast_cpu_kernel_generator_delete(generator: *mut KernelGenerator);
 
     // -- Kernel generation --
-    pub fn cast_cpu_kernel_generator_generate(
+    pub(crate) fn cast_cpu_kernel_generator_generate(
         generator: *mut KernelGenerator,
         spec: *const CPUKernelGenSpec,
         matrix: *const c64,
@@ -67,13 +67,13 @@ unsafe extern "C" {
     ) -> i32;
 
     // -- Diagnostics --
-    pub fn cast_cpu_kernel_generator_request_asm(
+    pub(crate) fn cast_cpu_kernel_generator_request_asm(
         generator: *mut KernelGenerator,
         kernel_id: KernelId,
         err_buf: *mut c_char,
         err_buf_len: usize,
     ) -> i32;
-    pub fn cast_cpu_kernel_generator_emit_ir(
+    pub(crate) fn cast_cpu_kernel_generator_emit_ir(
         generator: *mut KernelGenerator,
         kernel_id: KernelId,
         out_ir: *mut c_char,
@@ -84,7 +84,7 @@ unsafe extern "C" {
     ) -> i32;
 
     // -- JIT compilation --
-    pub fn cast_cpu_kernel_generator_finish(
+    pub(crate) fn cast_cpu_kernel_generator_finish(
         generator: *mut KernelGenerator,
         out_session: *mut *mut JitSession,
         out_records: *mut *mut KernelRecord,
@@ -92,8 +92,8 @@ unsafe extern "C" {
         err_buf: *mut c_char,
         err_buf_len: usize,
     ) -> i32;
-    pub fn cast_cpu_jit_kernel_records_free(records: *mut KernelRecord, n: usize);
+    pub(crate) fn cast_cpu_jit_kernel_records_free(records: *mut KernelRecord, n: usize);
 
     // -- Session lifecycle --
-    pub fn cast_cpu_jit_session_delete(session: *mut JitSession);
+    pub(crate) fn cast_cpu_jit_session_delete(session: *mut JitSession);
 }
