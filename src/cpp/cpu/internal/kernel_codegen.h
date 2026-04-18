@@ -43,12 +43,12 @@ enum class LoadMode { Mega, Tiled };
 
 // Full kernel emission strategy, selected once per kernel by choose_strategy().
 struct KernelStrategy {
-  LoadMode    load_mode   = LoadMode::Mega;
-  MatvecMode  matvec_mode = MatvecMode::Straight;
-  unsigned    tile_T      = 0; // meaningful iff Block
+  LoadMode load_mode = LoadMode::Mega;
+  MatvecMode matvec_mode = MatvecMode::Straight;
+  unsigned tile_T = 0; // meaningful iff Block
 };
 
-KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs);
+KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs, LoadMode load_mode);
 
 // scalar_ty = float or double; vec_ty = <vec_size() × scalar>.
 struct TypeBundle {
@@ -67,12 +67,13 @@ struct KernelCodegen {
   const std::vector<IRMatData> &mat_data;
   const TypeBundle &types;
 
-  KernelStrategy strategy;       // selected by choose_strategy() in ctor
-  MatvecScratch matvec_scratch;  // engaged() iff strategy.matvec_mode == Block
+  KernelStrategy strategy;      // selected by choose_strategy() in ctor
+  MatvecScratch matvec_scratch; // engaged() iff strategy.matvec_mode == Block
 
   KernelCodegen(llvm::IRBuilder<> &builder, const BitLayout &layout, unsigned simd_width_bytes,
                 const ShuffleMasks &smasks, const std::vector<IRMatData> &mat_data,
-                const TypeBundle &types, unsigned vec_regs, llvm::BasicBlock &entry_bb);
+                const TypeBundle &types, unsigned vec_regs, LoadMode load_mode,
+                llvm::BasicBlock &entry_bb);
 
   // Native-width complex-lane vector type (`<S × scalar>`) and SIMD alignment.
   llvm::VectorType *vec_s_type() const {
@@ -124,9 +125,9 @@ struct KernelCodegen {
                                              llvm::VectorType *chunk_ty);
   LoadedAmplitudes gather_amps_from_chunks(const std::vector<llvm::Value *> &chunks,
                                            llvm::VectorType *chunk_ty);
-  std::vector<llvm::Value *>
-  scatter_result_into_chunks(const MatvecResult &result, unsigned num_chunks,
-                             llvm::VectorType *chunk_ty);
+  std::vector<llvm::Value *> scatter_result_into_chunks(const MatvecResult &result,
+                                                        unsigned num_chunks,
+                                                        llvm::VectorType *chunk_ty);
   void store_all_chunks(const std::vector<llvm::Value *> &out_chunks, llvm::Value *ptr_sv_begin,
                         llvm::VectorType *chunk_ty);
 };

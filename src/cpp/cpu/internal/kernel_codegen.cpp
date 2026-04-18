@@ -11,7 +11,7 @@
 
 namespace cast_cpu_detail {
 
-KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs) {
+KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs, LoadMode load_mode) {
   KernelStrategy s{};
   const unsigned T = std::max(2u, vec_regs / 4);
 
@@ -20,10 +20,7 @@ KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs) {
     s.tile_T = T;
   }
 
-  bool needs_legalize = layout.vec_size() > layout.S();
-  bool shuffle_cheap = layout.S() <= 8;
-  if (needs_legalize && shuffle_cheap)
-    s.load_mode = LoadMode::Tiled;
+  s.load_mode = load_mode;
 
   return s;
 }
@@ -31,9 +28,9 @@ KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs) {
 KernelCodegen::KernelCodegen(llvm::IRBuilder<> &builder, const BitLayout &layout,
                              unsigned simd_width_bytes, const ShuffleMasks &smasks,
                              const std::vector<IRMatData> &mat_data, const TypeBundle &types,
-                             unsigned vec_regs, llvm::BasicBlock &entry_bb)
+                             unsigned vec_regs, LoadMode load_mode, llvm::BasicBlock &entry_bb)
     : B(builder), layout(layout), simd_width_bytes(simd_width_bytes), smasks(smasks),
-      mat_data(mat_data), types(types), strategy(choose_strategy(layout, vec_regs)) {
+      mat_data(mat_data), types(types), strategy(choose_strategy(layout, vec_regs, load_mode)) {
   if (strategy.matvec_mode == MatvecMode::Block) {
     matvec_scratch = alloca_matvec_scratch(entry_bb);
   }

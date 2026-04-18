@@ -183,3 +183,5 @@ One row per `(circuit, fusion mode)` pair. Columns:
 | `CXX` | build.rs | C++17 compiler (default: `c++`) |
 | `CUDA_PATH` | build.rs | CUDA toolkit root (auto-detected if unset) |
 | `CAST_NUM_THREADS` | cpu::get_num_threads | CPU simulation threads (default: all cores) |
+| `CAST_VEC_REGS` | cpu kernel codegen | Override vector register count for Block matvec threshold (default: 32) |
+| `CAST_CPU_LOADMODE` | cpu kernel codegen | Load/store mode: `mega` (default) or `tiled`. See [cpu_kernel_loadmode.md](cpu_kernel_loadmode.md) |

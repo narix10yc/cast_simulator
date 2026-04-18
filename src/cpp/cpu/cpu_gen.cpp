@@ -170,7 +170,18 @@ llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
     }
     return 32u;
   }();
-  KernelCodegen cg(builder, layout, simd_width_bytes, smasks, mat_data, types, vec_regs,
+
+  // Default Mega.  The optimal mode depends on ISA-specific shuffle vs
+  // scalar-gather costs; benchmarking is needed per target to determine which
+  // is better.  See docs/cpu_kernel_loadmode.md for background.
+  static const auto load_mode = [] {
+    const char *s = std::getenv("CAST_CPU_LOADMODE");
+    if (s && std::strcmp(s, "tiled") == 0)
+      return cast_cpu_detail::LoadMode::Tiled;
+    return cast_cpu_detail::LoadMode::Mega;
+  }();
+
+  KernelCodegen cg(builder, layout, simd_width_bytes, smasks, mat_data, types, vec_regs, load_mode,
                    *skel.entry_bb);
 
   emit_taskid_loop(builder, cg, args, skel);
