@@ -1,9 +1,9 @@
-#ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_KERNEL_CODEGEN_H
-#define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_KERNEL_CODEGEN_H
+#ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_KERNEL_CODEGEN_HPP
+#define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_KERNEL_CODEGEN_HPP
 
-#include "bit_layout.h"
-#include "matrix_data.h"
-#include "shuffle_masks.h"
+#include "bit_layout.hpp"
+#include "matrix_data.hpp"
+#include "shuffle_masks.hpp"
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -14,7 +14,7 @@
 
 #include <vector>
 
-namespace cast_cpu_detail {
+namespace cast::cpu {
 
 struct LoadedAmplitudes {
   std::vector<llvm::Value *> re;   // K = LK*HK elements, re[hi*LK + li]
@@ -132,6 +132,6 @@ struct KernelCodegen {
                         llvm::VectorType *chunk_ty);
 };
 
-} // namespace cast_cpu_detail
+} // namespace cast::cpu
 
-#endif // CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_KERNEL_CODEGEN_H
+#endif // CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_KERNEL_CODEGEN_HPP

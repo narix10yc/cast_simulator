@@ -63,7 +63,7 @@ use crate::ffi::cpu as ffi;
 // CastCpuLaunchArgs
 // ---------------------------------------------------------------------------
 
-/// Matches `cast_cpu_launch_args_t` in `cpu.h`.
+/// Matches `cast_cpu_launch_args_t` in `ffi_cpu.h`.
 /// Each JIT-compiled kernel reads its work range and matrix pointer from this struct.
 #[repr(C)]
 struct CpuLaunchArgs {

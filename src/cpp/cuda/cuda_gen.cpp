@@ -1,4 +1,4 @@
-#include "cuda_gen.h"
+#include "cuda_gen.hpp"
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/IntrinsicsNVPTX.h>
@@ -11,6 +11,8 @@
 #include <vector>
 
 using namespace llvm;
+
+namespace cast::cuda {
 
 namespace {
 
@@ -63,8 +65,8 @@ static Value *emit_opt_fmul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B
 /// Classifies each matrix element as zero, ±1, or general, and returns the
 /// corresponding LLVM constant value alongside its ScalarKind tag.
 static std::vector<IRMatData> build_matrix_data(IRBuilder<> &B,
-                                                const cast_cuda_kernel_gen_spec_t &spec,
-                                                const cast_complex64_t *matrix, unsigned n_qubits) {
+                                                const cast::cuda::KernelGenSpec &spec,
+                                                const cast::Complex64 *matrix, unsigned n_qubits) {
   const auto K = 1U << n_qubits;
   const auto KK = K * K;
 
@@ -83,7 +85,7 @@ static std::vector<IRMatData> build_matrix_data(IRBuilder<> &B,
   const auto z_tol = spec.ztol / static_cast<double>(K);
   const auto o_tol = spec.otol / static_cast<double>(K);
 
-  const bool fp32 = (spec.precision == CAST_PRECISION_F32);
+  const bool fp32 = (spec.precision == cast::Precision::F32);
   Type *scalar_ty = fp32 ? B.getFloatTy() : B.getDoubleTy();
   auto *zero_val = ConstantFP::get(scalar_ty, 0.0);
   auto *one_val = ConstantFP::get(scalar_ty, 1.0);
@@ -343,9 +345,11 @@ static void emit_persistent_grid_loop(IRBuilder<> &B, const uint32_t *qubits, si
 
 // ── Public entry point ───────────────────────────────────────────────────────
 
-llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
-    const cast_cuda_kernel_gen_spec_t &spec, const cast_complex64_t *matrix, size_t matrix_len,
-    const uint32_t *qubits, size_t n_qubits, llvm::StringRef func_name, llvm::Module &module) {
+llvm::Expected<llvm::Function *> generate_kernel_ir(const KernelGenSpec &spec,
+                                                    const cast::Complex64 *matrix,
+                                                    size_t matrix_len, const uint32_t *qubits,
+                                                    size_t n_qubits, llvm::StringRef func_name,
+                                                    llvm::Module &module) {
   if (matrix == nullptr)
     return llvm::createStringError("matrix pointer must not be null");
   if (qubits == nullptr || n_qubits == 0)
@@ -355,13 +359,13 @@ llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
   if (matrix_len != static_cast<size_t>(K) * K)
     return llvm::createStringError("matrix_len must equal (2^n_qubits)^2");
 
-  if (spec.precision != CAST_PRECISION_F32 && spec.precision != CAST_PRECISION_F64)
+  if (!cast::is_valid_precision(spec.precision))
     return llvm::createStringError("spec.precision must be F32 or F64");
 
   auto &ctx = module.getContext();
   IRBuilder<> B(ctx);
 
-  Type *scalar_ty = (spec.precision == CAST_PRECISION_F32) ? B.getFloatTy() : B.getDoubleTy();
+  Type *scalar_ty = (spec.precision == cast::Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
 
   KernelArgs args;
   auto *func = create_kernel_function(B, module, func_name.str(), args);
@@ -384,3 +388,5 @@ llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
   func->setCallingConv(llvm::CallingConv::PTX_Kernel);
   return func;
 }
+
+} // namespace cast::cuda

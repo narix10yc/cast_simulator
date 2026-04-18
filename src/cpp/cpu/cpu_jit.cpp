@@ -1,6 +1,6 @@
-#include "cpu_jit.h"
+#include "cpu_jit.hpp"
 
-#include "internal/util.h"
+#include "internal/util.hpp"
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -16,7 +16,8 @@
 #include <cstdlib>
 #include <cstring>
 
-llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> cast_cpu_jit_create(unsigned n_compile_threads) {
+llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>>
+cast::cpu::jit_create(unsigned n_compile_threads) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmParser();
   llvm::InitializeNativeTargetAsmPrinter();
@@ -30,7 +31,7 @@ llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> cast_cpu_jit_create(unsigned n
   return std::move(*jit);
 }
 
-llvm::Error cast_cpu_optimize_kernel_ir(CastCpuGeneratedKernel &generated) {
+llvm::Error cast::cpu::optimize_kernel_ir(cast::cpu::GeneratedKernel &generated) {
   if (generated.optimized)
     return llvm::Error::success();
   if (!generated.module)
@@ -72,15 +73,15 @@ llvm::Error cast_cpu_optimize_kernel_ir(CastCpuGeneratedKernel &generated) {
   return llvm::Error::success();
 }
 
-llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedKernel &generated,
-                                        cast_cpu_jit_kernel_record_t &out) {
+llvm::Expected<cast::cpu::CompiledKernelRecord>
+cast::cpu::jit_compile_kernel(llvm::orc::LLJIT &jit, cast::cpu::GeneratedKernel &generated) {
   // Optimize on the plain Module first so the IR is captured before the Module
   // is moved into the ThreadSafeModule and consumed by the JIT pipeline.
-  if (auto err = cast_cpu_optimize_kernel_ir(generated))
-    return err;
+  if (auto err = cast::cpu::optimize_kernel_ir(generated))
+    return std::move(err);
 
   // Emit native assembly only when explicitly requested for this kernel.
-  char *asm_ptr = nullptr;
+  std::optional<std::string> asm_text;
   if (generated.capture_asm) {
     const llvm::Triple &triple = jit.getTargetTriple();
     std::string err_str;
@@ -105,43 +106,23 @@ llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedK
       return llvm::createStringError("target does not support assembly emission");
     pm.run(*generated.module);
 
-    asm_ptr = static_cast<char *>(std::malloc(asm_buf.size() + 1));
-    if (!asm_ptr)
-      return llvm::createStringError("failed to allocate asm text buffer");
-    std::memcpy(asm_ptr, asm_buf.data(), asm_buf.size());
-    asm_ptr[asm_buf.size()] = '\0';
+    asm_text.emplace(asm_buf.begin(), asm_buf.end());
   }
 
   llvm::orc::ThreadSafeModule tsm(std::move(generated.module), std::move(generated.context));
 
   if (auto err = jit.addIRModule(std::move(tsm))) {
-    std::free(asm_ptr);
-    return err;
+    return std::move(err);
   }
 
   auto sym = jit.lookup(generated.func_name);
-  if (!sym) {
-    std::free(asm_ptr);
+  if (!sym)
     return sym.takeError();
-  }
 
-  // Copy matrix for StackLoad kernels.
-  cast_complex64_t *matrix_ptr = nullptr;
-  size_t const matrix_len = generated.matrix.size();
-  if (matrix_len > 0) {
-    const size_t nbytes = matrix_len * sizeof(cast_complex64_t);
-    matrix_ptr = static_cast<cast_complex64_t *>(std::malloc(nbytes));
-    if (!matrix_ptr) {
-      std::free(asm_ptr);
-      return llvm::createStringError("failed to allocate matrix buffer");
-    }
-    std::memcpy(matrix_ptr, generated.matrix.data(), nbytes);
-  }
-
+  cast::cpu::CompiledKernelRecord out;
   out.metadata = generated.metadata;
-  out.entry = sym->toPtr<cast_cpu_kernel_entry_t>();
-  out.matrix = matrix_ptr;
-  out.matrix_len = matrix_len;
-  out.asm_text = asm_ptr;
-  return llvm::Error::success();
+  out.entry = sym->toPtr<cast::cpu::KernelEntry>();
+  out.matrix = generated.matrix;
+  out.asm_text = std::move(asm_text);
+  return out;
 }

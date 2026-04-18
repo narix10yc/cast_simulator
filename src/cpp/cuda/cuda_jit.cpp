@@ -1,4 +1,4 @@
-#include "cuda_jit.h"
+#include "cuda_jit.hpp"
 
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
@@ -12,6 +12,8 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+
+namespace cast::cuda {
 
 // ── NVPTX target initialisation ─────────────────────────────────────────────
 
@@ -69,9 +71,9 @@ public:
 };
 } // namespace
 
-// ── cast_cuda_optimize_kernel_ir ─────────────────────────────────────────────
+// ── optimize_kernel_ir ───────────────────────────────────────────────────────
 
-llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated) {
+llvm::Error optimize_kernel_ir(GeneratedKernel &generated) {
   if (generated.optimized)
     return llvm::Error::success();
   if (!generated.module)
@@ -122,12 +124,11 @@ llvm::Error cast_cuda_optimize_kernel_ir(CastCudaGeneratedKernel &generated) {
   return llvm::Error::success();
 }
 
-// ── cast_cuda_compile_kernel ─────────────────────────────────────────────────
+// ── compile_kernel ───────────────────────────────────────────────────────────
 
-llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
-                                     CastCudaCompiledKernel &out) {
+llvm::Error compile_kernel(GeneratedKernel &generated, CompiledKernel &out) {
   // Stage 1: optimize (idempotent; also sets triple+layout on module).
-  if (auto err = cast_cuda_optimize_kernel_ir(generated))
+  if (auto err = optimize_kernel_ir(generated))
     return err;
 
   // Stage 2: LLVM IR → PTX via NVPTX backend.
@@ -165,3 +166,5 @@ llvm::Error cast_cuda_compile_kernel(CastCudaGeneratedKernel &generated,
   out.func_name = std::move(generated.func_name);
   return llvm::Error::success();
 }
+
+} // namespace cast::cuda

@@ -1,9 +1,9 @@
-#include "cpu_gen.h"
-#include "internal/bit_layout.h"
-#include "internal/kernel_codegen.h"
-#include "internal/matrix_data.h"
-#include "internal/shuffle_masks.h"
-#include "internal/util.h"
+#include "cpu_gen.hpp"
+#include "internal/bit_layout.hpp"
+#include "internal/kernel_codegen.hpp"
+#include "internal/matrix_data.hpp"
+#include "internal/shuffle_masks.hpp"
+#include "internal/util.hpp"
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -21,14 +21,14 @@
 
 namespace {
 
-using cast_cpu_detail::BitLayout;
-using cast_cpu_detail::build_matrix_data;
-using cast_cpu_detail::compute_bit_layout;
-using cast_cpu_detail::compute_shuffle_masks;
-using cast_cpu_detail::KernelCodegen;
-using cast_cpu_detail::MatrixView;
-using cast_cpu_detail::ShuffleMasks;
-using cast_cpu_detail::TypeBundle;
+using cast::cpu::BitLayout;
+using cast::cpu::build_matrix_data;
+using cast::cpu::compute_bit_layout;
+using cast::cpu::compute_shuffle_masks;
+using cast::cpu::KernelCodegen;
+using cast::cpu::MatrixView;
+using cast::cpu::ShuffleMasks;
+using cast::cpu::TypeBundle;
 
 // Live state unpacked from the opaque launch-args struct by the entry BB.
 struct LaunchArgs {
@@ -48,14 +48,14 @@ struct FunctionSkeleton {
   llvm::StructType *launch_ty;
 };
 
-llvm::Error validate_kernel_gen_inputs(const cast_cpu_kernel_gen_spec_t &spec,
-                                       const cast_complex64_t *matrix, size_t matrix_len,
+llvm::Error validate_kernel_gen_inputs(const cast::cpu::KernelGenSpec &spec,
+                                       const cast::Complex64 *matrix, size_t matrix_len,
                                        const uint32_t *qubits, size_t n_qubits) {
-  if (!cast_cpu_detail::is_valid_precision(spec.precision))
+  if (!cast::is_valid_precision(spec.precision))
     return llvm::createStringError("invalid precision");
-  if (!cast_cpu_detail::is_valid_simd_width(spec.simd_width))
+  if (!cast::cpu::is_valid_simd_width(spec.simd_width))
     return llvm::createStringError("invalid SIMD width");
-  if (!cast_cpu_detail::is_valid_mode(spec.mode))
+  if (!cast::cpu::is_valid_mode(spec.mode))
     return llvm::createStringError("invalid matrix load mode");
   if (matrix == nullptr)
     return llvm::createStringError("matrix must not be null");
@@ -66,7 +66,7 @@ llvm::Error validate_kernel_gen_inputs(const cast_cpu_kernel_gen_spec_t &spec,
       return llvm::createStringError("qubits must be strictly ascending");
   }
   size_t expected_len = 0;
-  if (!cast_cpu_detail::expected_matrix_len(n_qubits, &expected_len) || expected_len != matrix_len)
+  if (!cast::cpu::expected_matrix_len(n_qubits, &expected_len) || expected_len != matrix_len)
     return llvm::createStringError("matrix length does not match the target qubit count");
   return llvm::Error::success();
 }
@@ -132,13 +132,13 @@ void emit_taskid_loop(llvm::IRBuilder<> &builder, KernelCodegen &cg, const Launc
 } // namespace
 
 llvm::Expected<llvm::Function *>
-cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t &spec, const cast_complex64_t *matrix,
-                            size_t matrix_len, const uint32_t *qubits, size_t n_qubits,
-                            llvm::StringRef func_name, llvm::Module &module) {
+cast::cpu::generate_kernel_ir(const cast::cpu::KernelGenSpec &spec, const cast::Complex64 *matrix,
+                              size_t matrix_len, const uint32_t *qubits, size_t n_qubits,
+                              llvm::StringRef func_name, llvm::Module &module) {
   if (auto err = validate_kernel_gen_inputs(spec, matrix, matrix_len, qubits, n_qubits))
     return std::move(err);
 
-  const unsigned s = cast_cpu_detail::get_simd_s(spec.simd_width, spec.precision);
+  const unsigned s = cast::cpu::get_simd_s(spec.simd_width, spec.precision);
   assert(s > 0 && s <= 4);
   const MatrixView mat_view{matrix, static_cast<uint32_t>(1u << n_qubits)};
 
@@ -150,7 +150,7 @@ cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t &spec, const cast_c
   llvm::IRBuilder<> builder(module.getContext());
   builder.setFastMathFlags(llvm::FastMathFlags::getFast());
   auto *scalar_ty =
-      (spec.precision == CAST_PRECISION_F32) ? builder.getFloatTy() : builder.getDoubleTy();
+      (spec.precision == cast::Precision::F32) ? builder.getFloatTy() : builder.getDoubleTy();
   const TypeBundle types{scalar_ty, llvm::VectorType::get(scalar_ty, layout.vec_size(), false)};
 
   const FunctionSkeleton skel = create_function_skeleton(module, builder, func_name);
@@ -178,8 +178,8 @@ cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t &spec, const cast_c
   static const auto load_mode = [] {
     const char *s = std::getenv("CAST_CPU_LOADMODE");
     if (s && std::strcmp(s, "tiled") == 0)
-      return cast_cpu_detail::LoadMode::Tiled;
-    return cast_cpu_detail::LoadMode::Mega;
+      return cast::cpu::LoadMode::Tiled;
+    return cast::cpu::LoadMode::Mega;
   }();
 
   KernelCodegen cg(builder, layout, simd_width_bytes, smasks, mat_data, types, vec_regs, load_mode,

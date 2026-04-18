@@ -9,12 +9,13 @@
 
 #include "../include/ffi_cpu.h"
 
-#include "cpu_gen.h"
-#include "cpu_jit.h"
-#include "internal/util.h"
+#include "cpu_gen.hpp"
+#include "cpu_jit.hpp"
+#include "internal/util.hpp"
 
 #include <llvm/Support/Error.h>
 
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -24,10 +25,102 @@
 #include <utility>
 #include <vector>
 
-using namespace cast_cpu_detail;
+namespace {
+
+static_assert(sizeof(cast_complex64_t) == 16);
+static_assert(alignof(cast_complex64_t) == alignof(double));
+static_assert(static_cast<int>(CAST_PRECISION_F32) == static_cast<int>(cast::Precision::F32));
+static_assert(static_cast<int>(CAST_PRECISION_F64) == static_cast<int>(cast::Precision::F64));
+static_assert(static_cast<int>(CAST_CPU_SIMD_WIDTH_W128) ==
+              static_cast<int>(cast::cpu::SimdWidth::W128));
+static_assert(static_cast<int>(CAST_CPU_SIMD_WIDTH_W256) ==
+              static_cast<int>(cast::cpu::SimdWidth::W256));
+static_assert(static_cast<int>(CAST_CPU_SIMD_WIDTH_W512) ==
+              static_cast<int>(cast::cpu::SimdWidth::W512));
+static_assert(static_cast<int>(CAST_CPU_MATRIX_LOAD_IMM_VALUE) ==
+              static_cast<int>(cast::cpu::MatrixLoadMode::ImmValue));
+static_assert(static_cast<int>(CAST_CPU_MATRIX_LOAD_STACK_LOAD) ==
+              static_cast<int>(cast::cpu::MatrixLoadMode::StackLoad));
+
+cast::Precision to_internal(cast_precision_t precision) {
+  return static_cast<cast::Precision>(precision);
+}
+
+cast::cpu::SimdWidth to_internal(cast_cpu_simd_width_t width) {
+  return static_cast<cast::cpu::SimdWidth>(width);
+}
+
+cast::cpu::MatrixLoadMode to_internal(cast_cpu_matrix_load_mode_t mode) {
+  return static_cast<cast::cpu::MatrixLoadMode>(mode);
+}
+
+cast::cpu::KernelGenSpec to_internal(const cast_cpu_kernel_gen_spec_t &spec) {
+  return {to_internal(spec.precision), to_internal(spec.simd_width), to_internal(spec.mode),
+          spec.ztol, spec.otol};
+}
+
+std::vector<cast::Complex64> copy_matrix(const cast_complex64_t *matrix, size_t matrix_len) {
+  std::vector<cast::Complex64> out;
+  out.reserve(matrix_len);
+  for (size_t i = 0; i < matrix_len; ++i) {
+    out.push_back({matrix[i].re, matrix[i].im});
+  }
+  return out;
+}
+
+cast_precision_t to_ffi(cast::Precision precision) {
+  return static_cast<cast_precision_t>(precision);
+}
+
+cast_cpu_simd_width_t to_ffi(cast::cpu::SimdWidth width) {
+  return static_cast<cast_cpu_simd_width_t>(width);
+}
+
+cast_cpu_matrix_load_mode_t to_ffi(cast::cpu::MatrixLoadMode mode) {
+  return static_cast<cast_cpu_matrix_load_mode_t>(mode);
+}
+
+cast_cpu_kernel_metadata_t to_ffi(const cast::cpu::KernelMetadata &metadata) {
+  return {metadata.kernel_id, to_ffi(metadata.precision), to_ffi(metadata.simd_width),
+          to_ffi(metadata.mode), metadata.n_gate_qubits};
+}
+
+llvm::Error copy_to_ffi(const cast::cpu::CompiledKernelRecord &src,
+                        cast_cpu_jit_kernel_record_t &dst) {
+  dst = {};
+  dst.metadata = to_ffi(src.metadata);
+  dst.entry = src.entry;
+  dst.matrix_len = src.matrix.size();
+
+  if (!src.matrix.empty()) {
+    const size_t nbytes = src.matrix.size() * sizeof(cast_complex64_t);
+    dst.matrix = static_cast<cast_complex64_t *>(std::malloc(nbytes));
+    if (!dst.matrix)
+      return llvm::createStringError("failed to allocate matrix buffer");
+    for (size_t i = 0; i < src.matrix.size(); ++i) {
+      dst.matrix[i] = {src.matrix[i].re, src.matrix[i].im};
+    }
+  }
+
+  if (src.asm_text.has_value()) {
+    dst.asm_text = static_cast<char *>(std::malloc(src.asm_text->size() + 1));
+    if (!dst.asm_text) {
+      std::free(dst.matrix);
+      dst.matrix = nullptr;
+      dst.matrix_len = 0;
+      return llvm::createStringError("failed to allocate asm text buffer");
+    }
+    std::memcpy(dst.asm_text, src.asm_text->data(), src.asm_text->size());
+    dst.asm_text[src.asm_text->size()] = '\0';
+  }
+
+  return llvm::Error::success();
+}
+
+} // namespace
 
 struct cast_cpu_kernel_generator_t {
-  std::vector<CastCpuGeneratedKernel> kernels;
+  std::vector<cast::cpu::GeneratedKernel> kernels;
   cast_cpu_kernel_id_t next_kernel_id = 0;
 };
 
@@ -65,23 +158,51 @@ extern "C" int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *g
     write_err_buf(err_buf, err_buf_len, "out_kernel_id must not be null");
     return 1;
   }
+  if (matrix == nullptr) {
+    write_err_buf(err_buf, err_buf_len, "matrix must not be null");
+    return 1;
+  }
 
   try {
-    CastCpuGeneratedKernel kernel;
+    const cast::cpu::KernelGenSpec internal_spec = to_internal(*spec);
+    if (!cast::is_valid_precision(internal_spec.precision)) {
+      write_err_buf(err_buf, err_buf_len, "invalid precision");
+      return 1;
+    }
+    if (!cast::cpu::is_valid_simd_width(internal_spec.simd_width)) {
+      write_err_buf(err_buf, err_buf_len, "invalid SIMD width");
+      return 1;
+    }
+    if (!cast::cpu::is_valid_mode(internal_spec.mode)) {
+      write_err_buf(err_buf, err_buf_len, "invalid matrix load mode");
+      return 1;
+    }
+    if (qubits == nullptr && n_qubits != 0) {
+      write_err_buf(err_buf, err_buf_len, "qubits must not be null");
+      return 1;
+    }
+    size_t expected_len = 0;
+    if (!cast::cpu::expected_matrix_len(n_qubits, &expected_len) || expected_len != matrix_len) {
+      write_err_buf(err_buf, err_buf_len, "matrix length does not match the target qubit count");
+      return 1;
+    }
+    const std::vector<cast::Complex64> internal_matrix = copy_matrix(matrix, matrix_len);
+
+    cast::cpu::GeneratedKernel kernel;
     kernel.metadata.kernel_id = generator->next_kernel_id++;
-    kernel.metadata.precision = spec->precision;
-    kernel.metadata.simd_width = spec->simd_width;
-    kernel.metadata.mode = spec->mode;
+    kernel.metadata.precision = internal_spec.precision;
+    kernel.metadata.simd_width = internal_spec.simd_width;
+    kernel.metadata.mode = internal_spec.mode;
     kernel.metadata.n_gate_qubits = static_cast<uint32_t>(n_qubits);
     kernel.func_name = "k_" + std::to_string(kernel.metadata.kernel_id);
     kernel.context = std::make_unique<llvm::LLVMContext>();
     kernel.module = std::make_unique<llvm::Module>(kernel.func_name + "_module", *kernel.context);
-    if (spec->mode == CAST_CPU_MATRIX_LOAD_STACK_LOAD) {
-      kernel.matrix.assign(matrix, matrix + matrix_len);
+    if (internal_spec.mode == cast::cpu::MatrixLoadMode::StackLoad) {
+      kernel.matrix = internal_matrix;
     }
 
-    auto func = cast_cpu_generate_kernel_ir(*spec, matrix, matrix_len, qubits, n_qubits,
-                                            kernel.func_name, *kernel.module);
+    auto func = cast::cpu::generate_kernel_ir(internal_spec, internal_matrix.data(), matrix_len,
+                                              qubits, n_qubits, kernel.func_name, *kernel.module);
     if (!func) {
       write_err_buf(err_buf, err_buf_len, llvm::toString(func.takeError()));
       return 1;
@@ -107,9 +228,10 @@ extern "C" int cast_cpu_kernel_generator_request_asm(cast_cpu_kernel_generator_t
     write_err_buf(err_buf, err_buf_len, "generator must not be null");
     return 1;
   }
-  auto it = std::find_if(
-      generator->kernels.begin(), generator->kernels.end(),
-      [kernel_id](const CastCpuGeneratedKernel &k) { return k.metadata.kernel_id == kernel_id; });
+  auto it = std::find_if(generator->kernels.begin(), generator->kernels.end(),
+                         [kernel_id](const cast::cpu::GeneratedKernel &k) {
+                           return k.metadata.kernel_id == kernel_id;
+                         });
   if (it == generator->kernels.end()) {
     write_err_buf(err_buf, err_buf_len, "kernel id not found in generator");
     return 1;
@@ -128,16 +250,17 @@ extern "C" int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *ge
     return 1;
   }
 
-  auto it = std::find_if(
-      generator->kernels.begin(), generator->kernels.end(),
-      [kernel_id](const CastCpuGeneratedKernel &k) { return k.metadata.kernel_id == kernel_id; });
+  auto it = std::find_if(generator->kernels.begin(), generator->kernels.end(),
+                         [kernel_id](const cast::cpu::GeneratedKernel &k) {
+                           return k.metadata.kernel_id == kernel_id;
+                         });
   if (it == generator->kernels.end()) {
     write_err_buf(err_buf, err_buf_len, "kernel id not found in generator");
     return 1;
   }
 
   // Optimize (idempotent) and populate it->ir if not done yet.
-  if (auto err = cast_cpu_optimize_kernel_ir(*it)) {
+  if (auto err = cast::cpu::optimize_kernel_ir(*it)) {
     write_err_buf(err_buf, err_buf_len, llvm::toString(std::move(err)));
     return 1;
   }
@@ -171,7 +294,7 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
   }
 
   try {
-    auto jit = cast_cpu_jit_create(std::thread::hardware_concurrency());
+    auto jit = cast::cpu::jit_create(std::thread::hardware_concurrency());
     if (!jit) {
       write_err_buf(err_buf, err_buf_len, llvm::toString(jit.takeError()));
       return 1;
@@ -189,10 +312,16 @@ extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *gen
     session->jit = std::move(*jit);
 
     for (size_t i = 0; i < n; ++i) {
-      if (auto err =
-              cast_cpu_jit_compile_kernel(*session->jit, generator->kernels[i], records[i])) {
+      auto compiled = cast::cpu::jit_compile_kernel(*session->jit, generator->kernels[i]);
+      if (!compiled) {
         // Frees the records' inner fields AND the array itself.
         cast_cpu_jit_kernel_records_free(records, i);
+        delete session;
+        write_err_buf(err_buf, err_buf_len, llvm::toString(compiled.takeError()));
+        return 1;
+      }
+      if (auto err = copy_to_ffi(*compiled, records[i])) {
+        cast_cpu_jit_kernel_records_free(records, i + 1);
         delete session;
         write_err_buf(err_buf, err_buf_len, llvm::toString(std::move(err)));
         return 1;

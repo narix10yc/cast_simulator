@@ -1,11 +1,11 @@
-#ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_BIT_LAYOUT_H
-#define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_BIT_LAYOUT_H
+#ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_BIT_LAYOUT_HPP
+#define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_BIT_LAYOUT_HPP
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
-namespace cast_cpu_detail {
+namespace cast::cpu {
 
 // Qubits are partitioned into three groups relative to the SIMD register
 // (simd_s = log2 of lanes):
@@ -48,6 +48,6 @@ struct PtrSegment {
 std::vector<PtrSegment> compute_hi_ptr_segments(const std::vector<unsigned> &hi_bits,
                                                 unsigned sep_bit);
 
-} // namespace cast_cpu_detail
+} // namespace cast::cpu
 
-#endif // CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_BIT_LAYOUT_H
+#endif // CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_BIT_LAYOUT_HPP

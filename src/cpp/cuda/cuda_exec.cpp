@@ -1,5 +1,5 @@
 #include "../include/ffi_cuda.h"
-#include "cuda_util.h"
+#include "cuda_util.hpp"
 
 #include <cuda.h>
 

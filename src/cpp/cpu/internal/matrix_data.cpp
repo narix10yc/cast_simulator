@@ -1,12 +1,11 @@
-#include "matrix_data.h"
+#include "matrix_data.hpp"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 
-namespace cast_cpu_detail {
+namespace cast::cpu {
 
-std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder,
-                                         const cast_cpu_kernel_gen_spec_t &spec,
+std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder, const KernelGenSpec &spec,
                                          const MatrixView &matrix, llvm::Value *p_mat_arg,
                                          llvm::Type *scalar_ty, unsigned simd_s) {
   const unsigned kk = matrix.edge_size * matrix.edge_size;
@@ -14,7 +13,7 @@ std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder,
 
   std::vector<IRMatData> out(kk);
   for (unsigned i = 0; i < kk; ++i) {
-    if (spec.mode == CAST_CPU_MATRIX_LOAD_IMM_VALUE) {
+    if (spec.mode == MatrixLoadMode::ImmValue) {
       out[i].re_vec =
           llvm::ConstantVector::getSplat(ec, llvm::ConstantFP::get(scalar_ty, matrix.re(i)));
       out[i].im_vec =
@@ -29,4 +28,4 @@ std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder,
   return out;
 }
 
-} // namespace cast_cpu_detail
+} // namespace cast::cpu

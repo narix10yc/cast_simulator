@@ -1,9 +1,9 @@
-#include "shuffle_masks.h"
+#include "shuffle_masks.hpp"
 
 #include <cstdint>
 #include <utility>
 
-namespace cast_cpu_detail {
+namespace cast::cpu {
 
 namespace {
 
@@ -102,4 +102,4 @@ ShuffleMasks compute_shuffle_masks(const BitLayout &layout, unsigned s, unsigned
   return out;
 }
 
-} // namespace cast_cpu_detail
+} // namespace cast::cpu

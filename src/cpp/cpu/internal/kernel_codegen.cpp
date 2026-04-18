@@ -1,4 +1,4 @@
-#include "kernel_codegen.h"
+#include "kernel_codegen.hpp"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -9,7 +9,7 @@
 #include <cassert>
 #include <string>
 
-namespace cast_cpu_detail {
+namespace cast::cpu {
 
 KernelStrategy choose_strategy(const BitLayout &layout, unsigned vec_regs, LoadMode load_mode) {
   KernelStrategy s{};
@@ -389,4 +389,4 @@ void KernelCodegen::emit_loop_body(llvm::Value *ptr_sv_begin) {
   }
 }
 
-} // namespace cast_cpu_detail
+} // namespace cast::cpu

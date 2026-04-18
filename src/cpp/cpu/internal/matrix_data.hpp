@@ -1,7 +1,7 @@
-#ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_H
-#define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_H
+#ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_HPP
+#define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_HPP
 
-#include "../../include/ffi_cpu.h"
+#include "../../internal/types.hpp"
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Type.h>
@@ -11,11 +11,11 @@
 #include <cstdint>
 #include <vector>
 
-namespace cast_cpu_detail {
+namespace cast::cpu {
 
 // View into a flat row-major complex matrix.
 struct MatrixView {
-  const cast_complex64_t *data = nullptr;
+  const cast::Complex64 *data = nullptr;
   uint32_t edge_size = 0;
 
   double re(size_t idx) const { return data[idx].re; }
@@ -31,11 +31,10 @@ struct IRMatData {
 
 // ImmValue → splatted ConstantFP per matrix entry; StackLoad → runtime
 // load+splat from the caller's matrix buffer.
-std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder,
-                                         const cast_cpu_kernel_gen_spec_t &spec,
+std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder, const KernelGenSpec &spec,
                                          const MatrixView &matrix, llvm::Value *p_mat_arg,
                                          llvm::Type *scalar_ty, unsigned simd_s);
 
-} // namespace cast_cpu_detail
+} // namespace cast::cpu
 
-#endif // CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_H
+#endif // CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_HPP

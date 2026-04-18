@@ -1,5 +1,5 @@
-#ifndef CAST_SIMULATOR_SRC_CPP_INTERNAL_ERR_BUF_H
-#define CAST_SIMULATOR_SRC_CPP_INTERNAL_ERR_BUF_H
+#ifndef CAST_SIMULATOR_SRC_CPP_INTERNAL_ERR_BUF_HPP
+#define CAST_SIMULATOR_SRC_CPP_INTERNAL_ERR_BUF_HPP
 
 // FFI error buffer helpers shared by the CPU and CUDA backends.
 // All functions are inline to avoid a separate translation unit.
@@ -22,4 +22,4 @@ inline void clear_err_buf(char *err_buf, size_t err_buf_len) {
     err_buf[0] = '\0';
 }
 
-#endif // CAST_SIMULATOR_SRC_CPP_INTERNAL_ERR_BUF_H
+#endif // CAST_SIMULATOR_SRC_CPP_INTERNAL_ERR_BUF_HPP

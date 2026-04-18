@@ -1,6 +1,6 @@
-#include "bit_layout.h"
+#include "bit_layout.hpp"
 
-namespace cast_cpu_detail {
+namespace cast::cpu {
 
 BitLayout compute_bit_layout(const uint32_t *qubits, size_t n_qubits, unsigned simd_s) {
   BitLayout layout;
@@ -59,4 +59,4 @@ std::vector<PtrSegment> compute_hi_ptr_segments(const std::vector<unsigned> &hi_
   return segs;
 }
 
-} // namespace cast_cpu_detail
+} // namespace cast::cpu
