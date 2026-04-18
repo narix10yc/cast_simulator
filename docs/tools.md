@@ -95,9 +95,6 @@ cargo run --bin profile_hw --features cuda --release -- \
     --merge-out profiles/cuda_f64.json
 ```
 
-See [docs/hardware_profiling.md](hardware_profiling.md) for a full
-discussion of run-to-run variance and the merge workflow.
-
 ---
 
 ## bench — Fusion Strategy Benchmark
