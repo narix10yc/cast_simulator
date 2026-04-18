@@ -1,22 +1,26 @@
-.clangd
-.vscode/
-.idea/
-.DS_Store
-.venv/
-
+# Build
 target/
-
-analysis/
-examples/
-external/
-profiles/
-benchmarks/
-tmp/
-
-*.csv
-*.ipynb
-
-.cache/
 _deps/
 *.so
 *.dylib
+
+# Editor / IDE
+.vscode/
+.idea/
+.clangd
+compile_commands.json
+
+# OS
+.DS_Store
+
+# Data / scratch
+analysis/
+benchmarks/
+examples/
+external/
+profiles/
+tmp/
+.cache/
+.venv/
+*.csv
+*.ipynb
