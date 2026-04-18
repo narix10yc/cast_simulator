@@ -49,7 +49,7 @@ struct FunctionSkeleton {
 };
 
 llvm::Error validate_kernel_gen_inputs(const cast_cpu_kernel_gen_spec_t &spec,
-                                       const cast_cpu_complex64_t *matrix, size_t matrix_len,
+                                       const cast_complex64_t *matrix, size_t matrix_len,
                                        const uint32_t *qubits, size_t n_qubits) {
   if (!cast_cpu_detail::is_valid_precision(spec.precision))
     return llvm::createStringError("invalid precision");
@@ -131,9 +131,10 @@ void emit_taskid_loop(llvm::IRBuilder<> &builder, KernelCodegen &cg, const Launc
 
 } // namespace
 
-llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
-    const cast_cpu_kernel_gen_spec_t &spec, const cast_cpu_complex64_t *matrix, size_t matrix_len,
-    const uint32_t *qubits, size_t n_qubits, llvm::StringRef func_name, llvm::Module &module) {
+llvm::Expected<llvm::Function *>
+cast_cpu_generate_kernel_ir(const cast_cpu_kernel_gen_spec_t &spec, const cast_complex64_t *matrix,
+                            size_t matrix_len, const uint32_t *qubits, size_t n_qubits,
+                            llvm::StringRef func_name, llvm::Module &module) {
   if (auto err = validate_kernel_gen_inputs(spec, matrix, matrix_len, qubits, n_qubits))
     return std::move(err);
 
@@ -149,7 +150,7 @@ llvm::Expected<llvm::Function *> cast_cpu_generate_kernel_ir(
   llvm::IRBuilder<> builder(module.getContext());
   builder.setFastMathFlags(llvm::FastMathFlags::getFast());
   auto *scalar_ty =
-      (spec.precision == CAST_CPU_PRECISION_F32) ? builder.getFloatTy() : builder.getDoubleTy();
+      (spec.precision == CAST_PRECISION_F32) ? builder.getFloatTy() : builder.getDoubleTy();
   const TypeBundle types{scalar_ty, llvm::VectorType::get(scalar_ty, layout.vec_size(), false)};
 
   const FunctionSkeleton skel = create_function_skeleton(module, builder, func_name);

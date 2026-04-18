@@ -64,8 +64,7 @@ static Value *emit_opt_fmul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B
 /// corresponding LLVM constant value alongside its ScalarKind tag.
 static std::vector<IRMatData> build_matrix_data(IRBuilder<> &B,
                                                 const cast_cuda_kernel_gen_spec_t &spec,
-                                                const cast_cuda_complex64_t *matrix,
-                                                unsigned n_qubits) {
+                                                const cast_complex64_t *matrix, unsigned n_qubits) {
   const auto K = 1U << n_qubits;
   const auto KK = K * K;
 
@@ -84,7 +83,7 @@ static std::vector<IRMatData> build_matrix_data(IRBuilder<> &B,
   const auto z_tol = spec.ztol / static_cast<double>(K);
   const auto o_tol = spec.otol / static_cast<double>(K);
 
-  const bool fp32 = (spec.precision == CAST_CUDA_PRECISION_F32);
+  const bool fp32 = (spec.precision == CAST_PRECISION_F32);
   Type *scalar_ty = fp32 ? B.getFloatTy() : B.getDoubleTy();
   auto *zero_val = ConstantFP::get(scalar_ty, 0.0);
   auto *one_val = ConstantFP::get(scalar_ty, 1.0);
@@ -345,7 +344,7 @@ static void emit_persistent_grid_loop(IRBuilder<> &B, const uint32_t *qubits, si
 // ── Public entry point ───────────────────────────────────────────────────────
 
 llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
-    const cast_cuda_kernel_gen_spec_t &spec, const cast_cuda_complex64_t *matrix, size_t matrix_len,
+    const cast_cuda_kernel_gen_spec_t &spec, const cast_complex64_t *matrix, size_t matrix_len,
     const uint32_t *qubits, size_t n_qubits, llvm::StringRef func_name, llvm::Module &module) {
   if (matrix == nullptr)
     return llvm::createStringError("matrix pointer must not be null");
@@ -356,13 +355,13 @@ llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
   if (matrix_len != static_cast<size_t>(K) * K)
     return llvm::createStringError("matrix_len must equal (2^n_qubits)^2");
 
-  if (spec.precision != CAST_CUDA_PRECISION_F32 && spec.precision != CAST_CUDA_PRECISION_F64)
+  if (spec.precision != CAST_PRECISION_F32 && spec.precision != CAST_PRECISION_F64)
     return llvm::createStringError("spec.precision must be F32 or F64");
 
   auto &ctx = module.getContext();
   IRBuilder<> B(ctx);
 
-  Type *scalar_ty = (spec.precision == CAST_CUDA_PRECISION_F32) ? B.getFloatTy() : B.getDoubleTy();
+  Type *scalar_ty = (spec.precision == CAST_PRECISION_F32) ? B.getFloatTy() : B.getDoubleTy();
 
   KernelArgs args;
   auto *func = create_kernel_function(B, module, func_name.str(), args);

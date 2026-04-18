@@ -1,4 +1,4 @@
-//! Raw FFI bindings to `src/cpp/include/cast_cpu.h`.
+//! Raw FFI bindings to `src/cpp/include/ffi_cpu.h`.
 
 use crate::cpu::{CPUKernelGenSpec, KernelId, MatrixLoadMode, SimdWidth};
 use crate::types::Precision;
@@ -6,7 +6,7 @@ use std::ffi::{c_char, c_void};
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-/// `cast_cpu_complex64_t`
+/// `cast_complex64_t`
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct c64 {

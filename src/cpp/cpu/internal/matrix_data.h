@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_H
 #define CAST_SIMULATOR_SRC_CPP_CPU_INTERNAL_MATRIX_DATA_H
 
-#include "../../include/cast_cpu.h"
+#include "../../include/ffi_cpu.h"
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Type.h>
@@ -15,7 +15,7 @@ namespace cast_cpu_detail {
 
 // View into a flat row-major complex matrix.
 struct MatrixView {
-  const cast_cpu_complex64_t *data = nullptr;
+  const cast_complex64_t *data = nullptr;
   uint32_t edge_size = 0;
 
   double re(size_t idx) const { return data[idx].re; }

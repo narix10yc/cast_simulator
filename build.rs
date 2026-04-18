@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const CPU_FFI_SOURCES: &[&str] = &[
-    "src/cpp/include/cast_cpu.h",
+    "src/cpp/include/ffi_types.h",
+    "src/cpp/include/ffi_cpu.h",
     "src/cpp/cpu/cpu.cpp",
     "src/cpp/cpu/cpu_gen.h",
     "src/cpp/cpu/cpu_gen.cpp",
@@ -21,7 +22,7 @@ const CPU_FFI_SOURCES: &[&str] = &[
 ];
 
 const CUDA_FFI_SOURCES: &[&str] = &[
-    "src/cpp/include/cast_cuda.h",
+    "src/cpp/include/ffi_cuda.h",
     "src/cpp/cuda/cuda.cpp",
     "src/cpp/cuda/cuda_gen.h",
     "src/cpp/cuda/cuda_gen.cpp",

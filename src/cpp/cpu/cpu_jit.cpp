@@ -126,11 +126,11 @@ llvm::Error cast_cpu_jit_compile_kernel(llvm::orc::LLJIT &jit, CastCpuGeneratedK
   }
 
   // Copy matrix for StackLoad kernels.
-  cast_cpu_complex64_t *matrix_ptr = nullptr;
+  cast_complex64_t *matrix_ptr = nullptr;
   size_t const matrix_len = generated.matrix.size();
   if (matrix_len > 0) {
-    const size_t nbytes = matrix_len * sizeof(cast_cpu_complex64_t);
-    matrix_ptr = static_cast<cast_cpu_complex64_t *>(std::malloc(nbytes));
+    const size_t nbytes = matrix_len * sizeof(cast_complex64_t);
+    matrix_ptr = static_cast<cast_complex64_t *>(std::malloc(nbytes));
     if (!matrix_ptr) {
       std::free(asm_ptr);
       return llvm::createStringError("failed to allocate matrix buffer");

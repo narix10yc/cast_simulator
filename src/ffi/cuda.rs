@@ -1,4 +1,4 @@
-//! Raw FFI bindings to `src/cpp/include/cast_cuda.h`.
+//! Raw FFI bindings to `src/cpp/include/ffi_cuda.h`.
 //!
 //! Covers gate PTX compilation, device queries, stream management, PTX->cubin
 //! JIT linking, module/kernel launch, device-side reductions, async memcpy,
@@ -15,7 +15,7 @@ use std::ffi::c_char;
 // Types
 // ---------------------------------------------------------------------------
 
-/// `cast_cuda_complex64_t` — a complex number passed to the C++ gate compiler.
+/// `cast_complex64_t` — a complex number passed to the C++ gate compiler.
 #[repr(C)]
 pub(crate) struct FfiComplex64 {
     pub(crate) re: f64,

@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CUDA_GEN_H
 #define CAST_SIMULATOR_SRC_CPP_CUDA_GEN_H
 
-#include "../include/cast_cuda.h"
+#include "../include/ffi_cuda.h"
 
 #include <llvm/Support/Error.h>
 
@@ -19,7 +19,7 @@ class StringRef;
 /// (amplitude index combinations).  For ImmValue mode the matrix pointer
 /// is unused at runtime — all matrix elements are baked as constants.
 llvm::Expected<llvm::Function *> cast_cuda_generate_kernel_ir(
-    const cast_cuda_kernel_gen_spec_t &spec, const cast_cuda_complex64_t *matrix, size_t matrix_len,
+    const cast_cuda_kernel_gen_spec_t &spec, const cast_complex64_t *matrix, size_t matrix_len,
     const uint32_t *qubits, size_t n_qubits, llvm::StringRef func_name, llvm::Module &module);
 
 #endif // CAST_SIMULATOR_SRC_CPP_CUDA_GEN_H

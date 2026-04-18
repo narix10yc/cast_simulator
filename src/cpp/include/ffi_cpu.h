@@ -1,5 +1,10 @@
-#ifndef CAST_SIMULATOR_SRC_CPP_CPU_H
-#define CAST_SIMULATOR_SRC_CPP_CPU_H
+#ifndef CAST_SIMULATOR_SRC_CPP_INCLUDE_FFI_CPU_H
+#define CAST_SIMULATOR_SRC_CPP_INCLUDE_FFI_CPU_H
+
+// Rust-C FFI boundary for the CPU kernel pipeline.
+// Only types and functions in this header are exported to Rust.
+
+#include "ffi_types.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -8,19 +13,7 @@
 extern "C" {
 #endif
 
-// ── Exported to Rust ────────────────────────────────────────────────────────
-//
-// Every type and function below has a matching Rust declaration:
-//   - Types     → #[repr(C)] structs/enums in src/cpu/kernel.rs or src/cpu/types.rs
-//   - Opaques   → zero-sized #[repr(C)] structs in kernel.rs::mod ffi
-//   - Functions → unsafe extern "C" in kernel.rs::mod ffi
-
 typedef uint64_t cast_cpu_kernel_id_t;
-
-typedef enum cast_cpu_precision_t {
-  CAST_CPU_PRECISION_F32 = 0,
-  CAST_CPU_PRECISION_F64 = 1,
-} cast_cpu_precision_t;
 
 typedef enum cast_cpu_simd_width_t {
   CAST_CPU_SIMD_WIDTH_W128 = 128,
@@ -34,21 +27,16 @@ typedef enum cast_cpu_matrix_load_mode_t {
 } cast_cpu_matrix_load_mode_t;
 
 typedef struct cast_cpu_kernel_gen_spec_t {
-  cast_cpu_precision_t precision;
+  cast_precision_t precision;
   cast_cpu_simd_width_t simd_width;
   cast_cpu_matrix_load_mode_t mode;
   double ztol;
   double otol;
 } cast_cpu_kernel_gen_spec_t;
 
-typedef struct cast_cpu_complex64_t {
-  double re;
-  double im;
-} cast_cpu_complex64_t;
-
 typedef struct cast_cpu_kernel_metadata_t {
   cast_cpu_kernel_id_t kernel_id;
-  cast_cpu_precision_t precision;
+  cast_precision_t precision;
   cast_cpu_simd_width_t simd_width;
   cast_cpu_matrix_load_mode_t mode;
   uint32_t n_gate_qubits;
@@ -59,8 +47,8 @@ typedef struct cast_cpu_kernel_metadata_t {
 /// cast_cpu_jit_kernel_records_free to release them after copying the data.
 typedef struct cast_cpu_jit_kernel_record_t {
   cast_cpu_kernel_metadata_t metadata;
-  void (*entry)(void *);        ///< JIT-compiled function pointer.
-  cast_cpu_complex64_t *matrix; ///< NULL for ImmValue mode.
+  void (*entry)(void *);    ///< JIT-compiled function pointer.
+  cast_complex64_t *matrix; ///< NULL for ImmValue mode.
   size_t matrix_len;
   char *asm_text; ///< NULL if request_asm was not called.
 } cast_cpu_jit_kernel_record_t;
@@ -82,7 +70,7 @@ void cast_cpu_kernel_generator_delete(cast_cpu_kernel_generator_t *generator);
 /// Error handling: returns non-zero on failure and writes a message to err_buf.
 int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
                                        const cast_cpu_kernel_gen_spec_t *spec,
-                                       const cast_cpu_complex64_t *matrix, size_t matrix_len,
+                                       const cast_complex64_t *matrix, size_t matrix_len,
                                        const uint32_t *qubits, size_t n_qubits,
                                        cast_cpu_kernel_id_t *out_kernel_id, char *err_buf,
                                        size_t err_buf_len);
@@ -119,10 +107,6 @@ void cast_cpu_jit_kernel_records_free(cast_cpu_jit_kernel_record_t *records, siz
 void cast_cpu_jit_session_delete(cast_cpu_jit_session_t *session);
 
 // ── Internal to C++ (not imported by Rust) ──────────────────────────────────
-//
-// These types are used by the JIT dispatch code within C++ and have matching
-// Rust-side #[repr(C)] structs (CastCpuLaunchArgs), but the C typedefs
-// themselves are not referenced through the Rust FFI module.
 
 typedef void cast_cpu_kernel_entry_t(void *);
 
@@ -137,4 +121,4 @@ typedef struct cast_cpu_launch_args_t {
 } // extern "C"
 #endif
 
-#endif // CAST_SIMULATOR_SRC_CPP_CPU_H
+#endif // CAST_SIMULATOR_SRC_CPP_INCLUDE_FFI_CPU_H

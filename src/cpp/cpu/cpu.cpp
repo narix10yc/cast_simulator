@@ -1,13 +1,13 @@
 // Rust-C ABI boundary for the CPU kernel pipeline.
 //
 // Error handling: internal helpers propagate via LLVM error handling system (`llvm::Expected<T>`
-// and `llvm::Error). 
+// and `llvm::Error).
 //
 // At the FFI boundary, we use try-catch blocks for possible C++ std::exception (such as
 // std::bad_alloc of `new`). These exceptions must not cross the FFI boundary to Rust.
 // Rust side needs to catch these flags accordingly (nullptr, return value checks).
 
-#include "../include/cast_cpu.h"
+#include "../include/ffi_cpu.h"
 
 #include "cpu_gen.h"
 #include "cpu_jit.h"
@@ -47,10 +47,12 @@ extern "C" void cast_cpu_kernel_generator_delete(cast_cpu_kernel_generator_t *ge
   delete generator;
 }
 
-extern "C" int cast_cpu_kernel_generator_generate(
-    cast_cpu_kernel_generator_t *generator, const cast_cpu_kernel_gen_spec_t *spec,
-    const cast_cpu_complex64_t *matrix, size_t matrix_len, const uint32_t *qubits, size_t n_qubits,
-    cast_cpu_kernel_id_t *out_kernel_id, char *err_buf, size_t err_buf_len) {
+extern "C" int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
+                                                  const cast_cpu_kernel_gen_spec_t *spec,
+                                                  const cast_complex64_t *matrix, size_t matrix_len,
+                                                  const uint32_t *qubits, size_t n_qubits,
+                                                  cast_cpu_kernel_id_t *out_kernel_id,
+                                                  char *err_buf, size_t err_buf_len) {
   if (generator == nullptr) {
     write_err_buf(err_buf, err_buf_len, "generator must not be null");
     return 1;

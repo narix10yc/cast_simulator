@@ -12,7 +12,7 @@
 // surfaced via llvm::Error within the protected region. Do NOT add try/catch
 // inside helpers that return llvm::Error; keep the boundary thin.
 
-#include "../include/cast_cuda.h"
+#include "../include/ffi_cuda.h"
 
 #include "cuda_gen.h"
 #include "cuda_jit.h"
@@ -25,19 +25,17 @@
 #include <memory>
 #include <string>
 
-using namespace cast_cuda_detail;
-
 // ── Gate PTX compilation ──────────────────────────────────────────────────────
 
 extern "C" int cast_cuda_compile_gate_ptx(const cast_cuda_kernel_gen_spec_t *spec,
-                                          const cast_cuda_complex64_t *matrix, size_t matrix_len,
+                                          const cast_complex64_t *matrix, size_t matrix_len,
                                           const uint32_t *qubits, size_t n_qubits, char **out_ptx,
                                           char **out_func_name, uint32_t *out_n_gate_qubits,
                                           uint8_t *out_precision, char *err_buf,
                                           size_t err_buf_len) {
   if (!spec || !matrix || !qubits || !out_ptx || !out_func_name || !out_n_gate_qubits ||
       !out_precision) {
-    write_error_message(err_buf, err_buf_len, "arguments must not be null");
+    write_err_buf(err_buf, err_buf_len, "arguments must not be null");
     return 1;
   }
 
@@ -49,7 +47,7 @@ extern "C" int cast_cuda_compile_gate_ptx(const cast_cuda_kernel_gen_spec_t *spe
     auto func = cast_cuda_generate_kernel_ir(*spec, matrix, matrix_len, qubits, n_qubits, func_name,
                                              *module);
     if (!func) {
-      write_error_message(err_buf, err_buf_len, llvm::toString(func.takeError()));
+      write_err_buf(err_buf, err_buf_len, llvm::toString(func.takeError()));
       return 1;
     }
 
@@ -62,7 +60,7 @@ extern "C" int cast_cuda_compile_gate_ptx(const cast_cuda_kernel_gen_spec_t *spe
 
     CastCudaCompiledKernel compiled;
     if (auto err = cast_cuda_compile_kernel(generated, compiled)) {
-      write_error_message(err_buf, err_buf_len, llvm::toString(std::move(err)));
+      write_err_buf(err_buf, err_buf_len, llvm::toString(std::move(err)));
       return 1;
     }
 
@@ -81,13 +79,13 @@ extern "C" int cast_cuda_compile_gate_ptx(const cast_cuda_kernel_gen_spec_t *spe
     *out_n_gate_qubits = compiled.n_gate_qubits;
     *out_precision = static_cast<uint8_t>(compiled.precision);
 
-    clear_error_buffer(err_buf, err_buf_len);
+    clear_err_buf(err_buf, err_buf_len);
     return 0;
   } catch (const std::exception &ex) {
-    write_error_message(err_buf, err_buf_len, ex.what());
+    write_err_buf(err_buf, err_buf_len, ex.what());
     return 1;
   } catch (...) {
-    write_error_message(err_buf, err_buf_len, "unknown error in gate PTX compilation");
+    write_err_buf(err_buf, err_buf_len, "unknown error in gate PTX compilation");
     return 1;
   }
 }

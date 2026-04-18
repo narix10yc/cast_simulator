@@ -1,7 +1,7 @@
 #ifndef CAST_SIMULATOR_SRC_CPP_CUDA_JIT_H
 #define CAST_SIMULATOR_SRC_CPP_CUDA_JIT_H
 
-#include "../include/cast_cuda.h"
+#include "../include/ffi_cuda.h"
 
 #include <cstdint>
 #include <llvm/IR/LLVMContext.h>
@@ -28,7 +28,7 @@ struct CastCudaGeneratedKernel {
 /// Result of compiling one kernel: PTX text.
 struct CastCudaCompiledKernel {
   uint32_t n_gate_qubits = 0;
-  cast_cuda_precision_t precision = CAST_CUDA_PRECISION_F64;
+  cast_precision_t precision = CAST_PRECISION_F64;
   std::string func_name;
   std::string ptx;
 };

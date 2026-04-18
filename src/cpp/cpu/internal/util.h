@@ -4,30 +4,15 @@
 // Internal helpers shared across cpu.cpp, cpu_gen.cpp, and cpu_jit.cpp.
 // All functions are inline to avoid a separate translation unit.
 
-#include "../../include/cast_cpu.h"
+#include "../../include/ffi_cpu.h"
+#include "../../internal/err_buf.h"
 
-#include <algorithm>
 #include <cstddef>
-#include <cstring>
-#include <string>
 
 namespace cast_cpu_detail {
 
-inline void write_err_buf(char *err_buf, size_t err_buf_len, const std::string &msg) {
-  if (err_buf == nullptr || err_buf_len == 0)
-    return;
-  const size_t n = std::min(err_buf_len - 1, msg.size());
-  std::memcpy(err_buf, msg.data(), n);
-  err_buf[n] = '\0';
-}
-
-inline void clear_err_buf(char *err_buf, size_t err_buf_len) {
-  if (err_buf != nullptr && err_buf_len > 0)
-    err_buf[0] = '\0';
-}
-
-inline bool is_valid_precision(cast_cpu_precision_t p) {
-  return p == CAST_CPU_PRECISION_F32 || p == CAST_CPU_PRECISION_F64;
+inline bool is_valid_precision(cast_precision_t p) {
+  return p == CAST_PRECISION_F32 || p == CAST_PRECISION_F64;
 }
 
 inline bool is_valid_simd_width(cast_cpu_simd_width_t w) {
@@ -42,8 +27,8 @@ inline bool is_valid_mode(cast_cpu_matrix_load_mode_t m) {
 /// Returns simd_s = log2(register_scalars) for a given SIMD width and
 /// precision.  The result is always in [1, 4] for valid inputs; returns 0
 /// for any invalid combination (should not occur after validation).
-inline unsigned get_simd_s(cast_cpu_simd_width_t w, cast_cpu_precision_t p) {
-  if (p == CAST_CPU_PRECISION_F32) {
+inline unsigned get_simd_s(cast_cpu_simd_width_t w, cast_precision_t p) {
+  if (p == CAST_PRECISION_F32) {
     switch (w) {
     case CAST_CPU_SIMD_WIDTH_W128:
       return 2;

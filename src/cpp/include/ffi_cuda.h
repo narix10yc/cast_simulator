@@ -1,5 +1,10 @@
-#ifndef CAST_SIMULATOR_SRC_CPP_CUDA_H
-#define CAST_SIMULATOR_SRC_CPP_CUDA_H
+#ifndef CAST_SIMULATOR_SRC_CPP_INCLUDE_FFI_CUDA_H
+#define CAST_SIMULATOR_SRC_CPP_INCLUDE_FFI_CUDA_H
+
+// Rust-C FFI boundary for the CUDA kernel pipeline.
+// Only types and functions in this header are exported to Rust.
+
+#include "ffi_types.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -8,22 +13,8 @@
 extern "C" {
 #endif
 
-// ── Exported to Rust ────────────────────────────────────────────────────────
-//
-// Every type and function below has a matching Rust declaration:
-//   - Types     → #[repr(C)] structs/enums in src/cuda/types.rs or src/cuda/mod.rs::mod ffi
-//   - Functions → unsafe extern "C" in src/cuda/mod.rs::mod ffi
-//                 or src/cuda/statevector.rs::mod ffi
-//
-// Functions guarded by the `cuda` Cargo feature are noted inline.
-
-typedef enum cast_cuda_precision_t {
-  CAST_CUDA_PRECISION_F32 = 0,
-  CAST_CUDA_PRECISION_F64 = 1,
-} cast_cuda_precision_t;
-
 typedef struct cast_cuda_kernel_gen_spec_t {
-  cast_cuda_precision_t precision;
+  cast_precision_t precision;
   double ztol;
   double otol;
   uint32_t sm_major;
@@ -31,15 +22,10 @@ typedef struct cast_cuda_kernel_gen_spec_t {
   uint32_t maxnreg; ///< .maxnreg directive for PTX; 0 = no limit
 } cast_cuda_kernel_gen_spec_t;
 
-typedef struct cast_cuda_complex64_t {
-  double re;
-  double im;
-} cast_cuda_complex64_t;
-
 // -- Gate PTX compilation --
 
 int cast_cuda_compile_gate_ptx(const cast_cuda_kernel_gen_spec_t *spec,
-                               const cast_cuda_complex64_t *matrix, size_t matrix_len,
+                               const cast_complex64_t *matrix, size_t matrix_len,
                                const uint32_t *qubits, size_t n_qubits, char **out_ptx,
                                char **out_func_name, uint32_t *out_n_gate_qubits,
                                uint8_t *out_precision, char *err_buf, size_t err_buf_len);
@@ -116,4 +102,4 @@ int cast_cuda_scale(uint64_t dptr, size_t n_elements, uint8_t precision, double 
 } // extern "C"
 #endif
 
-#endif // CAST_SIMULATOR_SRC_CPP_CUDA_H
+#endif // CAST_SIMULATOR_SRC_CPP_INCLUDE_FFI_CUDA_H
