@@ -1,21 +1,14 @@
-// Rust-C ABI boundary for the CPU kernel pipeline.
-//
-// Error handling: internal helpers propagate via LLVM error handling system (`llvm::Expected<T>`
-// and `llvm::Error).
-//
-// At the FFI boundary, we use try-catch blocks for possible C++ std::exception (such as
-// std::bad_alloc of `new`). These exceptions must not cross the FFI boundary to Rust.
-// Rust side needs to catch these flags accordingly (nullptr, return value checks).
-
 #include "../include/ffi_cpu.h"
 
 #include "cpu_gen.hpp"
 #include "cpu_jit.hpp"
 #include "internal/util.hpp"
 
+#include <llvm/ExecutionEngine/Orc/LLJIT.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
 #include <llvm/Support/Error.h>
 
-#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -25,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+// FFI-internal type conversion helpers
 namespace {
 
 static_assert(sizeof(cast_complex64_t) == 16);
@@ -161,9 +155,10 @@ extern "C" void cast_cpu_kernel_generator_delete(cast_cpu_kernel_generator_t *ge
   delete generator;
 }
 
-extern "C" cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
-    cast_cpu_kernel_generator_t *generator, const cast_cpu_kernel_gen_request_t *request,
-    char *err_buf, size_t err_buf_len) {
+extern "C" cast_cpu_kernel_id_t
+cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
+                                   const cast_cpu_kernel_gen_request_t *request, char *err_buf,
+                                   size_t err_buf_len) {
   if (generator == nullptr) {
     write_err_buf(err_buf, err_buf_len, "generator must not be null");
     return 0;
@@ -182,8 +177,7 @@ extern "C" cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
 
   try {
     const cast::cpu::KernelGenSpec internal_spec = to_internal_spec(*request);
-    std::vector<cast::Complex64> matrix_buf =
-        copy_matrix(request->matrix, request->matrix_len);
+    std::vector<cast::Complex64> matrix_buf = copy_matrix(request->matrix, request->matrix_len);
 
     cast::cpu::GeneratedKernel kernel;
     kernel.metadata.kernel_id = generator->next_kernel_id++;
@@ -197,9 +191,9 @@ extern "C" cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
     kernel.capture_ir = request->capture_ir;
     kernel.capture_asm = request->capture_asm;
 
-    auto func = cast::cpu::generate_kernel_ir(internal_spec, matrix_buf.data(),
-                                              request->matrix_len, request->qubits,
-                                              request->n_qubits, kernel.func_name, *kernel.module);
+    auto func = cast::cpu::generate_kernel_ir(internal_spec, matrix_buf.data(), request->matrix_len,
+                                              request->qubits, request->n_qubits, kernel.func_name,
+                                              *kernel.module);
     if (!func) {
       write_err_buf(err_buf, err_buf_len, llvm::toString(func.takeError()));
       return 0;

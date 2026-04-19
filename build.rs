@@ -6,7 +6,7 @@ const CPU_FFI_SOURCES: &[&str] = &[
     "src/cpp/include/ffi_types.h",
     "src/cpp/include/ffi_cpu.h",
     "src/cpp/internal/types.hpp",
-    "src/cpp/cpu/cpu.cpp",
+    "src/cpp/cpu/ffi_cpu.cpp",
     "src/cpp/cpu/cpu_gen.hpp",
     "src/cpp/cpu/cpu_gen.cpp",
     "src/cpp/cpu/cpu_jit.hpp",
@@ -25,7 +25,7 @@ const CPU_FFI_SOURCES: &[&str] = &[
 const CUDA_FFI_SOURCES: &[&str] = &[
     "src/cpp/include/ffi_cuda.h",
     "src/cpp/internal/types.hpp",
-    "src/cpp/cuda/cuda.cpp",
+    "src/cpp/cuda/ffi_cuda.cpp",
     "src/cpp/cuda/cuda_gen.hpp",
     "src/cpp/cuda/cuda_gen.cpp",
     "src/cpp/cuda/cuda_jit.hpp",
@@ -59,7 +59,7 @@ fn build_cpu_ffi(out_dir: &Path, llvm_config: &Path) {
     let archive = compile_cpp_archive(
         out_dir,
         &[
-            "src/cpp/cpu/cpu.cpp",
+            "src/cpp/cpu/ffi_cpu.cpp",
             "src/cpp/cpu/cpu_gen.cpp",
             "src/cpp/cpu/cpu_jit.cpp",
             "src/cpp/cpu/internal/bit_layout.cpp",
@@ -89,7 +89,7 @@ fn build_cuda_ffi(out_dir: &Path, llvm_config: &Path) {
     let archive = compile_cpp_archive(
         out_dir,
         &[
-            "src/cpp/cuda/cuda.cpp",
+            "src/cpp/cuda/ffi_cuda.cpp",
             "src/cpp/cuda/cuda_gen.cpp",
             "src/cpp/cuda/cuda_jit.cpp",
             "src/cpp/cuda/cuda_exec.cpp",

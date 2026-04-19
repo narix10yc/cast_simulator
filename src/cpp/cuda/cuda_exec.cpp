@@ -110,7 +110,8 @@ extern "C" int cast_cuda_device_sm(uint32_t *out_major, uint32_t *out_minor, cha
     write_err_buf(err_buf, err_buf_len, err);
     return 1;
   }
-  int major = 0, minor = 0;
+  int major = 0;
+  int minor = 0;
   CUresult rc =
       cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, g_device);
   if (!cu_check(rc, "cuDeviceGetAttribute (major)", err)) {
@@ -137,7 +138,8 @@ extern "C" int cast_cuda_free_memory(uint64_t *out_free_bytes, uint64_t *out_tot
     write_err_buf(err_buf, err_buf_len, err);
     return 1;
   }
-  size_t free_bytes = 0, total_bytes = 0;
+  size_t free_bytes = 0;
+  size_t total_bytes = 0;
   CUresult const rc = cuMemGetInfo(&free_bytes, &total_bytes);
   if (!cu_check(rc, "cuMemGetInfo", err)) {
     write_err_buf(err_buf, err_buf_len, err);
@@ -317,7 +319,8 @@ extern "C" int cast_cuda_kernel_launch(void *cu_function, void *stream, uint64_t
 
   void *args[] = {&sv_d, &mat_d, &n_combos};
 
-  unsigned int grid_x, block_x;
+  unsigned int grid_x;
+  unsigned int block_x;
   launch_dims(n_combos, n_gate_qubits, grid_x, block_x);
 
   std::string err;

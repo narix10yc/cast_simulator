@@ -234,7 +234,8 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
   auto *vec2_ty = FixedVectorType::get(scalar_ty, 2);
 
   std::vector<Value *> amp_ptrs(K); // base pointer per amplitude (re position)
-  std::vector<Value *> re_amps(K), im_amps(K);
+  std::vector<Value *> re_amps(K);
+  std::vector<Value *> im_amps(K);
 
   // Compute the offset for each of the K amplitude slots in the combo.
   // Amplitude i corresponds to setting bits qubits[b] iff bit b of i is set.
