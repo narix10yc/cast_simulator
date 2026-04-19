@@ -23,7 +23,7 @@ struct GeneratedKernel {
   /// Populated by optimize_kernel_ir; empty until then.
   std::string ir;
   bool optimized = false;
-  /// Set by cast_cpu_kernel_generator_request_asm before finish().
+  /// Set from the `capture_asm` field of the kernel generation request.
   /// When false, jit_compile_kernel skips assembly emission.
   bool capture_asm = false;
 };

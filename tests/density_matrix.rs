@@ -35,13 +35,13 @@ fn run_dm(gates: &[QuantumGate], n_phys: u32) -> Vec<(f64, f64)> {
 
     // DM initial state: |0…0⟩⟨0…0| → only element 0 is 1.
     let spec = cpu_spec();
-    let mgr = CpuKernelManager::new(spec);
+    let mgr = CpuKernelManager::new();
     let mut sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
     sv.set_amp(0, Complex::new(1.0, 0.0));
 
     for gate in gates {
         let kid = mgr
-            .generate(&Arc::new(gate.clone()))
+            .generate_gate(spec, gate)
             .unwrap_or_else(|e| panic!("generate: {e}"));
         mgr.apply(kid, &mut sv, 1)
             .unwrap_or_else(|e| panic!("apply: {e}"));
@@ -136,10 +136,10 @@ fn noiseless_dm_diagonal_matches_sv_probabilities() {
 
     // Pure SV simulation.
     let spec = cpu_spec();
-    let mgr = CpuKernelManager::new(spec);
+    let mgr = CpuKernelManager::new();
     let mut sv = CPUStatevector::new(n_phys, spec.precision, spec.simd_width);
     sv.set_amp(0, Complex::new(1.0, 0.0));
-    let kid = mgr.generate(&Arc::new(QuantumGate::h(0))).unwrap();
+    let kid = mgr.generate_gate(spec, &QuantumGate::h(0)).unwrap();
     mgr.apply(kid, &mut sv, 1).unwrap();
     let probs: Vec<f64> = sv
         .amplitudes()

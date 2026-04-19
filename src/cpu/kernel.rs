@@ -2,20 +2,31 @@
 //!
 //! The primary workflow is:
 //! 1. Create a [`CpuKernelManager`].
-//! 2. Call [`CpuKernelManager::generate`] for each gate variant you need.
+//! 2. Build a [`KernelGenRequest`] from a spec + gate (or construct it
+//!    directly) and submit it via [`CpuKernelManager::generate`] for every
+//!    gate variant you need.
 //! 3. Allocate a [`CPUStatevector`] and drive simulation by calling
 //!    [`CpuKernelManager::apply`].
 
 use super::*;
-use crate::types::{Precision, QuantumGate};
+use crate::types::{Complex, Precision, QuantumGate};
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
+use std::hash::{Hash, Hasher};
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-/// Configuration passed to the kernel generator for each gate.
-#[repr(C)]
+// ---------------------------------------------------------------------------
+// CPUKernelGenSpec
+// ---------------------------------------------------------------------------
+
+/// Codegen-invariant configuration: precision, SIMD width, matrix load mode,
+/// and the tolerances used to classify matrix elements in StackLoad mode.
+///
+/// Not stored on the manager — each [`KernelGenRequest`] carries its own.
+/// Provided as a bundle so callers can reuse "their usual" defaults across
+/// many requests.
 #[derive(Debug, Clone, Copy)]
 pub struct CPUKernelGenSpec {
     pub precision: Precision,
@@ -51,8 +62,147 @@ impl CPUKernelGenSpec {
     }
 }
 
-/// Opaque handle returned by [`CpuKernelManager::generate`], used to identify a compiled
-/// kernel inside a [`CpuKernelManager`].
+// ---------------------------------------------------------------------------
+// KernelGenRequest
+// ---------------------------------------------------------------------------
+
+/// Complete description of a single kernel generation: spec + gate identity
+/// + diagnostic flags.  This is the canonical Rust-side source of truth and
+/// the key for kernel deduplication inside [`CpuKernelManager`].
+///
+/// Construction via [`KernelGenRequest::from_gate`] is the recommended path.
+/// It computes a canonical *dedup fingerprint* once:
+///
+/// - `ImmValue` — raw matrix bytes (values are baked into the IR).
+/// - `StackLoad` — per-scalar classification (0 = zero, 1 = +1, 2 = −1,
+///   3 = other) of every real/imaginary component, since only the sparsity
+///   pattern is baked into the generated code.
+///
+/// The fingerprint drives `Hash` and `Eq`, so requests that produce
+/// identical compiled output collide in the dedup map even when the live
+/// matrix values differ (StackLoad case).
+///
+/// The `matrix` field preserves the original complex values for the FFI
+/// handoff; the fingerprint is only used for hashing/equality.
+#[derive(Debug, Clone)]
+pub struct KernelGenRequest {
+    pub spec: CPUKernelGenSpec,
+    pub qubits: Vec<u32>,
+    matrix: Vec<Complex>,
+    dedup_fingerprint: Vec<u8>,
+    pub capture_ir: bool,
+    pub capture_asm: bool,
+}
+
+impl KernelGenRequest {
+    /// Builds a request from a spec and gate, computing the canonical
+    /// dedup fingerprint up front.  Diagnostic flags default to `false`;
+    /// use [`with_ir`](Self::with_ir) / [`with_asm`](Self::with_asm) to
+    /// opt in.
+    pub fn from_gate(spec: CPUKernelGenSpec, gate: &QuantumGate) -> Self {
+        let matrix: Vec<Complex> = gate.matrix().data().to_vec();
+        let qubits = gate.qubits().to_vec();
+        let dedup_fingerprint = match spec.mode {
+            MatrixLoadMode::ImmValue => gate.matrix().as_bytes().to_vec(),
+            MatrixLoadMode::StackLoad => matrix_signature(&matrix, spec.ztol, spec.otol),
+        };
+        Self {
+            spec,
+            qubits,
+            matrix,
+            dedup_fingerprint,
+            capture_ir: false,
+            capture_asm: false,
+        }
+    }
+
+    /// Requests capture of the optimized LLVM IR.  The IR text is emitted
+    /// into the generator on the C++ side during codegen and can be fetched
+    /// via [`CpuKernelManager::emit_ir`].
+    pub fn with_ir(mut self) -> Self {
+        self.capture_ir = true;
+        self
+    }
+
+    /// Requests capture of the native assembly.  The assembly text is
+    /// emitted during JIT finalization and can be fetched via
+    /// [`CpuKernelManager::emit_asm`].
+    pub fn with_asm(mut self) -> Self {
+        self.capture_asm = true;
+        self
+    }
+
+    /// Raw gate matrix (row-major, length 2^n × 2^n for an n-qubit gate).
+    pub fn matrix(&self) -> &[Complex] {
+        &self.matrix
+    }
+
+    /// Number of gate qubits.
+    pub fn n_qubits(&self) -> u32 {
+        self.qubits.len() as u32
+    }
+}
+
+impl PartialEq for KernelGenRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.spec.precision == other.spec.precision
+            && self.spec.simd_width == other.spec.simd_width
+            && self.spec.mode == other.spec.mode
+            && self.spec.ztol.to_bits() == other.spec.ztol.to_bits()
+            && self.spec.otol.to_bits() == other.spec.otol.to_bits()
+            && self.qubits == other.qubits
+            && self.dedup_fingerprint == other.dedup_fingerprint
+            && self.capture_ir == other.capture_ir
+            && self.capture_asm == other.capture_asm
+    }
+}
+
+impl Eq for KernelGenRequest {}
+
+impl Hash for KernelGenRequest {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.spec.precision.hash(state);
+        self.spec.simd_width.hash(state);
+        self.spec.mode.hash(state);
+        self.spec.ztol.to_bits().hash(state);
+        self.spec.otol.to_bits().hash(state);
+        self.qubits.hash(state);
+        self.dedup_fingerprint.hash(state);
+        self.capture_ir.hash(state);
+        self.capture_asm.hash(state);
+    }
+}
+
+/// Classify each real/imaginary scalar: 0 = zero, 1 = +1, 2 = −1, 3 = other.
+fn classify_scalar(val: f64, ztol: f64, otol: f64) -> u8 {
+    if val.abs() < ztol {
+        0
+    } else if (val - 1.0).abs() < otol {
+        1
+    } else if (val + 1.0).abs() < otol {
+        2
+    } else {
+        3
+    }
+}
+
+/// Per-scalar classification of the gate matrix, capturing the sparsity
+/// pattern baked into the generated code in StackLoad mode.
+fn matrix_signature(matrix: &[Complex], ztol: f64, otol: f64) -> Vec<u8> {
+    matrix
+        .iter()
+        .flat_map(|z| {
+            [
+                classify_scalar(z.re, ztol, otol),
+                classify_scalar(z.im, ztol, otol),
+            ]
+        })
+        .collect()
+}
+
+/// Opaque handle returned by [`CpuKernelManager::generate`], used to identify
+/// a compiled kernel inside a [`CpuKernelManager`].  Nonzero; 0 is reserved
+/// as a "no kernel" sentinel.
 pub type KernelId = u64;
 
 const ERR_BUF_LEN: usize = 1024;
@@ -118,8 +268,10 @@ impl MatrixBuffer {
 // FFI helpers
 // ---------------------------------------------------------------------------
 
-/// Runs O1 optimisation on the kernel and returns the LLVM IR text (two-call
-/// pattern: first call queries length, second fills the buffer).
+/// Returns the LLVM IR text for a kernel.  When the kernel was generated
+/// with `capture_ir = true`, the IR is already optimized and cached; this
+/// is a read of that cached text.  Otherwise the call triggers O1
+/// optimization lazily (idempotent — subsequent calls hit the cache).
 fn ffi_emit_ir(gen: *mut ffi::KernelGenerator, kernel_id: KernelId) -> anyhow::Result<String> {
     let mut err_buf = [0 as c_char; ERR_BUF_LEN];
 
@@ -243,24 +395,21 @@ impl Drop for GeneratorHandle {
 /// A single compiled kernel owned by the manager.
 ///
 /// Holds a shared reference to the LLJIT session (to keep the compiled code
-/// pages alive), the JIT-compiled function pointer, the source gate, and
-/// optional diagnostics (LLVM IR / native assembly text).
+/// pages alive), the JIT-compiled function pointer, and optional diagnostics.
 struct KernelEntry {
     /// Shared LLJIT session; multiple kernels from the same batch share this.
     /// Not read directly — kept alive to pin the JIT-compiled code pages.
     _jit_session: Arc<JitSessionHandle>,
-    /// The source gate this kernel was compiled from.  Also used to query
-    /// `n_gate_qubits` at apply time (avoids storing a redundant copy).
-    gate: Arc<QuantumGate>,
     /// JIT-compiled entry point.
     func: unsafe extern "C" fn(*mut c_void),
     precision: Precision,
     simd_width: SimdWidth,
+    n_gate_qubits: u32,
     /// Pre-built matrix buffer for StackLoad dispatch (Empty for ImmValue).
     matrix_buf: MatrixBuffer,
-    /// Cached LLVM IR text (only if generated with diagnostics).
+    /// Cached LLVM IR text (only if generated with `capture_ir`).
     ir_text: Option<String>,
-    /// Cached native assembly text (only if generated with diagnostics).
+    /// Cached native assembly text (only if generated with `capture_asm`).
     asm_text: Option<String>,
 }
 
@@ -274,11 +423,10 @@ impl KernelEntry {
             anyhow::bail!("statevector SIMD width does not match kernel");
         }
 
-        let n_gate_qubits = self.gate.n_qubits() as u32;
         let n_qubits = sv.n_qubits();
         let simd_s = get_simd_s(self.simd_width, self.precision);
         let n_task_bits = n_qubits
-            .checked_sub(n_gate_qubits + simd_s)
+            .checked_sub(self.n_gate_qubits + simd_s)
             .ok_or_else(|| anyhow::anyhow!("statevector has too few qubits for this kernel"))?;
 
         let n_tasks: u64 = 1 << n_task_bits;
@@ -292,7 +440,7 @@ impl KernelEntry {
 
         log::debug!(
             "cpu: apply kernel ({} gate qubits, {} tasks, {} thread(s))",
-            n_gate_qubits,
+            self.n_gate_qubits,
             n_tasks,
             n_threads,
         );
@@ -339,84 +487,21 @@ unsafe impl Sync for KernelEntry {}
 /// Metadata for a kernel that has been added to the C++ generator but not
 /// yet JIT-compiled.  Promoted to a [`KernelEntry`] by [`CpuKernelManager::finalize`].
 struct PendingKernel {
-    gate: Arc<QuantumGate>,
-    /// C++ kernel id within the current generator batch.  Not read on the
-    /// Rust side — present for debugging and to document the mapping.
+    /// C++-side kernel id within the current generator batch.  Used only to
+    /// query diagnostics before finalize; after finalize, the Rust-side
+    /// `KernelId` identifies the compiled entry.
     #[allow(dead_code)]
     raw_kid: KernelId,
-    /// Captured LLVM IR text (only if `request_llvm_ir` was set).
+    /// Captured LLVM IR text (only if `capture_ir` was set).
     ir_text: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Kernel deduplication
-// ---------------------------------------------------------------------------
-
-/// Key capturing every input that affects the compiled kernel output.
-///
-/// The spec is fixed per manager, so only the gate-specific fields vary.
-///
-/// - **ImmValue** mode bakes matrix values as immediates → key uses raw bytes.
-/// - **StackLoad** mode loads values at runtime → key uses the element
-///   classification (zero / +1 / −1 / other) since only the sparsity pattern
-///   is baked into the generated code.
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct DedupKey {
-    /// Raw matrix bytes (ImmValue) or per-scalar classification (StackLoad).
-    matrix_fingerprint: Vec<u8>,
-    qubits: Vec<u32>,
-}
-
-impl DedupKey {
-    fn new(spec: &CPUKernelGenSpec, gate: &QuantumGate) -> Self {
-        let matrix_fingerprint = match spec.mode {
-            MatrixLoadMode::ImmValue => matrix_bytes(gate),
-            MatrixLoadMode::StackLoad => matrix_signature(gate, spec.ztol, spec.otol),
-        };
-        Self {
-            matrix_fingerprint,
-            qubits: gate.qubits().to_vec(),
-        }
-    }
-}
-
-fn matrix_bytes(gate: &QuantumGate) -> Vec<u8> {
-    gate.matrix().as_bytes().to_vec()
-}
-
-/// Classify each real/imaginary scalar: 0 = zero, 1 = +1, 2 = −1, 3 = other.
-fn classify_scalar(val: f64, ztol: f64, otol: f64) -> u8 {
-    if val.abs() < ztol {
-        0
-    } else if (val - 1.0).abs() < otol {
-        1
-    } else if (val + 1.0).abs() < otol {
-        2
-    } else {
-        3
-    }
-}
-
-/// Per-scalar classification of the gate matrix, capturing the sparsity pattern
-/// that determines generated code in StackLoad mode.
-fn matrix_signature(gate: &QuantumGate, ztol: f64, otol: f64) -> Vec<u8> {
-    gate.matrix()
-        .data()
-        .iter()
-        .flat_map(|z| {
-            [
-                classify_scalar(z.re, ztol, otol),
-                classify_scalar(z.im, ztol, otol),
-            ]
-        })
-        .collect()
 }
 
 struct CpuManagerInner {
     next_id: KernelId,
     /// Compiled, ready-to-apply kernel entries.
     entries: HashMap<KernelId, Arc<KernelEntry>>,
-    dedup: HashMap<DedupKey, KernelId>,
+    /// Dedup map: identical requests → same kernel id.
+    dedup: HashMap<KernelGenRequest, KernelId>,
     /// Kernels added to the generator but not yet JIT-compiled.
     /// Order matches the C++ generator's internal kernel vector.
     pending: Vec<(KernelId, PendingKernel)>,
@@ -425,9 +510,9 @@ struct CpuManagerInner {
 /// CPU kernel manager: generate → JIT-compile → apply.
 ///
 /// ```ignore
-/// let mgr = CpuKernelManager::new(spec);
-/// let k1 = mgr.generate(&gate_a)?;         // LLVM IR (deferred JIT)
-/// let k2 = mgr.generate(&gate_b)?;         // batched with k1
+/// let mgr = CpuKernelManager::new();
+/// let k1 = mgr.generate(KernelGenRequest::from_gate(spec, &gate_a))?;
+/// let k2 = mgr.generate(KernelGenRequest::from_gate(spec, &gate_b))?;
 /// mgr.apply(k1, &mut sv, 0)?;     // auto-finalizes both
 /// mgr.apply(k2, &mut sv, 0)?;     // already compiled
 /// ```
@@ -437,7 +522,7 @@ struct CpuManagerInner {
 /// [`apply`], [`finalize`], or diagnostic query.  This amortizes LLJIT
 /// setup overhead and shares compiled code pages across kernels.
 ///
-/// Identical gates are deduplicated via content-based keys.
+/// Identical requests are deduplicated via `Hash + Eq` on [`KernelGenRequest`].
 /// `apply` dispatches work across threads synchronously; the manager lock
 /// is released before kernel execution.
 ///
@@ -447,20 +532,25 @@ struct CpuManagerInner {
 /// kernels can run in parallel because each `apply` clones its
 /// `KernelEntry` (via `Arc`) before releasing the manager lock.
 pub struct CpuKernelManager {
-    spec: CPUKernelGenSpec,
     inner: std::sync::Mutex<CpuManagerInner>,
     /// Shared C++ generator accumulating un-compiled kernels.
     /// Lock ordering: always acquire `generator` before `inner`.
     generator: std::sync::Mutex<Option<GeneratorHandle>>,
 }
 
+impl Default for CpuKernelManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CpuKernelManager {
-    /// Creates a new kernel manager bound to the given spec.
-    pub fn new(spec: CPUKernelGenSpec) -> Self {
+    /// Creates a new kernel manager.  The manager holds no default spec —
+    /// each kernel carries its own in the [`KernelGenRequest`].
+    pub fn new() -> Self {
         Self {
-            spec,
             inner: std::sync::Mutex::new(CpuManagerInner {
-                next_id: 0,
+                next_id: 1,
                 entries: HashMap::new(),
                 dedup: HashMap::new(),
                 pending: Vec::new(),
@@ -469,83 +559,48 @@ impl CpuKernelManager {
         }
     }
 
-    /// Returns the spec this manager was created with.
-    pub fn spec(&self) -> &CPUKernelGenSpec {
-        &self.spec
-    }
-
-    /// Adds the gate to the shared compile queue and returns its kernel ID.
+    /// Adds `request` to the shared compile queue and returns its kernel ID.
     ///
     /// LLVM IR generation runs on the calling thread; O1 optimization and
     /// native code generation are deferred until [`apply`](Self::apply),
-    /// [`finalize`](Self::finalize), or a diagnostic accessor is called.
-    /// The `Arc<QuantumGate>` is stored alongside the compiled code so the
-    /// source gate remains accessible via [`gate`](Self::gate).
+    /// [`finalize`](Self::finalize), or a diagnostic accessor is called
+    /// (except when `request.capture_ir` is set — O1 runs eagerly to
+    /// capture the optimized text).
     ///
     /// Multiple threads may call `generate` concurrently.
-    pub fn generate(&self, gate: &Arc<QuantumGate>) -> anyhow::Result<KernelId> {
-        self.generate_inner(gate.clone(), false, false)
-    }
-
-    /// Like [`generate`](Self::generate), but also captures diagnostics.
-    ///
-    /// - `request_llvm_ir`: capture optimized LLVM IR (retrieve via [`emit_ir`](Self::emit_ir)).
-    /// - `request_asm`: capture native assembly (retrieve via [`emit_asm`](Self::emit_asm)).
-    pub fn generate_with_diagnostics(
-        &self,
-        gate: &Arc<QuantumGate>,
-        request_llvm_ir: bool,
-        request_asm: bool,
-    ) -> anyhow::Result<KernelId> {
-        self.generate_inner(gate.clone(), request_llvm_ir, request_asm)
-    }
-
-    fn generate_inner(
-        &self,
-        gate: Arc<QuantumGate>,
-        request_llvm_ir: bool,
-        request_asm: bool,
-    ) -> anyhow::Result<KernelId> {
+    pub fn generate(&self, request: KernelGenRequest) -> anyhow::Result<KernelId> {
         // ── First dedup check (fast path, no generator lock) ─────────────
-        let spec = &self.spec;
-        let want_dedup = !request_llvm_ir && !request_asm;
-        let key = if want_dedup {
-            let k = DedupKey::new(spec, &gate);
+        {
             let guard = self.inner.lock().unwrap();
-            if let Some(&id) = guard.dedup.get(&k) {
+            if let Some(&id) = guard.dedup.get(&request) {
                 return Ok(id);
             }
-            Some(k)
-        } else {
-            None
-        };
+        }
 
-        // Extract FFI data upfront so the borrow on `gate` is released
-        // before we move the Arc into the pending entry.
-        let ffi_matrix: Vec<ffi::c64> = gate
-            .matrix()
-            .data()
+        // Build the FFI payload upfront so the borrow on `request` is held
+        // only across the single FFI call.
+        let ffi_matrix: Vec<ffi::c64> = request
+            .matrix
             .iter()
             .map(|c| ffi::c64 { re: c.re, im: c.im })
             .collect();
-        let qubits = gate.qubits().to_vec();
         let mut err_buf = [0 as c_char; ERR_BUF_LEN];
 
         // ── Acquire generator lock for the remainder of the function ────
         // Lock order: generator → inner.  Held through the C++ codegen and
         // the pending push so the generator state and pending list stay
-        // consistent — no concurrent generate_inner can race with us.
+        // consistent — no concurrent generate can race with us.
         let mut gen_guard = self.generator.lock().unwrap();
 
         // ── Second dedup re-check, BEFORE enqueueing into the C++ batch ──
-        // Another generate_inner may have completed between our first
-        // dedup miss and our acquisition of the generator lock.  We must
-        // catch the duplicate here so we never add an orphan kernel to the
-        // C++ generator's batch (which would cause a record/pending size
-        // mismatch in finalize).
-        if let Some(ref key) = key {
+        // Another generate may have completed between our first dedup miss
+        // and our acquisition of the generator lock.  Catch the duplicate
+        // here so we never add an orphan kernel to the C++ generator's
+        // batch (which would cause a record/pending size mismatch in
+        // finalize).
+        {
             let inner = self.inner.lock().unwrap();
-            if let Some(&existing_id) = inner.dedup.get(key) {
+            if let Some(&existing_id) = inner.dedup.get(&request) {
                 return Ok(existing_id);
             }
         }
@@ -559,69 +614,57 @@ impl CpuKernelManager {
             }
         };
 
-        let mut raw_kid: KernelId = 0;
-        let status = unsafe {
+        let ffi_request = ffi::CastCpuKernelGenRequest {
+            precision: request.spec.precision,
+            simd_width: request.spec.simd_width,
+            mode: request.spec.mode,
+            ztol: request.spec.ztol,
+            otol: request.spec.otol,
+            qubits: request.qubits.as_ptr(),
+            n_qubits: request.qubits.len(),
+            matrix: ffi_matrix.as_ptr(),
+            matrix_len: ffi_matrix.len(),
+            capture_ir: request.capture_ir,
+            capture_asm: request.capture_asm,
+        };
+
+        let raw_kid = unsafe {
             ffi::cast_cpu_kernel_generator_generate(
                 gen.as_ptr(),
-                spec as *const CPUKernelGenSpec,
-                ffi_matrix.as_ptr(),
-                ffi_matrix.len(),
-                qubits.as_ptr(),
-                qubits.len(),
-                &mut raw_kid,
+                &ffi_request as *const ffi::CastCpuKernelGenRequest,
                 err_buf.as_mut_ptr(),
                 err_buf.len(),
             )
         };
-        if status != 0 {
+        if raw_kid == 0 {
             anyhow::bail!(error_from_buf(&err_buf));
         }
 
-        // ── Diagnostics (IR + asm capture) ────────────────────────────────
-        // emit_ir triggers O1 optimization for this kernel (idempotent —
-        // finish will skip re-optimizing it).  request_asm only sets a flag;
-        // assembly is emitted during finish.
-        let ir_text = if request_llvm_ir {
+        // Fetch cached IR text now (C++ already optimized when capture_ir
+        // was set; otherwise this triggers lazy O1).  We do it eagerly for
+        // capture_ir so the text survives finish, which consumes the
+        // C++ Module.
+        let ir_text = if request.capture_ir {
             Some(ffi_emit_ir(gen.as_ptr(), raw_kid)?)
         } else {
             None
         };
-        if request_asm {
-            let status = unsafe {
-                ffi::cast_cpu_kernel_generator_request_asm(
-                    gen.as_ptr(),
-                    raw_kid,
-                    err_buf.as_mut_ptr(),
-                    err_buf.len(),
-                )
-            };
-            if status != 0 {
-                anyhow::bail!(error_from_buf(&err_buf));
-            }
-        }
 
         // ── Register pending entry ───────────────────────────────────────
-        // We still hold the generator lock, so no concurrent generate_inner
-        // can have inserted into dedup since our second re-check above.
+        // We still hold the generator lock, so no concurrent generate can
+        // have inserted into dedup since our second re-check above.
         let mut inner = self.inner.lock().unwrap();
         let id = inner.next_id;
         inner.next_id += 1;
-        if let Some(key) = key {
-            inner.dedup.insert(key, id);
-        }
-        inner.pending.push((
-            id,
-            PendingKernel {
-                gate,
-                raw_kid,
-                ir_text,
-            },
-        ));
+        let n_qubits = request.qubits.len();
+        let precision = request.spec.precision;
+        inner.dedup.insert(request, id);
+        inner.pending.push((id, PendingKernel { raw_kid, ir_text }));
         log::info!(
             "cpu: queued kernel {} ({} qubits, {:?} precision, batch pos {})",
             id,
-            qubits.len(),
-            spec.precision,
+            n_qubits,
+            precision,
             inner.pending.len() - 1,
         );
         Ok(id)
@@ -643,9 +686,9 @@ impl CpuKernelManager {
     pub(crate) fn finalize(&self) -> anyhow::Result<()> {
         // ── Take the generator and pending list atomically ───────────────
         // Hold the generator lock while taking pending so concurrent
-        // generate_inner cannot push new entries between the two takes
-        // (which would leave them stranded — their kernels are in a
-        // different generator than the one we're about to finish).
+        // generate cannot push new entries between the two takes (which
+        // would leave them stranded — their kernels are in a different
+        // generator than the one we're about to finish).
         // Lock order: generator → inner.
         let mut gen_guard = self.generator.lock().unwrap();
         let gen_handle = match gen_guard.take() {
@@ -656,8 +699,8 @@ impl CpuKernelManager {
             let mut inner = self.inner.lock().unwrap();
             std::mem::take(&mut inner.pending)
         };
-        // Release the generator lock — concurrent generate_inner calls
-        // can now create a fresh GeneratorHandle for the next batch.
+        // Release the generator lock — concurrent generate calls can now
+        // create a fresh GeneratorHandle for the next batch.
         drop(gen_guard);
 
         if pending.is_empty() {
@@ -711,10 +754,10 @@ impl CpuKernelManager {
                 *kid,
                 Arc::new(KernelEntry {
                     _jit_session: session.clone(),
-                    gate: pend.gate.clone(),
                     func: entry_fn,
                     precision,
                     simd_width,
+                    n_gate_qubits: record.metadata.n_gate_qubits,
                     matrix_buf,
                     ir_text: pend.ir_text.clone(),
                     asm_text,
@@ -754,30 +797,17 @@ impl CpuKernelManager {
     }
 
     /// Returns the optimized LLVM IR for a kernel, if it was generated with
-    /// diagnostics.  Triggers [`finalize`](Self::finalize) if the kernel is
+    /// `capture_ir`.  Triggers [`finalize`](Self::finalize) if the kernel is
     /// still pending.
     pub fn emit_ir(&self, id: KernelId) -> Option<String> {
         self.ensure_compiled(id).ok()?.ir_text.clone()
     }
 
     /// Returns the native assembly for a kernel, if it was generated with
-    /// diagnostics.  Triggers [`finalize`](Self::finalize) if the kernel is
-    /// still pending.
+    /// `capture_asm`.  Triggers [`finalize`](Self::finalize) if the kernel
+    /// is still pending.
     pub fn emit_asm(&self, id: KernelId) -> Option<String> {
         self.ensure_compiled(id).ok()?.asm_text.clone()
-    }
-
-    /// Returns the source gate for the kernel identified by `id`.
-    pub fn gate(&self, id: KernelId) -> Option<Arc<QuantumGate>> {
-        let inner = self.inner.lock().unwrap();
-        if let Some(entry) = inner.entries.get(&id) {
-            return Some(entry.gate.clone());
-        }
-        inner
-            .pending
-            .iter()
-            .find(|(kid, _)| *kid == id)
-            .map(|(_, p)| p.gate.clone())
     }
 
     /// Applies the kernel identified by `id` to `sv` in-place.
@@ -811,6 +841,25 @@ impl CpuKernelManager {
         budget_s: f64,
     ) -> anyhow::Result<crate::timing::TimingStats> {
         crate::timing::time_adaptive(|| self.apply(id, sv, n_threads), budget_s)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Convenience constructors / callers
+// ---------------------------------------------------------------------------
+
+impl CpuKernelManager {
+    /// Convenience: build a request from `(spec, gate)` and call
+    /// [`generate`](Self::generate).  Equivalent to
+    /// `self.generate(KernelGenRequest::from_gate(spec, gate))`.
+    ///
+    /// `&Arc<QuantumGate>` coerces to `&QuantumGate` via `Deref`.
+    pub fn generate_gate(
+        &self,
+        spec: CPUKernelGenSpec,
+        gate: &QuantumGate,
+    ) -> anyhow::Result<KernelId> {
+        self.generate(KernelGenRequest::from_gate(spec, gate))
     }
 }
 

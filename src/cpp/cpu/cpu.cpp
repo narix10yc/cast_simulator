@@ -54,9 +54,9 @@ cast::cpu::MatrixLoadMode to_internal(cast_cpu_matrix_load_mode_t mode) {
   return static_cast<cast::cpu::MatrixLoadMode>(mode);
 }
 
-cast::cpu::KernelGenSpec to_internal(const cast_cpu_kernel_gen_spec_t &spec) {
-  return {to_internal(spec.precision), to_internal(spec.simd_width), to_internal(spec.mode),
-          spec.ztol, spec.otol};
+cast::cpu::KernelGenSpec to_internal_spec(const cast_cpu_kernel_gen_request_t &request) {
+  return {to_internal(request.precision), to_internal(request.simd_width),
+          to_internal(request.mode), request.ztol, request.otol};
 }
 
 std::vector<cast::Complex64> copy_matrix(const cast_complex64_t *matrix, size_t matrix_len) {
@@ -121,7 +121,9 @@ llvm::Error copy_to_ffi(const cast::cpu::CompiledKernelRecord &src,
 
 struct cast_cpu_kernel_generator_t {
   std::vector<cast::cpu::GeneratedKernel> kernels;
-  cast_cpu_kernel_id_t next_kernel_id = 0;
+  // Kernel ids start at 1; 0 is reserved as the FFI failure sentinel for
+  // cast_cpu_kernel_generator_generate.
+  cast_cpu_kernel_id_t next_kernel_id = 1;
 };
 
 struct cast_cpu_jit_session_t {
@@ -140,105 +142,73 @@ extern "C" void cast_cpu_kernel_generator_delete(cast_cpu_kernel_generator_t *ge
   delete generator;
 }
 
-extern "C" int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
-                                                  const cast_cpu_kernel_gen_spec_t *spec,
-                                                  const cast_complex64_t *matrix, size_t matrix_len,
-                                                  const uint32_t *qubits, size_t n_qubits,
-                                                  cast_cpu_kernel_id_t *out_kernel_id,
-                                                  char *err_buf, size_t err_buf_len) {
+extern "C" cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
+    cast_cpu_kernel_generator_t *generator, const cast_cpu_kernel_gen_request_t *request,
+    char *err_buf, size_t err_buf_len) {
   if (generator == nullptr) {
     write_err_buf(err_buf, err_buf_len, "generator must not be null");
-    return 1;
+    return 0;
   }
-  if (spec == nullptr) {
-    write_err_buf(err_buf, err_buf_len, "spec must not be null");
-    return 1;
+  if (request == nullptr) {
+    write_err_buf(err_buf, err_buf_len, "request must not be null");
+    return 0;
   }
-  if (out_kernel_id == nullptr) {
-    write_err_buf(err_buf, err_buf_len, "out_kernel_id must not be null");
-    return 1;
-  }
-  if (matrix == nullptr) {
-    write_err_buf(err_buf, err_buf_len, "matrix must not be null");
-    return 1;
+  // Dereferencing a null matrix pointer in copy_matrix is UB; guard here.
+  // Shape-level validation (length, qubits, spec fields) is delegated to
+  // generate_kernel_ir.
+  if (request->matrix == nullptr && request->matrix_len != 0) {
+    write_err_buf(err_buf, err_buf_len, "request->matrix must not be null");
+    return 0;
   }
 
   try {
-    const cast::cpu::KernelGenSpec internal_spec = to_internal(*spec);
-    if (!cast::is_valid_precision(internal_spec.precision)) {
-      write_err_buf(err_buf, err_buf_len, "invalid precision");
-      return 1;
-    }
-    if (!cast::cpu::is_valid_simd_width(internal_spec.simd_width)) {
-      write_err_buf(err_buf, err_buf_len, "invalid SIMD width");
-      return 1;
-    }
-    if (!cast::cpu::is_valid_mode(internal_spec.mode)) {
-      write_err_buf(err_buf, err_buf_len, "invalid matrix load mode");
-      return 1;
-    }
-    if (qubits == nullptr && n_qubits != 0) {
-      write_err_buf(err_buf, err_buf_len, "qubits must not be null");
-      return 1;
-    }
-    size_t expected_len = 0;
-    if (!cast::cpu::expected_matrix_len(n_qubits, &expected_len) || expected_len != matrix_len) {
-      write_err_buf(err_buf, err_buf_len, "matrix length does not match the target qubit count");
-      return 1;
-    }
-    const std::vector<cast::Complex64> internal_matrix = copy_matrix(matrix, matrix_len);
+    const cast::cpu::KernelGenSpec internal_spec = to_internal_spec(*request);
+    std::vector<cast::Complex64> matrix_buf =
+        copy_matrix(request->matrix, request->matrix_len);
 
     cast::cpu::GeneratedKernel kernel;
     kernel.metadata.kernel_id = generator->next_kernel_id++;
     kernel.metadata.precision = internal_spec.precision;
     kernel.metadata.simd_width = internal_spec.simd_width;
     kernel.metadata.mode = internal_spec.mode;
-    kernel.metadata.n_gate_qubits = static_cast<uint32_t>(n_qubits);
+    kernel.metadata.n_gate_qubits = static_cast<uint32_t>(request->n_qubits);
     kernel.func_name = "k_" + std::to_string(kernel.metadata.kernel_id);
     kernel.context = std::make_unique<llvm::LLVMContext>();
     kernel.module = std::make_unique<llvm::Module>(kernel.func_name + "_module", *kernel.context);
-    if (internal_spec.mode == cast::cpu::MatrixLoadMode::StackLoad) {
-      kernel.matrix = internal_matrix;
-    }
+    kernel.capture_asm = request->capture_asm;
 
-    auto func = cast::cpu::generate_kernel_ir(internal_spec, internal_matrix.data(), matrix_len,
-                                              qubits, n_qubits, kernel.func_name, *kernel.module);
+    auto func = cast::cpu::generate_kernel_ir(internal_spec, matrix_buf.data(),
+                                              request->matrix_len, request->qubits,
+                                              request->n_qubits, kernel.func_name, *kernel.module);
     if (!func) {
       write_err_buf(err_buf, err_buf_len, llvm::toString(func.takeError()));
-      return 1;
+      return 0;
     }
 
+    // StackLoad mode needs the live matrix values at apply time.  ImmValue
+    // mode bakes them into the IR, so the buffer can be dropped.
+    if (internal_spec.mode == cast::cpu::MatrixLoadMode::StackLoad) {
+      kernel.matrix = std::move(matrix_buf);
+    }
+
+    if (request->capture_ir) {
+      if (auto err = cast::cpu::optimize_kernel_ir(kernel)) {
+        write_err_buf(err_buf, err_buf_len, llvm::toString(std::move(err)));
+        return 0;
+      }
+    }
+
+    const cast_cpu_kernel_id_t kernel_id = kernel.metadata.kernel_id;
     generator->kernels.push_back(std::move(kernel));
-    *out_kernel_id = generator->kernels.back().metadata.kernel_id;
     clear_err_buf(err_buf, err_buf_len);
-    return 0;
+    return kernel_id;
   } catch (const std::exception &ex) {
     write_err_buf(err_buf, err_buf_len, ex.what());
-    return 1;
+    return 0;
   } catch (...) {
     write_err_buf(err_buf, err_buf_len, "unknown error in kernel generation");
-    return 1;
+    return 0;
   }
-}
-
-extern "C" int cast_cpu_kernel_generator_request_asm(cast_cpu_kernel_generator_t *generator,
-                                                     cast_cpu_kernel_id_t kernel_id, char *err_buf,
-                                                     size_t err_buf_len) {
-  if (generator == nullptr) {
-    write_err_buf(err_buf, err_buf_len, "generator must not be null");
-    return 1;
-  }
-  auto it = std::find_if(generator->kernels.begin(), generator->kernels.end(),
-                         [kernel_id](const cast::cpu::GeneratedKernel &k) {
-                           return k.metadata.kernel_id == kernel_id;
-                         });
-  if (it == generator->kernels.end()) {
-    write_err_buf(err_buf, err_buf_len, "kernel id not found in generator");
-    return 1;
-  }
-  it->capture_asm = true;
-  clear_err_buf(err_buf, err_buf_len);
-  return 0;
 }
 
 extern "C" int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *generator,

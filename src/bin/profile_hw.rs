@@ -272,13 +272,11 @@ fn print_mem_bw(r: &MemBwResult) {
             fmt_duration(stats.stddev_s),
         );
     };
-    row("read",  1, &r.read,  r.read_gib_s());
+    row("read", 1, &r.read, r.read_gib_s());
     row("write", 1, &r.write, r.write_gib_s());
-    row("copy",  2, &r.copy,  r.copy_gib_s());
-    row("rmw",   2, &r.rmw,   r.rmw_gib_s());
-    println!(
-        "    (rmw = in-place read-modify-write — closest analogue to a gate apply)"
-    );
+    row("copy", 2, &r.copy, r.copy_gib_s());
+    row("rmw", 2, &r.rmw, r.rmw_gib_s());
+    println!("    (rmw = in-place read-modify-write — closest analogue to a gate apply)");
 }
 
 /// Runs the direct memory-bandwidth measurement and prints it.  Uses an F64-sized

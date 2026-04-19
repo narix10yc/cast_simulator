@@ -6,6 +6,7 @@
 
 #include "ffi_types.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -26,13 +27,25 @@ typedef enum cast_cpu_matrix_load_mode_t {
   CAST_CPU_MATRIX_LOAD_STACK_LOAD = 1,
 } cast_cpu_matrix_load_mode_t;
 
-typedef struct cast_cpu_kernel_gen_spec_t {
+/// Per-kernel generation request.  Borrowed pointers (`qubits`, `matrix`)
+/// must be valid for the duration of the call.  The Rust side owns the
+/// canonical form and hashes it for dedup; this struct is purely on-the-wire.
+typedef struct cast_cpu_kernel_gen_request_t {
+  // Codegen spec
   cast_precision_t precision;
   cast_cpu_simd_width_t simd_width;
   cast_cpu_matrix_load_mode_t mode;
   double ztol;
   double otol;
-} cast_cpu_kernel_gen_spec_t;
+  // Gate identity
+  const uint32_t *qubits;
+  size_t n_qubits;
+  const cast_complex64_t *matrix;
+  size_t matrix_len;
+  // Diagnostics
+  bool capture_ir;
+  bool capture_asm;
+} cast_cpu_kernel_gen_request_t;
 
 typedef struct cast_cpu_kernel_metadata_t {
   cast_cpu_kernel_id_t kernel_id;
@@ -50,7 +63,7 @@ typedef struct cast_cpu_jit_kernel_record_t {
   void (*entry)(void *);    ///< JIT-compiled function pointer.
   cast_complex64_t *matrix; ///< NULL for ImmValue mode.
   size_t matrix_len;
-  char *asm_text; ///< NULL if request_asm was not called.
+  char *asm_text; ///< NULL if capture_asm was false in the request.
 } cast_cpu_jit_kernel_record_t;
 
 typedef struct cast_cpu_kernel_generator_t cast_cpu_kernel_generator_t;
@@ -67,20 +80,15 @@ void cast_cpu_kernel_generator_delete(cast_cpu_kernel_generator_t *generator);
 
 // -- Kernel generation --
 
-/// Error handling: returns non-zero on failure and writes a message to err_buf.
-int cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
-                                       const cast_cpu_kernel_gen_spec_t *spec,
-                                       const cast_complex64_t *matrix, size_t matrix_len,
-                                       const uint32_t *qubits, size_t n_qubits,
-                                       cast_cpu_kernel_id_t *out_kernel_id, char *err_buf,
-                                       size_t err_buf_len);
+/// Generates one kernel from `request`.  Returns the assigned kernel id
+/// (> 0) on success, or 0 on failure with an error message in `err_buf`.
+/// The request struct's pointer fields need only be valid for the
+/// duration of this call.
+cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
+    cast_cpu_kernel_generator_t *generator, const cast_cpu_kernel_gen_request_t *request,
+    char *err_buf, size_t err_buf_len);
 
 // -- Diagnostics --
-
-/// Error handling: returns non-zero on failure and writes a message to err_buf.
-int cast_cpu_kernel_generator_request_asm(cast_cpu_kernel_generator_t *generator,
-                                          cast_cpu_kernel_id_t kernel_id, char *err_buf,
-                                          size_t err_buf_len);
 
 /// Error handling: returns non-zero on failure and writes a message to err_buf.
 int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *generator,

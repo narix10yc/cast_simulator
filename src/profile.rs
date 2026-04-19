@@ -45,6 +45,7 @@
 //! 3. **Output**: a [`HardwareProfile`] with the fitted parameters and
 //!    (optionally) the raw sweep data for plotting.
 
+#[cfg(feature = "cuda")]
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -473,7 +474,7 @@ pub fn measure_cpu(
 
     let mut sv = CPUStatevector::new(n_qubits, spec.precision, spec.simd_width);
     sv.initialize();
-    let mgr = CpuKernelManager::new(*spec);
+    let mgr = CpuKernelManager::new();
 
     let config = ProfileConfig {
         device: Device::Cpu {
@@ -485,8 +486,7 @@ pub fn measure_cpu(
     };
 
     measure(config, n_qubits, scalar_bytes, budget_s, |gate, budget| {
-        let gate = Arc::new(gate.clone());
-        let kid = mgr.generate(&gate)?;
+        let kid = mgr.generate_gate(*spec, gate)?;
         let timing = mgr.time_adaptive(kid, &mut sv, n_threads, budget)?;
         Ok(timing.mean_s)
     })

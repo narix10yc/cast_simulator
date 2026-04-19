@@ -110,8 +110,9 @@ compilation.  Rust owns the lifecycle via `CpuKernelManager` / `CudaKernelManage
 
 **CPU:**
 ```rust
-let mgr = CpuKernelManager::new(spec);
-let kid = mgr.generate(&gate)?;         // LLVM IR → O1 → native JIT
+let mgr = CpuKernelManager::new();
+let kid = mgr.generate(KernelGenRequest::from_gate(spec, &gate))?;
+//       ^^ LLVM IR → O1 (eager if capture_ir) → native JIT (on apply/finalize)
 mgr.apply(kid, &mut sv, n_threads)?;    // scoped thread pool, implicit barrier
 ```
 

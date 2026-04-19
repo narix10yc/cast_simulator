@@ -13,7 +13,7 @@ pub enum SimdWidth {
 
 /// Controls how the gate matrix is embedded in the JIT-compiled kernel.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MatrixLoadMode {
     /// Matrix elements are baked in as immediate constants (faster for fixed gates).
     ImmValue,

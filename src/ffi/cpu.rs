@@ -1,6 +1,6 @@
 //! Raw FFI bindings to `src/cpp/include/ffi_cpu.h`.
 
-use crate::cpu::{CPUKernelGenSpec, KernelId, MatrixLoadMode, SimdWidth};
+use crate::cpu::{KernelId, MatrixLoadMode, SimdWidth};
 use crate::types::Precision;
 use std::ffi::{c_char, c_void};
 
@@ -12,6 +12,25 @@ use std::ffi::{c_char, c_void};
 pub(crate) struct c64 {
     pub(crate) re: f64,
     pub(crate) im: f64,
+}
+
+/// `cast_cpu_kernel_gen_request_t` — FFI-wire form of a kernel generation
+/// request.  Built on the stack at call time from a Rust-side owned
+/// `KernelGenRequest`; never stored.  The `qubits` and `matrix` pointers
+/// must remain valid for the duration of one FFI call.
+#[repr(C)]
+pub(crate) struct CastCpuKernelGenRequest {
+    pub(crate) precision: Precision,
+    pub(crate) simd_width: SimdWidth,
+    pub(crate) mode: MatrixLoadMode,
+    pub(crate) ztol: f64,
+    pub(crate) otol: f64,
+    pub(crate) qubits: *const u32,
+    pub(crate) n_qubits: usize,
+    pub(crate) matrix: *const c64,
+    pub(crate) matrix_len: usize,
+    pub(crate) capture_ir: bool,
+    pub(crate) capture_asm: bool,
 }
 
 /// `cast_cpu_kernel_metadata_t`
@@ -54,25 +73,16 @@ unsafe extern "C" {
     pub(crate) fn cast_cpu_kernel_generator_delete(generator: *mut KernelGenerator);
 
     // -- Kernel generation --
+    // Returns the assigned kernel id (> 0) on success, or 0 on failure
+    // (with a message in `err_buf`).
     pub(crate) fn cast_cpu_kernel_generator_generate(
         generator: *mut KernelGenerator,
-        spec: *const CPUKernelGenSpec,
-        matrix: *const c64,
-        matrix_len: usize,
-        qubits: *const u32,
-        n_qubits: usize,
-        out_kernel_id: *mut KernelId,
+        request: *const CastCpuKernelGenRequest,
         err_buf: *mut c_char,
         err_buf_len: usize,
-    ) -> i32;
+    ) -> KernelId;
 
     // -- Diagnostics --
-    pub(crate) fn cast_cpu_kernel_generator_request_asm(
-        generator: *mut KernelGenerator,
-        kernel_id: KernelId,
-        err_buf: *mut c_char,
-        err_buf_len: usize,
-    ) -> i32;
     pub(crate) fn cast_cpu_kernel_generator_emit_ir(
         generator: *mut KernelGenerator,
         kernel_id: KernelId,

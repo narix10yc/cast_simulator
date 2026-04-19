@@ -21,7 +21,7 @@
 //! by default) and either explicit target qubit placement (`--qubits`) or
 //! matrix density (`--density`). Non-sweep modes run one row.
 
-use cast::cpu::{CPUKernelGenSpec, CPUStatevector, CpuKernelManager, SimdWidth};
+use cast::cpu::{CPUKernelGenSpec, CPUStatevector, CpuKernelManager, KernelGenRequest, SimdWidth};
 use cast::timing::{fmt_duration, TimingStats};
 use cast::types::{ComplexSquareMatrix, QuantumGate};
 use clap::{Parser, ValueEnum};
@@ -152,8 +152,8 @@ fn measure_runtime(
     threads: &[u32],
     apply_budget_s: f64,
 ) -> anyhow::Result<Vec<(u32, TimingStats)>> {
-    let mgr = CpuKernelManager::new(spec);
-    let id = mgr.generate(gate)?;
+    let mgr = CpuKernelManager::new();
+    let id = mgr.generate_gate(spec, gate)?;
     // Force compile now so the first exec doesn't absorb finalize.
     let _ = mgr.emit_asm(id);
 
@@ -181,9 +181,9 @@ fn measure(
     // Warm-up — a cold LLVM InitializeNativeTarget + module ctx allocation
     // adds ~5 ms on the first call in the process.
     {
-        let mgr = CpuKernelManager::new(spec);
+        let mgr = CpuKernelManager::new();
         let gate = make_gate(qubits, density);
-        let id = mgr.generate(&gate)?;
+        let id = mgr.generate_gate(spec, &gate)?;
         let _ = mgr.emit_asm(id);
     }
 
@@ -200,19 +200,19 @@ fn measure(
 
         // Phase A: IR emission only.
         {
-            let mgr = CpuKernelManager::new(spec);
+            let mgr = CpuKernelManager::new();
             let gate = clone_gate(&gate_proto);
             let t0 = Instant::now();
-            let _ = mgr.generate(&gate)?;
+            let _ = mgr.generate_gate(spec, &gate)?;
             ir_samples.push(t0.elapsed().as_secs_f64() * 1e3);
         }
 
         // Phase B: IR emission + O1 optimization (+ IR capture to measure size).
         {
-            let mgr = CpuKernelManager::new(spec);
+            let mgr = CpuKernelManager::new();
             let gate = clone_gate(&gate_proto);
             let t0 = Instant::now();
-            let id = mgr.generate_with_diagnostics(&gate, true, false)?;
+            let id = mgr.generate(KernelGenRequest::from_gate(spec, &gate).with_ir())?;
             ir_opt_samples.push(t0.elapsed().as_secs_f64() * 1e3);
             if let Some(ir) = mgr.emit_ir(id) {
                 ir_lines_samples.push(ir.lines().count());
@@ -221,10 +221,10 @@ fn measure(
 
         // Phase C: IR emission + O1 + native codegen + JIT.
         {
-            let mgr = CpuKernelManager::new(spec);
+            let mgr = CpuKernelManager::new();
             let gate = clone_gate(&gate_proto);
             let t0 = Instant::now();
-            let id = mgr.generate(&gate)?;
+            let id = mgr.generate_gate(spec, &gate)?;
             let _ = mgr.emit_asm(id);
             total_samples.push(t0.elapsed().as_secs_f64() * 1e3);
         }
@@ -237,9 +237,13 @@ fn measure(
 
     // Capture IR and asm from one extra run with both diagnostics enabled.
     let (ir_text, asm_text) = if capture {
-        let mgr = CpuKernelManager::new(spec);
+        let mgr = CpuKernelManager::new();
         let gate = make_gate(qubits, density);
-        let id = mgr.generate_with_diagnostics(&gate, true, true)?;
+        let id = mgr.generate(
+            KernelGenRequest::from_gate(spec, &gate)
+                .with_ir()
+                .with_asm(),
+        )?;
         let asm = mgr.emit_asm(id);
         let ir_text = mgr.emit_ir(id);
         (ir_text, asm)

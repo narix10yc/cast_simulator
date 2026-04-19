@@ -47,8 +47,8 @@ fn run_jit_and_compare_full(
     tol: f64,
 ) {
     let gate = Arc::new(gate.clone());
-    let mgr = CpuKernelManager::new(spec);
-    let kernel_id = mgr.generate(&gate).expect("generate kernel");
+    let mgr = CpuKernelManager::new();
+    let kernel_id = mgr.generate_gate(spec, &gate).expect("generate kernel");
 
     let mut sv_jit = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
     let mut sv_ref = sv_jit.clone();
@@ -117,10 +117,10 @@ fn run_circuit_jit(
     n_threads: u32,
 ) -> CPUStatevector {
     let gates = circuit_gates_in_row_order(graph);
-    let mgr = CpuKernelManager::new(spec);
+    let mgr = CpuKernelManager::new();
     let mut kernel_ids = Vec::with_capacity(gates.len());
     for gate in &gates {
-        let kernel_id = mgr.generate(gate).expect("generate kernel");
+        let kernel_id = mgr.generate_gate(spec, gate).expect("generate kernel");
         kernel_ids.push(kernel_id);
     }
     let mut sv = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
@@ -178,8 +178,8 @@ fn applies_single_qubit_gate() {
 fn jit_applies_single_qubit_gate() {
     let spec = CPUKernelGenSpec::f64();
     let gate = Arc::new(QuantumGate::h(0));
-    let mgr = CpuKernelManager::new(spec);
-    let kernel_id = mgr.generate(&gate).expect("generate kernel");
+    let mgr = CpuKernelManager::new();
+    let kernel_id = mgr.generate_gate(spec, &gate).expect("generate kernel");
 
     let mut sv = CPUStatevector::new(6, spec.precision, spec.simd_width);
     sv.initialize();
@@ -273,12 +273,16 @@ fn jit_stack_load_matches_imm_value() {
         ..spec_imm
     };
 
-    let mgr_imm = CpuKernelManager::new(spec_imm);
-    let kid_imm = mgr_imm.generate(&gate).expect("generate imm kernel");
+    let mgr_imm = CpuKernelManager::new();
+    let kid_imm = mgr_imm
+        .generate_gate(spec_imm, &gate)
+        .expect("generate imm kernel");
     mgr_imm.apply(kid_imm, &mut sv_imm, 1).expect("apply imm");
 
-    let mgr_stack = CpuKernelManager::new(spec_stack);
-    let kid_stack = mgr_stack.generate(&gate).expect("generate stack kernel");
+    let mgr_stack = CpuKernelManager::new();
+    let kid_stack = mgr_stack
+        .generate_gate(spec_stack, &gate)
+        .expect("generate stack kernel");
     mgr_stack
         .apply(kid_stack, &mut sv_stack, 1)
         .expect("apply stack");
@@ -357,9 +361,11 @@ fn jit_multiple_kernels_in_one_manager() {
     let h_gate = Arc::new(QuantumGate::h(0));
     let cx_gate = Arc::new(QuantumGate::cx(0, 1));
 
-    let mgr = CpuKernelManager::new(spec);
-    let kid_h = mgr.generate(&h_gate).expect("generate H kernel");
-    let kid_cx = mgr.generate(&cx_gate).expect("generate CX kernel");
+    let mgr = CpuKernelManager::new();
+    let kid_h = mgr.generate_gate(spec, &h_gate).expect("generate H kernel");
+    let kid_cx = mgr
+        .generate_gate(spec, &cx_gate)
+        .expect("generate CX kernel");
 
     let mut sv_jit = seeded_statevector(3, Precision::F64, SimdWidth::W128);
     let mut sv_ref = sv_jit.clone();
@@ -378,9 +384,10 @@ fn jit_multiple_kernels_in_one_manager() {
 
 #[test]
 fn emit_ir_returns_valid_llvm_ir() {
-    let mgr = CpuKernelManager::new(default_spec(Precision::F64, SimdWidth::W128));
+    let spec = default_spec(Precision::F64, SimdWidth::W128);
+    let mgr = CpuKernelManager::new();
     let kid = mgr
-        .generate_with_diagnostics(&Arc::new(QuantumGate::h(0)), true, false)
+        .generate(KernelGenRequest::from_gate(spec, &QuantumGate::h(0)).with_ir())
         .expect("generate kernel");
 
     let ir = mgr.emit_ir(kid).expect("emit_ir should be Some");
@@ -395,9 +402,10 @@ fn emit_ir_returns_valid_llvm_ir() {
 
 #[test]
 fn emit_ir_is_idempotent() {
-    let mgr = CpuKernelManager::new(default_spec(Precision::F64, SimdWidth::W128));
+    let spec = default_spec(Precision::F64, SimdWidth::W128);
+    let mgr = CpuKernelManager::new();
     let kid = mgr
-        .generate_with_diagnostics(&Arc::new(QuantumGate::x(0)), true, false)
+        .generate(KernelGenRequest::from_gate(spec, &QuantumGate::x(0)).with_ir())
         .expect("generate kernel");
 
     let ir_first = mgr.emit_ir(kid).expect("first emit_ir");
@@ -412,9 +420,9 @@ fn emit_ir_with_diagnostics_still_produces_correct_kernel() {
     let gate = Arc::new(QuantumGate::h(1));
     let spec = default_spec(Precision::F64, SimdWidth::W128);
 
-    let mgr = CpuKernelManager::new(spec);
+    let mgr = CpuKernelManager::new();
     let kid = mgr
-        .generate_with_diagnostics(&gate, true, false)
+        .generate(KernelGenRequest::from_gate(spec, &gate).with_ir())
         .expect("generate kernel");
 
     let ir = mgr.emit_ir(kid).expect("emit_ir should be Some");
@@ -435,12 +443,12 @@ fn emit_ir_per_kernel_independent() {
     let h_gate = Arc::new(QuantumGate::h(0));
     let cx_gate = Arc::new(QuantumGate::cx(0, 1));
 
-    let mgr = CpuKernelManager::new(spec);
+    let mgr = CpuKernelManager::new();
     let kid_h = mgr
-        .generate_with_diagnostics(&h_gate, true, false)
+        .generate(KernelGenRequest::from_gate(spec, &h_gate).with_ir())
         .expect("H kernel");
     let kid_cx = mgr
-        .generate_with_diagnostics(&cx_gate, true, false)
+        .generate(KernelGenRequest::from_gate(spec, &cx_gate).with_ir())
         .expect("CX kernel");
 
     let ir_h = mgr.emit_ir(kid_h).expect("H IR");
@@ -451,9 +459,10 @@ fn emit_ir_per_kernel_independent() {
 
 #[test]
 fn emit_ir_returns_none_without_diagnostics() {
-    let mgr = CpuKernelManager::new(default_spec(Precision::F64, SimdWidth::W128));
+    let spec = default_spec(Precision::F64, SimdWidth::W128);
+    let mgr = CpuKernelManager::new();
     let kid = mgr
-        .generate(&Arc::new(QuantumGate::h(0)))
+        .generate_gate(spec, &QuantumGate::h(0))
         .expect("generate kernel");
     assert!(
         mgr.emit_ir(kid).is_none(),
@@ -463,7 +472,7 @@ fn emit_ir_returns_none_without_diagnostics() {
 
 #[test]
 fn emit_ir_returns_none_for_unknown_kernel_id() {
-    let mgr = CpuKernelManager::new(default_spec(Precision::F64, SimdWidth::W128));
+    let mgr = CpuKernelManager::new();
     assert!(
         mgr.emit_ir(9999).is_none(),
         "unknown kernel_id should return None"
@@ -474,9 +483,10 @@ fn emit_ir_returns_none_for_unknown_kernel_id() {
 
 fn compile_h_manager_with_asm() -> (CpuKernelManager, KernelId) {
     let gate = Arc::new(QuantumGate::h(0));
-    let mgr = CpuKernelManager::new(default_spec(Precision::F64, SimdWidth::W128));
+    let spec = default_spec(Precision::F64, SimdWidth::W128);
+    let mgr = CpuKernelManager::new();
     let kid = mgr
-        .generate_with_diagnostics(&gate, false, true)
+        .generate(KernelGenRequest::from_gate(spec, &gate).with_asm())
         .expect("generate kernel");
     (mgr, kid)
 }
@@ -509,12 +519,12 @@ fn emit_asm_per_kernel_independent() {
     let h_gate = Arc::new(QuantumGate::h(0));
     let cx_gate = Arc::new(QuantumGate::cx(0, 1));
 
-    let mgr = CpuKernelManager::new(spec);
+    let mgr = CpuKernelManager::new();
     let kid_h = mgr
-        .generate_with_diagnostics(&h_gate, false, true)
+        .generate(KernelGenRequest::from_gate(spec, &h_gate).with_asm())
         .expect("H kernel");
     let kid_cx = mgr
-        .generate_with_diagnostics(&cx_gate, false, true)
+        .generate(KernelGenRequest::from_gate(spec, &cx_gate).with_asm())
         .expect("CX kernel");
 
     let asm_h = mgr.emit_asm(kid_h).expect("H asm");
@@ -530,9 +540,13 @@ fn emit_asm_consistent_with_emit_ir() {
     let spec = default_spec(Precision::F64, SimdWidth::W128);
     let gate = Arc::new(QuantumGate::h(0));
 
-    let mgr = CpuKernelManager::new(spec);
+    let mgr = CpuKernelManager::new();
     let kid = mgr
-        .generate_with_diagnostics(&gate, true, true)
+        .generate(
+            KernelGenRequest::from_gate(spec, &gate)
+                .with_ir()
+                .with_asm(),
+        )
         .expect("generate");
     let ir = mgr.emit_ir(kid).expect("emit_ir should be Some");
     let asm = mgr.emit_asm(kid).expect("emit_asm should be Some");
@@ -548,8 +562,9 @@ fn emit_asm_consistent_with_emit_ir() {
 #[test]
 fn emit_asm_returns_none_without_diagnostics() {
     let gate = Arc::new(QuantumGate::h(0));
-    let mgr = CpuKernelManager::new(default_spec(Precision::F64, SimdWidth::W128));
-    let kid = mgr.generate(&gate).expect("generate kernel");
+    let spec = default_spec(Precision::F64, SimdWidth::W128);
+    let mgr = CpuKernelManager::new();
+    let kid = mgr.generate_gate(spec, &gate).expect("generate kernel");
     assert!(
         mgr.emit_asm(kid).is_none(),
         "emit_asm should be None without diagnostics"
@@ -558,7 +573,7 @@ fn emit_asm_returns_none_without_diagnostics() {
 
 #[test]
 fn emit_asm_returns_none_for_unknown_kernel_id() {
-    let mgr = CpuKernelManager::new(default_spec(Precision::F64, SimdWidth::W128));
+    let mgr = CpuKernelManager::new();
     assert!(
         mgr.emit_asm(9999).is_none(),
         "unknown kernel_id should return None"
@@ -995,8 +1010,8 @@ mod layout_coverage {
     ) {
         let spec = default_spec(precision, simd_width);
         let gate_arc = Arc::new(gate.clone());
-        let mgr = CpuKernelManager::new(spec);
-        let id = mgr.generate(&gate_arc).expect("generate kernel");
+        let mgr = CpuKernelManager::new();
+        let id = mgr.generate_gate(spec, &gate_arc).expect("generate kernel");
 
         let mut sv_jit = seeded_statevector(n_qubits_sv, precision, simd_width);
         let mut sv_ref = sv_jit.clone();
@@ -1115,10 +1130,10 @@ mod layout_coverage {
     #[test]
     fn shape_mixed_lk_varies() {
         let scenarios: &[&[u32]] = &[
-            &[0, 5, 6, 7, 8],    // lk=1 on simd_s ≥ 1
-            &[0, 1, 5, 6, 7],    // lk=2 on simd_s ≥ 2
-            &[0, 1, 2, 5, 6],    // lk=3 on simd_s ≥ 3
-            &[0, 2, 4, 6, 8],    // spread, lk varies per simd_s
+            &[0, 5, 6, 7, 8], // lk=1 on simd_s ≥ 1
+            &[0, 1, 5, 6, 7], // lk=2 on simd_s ≥ 2
+            &[0, 1, 2, 5, 6], // lk=3 on simd_s ≥ 3
+            &[0, 2, 4, 6, 8], // spread, lk varies per simd_s
         ];
         for (i, qs) in scenarios.iter().enumerate() {
             let gate = random_unitary(qs, 0x4_0000 + i as u64);
@@ -1217,8 +1232,8 @@ mod layout_coverage {
                     Precision::F64 => 1e-12,
                 },
             };
-            let mgr = CpuKernelManager::new(spec);
-            let id = mgr.generate(&gate_arc).expect("generate");
+            let mgr = CpuKernelManager::new();
+            let id = mgr.generate_gate(spec, &gate_arc).expect("generate");
             let mut sv_jit = seeded_statevector(n_qubits_sv, precision, simd_width);
             let mut sv_ref = sv_jit.clone();
             sv_ref.apply_gate(&gate_arc);
@@ -1259,9 +1274,9 @@ mod layout_coverage {
         let spec = default_spec(Precision::F64, SimdWidth::W512);
         let u_arc = Arc::new(u);
         let ud_arc = Arc::new(ud);
-        let mgr = CpuKernelManager::new(spec);
-        let id_u = mgr.generate(&u_arc).expect("gen u");
-        let id_ud = mgr.generate(&ud_arc).expect("gen ud");
+        let mgr = CpuKernelManager::new();
+        let id_u = mgr.generate_gate(spec, &u_arc).expect("gen u");
+        let id_ud = mgr.generate_gate(spec, &ud_arc).expect("gen ud");
 
         let n_qubits_sv = sv_size_for(u_arc.qubits());
         let sv_start = seeded_statevector(n_qubits_sv, spec.precision, spec.simd_width);
@@ -1323,9 +1338,9 @@ mod layout_coverage {
         let qs: Vec<u32> = (0..5).collect();
         let gate = Arc::new(random_unitary(&qs, 0xD_0001));
         let spec = default_spec(Precision::F64, SimdWidth::W512);
-        let mgr = CpuKernelManager::new(spec);
-        let id_a = mgr.generate(&gate).expect("generate a");
-        let id_b = mgr.generate(&gate).expect("generate b");
+        let mgr = CpuKernelManager::new();
+        let id_a = mgr.generate_gate(spec, &gate).expect("generate a");
+        let id_b = mgr.generate_gate(spec, &gate).expect("generate b");
         // Dedup should have returned the same kernel id.
         assert_eq!(id_a, id_b);
 

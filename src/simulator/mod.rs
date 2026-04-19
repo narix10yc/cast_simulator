@@ -93,7 +93,11 @@ pub trait Backend: sealed::Sealed + Sized {
     /// (CPU batch JIT, finalized by [`finalize_compile`](Self::finalize_compile))
     /// or eager (CUDA PTX + cubin).
     #[doc(hidden)]
-    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> anyhow::Result<Self::KernelId>;
+    fn generate(
+        mgr: &Self::Mgr,
+        spec: &Self::Spec,
+        gate: &Arc<QuantumGate>,
+    ) -> anyhow::Result<Self::KernelId>;
 
     /// Apply a compiled kernel to a statevector.
     #[doc(hidden)]
@@ -159,8 +163,10 @@ impl Backend for Cpu {
     type Spec = CPUKernelGenSpec;
     type Extra = u32; // n_threads
 
-    fn new_manager(spec: Self::Spec) -> Self::Mgr {
-        CpuKernelManager::new(spec)
+    fn new_manager(_spec: Self::Spec) -> Self::Mgr {
+        // CPU manager no longer stores a spec — each generate call carries
+        // its own in the KernelGenRequest.  The spec is held by the Simulator.
+        CpuKernelManager::new()
     }
     fn default_extra() -> Self::Extra {
         get_num_threads()
@@ -179,8 +185,12 @@ impl Backend for Cpu {
     fn clone_sv(sv: &Self::Sv) -> anyhow::Result<Self::Sv> {
         Ok(sv.clone())
     }
-    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> anyhow::Result<Self::KernelId> {
-        mgr.generate(gate)
+    fn generate(
+        mgr: &Self::Mgr,
+        spec: &Self::Spec,
+        gate: &Arc<QuantumGate>,
+    ) -> anyhow::Result<Self::KernelId> {
+        mgr.generate_gate(*spec, gate)
     }
     fn apply(
         mgr: &Self::Mgr,
@@ -246,7 +256,11 @@ impl Backend for Cuda {
     fn clone_sv(sv: &Self::Sv) -> anyhow::Result<Self::Sv> {
         sv.clone_device()
     }
-    fn generate(mgr: &Self::Mgr, gate: &Arc<QuantumGate>) -> anyhow::Result<Self::KernelId> {
+    fn generate(
+        mgr: &Self::Mgr,
+        _spec: &Self::Spec,
+        gate: &Arc<QuantumGate>,
+    ) -> anyhow::Result<Self::KernelId> {
         mgr.generate(gate)
     }
     fn apply(
@@ -555,7 +569,7 @@ impl<B: Backend> Simulator<B> {
         gate_index: usize,
         gate: &Arc<QuantumGate>,
     ) -> anyhow::Result<B::KernelId> {
-        B::generate(&self.mgr, gate)
+        B::generate(&self.mgr, &self.spec, gate)
             .with_context(|| format!("generating kernel for gate index {gate_index}"))
     }
 

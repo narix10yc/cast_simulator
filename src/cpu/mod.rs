@@ -6,7 +6,7 @@ pub(crate) use statevector::get_simd_s;
 pub use statevector::CPUStatevector;
 
 mod kernel;
-pub use kernel::{CPUKernelGenSpec, CpuKernelManager, KernelId};
+pub use kernel::{CPUKernelGenSpec, CpuKernelManager, KernelGenRequest, KernelId};
 
 #[cfg(test)]
 mod tests;

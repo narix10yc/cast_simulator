@@ -74,8 +74,10 @@ fn apply_cpu(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let spec = cpu_spec();
     let gate = Arc::new(gate.clone());
 
-    let mgr = CpuKernelManager::new(spec);
-    let kid = mgr.generate(&gate).expect("cpu: generate kernel");
+    let mgr = CpuKernelManager::new();
+    let kid = mgr
+        .generate_gate(spec, &gate)
+        .expect("cpu: generate kernel");
 
     let mut sv = CPUStatevector::new(n_sv_qubits, spec.precision, spec.simd_width);
     for (idx, &(re, im)) in init.iter().enumerate() {
@@ -244,11 +246,11 @@ fn compare_sequential_h_then_x() {
 
     // CPU: H then X on qubit 0.
     let h_spec = cpu_spec();
-    let cpu_mgr = CpuKernelManager::new(h_spec);
+    let cpu_mgr = CpuKernelManager::new();
     let h_gate = Arc::new(QuantumGate::h(0));
     let x_gate = Arc::new(QuantumGate::x(0));
-    let h_cpu = cpu_mgr.generate(&h_gate).unwrap();
-    let x_cpu = cpu_mgr.generate(&x_gate).unwrap();
+    let h_cpu = cpu_mgr.generate_gate(h_spec, &h_gate).unwrap();
+    let x_cpu = cpu_mgr.generate_gate(h_spec, &x_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, h_spec.precision, h_spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -282,9 +284,9 @@ fn compare_h_squared_is_identity() {
 
     // CPU: H^2
     let spec = cpu_spec();
-    let cpu_mgr = CpuKernelManager::new(spec);
+    let cpu_mgr = CpuKernelManager::new();
     let h_gate = Arc::new(QuantumGate::h(0));
-    let kid = cpu_mgr.generate(&h_gate).unwrap();
+    let kid = cpu_mgr.generate_gate(spec, &h_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -354,11 +356,11 @@ fn compare_multi_kernel_same_manager() {
 
     // CPU: H on q0, then CX(0,1).
     let spec = cpu_spec();
-    let cpu_mgr = CpuKernelManager::new(spec);
+    let cpu_mgr = CpuKernelManager::new();
     let h_gate = Arc::new(QuantumGate::h(0));
     let cx_gate = Arc::new(QuantumGate::cx(0, 1));
-    let h_cpu = cpu_mgr.generate(&h_gate).unwrap();
-    let cx_cpu = cpu_mgr.generate(&cx_gate).unwrap();
+    let h_cpu = cpu_mgr.generate_gate(spec, &h_gate).unwrap();
+    let cx_cpu = cpu_mgr.generate_gate(spec, &cx_gate).unwrap();
     let mut cpu_sv = CPUStatevector::new(n_sv, spec.precision, spec.simd_width);
     for (i, &(re, im)) in init.iter().enumerate() {
         cpu_sv.set_amp(i, Complex::new(re, im));
@@ -404,8 +406,10 @@ fn apply_cpu_f32(gate: &QuantumGate, init: &[(f64, f64)]) -> Vec<(f64, f64)> {
         otol: 1e-6,
     };
     let gate = Arc::new(gate.clone());
-    let mgr = CpuKernelManager::new(spec);
-    let kid = mgr.generate(&gate).expect("cpu f32: generate kernel");
+    let mgr = CpuKernelManager::new();
+    let kid = mgr
+        .generate_gate(spec, &gate)
+        .expect("cpu f32: generate kernel");
     let mut sv = CPUStatevector::new(n_sv_qubits, spec.precision, spec.simd_width);
     for (idx, &(re, im)) in init.iter().enumerate() {
         sv.set_amp(idx, Complex::new(re, im));
