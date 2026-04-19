@@ -16,11 +16,10 @@ class StringRef;
 
 namespace cast::cpu {
 
-llvm::Expected<llvm::Function *> generate_kernel_ir(const KernelGenSpec &spec,
-                                                    const cast::Complex64 *matrix,
-                                                    size_t matrix_len, const uint32_t *qubits,
-                                                    size_t n_qubits, llvm::StringRef func_name,
-                                                    llvm::Module &module);
+llvm::Expected<llvm::Function *> generateKernelIr(const KernelGenSpec &spec,
+                                                  const cast::Complex64 *matrix, size_t matrixLen,
+                                                  const uint32_t *qubits, size_t nQubits,
+                                                  llvm::StringRef funcName, llvm::Module &module);
 
 } // namespace cast::cpu
 

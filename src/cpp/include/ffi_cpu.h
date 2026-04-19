@@ -85,9 +85,10 @@ void cast_cpu_kernel_generator_delete(cast_cpu_kernel_generator_t *generator);
 /// (> 0) on success, or 0 on failure with an error message in `err_buf`.
 /// The request struct's pointer fields need only be valid for the
 /// duration of this call.
-cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
-    cast_cpu_kernel_generator_t *generator, const cast_cpu_kernel_gen_request_t *request,
-    char *err_buf, size_t err_buf_len);
+cast_cpu_kernel_id_t
+cast_cpu_kernel_generator_generate(cast_cpu_kernel_generator_t *generator,
+                                   const cast_cpu_kernel_gen_request_t *request, char *err_buf,
+                                   size_t err_buf_len);
 
 // -- JIT compilation --
 

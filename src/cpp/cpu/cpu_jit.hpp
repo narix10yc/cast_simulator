@@ -16,33 +16,33 @@ namespace cast::cpu {
 
 struct GeneratedKernel {
   KernelMetadata metadata{};
-  std::string func_name;
+  std::string funcName;
   std::unique_ptr<llvm::LLVMContext> context;
   std::unique_ptr<llvm::Module> module;
   std::vector<cast::Complex64> matrix;
-  /// Populated by optimize_kernel_ir; empty until then.
+  /// Populated by optimizeKernelIr; empty until then.
   std::string ir;
   bool optimized = false;
-  /// Set from the `capture_ir` field of the kernel generation request.
-  /// When true, jit_compile_kernel copies the optimized IR text into the
+  /// Set from the `captureIr` field of the kernel generation request.
+  /// When true, jitCompileKernel copies the optimized IR text into the
   /// returned CompiledKernelRecord.
-  bool capture_ir = false;
-  /// Set from the `capture_asm` field of the kernel generation request.
-  /// When false, jit_compile_kernel skips assembly emission.
-  bool capture_asm = false;
+  bool captureIr = false;
+  /// Set from the `captureAsm` field of the kernel generation request.
+  /// When false, jitCompileKernel skips assembly emission.
+  bool captureAsm = false;
 };
 
-llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> jit_create(unsigned n_compile_threads);
+llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> createJit(unsigned nCompileThreads);
 
 /// Runs the O1 pass pipeline on the plain Module inside `generated`.
 /// Caches the resulting IR text in `generated.ir`.
 /// Idempotent: a second call is a no-op.
-/// Must be called before jit_compile_kernel, which moves the Module out.
-llvm::Error optimize_kernel_ir(GeneratedKernel &generated);
+/// Must be called before jitCompileKernel, which moves the Module out.
+llvm::Error optimizeKernelIr(GeneratedKernel &generated);
 
 /// Compiles `generated` into the JIT and returns per-kernel data.
-llvm::Expected<CompiledKernelRecord> jit_compile_kernel(llvm::orc::LLJIT &jit,
-                                                        GeneratedKernel &generated);
+llvm::Expected<CompiledKernelRecord> jitCompileKernel(llvm::orc::LLJIT &jit,
+                                                      GeneratedKernel &generated);
 
 } // namespace cast::cpu
 

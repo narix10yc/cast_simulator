@@ -35,15 +35,15 @@ struct KernelArgs {
 };
 
 struct IRMatData {
-  Value *re_val;
-  Value *im_val;
-  ScalarKind re_kind;
-  ScalarKind im_kind;
+  Value *reVal;
+  Value *imVal;
+  ScalarKind reKind;
+  ScalarKind imKind;
 };
 
-// ── emit_opt_fmul ──────────────────────────────────────────────────────────
+// ── emitOptFmul ──────────────────────────────────────────────────────────
 
-static Value *emit_opt_fmul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B) {
+static Value *emitOptFmul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B) {
   switch (aKind) {
   case SK_Runtime:
   case SK_ImmValue:
@@ -60,14 +60,13 @@ static Value *emit_opt_fmul(Value *a, Value *b, ScalarKind aKind, IRBuilder<> &B
   }
 }
 
-// ── build_matrix_data ──────────────────────────────────────────────────────
+// ── buildMatrixData ──────────────────────────────────────────────────────
 
 /// Classifies each matrix element as zero, ±1, or general, and returns the
 /// corresponding LLVM constant value alongside its ScalarKind tag.
-static std::vector<IRMatData> build_matrix_data(IRBuilder<> &B,
-                                                const cast::cuda::KernelGenSpec &spec,
-                                                const cast::Complex64 *matrix, unsigned n_qubits) {
-  const auto K = 1U << n_qubits;
+static std::vector<IRMatData> buildMatrixData(IRBuilder<> &B, const cast::cuda::KernelGenSpec &spec,
+                                              const cast::Complex64 *matrix, unsigned nQubits) {
+  const auto K = 1U << nQubits;
   const auto KK = K * K;
 
   // Scale tolerances by 1/K so that the classification becomes stricter
@@ -82,47 +81,47 @@ static std::vector<IRMatData> build_matrix_data(IRBuilder<> &B,
   // path is more conservative (classifies fewer elements as zero/±1) to
   // avoid accumulation artifacts in large fused gates, at the cost of a
   // few extra FP ops that the GPU easily absorbs.
-  const auto z_tol = spec.ztol / static_cast<double>(K);
-  const auto o_tol = spec.otol / static_cast<double>(K);
+  const auto zTol = spec.ztol / static_cast<double>(K);
+  const auto oTol = spec.otol / static_cast<double>(K);
 
   const bool fp32 = (spec.precision == cast::Precision::F32);
-  Type *scalar_ty = fp32 ? B.getFloatTy() : B.getDoubleTy();
-  auto *zero_val = ConstantFP::get(scalar_ty, 0.0);
-  auto *one_val = ConstantFP::get(scalar_ty, 1.0);
-  auto *minus_one_val = ConstantFP::get(scalar_ty, -1.0);
+  Type *scalarTy = fp32 ? B.getFloatTy() : B.getDoubleTy();
+  auto *zeroVal = ConstantFP::get(scalarTy, 0.0);
+  auto *oneVal = ConstantFP::get(scalarTy, 1.0);
+  auto *minusOneVal = ConstantFP::get(scalarTy, -1.0);
 
   // Classify kind and build LLVM constant for a single scalar.
   auto classify = [&](double v) -> std::pair<Value *, ScalarKind> {
-    if (spec.ztol > 0.0 && std::abs(v) < z_tol)
-      return {zero_val, SK_Zero};
-    if (spec.otol > 0.0 && std::abs(v - 1.0) < o_tol)
-      return {one_val, SK_One};
-    if (spec.otol > 0.0 && std::abs(v + 1.0) < o_tol)
-      return {minus_one_val, SK_MinusOne};
-    return {ConstantFP::get(scalar_ty, fp32 ? static_cast<double>(static_cast<float>(v)) : v),
+    if (spec.ztol > 0.0 && std::abs(v) < zTol)
+      return {zeroVal, SK_Zero};
+    if (spec.otol > 0.0 && std::abs(v - 1.0) < oTol)
+      return {oneVal, SK_One};
+    if (spec.otol > 0.0 && std::abs(v + 1.0) < oTol)
+      return {minusOneVal, SK_MinusOne};
+    return {ConstantFP::get(scalarTy, fp32 ? static_cast<double>(static_cast<float>(v)) : v),
             SK_ImmValue};
   };
 
   std::vector<IRMatData> data(KK);
   for (unsigned i = 0; i < KK; ++i) {
-    auto [re_val, re_kind] = classify(matrix[i].re);
-    auto [im_val, im_kind] = classify(matrix[i].im);
-    data[i] = {re_val, im_val, re_kind, im_kind};
+    auto [reVal, reKind] = classify(matrix[i].re);
+    auto [imVal, imKind] = classify(matrix[i].im);
+    data[i] = {reVal, imVal, reKind, imKind};
   }
   return data;
 }
 
-// ── create_kernel_function ───────────────────────────────────────────────────
+// ── createKernelFunction ───────────────────────────────────────────────────
 
-static Function *create_kernel_function(IRBuilder<> &B, Module &M, const std::string &func_name,
-                                        KernelArgs &args) {
+static Function *createKernelFunction(IRBuilder<> &B, Module &M, const std::string &funcName,
+                                      KernelArgs &args) {
   auto params = std::array<Type *, 3>{
       B.getPtrTy(),  // sv
       B.getPtrTy(),  // mat
       B.getInt64Ty() // combos
   };
   auto *fty = FunctionType::get(B.getVoidTy(), params, false);
-  auto *func = Function::Create(fty, Function::ExternalLinkage, func_name, M);
+  auto *func = Function::Create(fty, Function::ExternalLinkage, funcName, M);
 
   args.p_sv = func->getArg(0);
   args.p_sv->setName("p.sv");
@@ -140,14 +139,14 @@ static Function *create_kernel_function(IRBuilder<> &B, Module &M, const std::st
   return func;
 }
 
-// ── emit_combo_offset ──────────────────────────────────────────────────────
+// ── emitComboOffset ──────────────────────────────────────────────────────
 //
 // Maps a linear combo index to the statevector amplitude index using a
 // PDEP-like bit scatter.  Target qubits mark positions that must be ZERO
-// in the base address (they're filled in later by emit_matvec's delta
+// in the base address (they're filled in later by emitMatvec's delta
 // loop); all other address bits come from the combo counter.
 //
-// Algorithm: scan qubit positions 0..highest_q.  Non-target positions
+// Algorithm: scan qubit positions 0..highestQ.  Non-target positions
 // consume counter bits in order.  Each time we reach a target position,
 // the accumulated counter bits are shifted left by the number of target
 // qubits seen so far (inserting zeros at the target positions).
@@ -163,7 +162,7 @@ static Function *create_kernel_function(IRBuilder<> &B, Module &M, const std::st
 //           q=4 is target #1 → emit (counter & 0b100) << 1 = 0b1000
 //           Insert zero at position 4.
 //   Step 3: q=5 is target #2 → mask=0, nothing to emit.
-//   Final:  high bits of counter (bits ≥ highest_q-k+1 = 3) → shift << 3.
+//   Final:  high bits of counter (bits ≥ highestQ-k+1 = 3) → shift << 3.
 //           counter bits b3,b4 = 0b11 → shifted << 3 = 0b11_000_000
 //
 //   Result: 0b11_0_0_1000_0_01 = positions [..., -, -, 1, 0, 0, 0, -, 0, 1]
@@ -172,70 +171,70 @@ static Function *create_kernel_function(IRBuilder<> &B, Module &M, const std::st
 // The returned Value is the element index into the scalar array.  The
 // caller applies ×2 for re/im interleave.
 
-static Value *emit_combo_offset(IRBuilder<> &B, Value *counter_v, const uint32_t *qubits,
-                                size_t n_qubits) {
-  assert(n_qubits > 0);
+static Value *emitComboOffset(IRBuilder<> &B, Value *counterV, const uint32_t *qubits,
+                              size_t nQubits) {
+  assert(nQubits > 0);
 
   auto *offset = static_cast<Value *>(B.getInt64(0ULL));
-  counter_v = B.CreateZExt(counter_v, B.getInt64Ty());
+  counterV = B.CreateZExt(counterV, B.getInt64Ty());
 
-  const int k = static_cast<int>(n_qubits);
-  const int highest_q = static_cast<int>(qubits[n_qubits - 1]);
+  const int k = static_cast<int>(nQubits);
+  const int highestQ = static_cast<int>(qubits[nQubits - 1]);
 
   uint64_t mask = 0ULL;
-  int q_idx = 0;
-  int counter_q = 0;
+  int qIdx = 0;
+  int counterQ = 0;
 
-  Value *tmp_counter = nullptr;
+  Value *tmpCounter = nullptr;
 
-  for (int q = 0; q <= highest_q; q++) {
-    if (q < static_cast<int>(qubits[q_idx])) {
-      mask |= (1ULL << counter_q++);
+  for (int q = 0; q <= highestQ; q++) {
+    if (q < static_cast<int>(qubits[qIdx])) {
+      mask |= (1ULL << counterQ++);
       continue;
     }
-    ++q_idx;
+    ++qIdx;
     if (mask == 0)
       continue;
 
-    tmp_counter = B.CreateAnd(counter_v, mask);
-    tmp_counter = B.CreateShl(tmp_counter, (q_idx - 1));
-    offset = B.CreateAdd(offset, tmp_counter);
+    tmpCounter = B.CreateAnd(counterV, mask);
+    tmpCounter = B.CreateShl(tmpCounter, (qIdx - 1));
+    offset = B.CreateAdd(offset, tmpCounter);
     mask = 0ULL;
   }
 
-  mask = ~((1ULL << (highest_q - k + 1)) - 1);
-  tmp_counter = B.CreateAnd(counter_v, mask);
-  tmp_counter = B.CreateShl(tmp_counter, k);
-  offset = B.CreateAdd(offset, tmp_counter);
+  mask = ~((1ULL << (highestQ - k + 1)) - 1);
+  tmpCounter = B.CreateAnd(counterV, mask);
+  tmpCounter = B.CreateShl(tmpCounter, k);
+  offset = B.CreateAdd(offset, tmpCounter);
 
   return offset;
 }
 
-// ── emit_matvec ─────────────────────────────────────────────────────────────
+// ── emitMatvec ─────────────────────────────────────────────────────────────
 //
 // Emits straight-line code that:
-//   1. Loads all K amplitude pairs (re, im) from sv[sv_ptr + 2*delta{i}]
+//   1. Loads all K amplitude pairs (re, im) from sv[svPtr + 2*delta{i}]
 //   2. Accumulates M*v with constant (ImmValue) matrix entries
 //   3. Stores the updated amplitudes back in place
 //
-// sv_ptr already points to the base amplitude for this combo (offset has been
+// svPtr already points to the base amplitude for this combo (offset has been
 // applied by the caller).
 
-static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
-                        const std::vector<IRMatData> &mat_data, Value *sv_ptr, Type *scalar_ty) {
+static void emitMatvec(IRBuilder<> &B, const uint32_t *qubits, size_t nQubits,
+                       const std::vector<IRMatData> &matData, Value *svPtr, Type *scalarTy) {
   B.setFastMathFlags(FastMathFlags::getFast());
 
-  const auto k = static_cast<unsigned>(n_qubits);
+  const auto k = static_cast<unsigned>(nQubits);
   const unsigned K = 1u << k;
 
   // Vector type for complex pair (re, im) — enables ld.global.v2 / st.global.v2
   // in the NVPTX backend, doubling memory-transaction utilization for the
   // interleaved [re₀, im₀, re₁, im₁, …] layout.
-  auto *vec2_ty = FixedVectorType::get(scalar_ty, 2);
+  auto *vec2Ty = FixedVectorType::get(scalarTy, 2);
 
-  std::vector<Value *> amp_ptrs(K); // base pointer per amplitude (re position)
-  std::vector<Value *> re_amps(K);
-  std::vector<Value *> im_amps(K);
+  std::vector<Value *> ampPtrs(K); // base pointer per amplitude (re position)
+  std::vector<Value *> reAmps(K);
+  std::vector<Value *> imAmps(K);
 
   // Compute the offset for each of the K amplitude slots in the combo.
   // Amplitude i corresponds to setting bits qubits[b] iff bit b of i is set.
@@ -246,52 +245,52 @@ static void emit_matvec(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
         delta |= (1ull << qubits[b]);
 
     uint64_t const off2 = 2ull * delta;
-    amp_ptrs[i] = B.CreateConstGEP1_64(scalar_ty, sv_ptr, off2);
-    auto *pair = B.CreateLoad(vec2_ty, amp_ptrs[i]);
-    re_amps[i] = B.CreateExtractElement(pair, (uint64_t)0);
-    im_amps[i] = B.CreateExtractElement(pair, (uint64_t)1);
+    ampPtrs[i] = B.CreateConstGEP1_64(scalarTy, svPtr, off2);
+    auto *pair = B.CreateLoad(vec2Ty, ampPtrs[i]);
+    reAmps[i] = B.CreateExtractElement(pair, (uint64_t)0);
+    imAmps[i] = B.CreateExtractElement(pair, (uint64_t)1);
   }
 
   // For each output row r:  new[r] = sum_c  M[r,c] * old[c]
   for (unsigned r = 0; r < K; ++r) {
-    auto *acc_re0 = static_cast<Value *>(ConstantFP::get(scalar_ty, 0.0));
-    auto *acc_re1 = static_cast<Value *>(ConstantFP::get(scalar_ty, 0.0));
-    auto *acc_im = static_cast<Value *>(ConstantFP::get(scalar_ty, 0.0));
+    auto *accRe0 = static_cast<Value *>(ConstantFP::get(scalarTy, 0.0));
+    auto *accRe1 = static_cast<Value *>(ConstantFP::get(scalarTy, 0.0));
+    auto *accIm = static_cast<Value *>(ConstantFP::get(scalarTy, 0.0));
 
     for (unsigned c = 0; c < K; ++c) {
-      const auto &md = mat_data[r * K + c];
-      if (md.re_kind == SK_Zero && md.im_kind == SK_Zero)
+      const auto &md = matData[r * K + c];
+      if (md.reKind == SK_Zero && md.imKind == SK_Zero)
         continue;
 
       // Re(new) = Re(M)*Re(old) - Im(M)*Im(old)
-      if (auto *t0 = emit_opt_fmul(md.re_val, re_amps[c], md.re_kind, B))
-        acc_re0 = B.CreateFAdd(acc_re0, t0);
-      if (auto *t1 = emit_opt_fmul(md.im_val, im_amps[c], md.im_kind, B))
-        acc_re1 = B.CreateFAdd(acc_re1, t1);
+      if (auto *t0 = emitOptFmul(md.reVal, reAmps[c], md.reKind, B))
+        accRe0 = B.CreateFAdd(accRe0, t0);
+      if (auto *t1 = emitOptFmul(md.imVal, imAmps[c], md.imKind, B))
+        accRe1 = B.CreateFAdd(accRe1, t1);
 
       // Im(new) = Re(M)*Im(old) + Im(M)*Re(old)
-      if (auto *t2 = emit_opt_fmul(md.re_val, im_amps[c], md.re_kind, B))
-        acc_im = B.CreateFAdd(acc_im, t2);
-      if (auto *t3 = emit_opt_fmul(md.im_val, re_amps[c], md.im_kind, B))
-        acc_im = B.CreateFAdd(acc_im, t3);
+      if (auto *t2 = emitOptFmul(md.reVal, imAmps[c], md.reKind, B))
+        accIm = B.CreateFAdd(accIm, t2);
+      if (auto *t3 = emitOptFmul(md.imVal, reAmps[c], md.imKind, B))
+        accIm = B.CreateFAdd(accIm, t3);
     }
 
-    auto *new_re = B.CreateFSub(acc_re0, acc_re1);
-    Value *out = PoisonValue::get(vec2_ty);
-    out = B.CreateInsertElement(out, new_re, (uint64_t)0);
-    out = B.CreateInsertElement(out, acc_im, (uint64_t)1);
-    B.CreateStore(out, amp_ptrs[r]);
+    auto *newRe = B.CreateFSub(accRe0, accRe1);
+    Value *out = PoisonValue::get(vec2Ty);
+    out = B.CreateInsertElement(out, newRe, (uint64_t)0);
+    out = B.CreateInsertElement(out, accIm, (uint64_t)1);
+    B.CreateStore(out, ampPtrs[r]);
   }
 }
 
-// ── emit_persistent_grid_loop ────────────────────────────────────────────────
+// ── emitPersistentGridLoop ────────────────────────────────────────────────
 //
-// Wraps emit_matvec inside a persistent-grid loop:
-//   for (combo = global_tid; combo < p.combos; combo += stride) { ... }
+// Wraps emitMatvec inside a persistent-grid loop:
+//   for (combo = globalTid; combo < p.combos; combo += stride) { ... }
 
-static void emit_persistent_grid_loop(IRBuilder<> &B, const uint32_t *qubits, size_t n_qubits,
-                                      const std::vector<IRMatData> &mat_data, Value *sv_root,
-                                      Value *combos_v, Type *scalar_ty) {
+static void emitPersistentGridLoop(IRBuilder<> &B, const uint32_t *qubits, size_t nQubits,
+                                   const std::vector<IRMatData> &matData, Value *svRoot,
+                                   Value *combosV, Type *scalarTy) {
   auto *func = B.GetInsertBlock()->getParent();
   auto &C = B.getContext();
 
@@ -301,87 +300,86 @@ static void emit_persistent_grid_loop(IRBuilder<> &B, const uint32_t *qubits, si
   auto *ctaid = B.CreateIntrinsic(B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_ctaid_x, {});
   auto *nctaid = B.CreateIntrinsic(B.getInt32Ty(), Intrinsic::nvvm_read_ptx_sreg_nctaid_x, {});
 
-  // global_tid = ctaid * ntid + tid
-  auto *global_tid = B.CreateAdd(B.CreateMul(ctaid, ntid), tid);
-  global_tid = B.CreateIntCast(global_tid, B.getInt64Ty(), /*isSigned=*/true);
+  // globalTid = ctaid * ntid + tid
+  auto *globalTid = B.CreateAdd(B.CreateMul(ctaid, ntid), tid);
+  globalTid = B.CreateIntCast(globalTid, B.getInt64Ty(), /*isSigned=*/true);
 
   // stride = nctaid * ntid  (total thread count)
   auto *stride = B.CreateMul(nctaid, ntid);
   stride = B.CreateIntCast(stride, B.getInt64Ty(), true);
 
   // Persistent-grid combo loop.
-  auto *loop_bb = BasicBlock::Create(C, "cmb.chk", func);
-  auto *loop_body_bb = BasicBlock::Create(C, "cmb.body", func);
-  auto *loop_inc_bb = BasicBlock::Create(C, "cmb.inc", func);
-  auto *loop_done_bb = BasicBlock::Create(C, "cmb.done", func);
+  auto *loopBb = BasicBlock::Create(C, "cmb.chk", func);
+  auto *loopBodyBb = BasicBlock::Create(C, "cmb.body", func);
+  auto *loopIncBb = BasicBlock::Create(C, "cmb.inc", func);
+  auto *loopDoneBb = BasicBlock::Create(C, "cmb.done", func);
 
   auto *pre = B.GetInsertBlock();
-  B.CreateBr(loop_bb);
+  B.CreateBr(loopBb);
 
-  B.SetInsertPoint(loop_bb);
-  auto *combo_id = B.CreatePHI(B.getInt64Ty(), 2);
-  combo_id->addIncoming(global_tid, pre);
-  B.CreateCondBr(B.CreateICmpULT(combo_id, combos_v), loop_body_bb, loop_done_bb);
+  B.SetInsertPoint(loopBb);
+  auto *comboId = B.CreatePHI(B.getInt64Ty(), 2);
+  comboId->addIncoming(globalTid, pre);
+  B.CreateCondBr(B.CreateICmpULT(comboId, combosV), loopBodyBb, loopDoneBb);
 
-  B.SetInsertPoint(loop_body_bb);
+  B.SetInsertPoint(loopBodyBb);
   {
-    auto *sv_base = emit_combo_offset(B, combo_id, qubits, n_qubits);
-    sv_base = B.CreateShl(sv_base, 1); // ×2 for re/im interleave
-    sv_base = B.CreateGEP(scalar_ty, sv_root, sv_base);
-    emit_matvec(B, qubits, n_qubits, mat_data, sv_base, scalar_ty);
-    B.CreateBr(loop_inc_bb);
+    auto *svBase = emitComboOffset(B, comboId, qubits, nQubits);
+    svBase = B.CreateShl(svBase, 1); // ×2 for re/im interleave
+    svBase = B.CreateGEP(scalarTy, svRoot, svBase);
+    emitMatvec(B, qubits, nQubits, matData, svBase, scalarTy);
+    B.CreateBr(loopIncBb);
   }
 
-  B.SetInsertPoint(loop_inc_bb);
+  B.SetInsertPoint(loopIncBb);
   {
-    auto *combo_next = B.CreateAdd(combo_id, stride);
-    combo_id->addIncoming(combo_next, loop_inc_bb);
-    B.CreateBr(loop_bb);
+    auto *comboNext = B.CreateAdd(comboId, stride);
+    comboId->addIncoming(comboNext, loopIncBb);
+    B.CreateBr(loopBb);
   }
 
-  B.SetInsertPoint(loop_done_bb);
+  B.SetInsertPoint(loopDoneBb);
 }
 
 } // end anonymous namespace
 
 // ── Public entry point ───────────────────────────────────────────────────────
 
-llvm::Expected<llvm::Function *> generate_kernel_ir(const KernelGenSpec &spec,
-                                                    const cast::Complex64 *matrix,
-                                                    size_t matrix_len, const uint32_t *qubits,
-                                                    size_t n_qubits, llvm::StringRef func_name,
-                                                    llvm::Module &module) {
+llvm::Expected<llvm::Function *> generateKernelIr(const KernelGenSpec &spec,
+                                                  const cast::Complex64 *matrix, size_t matrixLen,
+                                                  const uint32_t *qubits, size_t nQubits,
+                                                  llvm::StringRef funcName, llvm::Module &module) {
   if (matrix == nullptr)
     return llvm::createStringError("matrix pointer must not be null");
-  if (qubits == nullptr || n_qubits == 0)
+  if (qubits == nullptr || nQubits == 0)
     return llvm::createStringError("qubits must not be null/empty");
 
-  const unsigned K = 1U << n_qubits;
-  if (matrix_len != static_cast<size_t>(K) * K)
-    return llvm::createStringError("matrix_len must equal (2^n_qubits)^2");
+  const unsigned K = 1U << nQubits;
+  if (matrixLen != static_cast<size_t>(K) * K)
+    return llvm::createStringError("matrixLen must equal (2^nQubits)^2");
 
-  if (!cast::is_valid_precision(spec.precision))
+  if (!cast::isValidPrecision(spec.precision))
     return llvm::createStringError("spec.precision must be F32 or F64");
 
   auto &ctx = module.getContext();
   IRBuilder<> B(ctx);
 
-  Type *scalar_ty = (spec.precision == cast::Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
+  Type *scalarTy = (spec.precision == cast::Precision::F32) ? B.getFloatTy() : B.getDoubleTy();
 
   KernelArgs args;
-  auto *func = create_kernel_function(B, module, func_name.str(), args);
+  auto *func = createKernelFunction(B, module, funcName.str(), args);
 
-  auto *entry_bb = BasicBlock::Create(ctx, "entry", func);
-  B.SetInsertPoint(entry_bb);
+  auto *entryBb = BasicBlock::Create(ctx, "entry", func);
+  B.SetInsertPoint(entryBb);
 
-  auto mat_data = build_matrix_data(B, spec, matrix, static_cast<unsigned>(n_qubits));
+  auto matData = buildMatrixData(B, spec, matrix, static_cast<unsigned>(nQubits));
 
-  emit_persistent_grid_loop(B, qubits, n_qubits, mat_data, args.p_sv, args.p_combos, scalar_ty);
+  emitPersistentGridLoop(B, qubits, nQubits, matData, args.p_sv, args.p_combos, scalarTy);
 
   B.CreateRetVoid();
 
-  std::string err_info;
-  llvm::raw_string_ostream rso(err_info);
+  std::string errInfo;
+  llvm::raw_string_ostream rso(errInfo);
   if (llvm::verifyFunction(*func, &rso))
     return llvm::createStringError("Function verification failed: " + rso.str());
 

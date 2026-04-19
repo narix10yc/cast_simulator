@@ -5,24 +5,24 @@
 
 namespace cast::cpu {
 
-std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder, const KernelGenSpec &spec,
-                                         const MatrixView &matrix, llvm::Value *p_mat_arg,
-                                         llvm::Type *scalar_ty, unsigned simd_s) {
-  const unsigned kk = matrix.edge_size * matrix.edge_size;
-  const auto ec = llvm::ElementCount::getFixed(1u << simd_s);
+std::vector<IRMatData> buildMatrixData(llvm::IRBuilder<> &builder, const KernelGenSpec &spec,
+                                       const MatrixView &matrix, llvm::Value *pMatArg,
+                                       llvm::Type *scalarTy, unsigned simdS) {
+  const unsigned kk = matrix.edgeSize * matrix.edgeSize;
+  const auto ec = llvm::ElementCount::getFixed(1u << simdS);
 
   std::vector<IRMatData> out(kk);
   for (unsigned i = 0; i < kk; ++i) {
     if (spec.mode == MatrixLoadMode::ImmValue) {
-      out[i].re_vec =
-          llvm::ConstantVector::getSplat(ec, llvm::ConstantFP::get(scalar_ty, matrix.re(i)));
-      out[i].im_vec =
-          llvm::ConstantVector::getSplat(ec, llvm::ConstantFP::get(scalar_ty, matrix.im(i)));
+      out[i].reVec =
+          llvm::ConstantVector::getSplat(ec, llvm::ConstantFP::get(scalarTy, matrix.re(i)));
+      out[i].imVec =
+          llvm::ConstantVector::getSplat(ec, llvm::ConstantFP::get(scalarTy, matrix.im(i)));
     } else {
-      auto *re_ptr = builder.CreateConstGEP1_32(scalar_ty, p_mat_arg, 2 * i);
-      out[i].re_vec = builder.CreateVectorSplat(ec, builder.CreateLoad(scalar_ty, re_ptr));
-      auto *im_ptr = builder.CreateConstGEP1_32(scalar_ty, p_mat_arg, 2 * i + 1);
-      out[i].im_vec = builder.CreateVectorSplat(ec, builder.CreateLoad(scalar_ty, im_ptr));
+      auto *rePtr = builder.CreateConstGEP1_32(scalarTy, pMatArg, 2 * i);
+      out[i].reVec = builder.CreateVectorSplat(ec, builder.CreateLoad(scalarTy, rePtr));
+      auto *imPtr = builder.CreateConstGEP1_32(scalarTy, pMatArg, 2 * i + 1);
+      out[i].imVec = builder.CreateVectorSplat(ec, builder.CreateLoad(scalarTy, imPtr));
     }
   }
   return out;

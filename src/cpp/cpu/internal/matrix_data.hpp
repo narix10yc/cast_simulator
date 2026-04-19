@@ -16,24 +16,24 @@ namespace cast::cpu {
 // View into a flat row-major complex matrix.
 struct MatrixView {
   const cast::Complex64 *data = nullptr;
-  uint32_t edge_size = 0;
+  uint32_t edgeSize = 0;
 
   double re(size_t idx) const { return data[idx].re; }
   double im(size_t idx) const { return data[idx].im; }
 };
 
 // One re/im vector pair per matrix element.  Populated by
-// `build_matrix_data`; consumed by Phase 2 matvec emission.
+// `buildMatrixData`; consumed by Phase 2 matvec emission.
 struct IRMatData {
-  llvm::Value *re_vec = nullptr;
-  llvm::Value *im_vec = nullptr;
+  llvm::Value *reVec = nullptr;
+  llvm::Value *imVec = nullptr;
 };
 
 // ImmValue → splatted ConstantFP per matrix entry; StackLoad → runtime
 // load+splat from the caller's matrix buffer.
-std::vector<IRMatData> build_matrix_data(llvm::IRBuilder<> &builder, const KernelGenSpec &spec,
-                                         const MatrixView &matrix, llvm::Value *p_mat_arg,
-                                         llvm::Type *scalar_ty, unsigned simd_s);
+std::vector<IRMatData> buildMatrixData(llvm::IRBuilder<> &builder, const KernelGenSpec &spec,
+                                       const MatrixView &matrix, llvm::Value *pMatArg,
+                                       llvm::Type *scalarTy, unsigned simdS);
 
 } // namespace cast::cpu
 

@@ -9,17 +9,17 @@
 #include <cstring>
 #include <string>
 
-inline void write_err_buf(char *err_buf, size_t err_buf_len, const std::string &msg) {
-  if (err_buf == nullptr || err_buf_len == 0)
+inline void writeErrBuf(char *errBuf, size_t errBufLen, const std::string &msg) {
+  if (errBuf == nullptr || errBufLen == 0)
     return;
-  const size_t n = std::min(err_buf_len - 1, msg.size());
-  std::memcpy(err_buf, msg.data(), n);
-  err_buf[n] = '\0';
+  const size_t n = std::min(errBufLen - 1, msg.size());
+  std::memcpy(errBuf, msg.data(), n);
+  errBuf[n] = '\0';
 }
 
-inline void clear_err_buf(char *err_buf, size_t err_buf_len) {
-  if (err_buf != nullptr && err_buf_len > 0)
-    err_buf[0] = '\0';
+inline void clearErrBuf(char *errBuf, size_t errBufLen) {
+  if (errBuf != nullptr && errBufLen > 0)
+    errBuf[0] = '\0';
 }
 
 #endif // CAST_SIMULATOR_SRC_CPP_INTERNAL_ERR_BUF_HPP

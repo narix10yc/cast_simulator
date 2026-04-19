@@ -8,17 +8,17 @@
 namespace cast::cpu {
 
 // Precomputed shufflevector indices used by Phase 1 (load → split) and
-// Phase 3 (merge → store).  `re_split`/`im_split` flatten as (li, si) with
-// stride `s`; `merge` holds one mask per lo_bit for the reassembly round.
+// Phase 3 (merge → store).  `reSplit`/`imSplit` flatten as (li, si) with
+// stride `s`; `merge` holds one mask per loBit for the reassembly round.
 struct ShuffleMasks {
-  std::vector<int> re_split;
-  std::vector<int> im_split;
+  std::vector<int> reSplit;
+  std::vector<int> imSplit;
   std::vector<std::vector<int>> merge;
-  std::vector<int> reim_merge;
+  std::vector<int> reimMerge;
 };
 
-ShuffleMasks compute_shuffle_masks(const BitLayout &layout, unsigned s, unsigned simd_s,
-                                   unsigned vec_size);
+ShuffleMasks computeShuffleMasks(const BitLayout &layout, unsigned s, unsigned simdS,
+                                 unsigned vecSize);
 
 } // namespace cast::cpu
 

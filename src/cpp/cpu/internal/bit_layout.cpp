@@ -2,60 +2,59 @@
 
 namespace cast::cpu {
 
-BitLayout compute_bit_layout(const uint32_t *qubits, size_t n_qubits, unsigned simd_s) {
+BitLayout computeBitLayout(const uint32_t *qubits, size_t nQubits, unsigned simdS) {
   BitLayout layout;
   unsigned q = 0;
   size_t qi = 0;
 
-  while (layout.simd_bits.size() < simd_s) {
-    if (qi < n_qubits && qubits[qi] == q) {
-      layout.lo_bits.push_back(q);
+  while (layout.simdBits.size() < simdS) {
+    if (qi < nQubits && qubits[qi] == q) {
+      layout.loBits.push_back(q);
       ++qi;
     } else {
-      layout.simd_bits.push_back(q);
+      layout.simdBits.push_back(q);
     }
     ++q;
   }
-  while (qi < n_qubits) {
-    layout.hi_bits.push_back(qubits[qi++]);
+  while (qi < nQubits) {
+    layout.hiBits.push_back(qubits[qi++]);
   }
 
-  for (auto *vec : {&layout.lo_bits, &layout.simd_bits, &layout.hi_bits}) {
+  for (auto *vec : {&layout.loBits, &layout.simdBits, &layout.hiBits}) {
     for (auto &bit : *vec) {
-      if (bit >= simd_s)
+      if (bit >= simdS)
         ++bit;
     }
   }
 
-  layout.sep_bit = layout.simd_bits.empty() ? 0u : layout.simd_bits.back() + 1u;
-  // When `simd_bits` fills positions [0, simd_s), sep_bit lands exactly on
-  // the implicit-zero bit the statevector inserts at `simd_s`.  Step over it.
-  if (layout.sep_bit == simd_s)
-    ++layout.sep_bit;
+  layout.sepBit = layout.simdBits.empty() ? 0u : layout.simdBits.back() + 1u;
+  // When `simdBits` fills positions [0, simdS), sepBit lands exactly on
+  // the implicit-zero bit the statevector inserts at `simdS`.  Step over it.
+  if (layout.sepBit == simdS)
+    ++layout.sepBit;
 
   return layout;
 }
 
-std::vector<PtrSegment> compute_hi_ptr_segments(const std::vector<unsigned> &hi_bits,
-                                                unsigned sep_bit) {
+std::vector<PtrSegment> computeHiPtrSegments(const std::vector<unsigned> &hiBits, unsigned sepBit) {
   std::vector<PtrSegment> segs;
-  unsigned src_bit = 0;
-  unsigned prev_end = 0;
+  unsigned srcBit = 0;
+  unsigned prevEnd = 0;
 
-  for (const unsigned hb : hi_bits) {
-    const unsigned hi_pos = hb - sep_bit;
-    if (hi_pos > prev_end) {
-      const unsigned width = hi_pos - prev_end;
-      const uint64_t mask = ((uint64_t(1) << width) - 1) << src_bit;
-      segs.push_back({mask, prev_end - src_bit});
-      src_bit += width;
+  for (const unsigned hb : hiBits) {
+    const unsigned hiPos = hb - sepBit;
+    if (hiPos > prevEnd) {
+      const unsigned width = hiPos - prevEnd;
+      const uint64_t mask = ((uint64_t(1) << width) - 1) << srcBit;
+      segs.push_back({mask, prevEnd - srcBit});
+      srcBit += width;
     }
-    prev_end = hi_pos + 1;
+    prevEnd = hiPos + 1;
   }
 
-  // Catch-all tail segment: all src bits above `src_bit` have no hi_bit
-  // punching through them, so they shift by the final (prev_end - src_bit).
-  segs.push_back({~((uint64_t(1) << src_bit) - 1), prev_end - src_bit});
+  // Catch-all tail segment: all src bits above `srcBit` have no hi_bit
+  // punching through them, so they shift by the final (prevEnd - srcBit).
+  segs.push_back({~((uint64_t(1) << srcBit) - 1), prevEnd - srcBit});
   return segs;
 }
 

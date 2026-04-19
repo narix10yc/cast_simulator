@@ -17,7 +17,7 @@ namespace cast::cuda {
 
 // ── NVPTX target initialisation ─────────────────────────────────────────────
 
-static void ensure_nvptx_initialized() {
+static void ensureNvptxInitialized() {
   static std::once_flag flag;
   std::call_once(flag, []() {
     LLVMInitializeNVPTXTarget();
@@ -29,9 +29,9 @@ static void ensure_nvptx_initialized() {
 
 // ── NVPTX TargetMachine helper ───────────────────────────────────────────────
 
-static llvm::Expected<std::unique_ptr<llvm::TargetMachine>> create_nvptx_tm(uint32_t sm_major,
-                                                                            uint32_t sm_minor) {
-  ensure_nvptx_initialized();
+static llvm::Expected<std::unique_ptr<llvm::TargetMachine>>
+createNvptxTargetMachine(uint32_t smMajor, uint32_t smMinor) {
+  ensureNvptxInitialized();
 
   llvm::Triple const triple("nvptx64-nvidia-cuda");
   std::string err;
@@ -39,7 +39,7 @@ static llvm::Expected<std::unique_ptr<llvm::TargetMachine>> create_nvptx_tm(uint
   if (!target)
     return llvm::createStringError("NVPTX target not found: " + err);
 
-  std::string const arch = "sm_" + std::to_string(sm_major) + std::to_string(sm_minor);
+  std::string const arch = "sm_" + std::to_string(smMajor) + std::to_string(smMinor);
   llvm::TargetOptions const options;
   auto tm = std::unique_ptr<llvm::TargetMachine>(
       target->createTargetMachine(triple, arch, /*features=*/"", options,
@@ -49,12 +49,12 @@ static llvm::Expected<std::unique_ptr<llvm::TargetMachine>> create_nvptx_tm(uint
   return tm;
 }
 
-// ── raw_pwrite_string_ostream ────────────────────────────────────────────────
+// ── RawPwriteStringOstream ────────────────────────────────────────────────
 // Writable stream that appends to a std::string; compatible with
 // TargetMachine::addPassesToEmitFile which requires raw_pwrite_stream.
 
 namespace {
-class raw_pwrite_string_ostream : public llvm::raw_pwrite_stream {
+class RawPwriteStringOstream : public llvm::raw_pwrite_stream {
   std::string &out_;
 
   void write_impl(const char *Ptr, size_t Size) override { out_.append(Ptr, Size); }
@@ -66,21 +66,21 @@ class raw_pwrite_string_ostream : public llvm::raw_pwrite_stream {
   uint64_t current_pos() const override { return out_.size(); }
 
 public:
-  explicit raw_pwrite_string_ostream(std::string &str) : out_(str) { SetUnbuffered(); }
-  ~raw_pwrite_string_ostream() override { flush(); }
+  explicit RawPwriteStringOstream(std::string &str) : out_(str) { SetUnbuffered(); }
+  ~RawPwriteStringOstream() override { flush(); }
 };
 } // namespace
 
-// ── optimize_kernel_ir ───────────────────────────────────────────────────────
+// ── optimizeKernelIr ───────────────────────────────────────────────────────
 
-llvm::Error optimize_kernel_ir(GeneratedKernel &generated) {
+llvm::Error optimizeKernelIr(GeneratedKernel &generated) {
   if (generated.optimized)
     return llvm::Error::success();
   if (!generated.module)
     return llvm::createStringError("kernel module is null");
 
   if (!generated.tm) {
-    auto tm = create_nvptx_tm(generated.spec.sm_major, generated.spec.sm_minor);
+    auto tm = createNvptxTargetMachine(generated.spec.smMajor, generated.spec.smMinor);
     if (!tm)
       return tm.takeError();
     generated.tm = std::move(*tm);
@@ -124,11 +124,11 @@ llvm::Error optimize_kernel_ir(GeneratedKernel &generated) {
   return llvm::Error::success();
 }
 
-// ── compile_kernel ───────────────────────────────────────────────────────────
+// ── compileKernel ───────────────────────────────────────────────────────────
 
-llvm::Error compile_kernel(GeneratedKernel &generated, CompiledKernel &out) {
+llvm::Error compileKernel(GeneratedKernel &generated, CompiledKernel &out) {
   // Stage 1: optimize (idempotent; also sets triple+layout on module).
-  if (auto err = optimize_kernel_ir(generated))
+  if (auto err = optimizeKernelIr(generated))
     return err;
 
   // Stage 2: LLVM IR → PTX via NVPTX backend.
@@ -140,7 +140,7 @@ llvm::Error compile_kernel(GeneratedKernel &generated, CompiledKernel &out) {
     if (llvm::verifyModule(*generated.module, &sstream))
       return llvm::createStringError("module verification failed before PTX: " + errStr);
 
-    raw_pwrite_string_ostream ptxStream(out.ptx);
+    RawPwriteStringOstream ptxStream(out.ptx);
     llvm::legacy::PassManager pm;
     if (generated.tm->addPassesToEmitFile(pm, ptxStream, /*DwoOut=*/nullptr,
                                           llvm::CodeGenFileType::AssemblyFile))
@@ -155,15 +155,15 @@ llvm::Error compile_kernel(GeneratedKernel &generated, CompiledKernel &out) {
   // There is no LLVM API for this; PTX post-processing is the only way.
   // The directive tells the CUDA JIT to allocate up to N physical registers
   // per thread, trading occupancy for less local-memory spilling.
-  if (generated.spec.maxnreg > 0) {
+  if (generated.spec.maxNReg > 0) {
     auto pos = out.ptx.find(")\n{");
     if (pos != std::string::npos)
-      out.ptx.insert(pos + 1, "\n.maxnreg " + std::to_string(generated.spec.maxnreg));
+      out.ptx.insert(pos + 1, "\n.maxnreg " + std::to_string(generated.spec.maxNReg));
   }
 
-  out.n_gate_qubits = generated.n_gate_qubits;
+  out.nGateQubits = generated.nGateQubits;
   out.precision = generated.spec.precision;
-  out.func_name = std::move(generated.func_name);
+  out.funcName = std::move(generated.funcName);
   return llvm::Error::success();
 }
 

@@ -18,9 +18,7 @@ struct Complex64 {
   double im = 0.0;
 };
 
-inline bool is_valid_precision(Precision p) {
-  return p == Precision::F32 || p == Precision::F64;
-}
+inline bool isValidPrecision(Precision p) { return p == Precision::F32 || p == Precision::F64; }
 
 namespace cpu {
 
@@ -40,26 +38,26 @@ enum class MatrixLoadMode : uint8_t {
 
 struct KernelGenSpec {
   Precision precision = Precision::F64;
-  SimdWidth simd_width = SimdWidth::W256;
+  SimdWidth simdWidth = SimdWidth::W256;
   MatrixLoadMode mode = MatrixLoadMode::ImmValue;
   double ztol = 0.0;
   double otol = 0.0;
 };
 
 struct KernelMetadata {
-  KernelId kernel_id = 0;
+  KernelId kernelId = 0;
   Precision precision = Precision::F64;
-  SimdWidth simd_width = SimdWidth::W256;
+  SimdWidth simdWidth = SimdWidth::W256;
   MatrixLoadMode mode = MatrixLoadMode::ImmValue;
-  uint32_t n_gate_qubits = 0;
+  uint32_t nGateQubits = 0;
 };
 
 struct CompiledKernelRecord {
   KernelMetadata metadata;
   KernelEntry *entry = nullptr;
   std::vector<Complex64> matrix;
-  std::optional<std::string> ir_text;
-  std::optional<std::string> asm_text;
+  std::optional<std::string> irText;
+  std::optional<std::string> asmText;
 };
 
 } // namespace cpu
@@ -70,9 +68,9 @@ struct KernelGenSpec {
   Precision precision = Precision::F64;
   double ztol = 0.0;
   double otol = 0.0;
-  uint32_t sm_major = 0;
-  uint32_t sm_minor = 0;
-  uint32_t maxnreg = 0;
+  uint32_t smMajor = 0;
+  uint32_t smMinor = 0;
+  uint32_t maxNReg = 0;
 };
 
 } // namespace cuda

@@ -16,14 +16,13 @@
 #include <cstdlib>
 #include <cstring>
 
-llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>>
-cast::cpu::jit_create(unsigned n_compile_threads) {
+llvm::Expected<std::unique_ptr<llvm::orc::LLJIT>> cast::cpu::createJit(unsigned nCompileThreads) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmParser();
   llvm::InitializeNativeTargetAsmPrinter();
 
   llvm::orc::LLJITBuilder builder;
-  builder.setNumCompileThreads((n_compile_threads > 0) ? n_compile_threads : 1);
+  builder.setNumCompileThreads((nCompileThreads > 0) ? nCompileThreads : 1);
   auto jit = builder.create();
   if (!jit)
     return jit.takeError();
@@ -31,7 +30,7 @@ cast::cpu::jit_create(unsigned n_compile_threads) {
   return std::move(*jit);
 }
 
-llvm::Error cast::cpu::optimize_kernel_ir(cast::cpu::GeneratedKernel &generated) {
+llvm::Error cast::cpu::optimizeKernelIr(cast::cpu::GeneratedKernel &generated) {
   if (generated.optimized)
     return llvm::Error::success();
   if (!generated.module)
@@ -74,20 +73,20 @@ llvm::Error cast::cpu::optimize_kernel_ir(cast::cpu::GeneratedKernel &generated)
 }
 
 llvm::Expected<cast::cpu::CompiledKernelRecord>
-cast::cpu::jit_compile_kernel(llvm::orc::LLJIT &jit, cast::cpu::GeneratedKernel &generated) {
+cast::cpu::jitCompileKernel(llvm::orc::LLJIT &jit, cast::cpu::GeneratedKernel &generated) {
   // Optimize on the plain Module first so the IR is captured before the Module
   // is moved into the ThreadSafeModule and consumed by the JIT pipeline.
-  if (auto err = cast::cpu::optimize_kernel_ir(generated))
+  if (auto err = cast::cpu::optimizeKernelIr(generated))
     return std::move(err);
 
   // Emit native assembly only when explicitly requested for this kernel.
-  std::optional<std::string> asm_text;
-  if (generated.capture_asm) {
+  std::optional<std::string> asmText;
+  if (generated.captureAsm) {
     const llvm::Triple &triple = jit.getTargetTriple();
-    std::string err_str;
-    const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, err_str);
+    std::string errStr;
+    const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, errStr);
     if (!target)
-      return llvm::createStringError("assembly emission: " + err_str);
+      return llvm::createStringError("assembly emission: " + errStr);
 
     llvm::TargetOptions const options;
     auto tm = std::unique_ptr<llvm::TargetMachine>(target->createTargetMachine(
@@ -98,15 +97,14 @@ cast::cpu::jit_compile_kernel(llvm::orc::LLJIT &jit, cast::cpu::GeneratedKernel 
     generated.module->setDataLayout(tm->createDataLayout());
     generated.module->setTargetTriple(triple);
 
-    llvm::SmallVector<char, 0> asm_buf;
-    llvm::raw_svector_ostream asm_os(asm_buf);
+    llvm::SmallVector<char, 0> asmBuf;
+    llvm::raw_svector_ostream asmOs(asmBuf);
     llvm::legacy::PassManager pm;
-    if (tm->addPassesToEmitFile(pm, asm_os, /*DwoOut=*/nullptr,
-                                llvm::CodeGenFileType::AssemblyFile))
+    if (tm->addPassesToEmitFile(pm, asmOs, /*DwoOut=*/nullptr, llvm::CodeGenFileType::AssemblyFile))
       return llvm::createStringError("target does not support assembly emission");
     pm.run(*generated.module);
 
-    asm_text.emplace(asm_buf.begin(), asm_buf.end());
+    asmText.emplace(asmBuf.begin(), asmBuf.end());
   }
 
   llvm::orc::ThreadSafeModule tsm(std::move(generated.module), std::move(generated.context));
@@ -115,7 +113,7 @@ cast::cpu::jit_compile_kernel(llvm::orc::LLJIT &jit, cast::cpu::GeneratedKernel 
     return std::move(err);
   }
 
-  auto sym = jit.lookup(generated.func_name);
+  auto sym = jit.lookup(generated.funcName);
   if (!sym)
     return sym.takeError();
 
@@ -123,8 +121,8 @@ cast::cpu::jit_compile_kernel(llvm::orc::LLJIT &jit, cast::cpu::GeneratedKernel 
   out.metadata = generated.metadata;
   out.entry = sym->toPtr<cast::cpu::KernelEntry>();
   out.matrix = generated.matrix;
-  if (generated.capture_ir)
-    out.ir_text = std::move(generated.ir);
-  out.asm_text = std::move(asm_text);
+  if (generated.captureIr)
+    out.irText = std::move(generated.ir);
+  out.asmText = std::move(asmText);
   return out;
 }
