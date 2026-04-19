@@ -10,6 +10,8 @@ pub mod cost_model;
 
 pub mod profile;
 
+pub mod mem_bw;
+
 pub mod fusion;
 
 pub mod openqasm;

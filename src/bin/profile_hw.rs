@@ -23,8 +23,10 @@
 
 use anyhow::Context;
 use cast::cost_model::{HardwareProfile, ProfileConfig, SweepEntry};
+use cast::mem_bw::{measure_mem_bw, MemBwResult};
 use cast::profile;
 use cast::sysinfo::{self, MAX_DEFAULT_QUBITS, MIN_DEFAULT_QUBITS};
+use cast::timing::fmt_duration;
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
@@ -94,6 +96,19 @@ struct Args {
     /// Output path for `--merge` mode.
     #[arg(long)]
     merge_out: Option<PathBuf>,
+
+    /// Skip the direct memory-bandwidth section (CPU only).
+    #[arg(long)]
+    skip_mem_bw: bool,
+
+    /// Run only the direct memory-bandwidth section; skip the kernel roofline.
+    #[arg(long, conflicts_with = "skip_mem_bw")]
+    mem_bw_only: bool,
+
+    /// Per-pattern wall-time budget for the direct memory-bandwidth section.
+    /// The section runs four patterns, so total cost is ~4× this value.
+    #[arg(long, default_value_t = 3.0)]
+    mem_bw_budget: f64,
 }
 
 impl Args {
@@ -239,6 +254,53 @@ fn print_table(profiles: &[(HardwareProfile, f64)]) {
 }
 
 // ---------------------------------------------------------------------------
+// Direct memory bandwidth
+// ---------------------------------------------------------------------------
+
+fn print_mem_bw(r: &MemBwResult) {
+    let buf_gib = r.bytes as f64 / GIB;
+    println!(
+        "  Direct memory bandwidth  ({:.2} GiB buffer, {} threads)",
+        buf_gib, r.n_threads,
+    );
+    let row = |label: &str, traffic_mul: u64, stats: &cast::timing::TimingStats, gib_s: f64| {
+        let cv_pct = stats.cv * 100.0;
+        println!(
+            "    {label:<6} {traffic_mul}× buffer  {:>10}/iter ± {:<8}  cv={cv_pct:>4.1}%   \
+             {gib_s:>6.1} GiB/s",
+            fmt_duration(stats.mean_s),
+            fmt_duration(stats.stddev_s),
+        );
+    };
+    row("read",  1, &r.read,  r.read_gib_s());
+    row("write", 1, &r.write, r.write_gib_s());
+    row("copy",  2, &r.copy,  r.copy_gib_s());
+    row("rmw",   2, &r.rmw,   r.rmw_gib_s());
+    println!(
+        "    (rmw = in-place read-modify-write — closest analogue to a gate apply)"
+    );
+}
+
+/// Runs the direct memory-bandwidth measurement and prints it.  Uses an F64-sized
+/// statevector buffer (the worst-case precision) at `n_qubits`.
+fn run_mem_bw_section(args: &Args, n_qubits: u32) -> anyhow::Result<()> {
+    let n_threads = if args.threads > 0 {
+        args.threads
+    } else {
+        cast::cpu::get_num_threads()
+    };
+    // F64: 2 scalars × 8 bytes per complex amplitude.
+    let buf_bytes = (1usize << n_qubits) * 16;
+
+    let t0 = std::time::Instant::now();
+    let r = measure_mem_bw(buf_bytes, n_threads, args.mem_bw_budget)?;
+    let wall_s = t0.elapsed().as_secs_f64();
+    print_mem_bw(&r);
+    println!("  ({:.1}s)\n", wall_s);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Error helpers
 // ---------------------------------------------------------------------------
 
@@ -344,6 +406,19 @@ fn main() -> anyhow::Result<()> {
     println!();
 
     let n_qubits = resolve_n_qubits(&args);
+
+    // ── Direct memory bandwidth (CPU only) ──────────────────────────────────
+    //
+    // Runs before the kernel roofline so users see the DRAM ceiling first.
+    // This measurement is independent of LLVM codegen — pure streaming Rust.
+
+    if args.do_cpu() && !args.skip_mem_bw {
+        run_mem_bw_section(&args, n_qubits)?;
+    }
+
+    if args.mem_bw_only {
+        return Ok(());
+    }
 
     // ── CPU profiles ─────────────────────────────────────────────────────────
 
