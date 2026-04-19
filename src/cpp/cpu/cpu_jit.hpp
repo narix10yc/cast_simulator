@@ -23,6 +23,10 @@ struct GeneratedKernel {
   /// Populated by optimize_kernel_ir; empty until then.
   std::string ir;
   bool optimized = false;
+  /// Set from the `capture_ir` field of the kernel generation request.
+  /// When true, jit_compile_kernel copies the optimized IR text into the
+  /// returned CompiledKernelRecord.
+  bool capture_ir = false;
   /// Set from the `capture_asm` field of the kernel generation request.
   /// When false, jit_compile_kernel skips assembly emission.
   bool capture_asm = false;

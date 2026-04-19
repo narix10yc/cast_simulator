@@ -102,16 +102,35 @@ llvm::Error copy_to_ffi(const cast::cpu::CompiledKernelRecord &src,
     }
   }
 
+  auto dup_to_c_string = [](const std::string &s) -> char * {
+    char *buf = static_cast<char *>(std::malloc(s.size() + 1));
+    if (!buf)
+      return nullptr;
+    std::memcpy(buf, s.data(), s.size());
+    buf[s.size()] = '\0';
+    return buf;
+  };
+
+  if (src.ir_text.has_value()) {
+    dst.ir_text = dup_to_c_string(*src.ir_text);
+    if (!dst.ir_text) {
+      std::free(dst.matrix);
+      dst.matrix = nullptr;
+      dst.matrix_len = 0;
+      return llvm::createStringError("failed to allocate ir text buffer");
+    }
+  }
+
   if (src.asm_text.has_value()) {
-    dst.asm_text = static_cast<char *>(std::malloc(src.asm_text->size() + 1));
+    dst.asm_text = dup_to_c_string(*src.asm_text);
     if (!dst.asm_text) {
       std::free(dst.matrix);
       dst.matrix = nullptr;
       dst.matrix_len = 0;
+      std::free(dst.ir_text);
+      dst.ir_text = nullptr;
       return llvm::createStringError("failed to allocate asm text buffer");
     }
-    std::memcpy(dst.asm_text, src.asm_text->data(), src.asm_text->size());
-    dst.asm_text[src.asm_text->size()] = '\0';
   }
 
   return llvm::Error::success();
@@ -175,6 +194,7 @@ extern "C" cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
     kernel.func_name = "k_" + std::to_string(kernel.metadata.kernel_id);
     kernel.context = std::make_unique<llvm::LLVMContext>();
     kernel.module = std::make_unique<llvm::Module>(kernel.func_name + "_module", *kernel.context);
+    kernel.capture_ir = request->capture_ir;
     kernel.capture_asm = request->capture_asm;
 
     auto func = cast::cpu::generate_kernel_ir(internal_spec, matrix_buf.data(),
@@ -191,13 +211,6 @@ extern "C" cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
       kernel.matrix = std::move(matrix_buf);
     }
 
-    if (request->capture_ir) {
-      if (auto err = cast::cpu::optimize_kernel_ir(kernel)) {
-        write_err_buf(err_buf, err_buf_len, llvm::toString(std::move(err)));
-        return 0;
-      }
-    }
-
     const cast_cpu_kernel_id_t kernel_id = kernel.metadata.kernel_id;
     generator->kernels.push_back(std::move(kernel));
     clear_err_buf(err_buf, err_buf_len);
@@ -209,44 +222,6 @@ extern "C" cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
     write_err_buf(err_buf, err_buf_len, "unknown error in kernel generation");
     return 0;
   }
-}
-
-extern "C" int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *generator,
-                                                 cast_cpu_kernel_id_t kernel_id, char *out_ir,
-                                                 size_t ir_buf_len, size_t *out_ir_len,
-                                                 char *err_buf, size_t err_buf_len) {
-  if (generator == nullptr) {
-    write_err_buf(err_buf, err_buf_len, "generator must not be null");
-    return 1;
-  }
-
-  auto it = std::find_if(generator->kernels.begin(), generator->kernels.end(),
-                         [kernel_id](const cast::cpu::GeneratedKernel &k) {
-                           return k.metadata.kernel_id == kernel_id;
-                         });
-  if (it == generator->kernels.end()) {
-    write_err_buf(err_buf, err_buf_len, "kernel id not found in generator");
-    return 1;
-  }
-
-  // Optimize (idempotent) and populate it->ir if not done yet.
-  if (auto err = cast::cpu::optimize_kernel_ir(*it)) {
-    write_err_buf(err_buf, err_buf_len, llvm::toString(std::move(err)));
-    return 1;
-  }
-
-  const std::string &ir = it->ir;
-  if (out_ir_len != nullptr)
-    *out_ir_len = ir.size();
-
-  if (out_ir != nullptr && ir_buf_len > 0) {
-    const size_t n = std::min(ir_buf_len - 1, ir.size());
-    std::memcpy(out_ir, ir.data(), n);
-    out_ir[n] = '\0';
-  }
-
-  clear_err_buf(err_buf, err_buf_len);
-  return 0;
 }
 
 extern "C" int cast_cpu_kernel_generator_finish(cast_cpu_kernel_generator_t *generator,
@@ -320,6 +295,7 @@ extern "C" void cast_cpu_jit_kernel_records_free(cast_cpu_jit_kernel_record_t *r
     return;
   for (size_t i = 0; i < n; ++i) {
     std::free(records[i].matrix);
+    std::free(records[i].ir_text);
     std::free(records[i].asm_text);
   }
   std::free(records);

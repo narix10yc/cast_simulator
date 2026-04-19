@@ -50,6 +50,7 @@ pub(crate) struct KernelRecord {
     pub(crate) entry: Option<unsafe extern "C" fn(*mut c_void)>,
     pub(crate) matrix: *mut c64,
     pub(crate) matrix_len: usize,
+    pub(crate) ir_text: *mut c_char,
     pub(crate) asm_text: *mut c_char,
 }
 
@@ -81,17 +82,6 @@ unsafe extern "C" {
         err_buf: *mut c_char,
         err_buf_len: usize,
     ) -> KernelId;
-
-    // -- Diagnostics --
-    pub(crate) fn cast_cpu_kernel_generator_emit_ir(
-        generator: *mut KernelGenerator,
-        kernel_id: KernelId,
-        out_ir: *mut c_char,
-        ir_buf_len: usize,
-        out_ir_len: *mut usize,
-        err_buf: *mut c_char,
-        err_buf_len: usize,
-    ) -> i32;
 
     // -- JIT compilation --
     pub(crate) fn cast_cpu_kernel_generator_finish(

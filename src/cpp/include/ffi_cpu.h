@@ -2,7 +2,6 @@
 #define CAST_SIMULATOR_SRC_CPP_INCLUDE_FFI_CPU_H
 
 // Rust-C FFI boundary for the CPU kernel pipeline.
-// Only types and functions in this header are exported to Rust.
 
 #include "ffi_types.h"
 
@@ -56,13 +55,15 @@ typedef struct cast_cpu_kernel_metadata_t {
 } cast_cpu_kernel_metadata_t;
 
 /// Per-kernel data returned by cast_cpu_kernel_generator_finish.
-/// The `matrix` and `asm_text` fields are heap-allocated (malloc); call
-/// cast_cpu_jit_kernel_records_free to release them after copying the data.
+/// The `matrix`, `ir_text`, and `asm_text` fields are heap-allocated
+/// (malloc); call cast_cpu_jit_kernel_records_free to release them after
+/// copying the data.
 typedef struct cast_cpu_jit_kernel_record_t {
   cast_cpu_kernel_metadata_t metadata;
   void (*entry)(void *);    ///< JIT-compiled function pointer.
   cast_complex64_t *matrix; ///< NULL for ImmValue mode.
   size_t matrix_len;
+  char *ir_text;  ///< NULL if capture_ir was false in the request.
   char *asm_text; ///< NULL if capture_asm was false in the request.
 } cast_cpu_jit_kernel_record_t;
 
@@ -87,14 +88,6 @@ void cast_cpu_kernel_generator_delete(cast_cpu_kernel_generator_t *generator);
 cast_cpu_kernel_id_t cast_cpu_kernel_generator_generate(
     cast_cpu_kernel_generator_t *generator, const cast_cpu_kernel_gen_request_t *request,
     char *err_buf, size_t err_buf_len);
-
-// -- Diagnostics --
-
-/// Error handling: returns non-zero on failure and writes a message to err_buf.
-int cast_cpu_kernel_generator_emit_ir(cast_cpu_kernel_generator_t *generator,
-                                      cast_cpu_kernel_id_t kernel_id, char *out_ir,
-                                      size_t ir_buf_len, size_t *out_ir_len, char *err_buf,
-                                      size_t err_buf_len);
 
 // -- JIT compilation --
 

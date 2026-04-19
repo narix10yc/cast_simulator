@@ -123,6 +123,8 @@ cast::cpu::jit_compile_kernel(llvm::orc::LLJIT &jit, cast::cpu::GeneratedKernel 
   out.metadata = generated.metadata;
   out.entry = sym->toPtr<cast::cpu::KernelEntry>();
   out.matrix = generated.matrix;
+  if (generated.capture_ir)
+    out.ir_text = std::move(generated.ir);
   out.asm_text = std::move(asm_text);
   return out;
 }

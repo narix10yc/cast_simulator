@@ -58,6 +58,7 @@ struct CompiledKernelRecord {
   KernelMetadata metadata;
   KernelEntry *entry = nullptr;
   std::vector<Complex64> matrix;
+  std::optional<std::string> ir_text;
   std::optional<std::string> asm_text;
 };
 

@@ -116,9 +116,9 @@ impl KernelGenRequest {
         }
     }
 
-    /// Requests capture of the optimized LLVM IR.  The IR text is emitted
-    /// into the generator on the C++ side during codegen and can be fetched
-    /// via [`CpuKernelManager::emit_ir`].
+    /// Requests capture of the optimized LLVM IR.  The text is returned
+    /// from the C++ side alongside the JIT-compiled entry at finalize time
+    /// and can be fetched via [`CpuKernelManager::emit_ir`].
     pub fn with_ir(mut self) -> Self {
         self.capture_ir = true;
         self
@@ -262,53 +262,6 @@ impl MatrixBuffer {
             MatrixBuffer::Empty => std::ptr::null(),
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// FFI helpers
-// ---------------------------------------------------------------------------
-
-/// Returns the LLVM IR text for a kernel.  When the kernel was generated
-/// with `capture_ir = true`, the IR is already optimized and cached; this
-/// is a read of that cached text.  Otherwise the call triggers O1
-/// optimization lazily (idempotent — subsequent calls hit the cache).
-fn ffi_emit_ir(gen: *mut ffi::KernelGenerator, kernel_id: KernelId) -> anyhow::Result<String> {
-    let mut err_buf = [0 as c_char; ERR_BUF_LEN];
-
-    let mut ir_len: usize = 0;
-    let status = unsafe {
-        ffi::cast_cpu_kernel_generator_emit_ir(
-            gen,
-            kernel_id,
-            std::ptr::null_mut(),
-            0,
-            &mut ir_len,
-            err_buf.as_mut_ptr(),
-            err_buf.len(),
-        )
-    };
-    if status != 0 {
-        anyhow::bail!(error_from_buf(&err_buf));
-    }
-
-    let mut ir_buf = vec![0u8; ir_len + 1];
-    let status = unsafe {
-        ffi::cast_cpu_kernel_generator_emit_ir(
-            gen,
-            kernel_id,
-            ir_buf.as_mut_ptr().cast(),
-            ir_buf.len(),
-            std::ptr::null_mut(),
-            err_buf.as_mut_ptr(),
-            err_buf.len(),
-        )
-    };
-    if status != 0 {
-        anyhow::bail!(error_from_buf(&err_buf));
-    }
-
-    ir_buf.truncate(ir_len);
-    String::from_utf8(ir_buf).map_err(|e| anyhow::anyhow!("IR is not valid UTF-8: {e}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -487,13 +440,11 @@ unsafe impl Sync for KernelEntry {}
 /// Metadata for a kernel that has been added to the C++ generator but not
 /// yet JIT-compiled.  Promoted to a [`KernelEntry`] by [`CpuKernelManager::finalize`].
 struct PendingKernel {
-    /// C++-side kernel id within the current generator batch.  Used only to
-    /// query diagnostics before finalize; after finalize, the Rust-side
-    /// `KernelId` identifies the compiled entry.
+    /// C++-side kernel id within the current generator batch.  Kept for
+    /// logging/debug only; after finalize, the Rust-side `KernelId`
+    /// identifies the compiled entry.
     #[allow(dead_code)]
     raw_kid: KernelId,
-    /// Captured LLVM IR text (only if `capture_ir` was set).
-    ir_text: Option<String>,
 }
 
 struct CpuManagerInner {
@@ -563,9 +514,7 @@ impl CpuKernelManager {
     ///
     /// LLVM IR generation runs on the calling thread; O1 optimization and
     /// native code generation are deferred until [`apply`](Self::apply),
-    /// [`finalize`](Self::finalize), or a diagnostic accessor is called
-    /// (except when `request.capture_ir` is set — O1 runs eagerly to
-    /// capture the optimized text).
+    /// [`finalize`](Self::finalize), or a diagnostic accessor is called.
     ///
     /// Multiple threads may call `generate` concurrently.
     pub fn generate(&self, request: KernelGenRequest) -> anyhow::Result<KernelId> {
@@ -640,16 +589,6 @@ impl CpuKernelManager {
             anyhow::bail!(error_from_buf(&err_buf));
         }
 
-        // Fetch cached IR text now (C++ already optimized when capture_ir
-        // was set; otherwise this triggers lazy O1).  We do it eagerly for
-        // capture_ir so the text survives finish, which consumes the
-        // C++ Module.
-        let ir_text = if request.capture_ir {
-            Some(ffi_emit_ir(gen.as_ptr(), raw_kid)?)
-        } else {
-            None
-        };
-
         // ── Register pending entry ───────────────────────────────────────
         // We still hold the generator lock, so no concurrent generate can
         // have inserted into dedup since our second re-check above.
@@ -659,7 +598,7 @@ impl CpuKernelManager {
         let n_qubits = request.qubits.len();
         let precision = request.spec.precision;
         inner.dedup.insert(request, id);
-        inner.pending.push((id, PendingKernel { raw_kid, ir_text }));
+        inner.pending.push((id, PendingKernel { raw_kid }));
         log::info!(
             "cpu: queued kernel {} ({} qubits, {:?} precision, batch pos {})",
             id,
@@ -725,7 +664,7 @@ impl CpuKernelManager {
 
         // ── Promote pending entries to compiled entries ───────────────────
         let mut inner = self.inner.lock().unwrap();
-        for ((kid, pend), record) in pending.iter().zip(records.iter()) {
+        for ((kid, _pend), record) in pending.iter().zip(records.iter()) {
             let entry_fn = record
                 .entry
                 .ok_or_else(|| anyhow::anyhow!("finish returned null entry pointer"))?;
@@ -736,15 +675,19 @@ impl CpuKernelManager {
                 unsafe { std::slice::from_raw_parts(record.matrix, record.matrix_len) }
             };
 
-            let asm_text = if record.asm_text.is_null() {
-                None
-            } else {
-                Some(
-                    unsafe { std::ffi::CStr::from_ptr(record.asm_text) }
-                        .to_string_lossy()
-                        .into_owned(),
-                )
+            let c_string_to_owned = |p: *mut c_char| -> Option<String> {
+                if p.is_null() {
+                    None
+                } else {
+                    Some(
+                        unsafe { std::ffi::CStr::from_ptr(p) }
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                }
             };
+            let ir_text = c_string_to_owned(record.ir_text);
+            let asm_text = c_string_to_owned(record.asm_text);
 
             let precision = record.metadata.precision;
             let simd_width = record.metadata.simd_width;
@@ -759,7 +702,7 @@ impl CpuKernelManager {
                     simd_width,
                     n_gate_qubits: record.metadata.n_gate_qubits,
                     matrix_buf,
-                    ir_text: pend.ir_text.clone(),
+                    ir_text,
                     asm_text,
                 }),
             );
