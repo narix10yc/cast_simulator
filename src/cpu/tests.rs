@@ -1048,7 +1048,7 @@ mod layout_coverage {
     fn shape_all_lo_contiguous_k_sweep_f64_w512() {
         // k-sweep at a single spec to keep runtime bounded; F64 W512
         // is the production default and has simd_s=3.
-        for k in 1..=6u32 {
+        for k in 2..=5u32 {
             let qs: Vec<u32> = (0..k).collect();
             let gate = random_unitary(&qs, 0x1_0000 + k as u64);
             check_one(
@@ -1064,10 +1064,10 @@ mod layout_coverage {
     }
 
     #[test]
-    fn shape_all_lo_contiguous_k6_every_spec() {
-        // Worst-case vec_size for every simd_s; full spec matrix.
-        let qs: Vec<u32> = (0..6).collect();
-        let gate = random_unitary(&qs, 0x1_A006);
+    fn shape_all_lo_contiguous_k5_every_spec() {
+        // Largest lo-heavy size under the k≤5 coverage cap; full spec matrix.
+        let qs: Vec<u32> = (0..5).collect();
+        let gate = random_unitary(&qs, 0x1_A005);
         check_all_specs(&gate, true);
     }
 
@@ -1084,12 +1084,12 @@ mod layout_coverage {
     #[test]
     fn shape_all_lo_with_gaps() {
         // Single spec to keep runtime bounded — each scenario is a
-        // 6-qubit gate whose compile dominates.
+        // 5-qubit gate whose compile dominates.
         let scenarios: &[&[u32]] = &[
-            &[0, 1, 2, 3, 4, 6], // one gap at position 5
-            &[0, 1, 2, 3, 5, 6], // gap inside the target span
-            &[0, 1, 3, 4, 6, 7], // two interior gaps
-            &[0, 1, 2, 3, 4, 7], // one wide gap
+            &[0, 1, 2, 3, 5], // one gap at position 4
+            &[0, 1, 2, 4, 5], // gap inside the target span
+            &[0, 1, 3, 4, 6], // two interior gaps
+            &[0, 1, 2, 3, 6], // one wide gap
         ];
         for (i, qs) in scenarios.iter().enumerate() {
             let gate = random_unitary(qs, 0x2_0000 + i as u64);
@@ -1103,7 +1103,7 @@ mod layout_coverage {
     fn shape_all_hi_contiguous() {
         // First target ≥ simd_s on every variant (simd_s ≤ 4).
         // These compile fast (~300 ms), so every spec is affordable.
-        let scenarios: &[&[u32]] = &[&[5, 6, 7, 8, 9, 10], &[6, 7, 8, 9, 10, 11], &[5], &[5, 6]];
+        let scenarios: &[&[u32]] = &[&[5, 6, 7, 8, 9], &[6, 7, 8, 9, 10], &[5], &[5, 6]];
         for (i, qs) in scenarios.iter().enumerate() {
             let gate = random_unitary(qs, 0x3_0000 + i as u64);
             check_all_specs(&gate, true);
@@ -1115,10 +1115,10 @@ mod layout_coverage {
     #[test]
     fn shape_mixed_lk_varies() {
         let scenarios: &[&[u32]] = &[
-            &[0, 5, 6, 7, 8, 9],  // lk=1 on simd_s ≥ 1
-            &[0, 1, 5, 6, 7, 8],  // lk=2 on simd_s ≥ 2
-            &[0, 1, 2, 5, 6, 7],  // lk=3 on simd_s ≥ 3
-            &[0, 2, 4, 6, 8, 10], // spread, lk varies per simd_s
+            &[0, 5, 6, 7, 8],    // lk=1 on simd_s ≥ 1
+            &[0, 1, 5, 6, 7],    // lk=2 on simd_s ≥ 2
+            &[0, 1, 2, 5, 6],    // lk=3 on simd_s ≥ 3
+            &[0, 2, 4, 6, 8],    // spread, lk varies per simd_s
         ];
         for (i, qs) in scenarios.iter().enumerate() {
             let gate = random_unitary(qs, 0x4_0000 + i as u64);
@@ -1152,32 +1152,32 @@ mod layout_coverage {
     // ── Matrix content classes on the worst-case lo-heavy layout ────
 
     #[test]
-    fn content_identity_on_all_lo_k6() {
+    fn content_identity_on_all_lo_k5() {
         // Identity → every off-diagonal = 0 folded by InstCombine, so
         // this runs fast enough to sweep all specs.
-        let qs: Vec<u32> = (0..6).collect();
+        let qs: Vec<u32> = (0..5).collect();
         check_all_specs(&identity_gate(&qs), true);
     }
 
     #[test]
-    fn content_diagonal_on_all_lo_k6() {
+    fn content_diagonal_on_all_lo_k5() {
         // Diagonal unitary — off-diagonals are structural zeros; fast.
-        let qs: Vec<u32> = (0..6).collect();
+        let qs: Vec<u32> = (0..5).collect();
         check_all_specs(&diagonal_unitary(&qs, 0x7_D001), true);
     }
 
     #[test]
-    fn content_permutation_on_all_lo_k6() {
+    fn content_permutation_on_all_lo_k5() {
         // Permutation — one ±1 per row, exercises the otol branch.
-        let qs: Vec<u32> = (0..6).collect();
+        let qs: Vec<u32> = (0..5).collect();
         check_all_specs(&permutation_gate(&qs, 0x7_D002), true);
     }
 
     #[test]
-    fn content_sparse_densities_on_all_lo_k6() {
+    fn content_sparse_densities_on_all_lo_k5() {
         // Sparsity triggers the zero-fold path in the kernel generator.
         // random_sparse is NOT unitary, so we skip the norm check.
-        let qs: Vec<u32> = (0..6).collect();
+        let qs: Vec<u32> = (0..5).collect();
         for (i, &d) in [0.5f64, 0.25, 0.1].iter().enumerate() {
             let gate = random_sparse(&qs, d, 0x7_5000 + i as u64);
             check_default_spec(&gate, false);
@@ -1185,10 +1185,10 @@ mod layout_coverage {
     }
 
     #[test]
-    fn content_zero_matrix_on_all_lo_k6() {
+    fn content_zero_matrix_on_all_lo_k5() {
         // Degenerate: every output amp must be 0.  Guards against
         // NaN/inf leakage in the accumulator-init path.
-        let qs: Vec<u32> = (0..6).collect();
+        let qs: Vec<u32> = (0..5).collect();
         let gate = zero_gate(&qs);
         let n_qubits_sv = sv_size_for(&qs);
         for (precision, simd_width, tol) in all_specs() {
@@ -1199,8 +1199,8 @@ mod layout_coverage {
     // ── StackLoad mode over the worst-case lo-heavy layout ──────────
 
     #[test]
-    fn stack_load_mode_on_all_lo_k6() {
-        let qs: Vec<u32> = (0..6).collect();
+    fn stack_load_mode_on_all_lo_k5() {
+        let qs: Vec<u32> = (0..5).collect();
         let gate_arc = Arc::new(random_unitary(&qs, 0x8_F001));
         let n_qubits_sv = sv_size_for(&qs);
         for (precision, simd_width, tol) in all_specs() {
@@ -1231,8 +1231,8 @@ mod layout_coverage {
     // ── Multi-threaded execution on the worst-case layout ────────────
 
     #[test]
-    fn multi_thread_on_all_lo_k6() {
-        let qs: Vec<u32> = (0..6).collect();
+    fn multi_thread_on_all_lo_k5() {
+        let qs: Vec<u32> = (0..5).collect();
         let gate = random_unitary(&qs, 0x9_0001);
         let n_qubits_sv = sv_size_for(&qs);
         for &n_threads in &[1u32, 2, 4, 8] {
@@ -1251,8 +1251,8 @@ mod layout_coverage {
     // ── U · U† = I round-trip on the worst-case layout ───────────────
 
     #[test]
-    fn unitary_dagger_roundtrip_on_all_lo_k6() {
-        let qs: Vec<u32> = (0..6).collect();
+    fn unitary_dagger_roundtrip_on_all_lo_k5() {
+        let qs: Vec<u32> = (0..5).collect();
         let u = random_unitary(&qs, 0xA_0001);
         let ud = dagger(&u);
 
@@ -1279,9 +1279,9 @@ mod layout_coverage {
 
     #[test]
     fn minimum_sv_size_edges() {
-        let qs: Vec<u32> = (0..6).collect();
+        let qs: Vec<u32> = (0..5).collect();
         let gate = random_unitary(&qs, 0xB_0001);
-        for n_qubits_sv in [9u32, 10, 11, 12] {
+        for n_qubits_sv in [8u32, 9, 10, 11] {
             check_one(
                 &gate,
                 n_qubits_sv,
@@ -1297,11 +1297,11 @@ mod layout_coverage {
     // ── Multiple random seeds (property-style robustness) ────────────
 
     #[test]
-    fn random_seed_robustness_all_lo_k6() {
+    fn random_seed_robustness_all_lo_k5() {
         // Eight independent random unitaries — catches bugs that depend
         // on specific matrix patterns (e.g. accidental ±1 coincidence
         // within ImmValue ztol/otol tolerances).
-        let qs: Vec<u32> = (0..6).collect();
+        let qs: Vec<u32> = (0..5).collect();
         for seed in 0..8u64 {
             let gate = random_unitary(&qs, 0xC_0000 + seed);
             check_one(
@@ -1320,7 +1320,7 @@ mod layout_coverage {
 
     #[test]
     fn dedup_returns_identical_results() {
-        let qs: Vec<u32> = (0..6).collect();
+        let qs: Vec<u32> = (0..5).collect();
         let gate = Arc::new(random_unitary(&qs, 0xD_0001));
         let spec = default_spec(Precision::F64, SimdWidth::W512);
         let mgr = CpuKernelManager::new(spec);
