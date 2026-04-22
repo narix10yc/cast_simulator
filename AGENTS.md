@@ -5,7 +5,7 @@
 - `LLVM_CONFIG` selects the LLVM installation used for build flags and linking.
 - The C++ compiler is `CXX` if set, otherwise plain `c++`.
 
-# Developer Setup
+## Developer Setup
 
 - Each developer must point `LLVM_CONFIG` at a locally installed `llvm-config`.
 - Example:
@@ -21,41 +21,34 @@ export LLVM_CONFIG=/path/to/llvm/bin/llvm-config
 export CXX=/path/to/c++
 ```
 
-# Quick Build
+- Query local memory to see if `LLVM_CONFIG` path is specified there.
 
-```sh
-cargo check
-cargo test
+## Code Format & Style
+
+### Section separators
+
+Use section separators in files with distinct logical sections:
+
+```rust
+// ---------------------------------------------------------------------------
+// Section name
+// ---------------------------------------------------------------------------
 ```
 
-- If `LLVM_CONFIG` is set in the developer's shell startup files, source those first.
-- Otherwise export `LLVM_CONFIG` explicitly for the current shell before running Cargo.
+Do not add excessive separators — only where they genuinely clarify structure (e.g. separating types from implementation, or grouping related functions).
 
-# LLVM Helper
+### Function arguments
 
-- Local LLVM helper: `scripts/build_llvm.sh`
-- Default mode builds release LLVM with `Native;NVPTX`
-- Useful maintenance:
-  - `scripts/build_llvm.sh <llvm-src-dir> --verify-targets`
-  - `scripts/build_llvm.sh <llvm-src-dir> --clean`
-  - `scripts/build_llvm.sh <llvm-src-dir> --with-clang-tools`
+When a function takes a closure or function argument, put it as the **last parameter**. This enables trailing-closure style at call sites.
 
-- Typical local build flow:
+### Error handling
 
-```sh
-scripts/build_llvm.sh ~/llvm/${version}/llvm-project-${version}.src
-export LLVM_CONFIG=~/llvm/${version}/release-install/bin/llvm-config
-```
+- Use `anyhow` for error propagation. The `anyhow::` namespace should often be preserved. For example, `anyhow::Result<T>` -- not `use anyhow::Result`, which shadows `std::Result`.
+- `use anyhow::Context;` is allowed -- grants methods such as `with_context`. The macros `anyhow::bail!` and `anyhow::ensure!` should keep the `anyhow::` namespace.
 
-# Notes
+## General
 
-- `build.rs` already handles the macOS/Homebrew `zstd` link path automatically, so developers should not need to add a manual `LIBRARY_PATH` workaround for that case.
-- Editor settings such as VS Code `rust-analyzer`, `clangd`, or per-machine LLVM paths are local environment concerns and should not be treated as repository-wide defaults.
-
-# Further Documentation
-
-- **Architecture, data flow, kernel details:** see [docs/architecture.md](docs/architecture.md)
-- **CLI tools (profile_hw, bench):** see [docs/tools.md](docs/tools.md)
-- **Fusion algorithm and cost model:** see [docs/fusion.md](docs/fusion.md)
-- **Noisy simulation and density matrices:** see [docs/noise.md](docs/noise.md)
-- **NWQ-Sim baseline comparison:** see [docs/nwqsim_baseline.md](docs/nwqsim_baseline.md)
+- Use US English spelling in all code, comments, and documentation (e.g. "color" not "colour", "serialize" not "serialise", "labeled" not "labelled").
+- Prefer dispatch methods that delegate to helpers over large match blocks with inline logic.
+- Keep closures short; hoist complex logic into named functions.
+- Think twice before adding helper functions. Can this helper function be inline? Is this helper function already defined elsewhere?
